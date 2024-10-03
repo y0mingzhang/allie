@@ -1,0 +1,24 @@
+trainer_config:
+  output_dir: models/ablations/half
+  wandb_run_name: half-medium
+  wandb_run_id: half-medium
+  dtype: bfloat16
+  torch_compile: true
+  batch_size: 32
+  gradient_accumulation_steps: 1
+  max_iters: 2000000
+  decay_iters: 2000000
+  eval_interval: 10000
+  log_interval: 50
+  save_interval: 10000
+  min_lr: 1e-5
+  weight_decay: 1e-2
+data_config:
+  tokenizer_config:
+    max_length: 512
+  train_file: data/lichess-2022-blitz-train/2022-half.bin
+model_config:
+  base_model: gpt2-medium
+  use_control_token: true
+  use_regression_head: true
+  use_pretrained: true

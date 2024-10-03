@@ -1,0 +1,23 @@
+trainer_config:
+  output_dir: models/ablations/large
+  wandb_run_name: full-large
+  wandb_run_id: full-large
+  dtype: bfloat16
+  torch_compile: true
+  batch_size: 32
+  gradient_accumulation_steps: 1
+  max_iters: 2000000
+  decay_iters: 2000000
+  eval_interval: 10000
+  log_interval: 50
+  save_interval: 10000
+  min_lr: 1e-5
+  weight_decay: 1e-2
+data_config:
+  tokenizer_config:
+    max_length: 512
+model_config:
+  base_model: gpt2-large
+  use_control_token: true
+  use_regression_head: true
+  use_pretrained: true
