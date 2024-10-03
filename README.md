@@ -37,7 +37,8 @@ It is deployed on [Lichess](https://lichess.org/@/AllieTheChessBot).
 
 ### Training Allie from Scratch
 
-1. Download the training and evaluation datasets from [Hugging Face](https://huggingface.co/datasets/yimingzhang/allie-data).
+1. Download the training and evaluation datasets from [Hugging Face](https://huggingface.co/datasets/yimingzhang/allie-data).\
+Note: Try `HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --repo-type dataset --local-dir data  "yimingzhang/allie-data"`.
 
 2. Place the downloaded content in a local directory named `data/`.
 
@@ -52,7 +53,8 @@ It is deployed on [Lichess](https://lichess.org/@/AllieTheChessBot).
 
 1. Download the Allie model weights from [Hugging Face](https://huggingface.co/datasets/yimingzhang/allie-models).
 
-2. Move the content to the `models/` directory in your local repository.
+2. Move the content to the `models/` directory in your local repository.\
+Note: Try "HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --repo-type dataset --local-dir models  "yimingzhang/allie-models".
 
 3. Run evaluations:
 
@@ -62,7 +64,8 @@ It is deployed on [Lichess](https://lichess.org/@/AllieTheChessBot).
        --config pretrain_config/medium.yaml \
        --dataset data/lichess-2022-blitz-test/2022-test-annotated.jsonl \
        --decode policy \
-       --output_file "allie-eval/allie-policy.json"
+       --output_file "allie-eval/allie-policy.json" \
+       --quick
      ```
 
    - For *Allie-Adaptive-Search*, the time-adaptive MCTS variant:
@@ -71,7 +74,8 @@ It is deployed on [Lichess](https://lichess.org/@/AllieTheChessBot).
        --config pretrain_config/medium.yaml \
        --dataset data/lichess-2022-blitz-test/2022-test-annotated.jsonl \
        --decode adaptive-mcts \
-       --output_file "allie-eval/allie-adaptive-search.json"
+       --output_file "allie-eval/allie-adaptive-search.json" \
+       --quick
      ```
      Note: Right now I don't have kv caching implemented in MCTS, and it runs extremely slowly.
 
