@@ -1,0 +1,20 @@
+{
+  "parameters": 1419035648,
+  "tokens": 44407193600,
+  "nominal_flops": 378092344476224716800,
+  "ce": {
+    "move": 1.3421972175979118,
+    "expert2400": 1.1621530215347167,
+    "expert2600": 1.1787802394769853
+  },
+  "validation_rows": 5371,
+  "dataset_revision": "20a899ddf344ccaea74e273509a60e5a511125f8",
+  "checkpoint_identity": {
+    "path": "/data/user_data/yimingz3/chess-v2/models/yimingzhang/qwen-3-1.7b-57b-cool-from-66550-step96800",
+    "files_sha256": {
+      "config.json": "355f874b2d642af11e5701d4ee63041b4d48cb4b56f845611ba2c99eb6eaf482",
+      "model.safetensors": "9e45652d2cc422454eb4529b4ec91f6945102ee0698ea489a14d7f532f8d0d30"
+    }
+  },
+  "checkpoint_bound_to_run": false
+}
