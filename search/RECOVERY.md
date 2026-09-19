@@ -115,3 +115,11 @@ No environment installation made. A cursory primary-paper search found Gumbel
 AlphaZero (https://openreview.net/pdf?id=bERaNdoegnO): its guarantee is playing
 policy improvement with correct values, not human likelihood; do not substitute
 best-action identification for the distribution-estimation objective blindly.
+
+## Update 18:57 UTC
+091/092 completed2048,093ratingprecision completed.094 now extends deep-scale to full4096;095 analyzes it. Do not duplicate. The current allocation10503933 expires19:28:51UTC.
+New CPU modules lapse_screen.py, diagnose_fit.py, stability_diagnostic.py, value_uncertainty.py completed. Rating precision module completed on resident GPU (10.6s). Lapse/rating/uncertainty: no resolved development gains and no golden promotion. report.py includes their full tables.
+Fit-only diagnostics: calibrated confidence53.7% versus accuracy53.9%; first20plies see only~.0014CE search benefit, versus~.1 later. Early-to-late root value instability Spearman.778, but held-out CE-gain prediction R2 only.0025overall/.0046expert. Do not mistake value instability for human-prediction improvement.
+Next: inspect aug-deep-scale-v1/results.json after095. Costs and every arm required; no goldenCM conversion on this August cohort. No external memory or retrieval.
+
+A causal root-quota screen is now queued as096 smoke after095: quota_replay.py/.cpp. It reconstructs independent root-action traces from16K trees, observes Q128/Q256 only, and redistributes the remaining744simulations using action instability. Two sigma rules (plain and sqrt-visit scaled), clipped allocation multipliers. Every birth must match the reconstructed original schedule; baseline1000 Q/nodes must be bit-identical. Cache exhaustion is a hard error. Only run full after smoke passes. Counterfactual results remain conditional on cached NN predictions; any promotion needs actual live search due batch numerics. No newGPUallocation.

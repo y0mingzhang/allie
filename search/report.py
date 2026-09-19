@@ -95,10 +95,18 @@ def main():
                          ('aug-budget-reverse-v1','Reused August development: reverse-KL root output inside current calibrated strength mixture. Same trees/Q, independently refitted output; loses at every budget.'),
                          ('aug-tactical-v1','Reused August development: bounded rule-directed capture/promotion/check-evasion extensions, no external evaluator; strict node/depth caps and refitted residual output.'),
                          ('aug-tactical-budget-v1','Reused August development: substitute tactical extensions for ordinary search. See cost-comparison.json for randomized ordinary-search controls at equal expected node cost; no demonstrated efficiency win.'),
-                         ('aug-perspective-v2','Reused August development: six own/opponent selectivity rules on identical current trees and output pipeline; unchanged symmetric rule selected by both fit-CV metrics.')]:
+                         ('aug-perspective-v2','Reused August development: six own/opponent selectivity rules on identical current trees and output pipeline; unchanged symmetric rule selected by both fit-CV metrics.'),
+                         ('aug-lapse-v1','Reused August development: explicit zero-deliberation, uniform-lapse and reversed-value components. No resolved confirmation gain; no extra NN queries.'),
+                         ('aug-rating-precision-v1','Reused August development: common rating shifts of +/-3,25,100 points, preserving the rating gap. Three full-prefix queries per arm; no resolved gain.'),
+                         ('aug-value-uncertainty-v1','Reused August development: marginalize uncertainty along search refinement versus a diagonal approximation and signed drift. Same1000-node policies; no extra NN queries.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    for path,description in [('aug-deep-scale-v1/results-prefix2048.json','first2048positions'),('aug-deep-scale-v1/results.json','full4096positions')]:
+        d=read(path)
+        if d:
+            table('Reused August deep-search ladder, '+description+':1000/4000/16000 simulations with constant, count-decayed and budget-normalized temperature. Separate smaller cohort; compare within this table only. Higher cost alone is not Pareto dominance.',
+                  [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
     rows=[]
     d=read('confirmation/results.json')
     if d:
