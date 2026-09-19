@@ -179,17 +179,22 @@ def test_reference(accum):
         assert all(torch.equal(e, p) for e in every), f"ranks disagree on {p.label}"
 
 
-def test_resume():
-    """save at step 4, rebuild and load, continue: bit-identical to an uninterrupted run."""
-    full, full_mgr = build(True)
+def test_resume(bf16=True, old=False):
+    """save at step 4, rebuild and load, continue: bit-identical to an uninterrupted run. old: a
+    checkpoint written before Config.bf16_weights existed (flag off) still resumes."""
+    full, full_mgr = build(bf16)
     train(full, full_mgr, range(STEPS), 2)
-    part, part_mgr = build(True)
+    part, part_mgr = build(bf16)
     train(part, part_mgr, range(4), 2)
     shared, local = mm.cpu_copy(part.state_dict()), part_mgr.rank_state_dict()
-    model, manager = build(True)
+    if old:
+        del local["config"]["bf16_weights"]
+    model, manager = build(bf16)
     model.load_state_dict(shared)
     manager.load_rank_state_dict(local)
-    assert all(m.dtype == torch.float32 for m, *_ in shards(manager))
+    assert all(m.dtype == torch.float32 for m, *_ in shards(manager)) and (
+        not bf16 or shards(manager)
+    )
     train(model, manager, range(4, STEPS), 2)
     for p, q in zip(model.parameters(), full.parameters()):
         assert p.dtype == q.dtype and torch.equal(p, q), p.label
@@ -272,6 +277,7 @@ def worker(rank, world, port):
     for accum in (1, 3):
         test_reference(accum)
     test_resume()
+    test_resume(bf16=False, old=True)
     test_distadam_master()
     if rank == 0:
         print(

@@ -1,6 +1,6 @@
 """Chess data/attention/recovery adapter around the pinned medium implementation."""
 
-from dataclasses import dataclass, asdict, field
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from types import SimpleNamespace
 import copy
 import os
@@ -435,7 +435,11 @@ class TrainingManager(core.TrainingManager):
         )
 
     def load_rank_state_dict(self, saved):
-        assert saved["config"] == asdict(self.cfg)
+        # fields added after a checkpoint was written take their defaults (e.g. bf16_weights=False)
+        defaults = {
+            f.name: f.default for f in fields(Config) if f.default is not MISSING
+        }
+        assert defaults | saved["config"] == asdict(self.cfg)
         assert (
             saved["rank"] == dist.get_rank() and saved["world"] == dist.get_world_size()
         )
