@@ -483,6 +483,18 @@ wave(
     "tier-2c MoE bias-speed pilot on L40S (pilot2_gate vs pilot2b's base)",
     "l40s",
 )
+# main (~06:45): moe64k8bs as is (drops 3.6%, already priced into golden) into the 3e16 screen, with
+# executed FLOPs and throughput reported beside CM; pilot2c's better gamma gets its own run later
+wave(
+    "screen2b",
+    "model-v1-screen2b",
+    "m2b",
+    variants("3e16", b, {"moe64k8bs": SCREEN2B["moe64k8bs"]}),
+    "model screen 1, tier 2b at 3e16 on pinned B_2, trainer-FLOP matched (nominal): MoE 64 x top-8 v2",
+    "preempt",
+    pool_sources="model-v1-screen1g",
+    identity="model-v1-pilot2b",
+)
 wave(
     "screen2",
     "model-v1-screen2",
