@@ -110,7 +110,7 @@ class MoE(nn.Module):
         n = t * k
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
         s = F.linear(h.to(g), self.router.to(g))
-        s = torch.sigmoid(s) if self.score == "sigmoid" else F.softplus(s).sqrt()
+        s = torch.sigmoid(s) if self.score == "sigmoid" else F.softplus(s).clamp_min(1e-12).sqrt()
         idx = torch.topk(s + self.bias, k, dim=-1).indices
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
