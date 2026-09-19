@@ -1,7 +1,13 @@
 # Model-only inference research
 
 Owner: Codex. Worktree: `codex/search-v1`, independent of Claude's main worktree.
-Status: active, authorized by Yiming on 2026-09-18.
+Status: active, explicitly resumed by Yiming on 2026-09-19 after the usage reset.
+
+Current work: inference infrastructure is operational. Resume the existing10x/10x
+search goal with batched experiment execution and reporting. One preempt GPU
+(workbench10503413) while general is reserved for Claude; max8h, permit shorter
+backfill. The previous pause is superseded by the explicit user instruction.
+All prior compute charges and fixed-checkpoint targets remain unchanged.
 
 Current priority (Yiming, 2026-09-19 UTC): build a fast, hackable SGLang inference
 port before more search experiments. Latest refinement: make MCTS throughput per

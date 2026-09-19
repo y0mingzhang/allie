@@ -1,3 +1,19 @@
+## Update: 2026-09-19 17:12UTC
+
+Yiming explicitly said grab a GPU, keep optimizing, resume previous goal.
+Goal10x macro AND10x expert CM remains active, same checkpoint/evals/frontier.
+Goal UI get_goal failed with database error; own GOAL.md remains authoritative;
+no new goal created or completed/blocked state reset.
+New workbench10503413 pending on preempt, ONE GPU; general reserved for Claude.
+Request4CPUs,48G,max8h,TimeMin30min for backfill; cache1.5Mtokens/fraction0.8.
+Previous10.754722GPUh retained, receipt recorded. No duplicate allocations.
+Activation correction has CPU math reference PASS. New coarse task078 will
+collect and analyze automatically (activation_screen wrapper); avoid polling
+per block. Analyzer includes old-residual correlation, fold fits and paired
+game-bootstrap. No golden promotion before development evidence.
+All Claude review requests closed, independently confirmed via phone.
+
+---
 ## Update: 2026-09-19 reset recovery
 
 Recovered after Yiming's explicit reset. Own search target remains unmet:
