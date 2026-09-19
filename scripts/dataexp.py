@@ -624,6 +624,23 @@ WAVES["round4"] = WAVES["round3x"] | dict(
     "in the last 20% (up16 there cost macro); sampler 211a8e6",
 )
 
+WAVES["round4s2"] = WAVES["round3g"] | dict(
+    study="data-v1-round4s2",
+    prefix="r4s2",
+    sbatch=WAVES["wave2"]["sbatch"] + f"\n#SBATCH --constraint={FAST}",
+    runs=r3(b2("1e17", seeds=(43,)), "1e17"),
+    purpose="B_2 at 1e17 seed 43: second seed of the B_2 vs B_3 1e17 comparison (s42: 1.4272 / 1.3371 vs "
+    "1.4251 / 1.3315); sampler 506e9fb, batches identical to da0322b's",
+)
+
+WAVES["round4s3"] = WAVES["round4"] | dict(
+    study="data-v1-round4s3",
+    prefix="r4s3",
+    throttle=1,
+    runs=r3(b2("1e17", B3C, seeds=(43,)), "1e17", **X),
+    purpose="B_3 (B_2 + OTB x4) at 1e17 seed 43, paired with round4s2's B_2 s43",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
