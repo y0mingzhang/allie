@@ -481,6 +481,40 @@ def plain_wd_and_update_inplace(p, v, wd_tensor, lr_tensor):
 CAUTIOUS_WD = (
     True  # model track: plain decoupled weight decay (NorMuon and DistAdam) when False
 )
+_pending = []  # BF16-weight params whose grad arrived in this backward (accumulate_fp32)
+
+
+@torch.compile(dynamic=False)
+def _accumulate(mains, grads, fresh):
+    for m, g, f in zip(mains, grads, fresh):
+        m.copy_(g) if f else m.add_(g)
+
+
+@torch.no_grad()
+def _flush():
+    ps = [p for p in _pending if p.main_grad is not None]
+    for p in _pending:
+        if p.main_grad is None:  # params without a flat buffer (DistAdam masters)
+            p.main_grad = p.grad.float()
+    if ps:
+        _accumulate(
+            [p.main_grad for p in ps],
+            [p.grad for p in ps],
+            [bool(getattr(p, "fresh", False)) for p in ps],
+        )
+    for p in _pending:
+        p.grad, p.fresh = None, False
+    _pending.clear()
+
+
+def accumulate_fp32(p):
+    """BF16 weight: sum micro-batch grads in FP32 exactly as an FP32 weight's grad would be; batched at
+    the end of backward (fresh: first micro-batch into NorMuon's flat buffer overwrites)."""
+    if not _pending:
+        torch.autograd.Variable._execution_engine.queue_callback(_flush)
+    _pending.append(p)
+
+
 NORMUON = (
     True  # model track: plain Muon, no second-moment variance reduction, when False
 )
@@ -570,6 +604,30 @@ class NorMuon(torch.optim.Optimizer):
         else:
             param_groups = self.generate_standard_param_groups(params)
         super().__init__(param_groups, defaults)
+        # BF16 weights (p.master): FP32 master of this rank's shard from the FP32 init, FP32 grads in one
+        # padded stacked buffer per group (reduce-scattered in place) and the BF16 params as rows of
+        # another (all-gathered in place)
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        self._flat, self._pflat = {}, {}
+        for i, group in enumerate(self.param_groups):
+            ps, lo = group["params"], rank * group["chunk_size"]
+            if not getattr(ps[0], "master", False):
+                continue
+            if lo < len(ps):
+                group["master"] = torch.stack(
+                    [p.fp32 for p in ps[lo : lo + group["chunk_size"]]]
+                )
+            shape = (group["chunk_size"] * self.world_size, *ps[0].shape)
+            self._flat[i] = torch.zeros(shape, dtype=torch.float32, device=ps[0].device)
+            self._pflat[i] = torch.zeros(shape, dtype=ps[0].dtype, device=ps[0].device)
+            for k, p in enumerate(ps):
+                self._pflat[i][k].copy_(p.detach())
+                p.data, p.main_grad, p.fresh = self._pflat[i][k], self._flat[i][k], True
+                del p.fp32
+        # by index: load_state_dict replaces the group dicts
+        self._group_of = {
+            p: i for i, g in enumerate(self.param_groups) for p in g["params"]
+        }
 
     def reset(self):
         # expose a reset for clearing buffers
@@ -632,6 +690,18 @@ class NorMuon(torch.optim.Optimizer):
                 continue
 
             chunk_size = group["chunk_size"]
+            flat = self._flat.get(self._group_of[params[0]])
+            if flat is not None:  # BF16 weights: FP32 grads already stacked
+                for p in params:
+                    p.fresh = True  # the next accumulation overwrites, after this reduce-scatter
+                grad_chunk = torch.empty_like(flat[:chunk_size])
+                reduce_future = dist.reduce_scatter_tensor(
+                    grad_chunk, flat, op=dist.ReduceOp.AVG, async_op=True
+                )
+                group_infos.append(
+                    dict(grad_chunk=grad_chunk, reduce_future=reduce_future)
+                )
+                continue
             padded_num_params = chunk_size * self.world_size
 
             stacked_grads = torch.empty(
@@ -648,7 +718,7 @@ class NorMuon(torch.optim.Optimizer):
 
             reduce_future = dist.reduce_scatter_tensor(
                 grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, async_op=True
-            ).get_future()
+            )
 
             group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
 
@@ -660,6 +730,8 @@ class NorMuon(torch.optim.Optimizer):
 
             params = group["params"]
             grad_chunk = info["grad_chunk"]
+            # BF16 weights: FP32 grads, momentum and update math on the FP32 master
+            master = getattr(params[0], "master", False)
             chunk_size = group["chunk_size"]
             padded_num_params = chunk_size * self.world_size
 
@@ -758,10 +830,15 @@ class NorMuon(torch.optim.Optimizer):
             v_chunk = v_chunk.view(grad_shape)
 
             # # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
-            updated_params = torch.empty_like(grad_chunk)
+            updated_params = torch.empty_like(grad_chunk, dtype=params[0].dtype)
             if num_params > 0:
-                # Work on a stacked copy to avoid touching original params
-                param_chunk = torch.stack(params[module_idx : module_idx + num_params])
+                # Work on a stacked copy to avoid touching original params; BF16 weights update the
+                # persistent FP32 master of this rank's shard instead (ZeRO-1)
+                param_chunk = (
+                    group["master"]
+                    if master
+                    else torch.stack(params[module_idx : module_idx + num_params])
+                )
 
                 for local_idx in range(num_params):
                     (
@@ -781,15 +858,20 @@ class NorMuon(torch.optim.Optimizer):
             if num_params < chunk_size:
                 updated_params[num_params:].zero_()
 
-            stacked_params = torch.empty(
-                (padded_num_params, *param_shape),
-                dtype=updated_params.dtype,
-                device=updated_params.device,
+            flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
+            stacked_params = (
+                torch.empty(
+                    (padded_num_params, *param_shape),
+                    dtype=updated_params.dtype,
+                    device=updated_params.device,
+                )
+                if flat is None
+                else flat
             )
 
             gather_future = dist.all_gather_into_tensor(
                 stacked_params, updated_params, async_op=True
-            ).get_future()
+            )
 
             all_gather_infos.append(
                 {
@@ -805,6 +887,8 @@ class NorMuon(torch.optim.Optimizer):
             stacked_params = info["stacked_params"]
             orig_params = info["orig_params"]
 
+            if stacked_params is self._pflat.get(self._group_of[orig_params[0]]):
+                continue  # gathered in place
             unstacked_params = torch.unbind(stacked_params)
             for i, p in enumerate(orig_params):
                 p.copy_(unstacked_params[i], non_blocking=True)
@@ -836,6 +920,7 @@ class DistAdam(torch.optim.Optimizer):
             param_groups.append(dict(params=params_by_label[None]))
         super().__init__(param_groups, defaults)
         # init state: small params (numel < 1024) use full-sized state, others use sharded
+        rank = dist.get_rank() if dist.is_initialized() else 0
         for p in params:
             chunk = p if p.numel() < 1024 else p[: p.size(0) // self.world_size]
             dtype = torch.float32 if getattr(p, "fp32_state", False) else torch.bfloat16
@@ -843,6 +928,16 @@ class DistAdam(torch.optim.Optimizer):
             self.state[p] = dict(
                 step=0, exp_avg=exp_avg, exp_avg_sq=torch.zeros_like(exp_avg)
             )
+            # BF16 weight: FP32 master of this rank's slice
+            if getattr(p, "master", False):
+                n, w = len(chunk), getattr(p, "fp32", p)
+                self.state[p]["master"] = (
+                    (w if p.numel() < 1024 else w[rank * n : (rank + 1) * n])
+                    .float()
+                    .clone()
+                )
+                if hasattr(p, "fp32"):
+                    del p.fp32
         # DistributedAdam implementation by @vagrawal, @akash5474
         self.should_sync = False
         self._reduce_scatter_hooks = []
@@ -862,10 +957,17 @@ class DistAdam(torch.optim.Optimizer):
             return
 
         grad = param.grad
+        if getattr(
+            param, "master", False
+        ):  # BF16 weight: this backward's grad folded in FP32
+            if any(q is param for q in _pending):
+                _flush()
+            if getattr(param, "main_grad", None) is not None:
+                grad, param.main_grad = param.main_grad, None
         if param.numel() < 1024:
             # Small params: use all_reduce (no scatter/gather needed)
             self._reduce_scatter_futures[param] = (
-                dist.all_reduce(grad, op=dist.ReduceOp.AVG, async_op=True).get_future(),
+                dist.all_reduce(grad, op=dist.ReduceOp.AVG, async_op=True),
                 grad,
             )
         else:
@@ -875,7 +977,7 @@ class DistAdam(torch.optim.Optimizer):
                 self._reduce_scatter_futures[param] = (
                     dist.reduce_scatter_tensor(
                         grad_slice, grad, op=dist.ReduceOp.AVG, async_op=True
-                    ).get_future(),
+                    ),
                     grad_slice,
                 )
 
@@ -895,7 +997,7 @@ class DistAdam(torch.optim.Optimizer):
     @torch.no_grad()
     def step(self):
         rank = dist.get_rank()
-        all_gather_futures: list[torch.Future] = []
+        all_gather_futures = []  # c10d Works: Work.wait() also releases NCCL's stashed tensors
 
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
@@ -918,6 +1020,7 @@ class DistAdam(torch.optim.Optimizer):
 
                 lr = group["lr"] * getattr(param, "lr_mul", 1.0)
                 state = self.state[param]
+                out, p_slice = p_slice, state.get("master", p_slice)
 
                 exp_avg = state["exp_avg"]
                 exp_avg_sq = state["exp_avg_sq"]
@@ -942,16 +1045,17 @@ class DistAdam(torch.optim.Optimizer):
                     update.add_(p_slice, alpha=eff_weight_decay * lr)
 
                 p_slice.add_(other=update, alpha=-1.0)
+                if out is not p_slice:
+                    out.copy_(p_slice)
 
                 if not is_small:
                     all_gather_futures.append(
-                        dist.all_gather_into_tensor(
-                            param, p_slice, async_op=True
-                        ).get_future()
+                        dist.all_gather_into_tensor(param, out, async_op=True)
                     )
 
         self._reduce_scatter_futures.clear()
-        torch.futures.collect_all(all_gather_futures).wait()
+        for work in all_gather_futures:
+            work.wait()
 
 
 # -----------------------------------------------------------------------------
