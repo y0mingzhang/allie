@@ -1,3 +1,58 @@
+## Update: 2026-09-19 11:27 UTC
+
+072 order audit is DONE. Same-order repeat is bit-exact (policy, budgets, CE).
+Reversed order changes macro/expert CE by -0.0000202/-0.0001626; seeded shuffle
+by -0.0000727/-0.0001471. Both below the preregistered 0.001 aggregate threshold.
+Individual policy differences have large tails (max 0.188/0.210), so do not claim
+full batch invariance. Original result stays authoritative; no selecting a permutation.
+Read golden-order-audit-v1/results.json for all metrics and per-position statistics.
+
+aug-value-geometry-v1 also DONE. Independent reference / identity / terminal
+checks passed. Forward control exactly reproduced. Log-odds, compressed value,
+and variance-dependent internal temperatures all lose in fit-game CV; neither
+metric selects an alternative. No golden promotion. New methods are CPU only.
+
+Next hypothesis (not yet implemented/queued): Bayesian Elo-header gap-offset
+adaptation. Query own Elo offsets -400/-200/0/+200/+400, opponent unchanged;
+use strictly past own moves in prefix for likelihood. Compare static and adaptive
+mixtures at equal prefill cost, fit power/prior width within game folds, report
+posterior entropy and gain by ply. Claude sees no blocker; cautions that the LM
+already sees past moves, and the latent offset also absorbs opponent misrating.
+No checkpoint updates or new Slurm jobs. Same engine/allocation, idle after072.
+---
+## Update: 2026-09-19 11:23 UTC
+
+Own goal remains active, 10x macro AND expert CM, not achieved. Main untouched.
+072-order-audit is running on existing engine1713252/job10498670, babel-t5-32.
+Code search/engine/golden_order_audit.py; plan golden-order-audit-v1/plan.json.
+Frozen state0.1 adaptive router, original order repeat plus reverse and fixed
+shuffle; same block1024/4threads. Reports per-position policy/KL, route changes,
+macro/expert drift and paired CIs. No refitting or method selection. Threshold
+>0.001 CE drift means require batch-invariant final scoring before any final claim.
+Do not duplicate task. All old GPU queue requests through071 are completed.
+Allocation ends12:52UTC; no extra GPU or new Slurm request. Observer keeps charges.
+
+New CPU probes completed:
+- aug-hidden-calibration-v2: cached512D hidden states -> fold-fitted8/32PCs ->
+  scalar temperature and Q-tilt. No NN-weight changes. CV macro picks8PC joint
+  ridge0.1, confirmation1.445713/1.315413 vsparent1.445115/1.315885; both CIs
+  cross0, macro worse. ExpertCV picksglobal joint, essentiallynochange. Notpromoted.
+  6.47sCPU. v1 failed after fitting due to wrong control report key; original source,
+  plan andlog archived failed-attempt1. v2 corrects key; same experiment/seed.
+- aug-value-outcomes-v1:6076uniqueAugustgames,16384positions; metadataresults ONLY.
+- aug-value-calibration-v1/v2: predicted expected game score is already calibrated;
+  alpha~0.97, scoreCE macro0.58706->0.58694/expert0.54636->0.54643. AllCIs cross0.
+  This is BINARY expectedscoreCE, NOT moveCE/3classWDL/CM. NoJulyoutcomesread.
+  v2 computes CE directly fromcalibratedlogits to avoid sigmoid saturation; v1
+  source archived, maximum actualCEdifference1.1e-16. Notpromoted into search.
+
+Latest search outcome remains adaptive router frontier: ~501nodes gives
+macro/expertCE1.445629/1.340769 andCM2.984x/5.019x. Best970-nodepoint
+1.444599/1.338855, CM3.035x/5.167x. Golden reused, no finalconfirmation yet.
+Next inspect072. Possible independent next hypothesis: monotone odd value
+geometry INSIDE Bellman recursion (root-only utility transforms already failed).
+Not implemented, not queued. Need exactforwardcontrol and independent reference.
+---
 ## Update: 2026-09-19 11:12 UTC
 
 071 is DONE,95.51s for4 value-conditioning variants ×16384positions,

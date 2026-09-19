@@ -82,7 +82,9 @@ def main():
                          ('aug-value-gap-v1','Expanded August smooth value-gap calibration; no resolved incremental gain, not promoted.'),
                          ('aug-reverse-bellman-v1','Expanded August reverse-KL Bellman backups on identical trees, all arms and visited-only diagnostic reported.'),
                          ('aug-critic-conditions-v1','Expanded August hypothetical-rating VALUE queries; actual human policy unchanged, extra calls charged, no resolved gain.'),
-                         ('aug-depth-mixture-v1','Expanded August latent deliberation-depth mixtures on shared trees; fit-CV selects unchanged policy.')]:
+                         ('aug-depth-mixture-v1','Expanded August latent deliberation-depth mixtures on shared trees; fit-CV selects unchanged policy.'),
+                         ('aug-hidden-calibration-v2','Expanded August frozen hidden-state PCA calibration gates; no resolved gain on confirmation, not promoted.'),
+                         ('aug-value-geometry-v1','Expanded August internal value geometry and uncertainty-temperature backups; both CV metrics select unchanged forward backup.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
