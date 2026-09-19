@@ -446,8 +446,9 @@ wave(
     "screen2",
     "model-v1-screen2",
     "m2",
-    variants("3e16", b, SCREEN2),
-    "model screen 1, tier 2 at 3e16 on pinned B_2, trainer-FLOP matched: MoE x 2, diff attention, "
+    # MoE left out: its routing collapsed in pilot2 (ledger 04:20); it returns as tier 2b
+    variants("3e16", b, {k: v for k, v in SCREEN2.items() if not k.startswith("moe")}),
+    "model screen 1, tier 2 at 3e16 on pinned B_2, trainer-FLOP matched: diff attention, "
     "aux-head weights 0.1 / 0.05 / 0",
     "preempt",
     pool_sources="model-v1-screen1g",
