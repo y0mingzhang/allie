@@ -77,6 +77,11 @@ def evaluate(model, manager, rows, batch):
     }
 
 
+def to_gpu(x):
+    """Pinned asynchronous host-to-device copy, so no micro-batch input syncs the host."""
+    return torch.from_numpy(x).pin_memory().to("cuda", non_blocking=True)
+
+
 def useful_flops(rows, cfg, short_window, long_window):
     x = rows[:, :-1]
     pos = np.arange(x.shape[1])[None, :]
@@ -524,7 +529,7 @@ def main():
             flops_local += useful_flops(
                 rows, cfg, manager.ws_short * 128, manager.ws_long * 128
             )
-            data = torch.from_numpy(rows).pin_memory().to("cuda", non_blocking=True)
+            data = to_gpu(rows)
             x, y = data[:, :-1], data[:, 1:]
             context = make_context(
                 x, manager.ws_short * 128, manager.ws_long * 128, host=rows[:, :-1]
@@ -535,25 +540,13 @@ def main():
             clock = last.get("clock")
             feat = last.get("feat")
             if feat is not None:
-                feat = (
-                    torch.from_numpy(feat[:, :-1].astype(np.int64))
-                    .to("cuda")
-                    .flatten(0, 1)
-                )
+                feat = to_gpu(feat[:, :-1].astype(np.int64)).flatten(0, 1)
             extra = (
                 ()
                 if clock is None
-                else (
-                    torch.from_numpy(clock[:, :-1].astype(np.int64))
-                    .to("cuda")
-                    .flatten(),
-                )
+                else (to_gpu(clock[:, :-1].astype(np.int64)).flatten(),)
             )
-            elo = (
-                torch.from_numpy(elo_buckets(rows)).to("cuda").flatten()
-                if a.elo
-                else None
-            )
+            elo = to_gpu(elo_buckets(rows)).flatten() if a.elo else None
             logits = net(
                 x.flatten(),
                 y.flatten(),
@@ -564,19 +557,13 @@ def main():
                 feat_seq=feat,
             )
             mask = last.get("mask")
-            mask = (
-                None
-                if mask is None
-                else torch.from_numpy(mask[:, 1:]).to("cuda", non_blocking=True)
-            )
+            mask = None if mask is None else to_gpu(mask[:, 1:])
             loss, primary, count = move_losses(
                 logits, x, y, context, manager.mtp_weights, mask
             )
             if aux:
                 t, w = (
-                    torch.from_numpy(last[k][:, :-1].astype(np.int64))
-                    .to("cuda")
-                    .flatten()
+                    to_gpu(last[k][:, :-1].astype(np.int64)).flatten()
                     for k in ("time", "wdl")
                 )
                 parts = aux_losses(logits, t, w, mask.flatten())

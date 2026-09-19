@@ -16,6 +16,7 @@ import queue
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -421,6 +422,31 @@ POLICIES.update(
     ),
 )
 
+OTB, ENGINE = (
+    (1, 2, 3),
+    (5, 6, 7),
+)  # ext-v1 source digits: pgnmentor, twic, broadcast; tcec, ccrl
+
+
+def sources(srcs, k, start=0.0):
+    """control, with games from the given external sources weighted k times from phase start."""
+    return lambda g, p: (
+        control(g, p)[0]
+        * np.where(np.isin(getattr(g, "src", 0), srcs) & (p >= start), k, 1),
+        True,
+        True,
+    )
+
+
+EXT = (("otb", OTB), ("engine", ENGINE))
+POLICIES.update(
+    {f"{n}_x{k}": sources(s, k) for n, s in EXT for k in (2, 4, 10, 30)}
+    | {f"{n}_d{k}": sources(s, 1 / k) for n, s in EXT for k in (2, 3, 10)}
+    | {f"no{n}": sources(s, 0) for n, s in EXT}
+    | {f"engine_cd_x{k}": sources(ENGINE, k, 0.8) for k in (3, 10, 30)}
+)
+PHASES.update({f"engine_cd_x{k}": (0.0, 0.8) for k in (3, 10, 30)})
+
 
 def phase(policy, p):
     marks = {x for k in policy.split("+") for x in PHASES.get(k, (0.0,))}
@@ -465,6 +491,7 @@ class Grid:
         keep = b <= w
         self.welo, self.belo, self.n = w[keep], b[keep], int(keep.sum())
         self.fmt = np.full(self.n, fmt)
+        self.src = code // 100000
         self.rated = np.ones(self.n, bool)
         self.wbot = self.bbot = np.zeros(self.n, bool)
         # fields cleaning policies read, set to the values that maximise any weight
@@ -493,6 +520,9 @@ class Shard:
             Games(read(path, cols), clock, aux, feats),
             None,
         )
+        self.g.src = (
+            int(Path(path).parent.name[1:]) // 100000
+        )  # 0 lichess, else ext source
 
     def policy(self, fn, ph):
         if self.phase != ph:
@@ -598,6 +628,7 @@ class Sampler:
         self.paths = [p for c in self.codes for p, _ in self.units[c]]
         self.ends = [int(self.games.sum())]
         self.resident, self.weights_phase = {}, None  # code -> Shard
+        self.preload = {}  # path -> Shard read ahead for the current chunk
 
     def _weights(self, p):
         ph = phase(self.policy, p)
@@ -609,36 +640,63 @@ class Sampler:
             self.cdf, self.weights_phase = np.cumsum(total) / total.sum(), ph
         return ph
 
-    def _take(self, k, count):
-        """The next `count` games of bucket k, as (Shard, index array) pieces."""
+    def _take(self, k, count, rng, cursor):
+        """The next `count` games of bucket k as (path, rows, index array) pieces."""
         code, pieces = self.codes[k], []
         shards = self.units[code]
         while count:
-            cur = self.cursor.setdefault(code, [int(self.rng.integers(2**63)), 0, 0])
+            cur = cursor.setdefault(code, [int(rng.integers(2**63)), 0, 0])
             path, rows = shards[
                 np.random.default_rng(cur[0]).permutation(len(shards))[cur[1]]
             ]
-            if code not in self.resident or self.resident[code].path != path:
-                self.resident[code] = Shard(path, self.clock, self.aux, self.feats)
-            shard = self.resident[code]
-            assert rows <= shard.g.n, (path, rows, shard.g.n)
             t = min(count, rows - cur[2])
-            pieces.append((shard, np.arange(cur[2], cur[2] + t)))
+            pieces.append((path, rows, np.arange(cur[2], cur[2] + t)))
             cur[2] += t
             count -= t
             if cur[2] == rows:
                 cur[1], cur[2] = cur[1] + 1, 0
                 if cur[1] == len(shards):
-                    cur[:] = [int(self.rng.integers(2**63)), 0, 0]
+                    cur[:] = [int(rng.integers(2**63)), 0, 0]
         return pieces
+
+    def _chunk(self, rng, cursor):
+        """One chunk of draws as (bucket, pieces), lazily: callers draw each bucket's acceptance
+        before the next bucket's take, which fixes the order of rng draws."""
+        drawn = np.searchsorted(self.cdf, rng.random(self.chunk), side="right")
+        for k, count in zip(*np.unique(drawn, return_counts=True)):
+            yield int(k), self._take(int(k), int(count), rng, cursor)
+
+    def _warm(self):
+        """Read the shards the next chunk opens in parallel (cold NFS reads are latency-bound),
+        found by replaying its draws on copies of the rng and cursors."""
+        rng, cursor, need = copy.deepcopy(self.rng), copy.deepcopy(self.cursor), {}
+        for k, pieces in self._chunk(rng, cursor):
+            for path, _, idx in pieces:
+                rng.random(len(idx))
+                r = self.resident.get(self.codes[k])
+                if (r is None or r.path != path) and path not in self.preload:
+                    need[path] = None
+        load = lambda p: Shard(p, self.clock, self.aux, self.feats)
+        with ThreadPoolExecutor(32) as ex:
+            self.preload |= dict(zip(need, ex.map(load, need)))
+
+    def _shard(self, k, path):
+        code = self.codes[k]
+        if code not in self.resident or self.resident[code].path != path:
+            self.resident[code] = self.preload.pop(path, None) or Shard(
+                path, self.clock, self.aux, self.feats
+            )
+        return self.resident[code]
 
     def _accepted(self, p):
         """One chunk of candidate draws, returned as accepted tokenized games in random order."""
         ph = self._weights(p)
-        drawn = np.searchsorted(self.cdf, self.rng.random(self.chunk), side="right")
+        self._warm()
         out = []
-        for k, count in zip(*np.unique(drawn, return_counts=True)):
-            for shard, idx in self._take(int(k), int(count)):
+        for k, pieces in self._chunk(self.rng, self.cursor):
+            for path, rows, idx in pieces:
+                shard = self._shard(k, path)
+                assert rows <= shard.g.n, (path, rows, shard.g.n)
                 shard.policy(self.fn, ph)
                 ok = idx[self.rng.random(len(idx)) * self.caps[k] < shard.w[idx]]
                 for i in ok:
@@ -650,6 +708,7 @@ class Sampler:
                     if self.feats:
                         game += (shard.g.feats(i, len(game[0])),)
                     out.append(game)
+        assert not self.preload, "warm-up replay diverged from the draws"
         return [out[i] for i in self.rng.permutation(len(out))]
 
     def batch(self, n, rank=0, world=1):
