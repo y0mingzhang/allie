@@ -697,7 +697,7 @@ class NorMuon(torch.optim.Optimizer):
                 grad_chunk = torch.empty_like(flat[:chunk_size])
                 reduce_future = dist.reduce_scatter_tensor(
                     grad_chunk, flat, op=dist.ReduceOp.AVG, async_op=True
-                ).get_future()
+                )
                 group_infos.append(
                     dict(grad_chunk=grad_chunk, reduce_future=reduce_future)
                 )
@@ -718,7 +718,7 @@ class NorMuon(torch.optim.Optimizer):
 
             reduce_future = dist.reduce_scatter_tensor(
                 grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, async_op=True
-            ).get_future()
+            )
 
             group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
 
@@ -871,7 +871,7 @@ class NorMuon(torch.optim.Optimizer):
 
             gather_future = dist.all_gather_into_tensor(
                 stacked_params, updated_params, async_op=True
-            ).get_future()
+            )
 
             all_gather_infos.append(
                 {
@@ -967,7 +967,7 @@ class DistAdam(torch.optim.Optimizer):
         if param.numel() < 1024:
             # Small params: use all_reduce (no scatter/gather needed)
             self._reduce_scatter_futures[param] = (
-                dist.all_reduce(grad, op=dist.ReduceOp.AVG, async_op=True).get_future(),
+                dist.all_reduce(grad, op=dist.ReduceOp.AVG, async_op=True),
                 grad,
             )
         else:
@@ -977,7 +977,7 @@ class DistAdam(torch.optim.Optimizer):
                 self._reduce_scatter_futures[param] = (
                     dist.reduce_scatter_tensor(
                         grad_slice, grad, op=dist.ReduceOp.AVG, async_op=True
-                    ).get_future(),
+                    ),
                     grad_slice,
                 )
 
@@ -997,7 +997,7 @@ class DistAdam(torch.optim.Optimizer):
     @torch.no_grad()
     def step(self):
         rank = dist.get_rank()
-        all_gather_futures: list[torch.Future] = []
+        all_gather_futures = []  # c10d Works: Work.wait() also releases NCCL's stashed tensors
 
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
@@ -1050,13 +1050,12 @@ class DistAdam(torch.optim.Optimizer):
 
                 if not is_small:
                     all_gather_futures.append(
-                        dist.all_gather_into_tensor(
-                            param, out, async_op=True
-                        ).get_future()
+                        dist.all_gather_into_tensor(param, out, async_op=True)
                     )
 
         self._reduce_scatter_futures.clear()
-        torch.futures.collect_all(all_gather_futures).wait()
+        for work in all_gather_futures:
+            work.wait()
 
 
 # -----------------------------------------------------------------------------

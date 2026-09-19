@@ -30,6 +30,9 @@ LAYERS, STEPS, SPLIT = (
 
 
 class Done:
+    def wait(self):
+        pass
+
     def get_future(self):
         f = torch.futures.Future()
         f.set_result(None)
