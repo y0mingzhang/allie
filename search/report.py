@@ -101,7 +101,9 @@ def main():
                          ('aug-value-uncertainty-v1','Reused August development: marginalize uncertainty along search refinement versus a diagonal approximation and signed drift. Same1000-node policies; no extra NN queries.'),
                          ('aug-quota-replay-v1','Reused August4096-position cohort: causal root-action allocation from early value instability. Same1000 simulations, actual NN counts reported separately. Both variants worsen expert CE; unchanged rule selected by both CV metrics. No live or golden promotion.'),
                          ('aug-deep-frontier-v1','Reused August4096-position cohort: selective depth through16000 with budget-normalized backups. Nested game cross-fitting supplies router targets. Mean nodes and paired equal-cost comparisons in results.json; cached-prefix development only.'),
-                         ('aug-deep-frontier-live-v1','Actual mixed-budget execution of frozen selective-depth routers on the same reused August4096-position cohort. No refitting. Cached/live drift and measured nodes/wall time in results.json; no golden conversion.')]:
+                         ('aug-deep-frontier-live-v1','Actual mixed-budget execution of frozen selective-depth routers on the same reused August4096-position cohort. No refitting. Cached/live drift and measured nodes/wall time in results.json; no golden conversion.'),
+                         ('aug-convergence-router-v1','Reused August4096: add64-to128 convergence features to position-level allocation, fixed ridge and nested calibration targets. Unchanged state router selected at every cap; no extra NN queries or live promotion.'),
+                         ('aug-conditioned-search-v1','Reused August4096: actual root policy retained; entire imagined continuation uses actual,+200,+400,or equal2400 ratings. Same1000 simulations, actual nodes and additional prefills charged. Controls and variants run on the same A100; no golden conversion.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])

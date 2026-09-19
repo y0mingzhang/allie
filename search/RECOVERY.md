@@ -10,32 +10,22 @@ Read controller/STOP and results/search-v1/STOP before work. Neither existed at 
 
 ## Current execution
 
-Update:10504460 restarted on A10080G/babel-y9-24 at2026-09-19 19:56:19UTC. Runtime archive is staging in node-local scratch; old ready.json remains stale until startup finishes. Attempt to widen pending job Features was rejected because the job had started; no change took effect.
+- ONE job10504460 search-engine RUNNING on A10080G/babel-y9-24; restarted2026-09-19 19:56:19UTC. Previous Ada allocation was preempted. Keep both charges. Attempted pending Features update was rejected after restart; no change took effect.
+- Current enginePID2530027; ready_unix1789848043. Cold stage161.9s plus process startup98.1s. Logs engine-10504460.log. No other search GPU submitted. General/dei belong to Claude.
+-101 numerical audit DONE.102 conditioned-search smoke DONE, exact same-hardware actual-control reproduction.103 critic precision diagnostic DONE.104 full conditioned-search is RUNNING, atomic256-root blocks, fourarms. No new golden queued. Do not duplicate requests.
+- Python gate(session94700) queued104 only after102 passed and exited. Progress-only observer(session83706) may time out independently of GPU work; never infer job failure from observer exit. Existing search.advance --watch preserves cumulative sacct charges.
 
-- ONE job10504460 search-engine, preempt. It completed request100 on RTX6000Ada/babel-x5-20, then was preempted. Same job auto-requeued and PENDING; old ready.json/PID3839958 is stale. Never infer live access from it. No second search job submitted.
-- Request101-deep-order-audit is queued, not yet started. All through100 are DONE. It will resume on the existing job. Check receipts before doing anything.
-- Logs results/search-v1/logs/engine-10504460.log; queue engine-queue/. Observer search.advance --watch reconciles repeated sacct allocations without model wakeups. Preserve all charges. General/dei belong to Claude.
+## Current findings and next action
 
-## Current experiment and next action
+- A100 fixed1000 repeat is bit-identical on all4096 roots. Fixed permutation Δmacro/expert−.000134/−.000321; adaptive2000 permutation−.000052/−.000041. Both below.001 aggregate threshold, while individual policies vary. GPU migration Ada→A100 shifts expert+.00208(control)/−.00158(adaptive); compare same-hardware controls. aug-deep-order-audit-v1/{REPORT.md,results.json,paired-ci.json}.
+- A100 checking fixed1000 CE1.408722/1.228093(~972NN), adaptive2000 CE1.403339/1.217313(~1848NN). Pairedmacro−.00538 CI[−.01021,−.00044]; expert−.01078 CI[−.02476,+.00216]. More expensive, so no dominance claim.
+- CPU convergence router study DONE: add64→128 causal convergence features between POSITIONS. Both CV metrics choose unchanged state router at512/1000/2000. Same-state baselines recovered exactly. No live promotion. aug-convergence-router-v1/REPORT.md.
+-103 fixed-prefix precision diagnostic: only3WDL readout rows recomputedFP32, other logits bit-identical and hook restored in finally.99th-percentile batch-size value differences~.038→.0097, maximum~.059→.013. One target-selected debugging tree, not representative quality evidence. No new inference default adopted.
+-104 aug-conditioned-search-v1: actual root policy/quotas fixed. Entire imagined continuation uses actual/common+200/common+400/equal2400. Shift preserves rating gap; separate hypothetical-header prefill prevents mismatched KV.1000simulations, all NN calls and additional root/prefill work charged. Fourarms,4096August positions, modern output fit inside gameCV. Inspect result/error and per-cell deltas; no automatic golden promotion.
 
-aug-deep-frontier-v1 cached screen098:128/256/512/1000/4000/16000 budgets, nested game-cross-fitted calibration targets for routing. Features use only raw root and paid128 search. State routers win both CV metrics at all3caps. Same4096 August cohort, no CM conversion.
+After104: verify all actual-control Q/root/node blocks equal101 fixed1000-repeat on same A100(after103 hook restoration). Report all4arms, quality intervals and costs; choose from fitCV only. If the header intervention wins, isolate continuation prior versus critic mechanisms. If not, consider a paired FP32-critic search test (same nodes, tiny extra head work) or complementary search portfolios; no new neural weights/external memory. Each is a hypothesis, not a demonstrated win.
 
-aug-deep-frontier-live-v1 requests099/100 DONE. Checking results:
-- fixed1000:1.408161/1.226010;971.9NN;66.6s all4096.
-- state512:1.409917/1.225791;505.6NN;39.6s.
-- state1000:1.407338/1.225857;1012.7NN;103.8s.
-- state2000:1.403933/1.218888;1847.2NN;231.3s.
-All paired CIs against live fixed1000 cross0. No established dominance.
-
-Issue: cached64-root vs live256-root fixed1000 expert shift−.002144 exceeds .001 threshold. One checking move(index3463) contributes−1.096738CE/512, almost entire shift. Raw root logits equal; descendant values diverge. Sources/calibration reconstruction correct. Diagnostic: search/diagnose_deep_drift.py, output drift-diagnostic.json in live study. CPU deterministic staged128→mixed budgets audit exact; not proof of GPU invariance.
-
-101 now runs same256-root fixed1000 twice plus a fixed shuffle, and state2000 repeat plus shuffle, all on the new allocation. Within-allocation contrasts isolate ordering; comparisons with the old live study include hardware migration. Frozen coefficients, no retuning. Logs every descendant oracle result for diagnostic position3463 in both fixed repeats. Output aug-deep-order-audit-v1. Inspect source and results, distinguish raw kernel drift from search amplification. If aggregate drift>.001 persists, investigate before any golden promotion. No new golden evaluation is queued. Do not edit the audit once its plan freezes/runs.
-
-102-conditioned-search-smoke is queued after101; plan frozen at aug-conditioned-search-v1/plan.json. Fourarms:actual,common+200,common+400,equal2400. Actual root policy/quotas fixed; changed header affects full continuation priors/critics. Fresh hypothetical-header prefill prevents inconsistent KV; actual+counterfactual prefills both charged. Shift uses same bounded delta for both players to preserve rating gap. Smoke actual must match the new-allocation audit control exactly. 103-critic-precision-audit is a small fixed-prefix numerical diagnostic, not the full quality study. Do not queue full104 until102 passes. No golden until audit resolved.
-
-Next scientific direction must retain no external memory and report small ablations as variant evidence rather than dismissing entire families. Current GPU wait can be used for math/review and cached CPU studies.
-
-Audit progress on A100: fixed1000 same-order repeat is exact on all4096 roots. Fixed shuffle shifts checking macro−.000134/expert−.000321, max per-position probability difference.03275. Adaptive repeat/permutation still running. Request103 compares the same outlier descendant prefixes under1/64/256 query batches, with default BF16 vs FP32-only WDL output rows; no weights or other logits change and the hook is restored in finally. No new quality method selected from this software diagnostic.
+All development is reused August, potentially training-seen. Current goal10x/10x remains unmet. Keep July raw anchors/laws fixed, fresh disjoint golden confirmation required for final claim. Do not turn stability probes into a new quality claim.
 
 ## Recent completed evidence
 
