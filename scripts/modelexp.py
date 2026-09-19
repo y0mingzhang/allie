@@ -100,6 +100,20 @@ LANES = dict(
 #SBATCH --time=12:00:00""",
         1,
     ),
+    # one run on a whole 8 x L40S node (the 3e17 ship run; user, ~11:30)
+    general8=(
+        1,
+        8,
+        """#SBATCH --account=dippolit
+#SBATCH --partition=general
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:L40S:8
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=48
+#SBATCH --mem=400G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
     # one run on 4 L40S (the 3e17 ladder, as the data track's round6)
     general4=(
         1,
@@ -490,6 +504,25 @@ wave(
     ),
     "3e17 model recipe seed 43 on 4 fast preempt GPUs (second seed of the ladder arm)",
     "preempt4",
+)
+
+# the ship recipe at 3e17 on one 8-GPU node (user: ship fast); same run as ladder3e17 (the gradient
+# normalisation is fixed at /8, so world size does not change the math)
+wave(
+    "ship3e17",
+    "model-v1-ship3e17",
+    "msh",
+    variants(
+        "3e17",
+        b,
+        {
+            "model": dict(
+                arch=dict(board="conv", mlp="swiglu", key_offset=False), abs_sched=True
+            )
+        },
+    ),
+    "3e17 ship recipe on 8 x L40S: B_3 + boardcnn + swiglu + no key offset, s42",
+    "general8",
 )
 
 
