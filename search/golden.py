@@ -15,6 +15,7 @@ from scipy.special import logsumexp
 
 import allie_mcts
 from client import Oracle
+from memo_oracle import MemoOracle
 import golden_data
 import reply_pilot
 import training_cm
@@ -23,7 +24,7 @@ ROOT=Path(__file__).resolve().parents[1]/'results/search-v1'
 OUT=ROOT/'golden-v1'
 OFFICIAL=Path('/data/group_data/dei-group/yimingz3/allie/results/lm-eval/r2-3e16-control-t20-w20-pf052h-s42/strat-v1.json')
 NAMES=['canonical_raw','legal','allie_adaptive_expert','reply_fixed_expert','reply_calibrated_expert']
-FILES=['golden.py','golden_data.py','allie_mcts.py','reply_pilot.py','training_cm.py']
+FILES=['golden.py','golden_data.py','allie_mcts.py','reply_pilot.py','training_cm.py','memo_oracle.py']
 
 
 def sha(path):
@@ -84,7 +85,7 @@ def validate():
 def task(index,docs,plan):
     dest=OUT/f'{index:05d}.npz'
     if dest.exists():return index
-    started=time.monotonic();oracle=Oracle();positions=[];indices=[];offset=0
+    started=time.monotonic();oracle=MemoOracle(Oracle());positions=[];indices=[];offset=0
     for doc in docs:
         for p in golden_data.positions(doc):
             positions.append(p);indices.append(offset+p['root_index'])
@@ -123,6 +124,7 @@ def task(index,docs,plan):
     policies=[]
     if len(which):
         erows=[positions[i] for i in which]
+        oracle.prime([p['prefix'] for p in erows],root[which])
         pred,stats['allie']=allie_mcts.run(erows,root[which],oracle,adaptive=True,mean_n_sims=50)
         policies.append(np.log(pred['policy'].astype(np.float64),where=pred['policy']>0,
                                out=np.full(pred['policy'].shape,-np.inf)))
@@ -136,6 +138,7 @@ def task(index,docs,plan):
         if len(which):lp[which]=ep
         a,b,c=measures(lp);loss.append(a);correct.append(b);confidence.append(c)
     assert np.isfinite(loss).all()
+    stats['actual_inference']=dict(oracle.counts)
     tmp=dest.with_suffix('.partial')
     with tmp.open('wb') as f:np.savez_compressed(f,nll=np.stack(loss,1),correct=np.stack(correct,1),
         confidence=np.stack(confidence,1),cell=cell,game=np.array([p['game'] for p in positions]),
@@ -144,7 +147,7 @@ def task(index,docs,plan):
     return index
 
 
-def summarize(manifest,expected_blocks):
+def summarize(manifest,expected_blocks,elapsed_seconds=None):
     paths=sorted(OUT.glob('[0-9][0-9][0-9][0-9][0-9].npz'))
     assert len(paths)==expected_blocks,'Do not summarize a partial golden evaluation'
     parts=[];cost=[]
@@ -179,10 +182,34 @@ def summarize(manifest,expected_blocks):
             means=(w@s)/den;draws[j].append(np.stack([means.mean(1),means[:,3::4].mean(1)],axis=1))
     for j,name in enumerate(NAMES):
         boot=np.concatenate(draws[j]);methods[name]['paired_ce_delta_vs_legal_95pct']=np.quantile(boot,[.025,.975],axis=0).tolist()
+        # Transform the paired gain, leaving the raw-anchor and legal-baseline
+        # point estimate fixed. This is not a confidence interval on the law.
+        frozen=json.loads((ROOT/'training-cm-laws.json').read_text())
+        for mi,metric in enumerate(('macro','expert_macro')):
+            law=frozen['metrics'][metric]['law'];c=frozen['budget_nd']
+            cms=[training_cm.multiplier(law,c,methods['official_raw'][metric],
+                 methods['legal'][metric]+delta) for delta in boot[:,mi]]
+            methods[name][metric+'_paired_gain_cm_95pct']=(np.quantile(cms,[.025,.975]).tolist()
+                if all(cm is not None for cm in cms) else None)
+    frozen=json.loads((ROOT/'training-cm-laws.json').read_text())
+    for name,method in methods.items():
+        for metric in ('macro','expert_macro'):
+            method[metric+'_cm_alternative_shared_floor']=training_cm.multiplier(
+                frozen['metrics'][metric]['alternative_shared_floor'],frozen['budget_nd'],
+                methods['official_raw'][metric],method[metric])
+    work={}
+    for block in cost:
+        for name,stats in block.items():
+            totals=work.setdefault(name,{})
+            for key,value in stats.items():
+                if isinstance(value,(int,float)):
+                    totals[key]=totals.get(key,0)+value
     report=dict(stage='Exact golden evaluation of frozen expert-only search policies',positions=len(cell),games=ng,
         methods=methods,scope='Nonexpert cells use legal policy unchanged for every search method',
         uncertainty='Game bootstrap describes eval sampling, not uncertainty in the transferred scaling law',
-        costs=cost,plan_sha256=sha(OUT/'plan.json'))
+        elapsed_seconds_this_invocation=elapsed_seconds,
+        cost_notes='Per-method seconds sum concurrent worker durations including queue time; they are not allocation wall time.',
+        work=work,costs=cost,plan_sha256=sha(OUT/'plan.json'))
     tmp=OUT/'results.partial';tmp.write_text(json.dumps(report,indent=2)+'\n');tmp.replace(OUT/'results.json')
     print(json.dumps({k:{m:v[m] for m in ('macro','expert_macro','macro_training_eq_cm','expert_macro_training_eq_cm')} for k,v in methods.items()},indent=2),flush=True)
 
@@ -205,7 +232,7 @@ def main():
             for f in finished:
                 f.result();done+=1
             if done%10==0:print('golden blocks',done,'of',total,'seconds',time.monotonic()-started,flush=True)
-    summarize(manifest,total)
+    summarize(manifest,total,time.monotonic()-started)
 
 
 if __name__=='__main__':main()

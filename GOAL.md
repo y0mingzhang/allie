@@ -3,6 +3,18 @@
 Owner: Codex. Worktree: `codex/search-v1`, independent of Claude's main worktree.
 Status: active, authorized by Yiming on 2026-09-18.
 
+Current priority (Yiming, 2026-09-19 UTC): build a fast, hackable SGLang inference
+port before more search experiments. Validate full-prefix versus cached branch
+outputs, then measure startup and end-to-end search latency. Cheap x86 CPU hosting
+on Lichess should remain possible through portable model math; implementing that
+hosting path is explicitly deferred. Keep the approved research target below.
+
+Evaluation update: a smaller balanced sample of the existing 16 time-control ×
+skill cells is now allowed. Preserve the macro/expert definitions and use paired
+game-level uncertainty to size it; do not require every experiment to score all
+1.55M golden moves. Keep tuning and confirmation games separate and report cell
+regressions, not only aggregate improvements.
+
 Improve human move prediction through inference-time methods using the model itself,
 starting with `r2-3e16-control-t20-w20-pf052h-s42`. No Stockfish or external value model.
 The small model is deliberate: optimize experiment speed and build reusable infrastructure.
@@ -31,6 +43,11 @@ anchored to this checkpoint's raw CE at its own training budget. Report total CM
 versus raw and incremental CM versus cheap calibration on that same curve. Label
 this a fitted training equivalence, distinct from measured inference cost. Do not
 convert development losses with a golden-evaluation law.
+
+After every completed experiment, show Yiming an updated table of ideas tried,
+loss and CM. Maintain results/search-v1/REPORT.md as the cumulative table. Separate
+small and expanded development checks from golden macro results; label CM pending
+when the available scaling law does not apply to the evaluated split.
 
 Evaluation uses Claude's 16 format × mover-rating cells and four-cell expert macro.
 Do not tune against strat-eval-v1. Use the existing prepared dev/dev_expert splits for selection; split development

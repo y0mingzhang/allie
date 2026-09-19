@@ -1,56 +1,86 @@
-# Recovery and ownership
+# Search worktree recovery
 
-This branch owns GOAL.md and search/*. Main-worktree training/data research belongs to Claude.
-All pilot state is in results/search-v1 under this worktree's durable path. No symlink to the
-main results directory is used. The only external checkpoint inputs are read-only.
+Codex owns this worktree (`codex/search-v1`), its GOAL.md, search/ and private
+results/search-v1/. Claude owns main and training/data/model research. Do not
+submit training or change main. Read GOAL.md and the controller STOP file first.
 
-1. Read GOAL.md and results/search-v1/status.json. Check controller/STOP.
-2. Inspect recorded job IDs with squeue/sacct before any submission. Do not resubmit a
-   running/pending job. Persistent workbench: 10497511, one modern preempt GPU, eight hours.
-   The earlier pending pilot 10497506 was cancelled with zero GPU time.
-3. If the pilot finishes successfully, run:
-   /home/yimingz3/src/allie/.venv/bin/python -B search/analyze.py
-4. If preempted or failed, read logs and account its GPU time before deciding on a retry.
-   Atomic cache-*.npz batches are reusable only with the same cache-identity.json.
-   Identity binds checkpoint, input data, oracle code and top-k/packing settings.
-5. Never modify the dev confirmation selection after viewing its result. selected.json
-   records the fit-only choice. More research requires a clearly identified new round
-   and independent confirmation; do not silently reuse the final golden set for tuning.
-6. Final evaluation uses the existing strat-eval-v1 rows and labels, not a rebuilt sample.
-   Preserve its per-cell mean and equal-cell macro weighting. Development is mostly blitz
-   and cannot alone establish gains on classical or rapid experts.
-7. The first cache does not implement MCTS. It measures a one-ply model-value correction.
-   Deeper search is conditional on evidence that values improve over cheap controls.
+## Active work, 2026-09-19 UTC
 
-The model oracle currently recomputes packed prefixes. It batches candidates and caches
-all raw predictions to make CPU policy sweeps cheap. KV caching or a specialized leaf-only
-head can be added if measured throughput says they are worth the implementation cost.
+User priority: make MCTS and four-ply achieve comparable throughput per evaluated
+node with enough independent positions to batch. Then resume the >=2x macro /
+>=10x expert training-equivalent CM research goal. Do not declare success merely
+for finishing infrastructure. All search golden-method scores remain unopened.
 
-Persistent session: results/search-v1/allocation.txt contains job, host, tmux socket,
-and the staged Python interpreter. The socket is unique to this job and unrelated
- to the user's controller/tunnel. SSH to the allocated host and attach with:
-  tmux -L search-v1-10497511 attach -t oracle
-The worker leaves an interactive shell available if inference fails. Restart its
-oracle with SEARCH_PYTHON from allocation.txt and the command in worker.sh.
+One allocated GPU: Slurm 10497511, preempt, RTX6000Ada on babel-x9-24, through about
+10:03 UTC. Inspect squeue and results/search-v1/status.json before any submission.
+Never duplicate it. Never stop tunnel/controller or Claude jobs. All reserved time
+including idle is charged by search/advance.py --watch. This is our separate ledger.
 
-When server-ready.json exists, send requests without reloading the model:
-  /home/yimingz3/src/allie/.venv/bin/python -B search/request.py ping
-  /home/yimingz3/src/allie/.venv/bin/python -B search/request.py score --input <json> --output <npz>
-Inputs have {"prefixes": [[tokens...], ...]}; paths must be inside results/search-v1.
-Queue requests and outputs are durable. Completed requests are not retried; requests
-interrupted by server restart are recovered. Check .done.json/.error.txt before retrying.
-The server will retain its GPU while idle, and all allocation time is charged.
-Writing results/search-v1/STOP releases only this workbench, not other Slurm jobs.
+Tmux socket search-v1-10497511, session oracle. Original reference evaluator stays
+in window 0; server-ready.json describes it. Never print rpc-token. It uses the
+original staged torch2.10 runtime. The new engine uses a private SGLang0.5.9 /
+torch2.9.1 runtime and is in window fast-engine. Queue/ready state lives in
+results/search-v1/engine-queue; check process liveness because ready.json may be
+stale during startup. Use the existing allocation only.
 
-Fast transport: server-ready.json includes the allocated host's HTTP URL. The client
-in confirm.py sends authenticated JSON prefixes and receives NumPy logits directly,
-optionally only requested columns. The token stays in results/search-v1/rpc-token
-(mode0600). Do not print or commit it. The filesystem request queue remains a recovery
-fallback. Use `bash search/worker.sh --serve-only` to restart the service without
-regenerating the completed pilot: it checks semantic identity and exact cached-root
-parity before exposing the server.
+- 001-benchmark.result.json: 2048-root port/caching numerical drift and four-ply
+  timing. Serving BF16 is not bit-identical to the reference; CE drift is small.
+- 002-mcts.result.json: Python/native-board MCTS benchmark, before C++ tree logic.
+- 003-deeper.result.json: complete fast 2048-position four-ply pilot, 58.6s total.
+  fast-deeper-pilot/results.json uses coefficients frozen before the port.
+- 004-equal-nodes.request.json: native C++ MCTS equal-node benchmark, pending/running.
+  It compares ~64k leaves, 128/512/1024 independent MCTS trees vs four-ply. Do not
+  duplicate a producer; inspect .result.json / .error.json and engine-service.log.
 
-Expanded confirmation command:
-  /home/yimingz3/src/allie/.venv/bin/python -B search/confirm.py
-It resumes completed batches and holds the selected parameters fixed. A running
-confirmation producer must not be duplicated. Check the process table first.
+The native tree is in search/engine/mcts_native.hpp. test_mcts passes identical
+paths/budgets/visits and policies within1e-7 against the original Python reference
+on deterministic predictions. Other tests cover 18,613 rules positions, FP64 cache
+branching/reuse, and four-ply equivalence. The board extension is built atomically
+so a resident process never maps a truncated library. Restart the engine after a
+native library change. Existing completed experiments remain immutable.
+
+One restart encountered minutes of NFS metadata waits while importing unrelated
+Transformers models. A runtime tar archive is being prepared under our private
+runtime directory for staging to /scratch; the group copy stays authoritative.
+workbench.sh accepts SEARCH_ENGINE_RUNTIME for the scratch copy. direct.py now
+sets SGLANG_DISABLED_MODEL_ARCHS to skip unused built-in registry models. These
+startup changes have not yet been benchmarked. No additional GPU was requested.
+
+The resident engine accepts coarse experiment requests; all tree edges stay in
+process. See search/engine/README.md. Completed blocks are atomic and immutable
+under their recorded input/checkpoint/source hashes. Both STOP files prevent new
+tasks. Filesystem request kinds include benchmark, mcts_benchmark, tree, and
+experiment (a module under search.engine exposing run(oracle,spec)).
+
+## Science state and next evaluation
+
+The original 64,366-position dev confirmation is complete for released MCTS and
+calibrated two-ply. Four-ply is promising only on the reused 1050-position dev
+confirmation; port verification agrees. Do not label dev losses as macro metrics
+or use golden scaling laws to convert them to CM.
+
+Exact golden raw/legal baselines and root caches are complete in golden-baseline/.
+The old golden.py expert-only full-eval plan has NEVER been frozen/launched and is
+superseded by the user's allowance for a smaller balanced existing-eval sample.
+Proposed first comparison: 512 uniformly selected existing scored moves per cell,
+fixed seed independent of scores, all16cells, methods frozen from dev. Report all
+2ply/4ply/released adaptive methods, no golden-based selection. Keep test shut.
+
+Claude agreed the difference estimator is sound: for each cell use its exact full
+canonical raw baseline + paired sample (method - canonical raw), then macro-average.
+Bootstrap whole games and transform paired uncertainty through the frozen law.
+Also report ordinary sample CE, all16cells, raw->port->legal->search changes and
+inference cost. Never drop skipped positions; declared fallback remains scored.
+Clock inputs are absent in this checkpoint. No golden sample has yet been created.
+
+After each experiment update search/report.py's output results/search-v1/REPORT.md
+and show the user the important loss/CM table (CM pending for unmatched dev metrics).
+No images unless requested. Keep model and original data read-only.
+
+Claude also requested a focused pre-sweep review of model-screen common paths.
+Already phoned findings: board optimizer group breaks copy_lm_to_embed's last-group
+assumption; global BOARD leaks across constructions; B2 stored SHA needs verification;
+within-track hashes need driver/evaluator coverage. Wait for the frozen snapshot
+before explicit done-review; cross-track controls must compare executed configs,
+source/evaluator hashes and B2 SHA rather than requiring identical drivers. No main
+files were edited. User's MCTS optimization retains priority.

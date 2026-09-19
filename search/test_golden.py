@@ -31,10 +31,11 @@ def main():
     doc=dict(prefix=tokens,labels=labels,game='synthetic-dev',row=0,start=0)
     expected=list(golden.golden_data.positions(doc))
     plan=dict(reply=dict(alpha=1.,beta=4.),reply_calibrated=dict(alpha=.85,beta=7.3))
-    original=golden.OUT;oracle=golden.Oracle
+    original=golden.OUT;original_root=golden.ROOT;oracle=golden.Oracle
     golden.Oracle=FakeOracle
     with tempfile.TemporaryDirectory(prefix='golden-unit-') as tmp:
         golden.OUT=Path(tmp)
+        golden.ROOT=Path(tmp)/'synthetic-root'
         golden.task(0,[doc],plan)
         with np.load(Path(tmp)/'00000.npz') as z:
             assert np.array_equal(z['cell'],labels[11:])
@@ -53,7 +54,7 @@ def main():
             nonexpert=z['cell']%4!=3
             assert np.array_equal(z['nll'][nonexpert,2:],np.repeat(z['nll'][nonexpert,1:2],3,axis=1))
         calls=FakeOracle.calls;golden.task(0,[doc],plan);assert FakeOracle.calls==calls
-    golden.OUT=original;golden.Oracle=oracle
+    golden.OUT=original;golden.ROOT=original_root;golden.Oracle=oracle
     # Equal-cell macro must not silently become move-weighted mean.
     counts=np.arange(1,17);cells=np.repeat(np.arange(16),counts);loss=cells/10.
     r=golden.golden_data.aggregate(loss,cells,dict(scored_moves=counts.tolist(),cells=list(map(str,range(16)))))

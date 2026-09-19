@@ -33,6 +33,8 @@ def main():
         for k,x in d['methods'].items():rows.append((k,x['ce'],x['expert_ce'],None,None))
     d=read('reply-confirmation/calibrated-results.json')
     if d:rows.append(('Calibrated two-ply',d['ce'],d['expert_ce'],None,None))
+    d=read('reply-confirmation/utility-results.json')
+    if d:rows.append(('State-scaled two-ply',d['ce'],d['expert_ce'],None,None))
     table('Expanded development check: 64,366 positions, 11,396 expert moves; these are not macro metrics.',rows)
     rows=[];d=read('pilot-results.json')
     if d:
@@ -51,6 +53,11 @@ def main():
     d=read('reply-pilot/calibrated-selection.json')
     if d:
         x=d['parameters']['all'];rows.append(('Calibrated two-ply',x['confirmation_ce'],x['confirmation_expert_ce'],None,None))
+    d=read('reply-pilot/utility-selection.json')
+    if d:
+        for k,x in d['results'].items():
+            if k=='linear':continue
+            x=x['metrics']['confirmation'];rows.append((f'Two-ply utility: {k}',x['ce'],x['expert_ce'],None,None))
     d=read('branch-pilot/results.json')
     if d:
         for k,label in [('exact_future_legality','Exact future-legality conditioning'),('reply_entropy','Two-ply plus response entropy')]:
@@ -59,7 +66,20 @@ def main():
     if d:
         for k,label in [('prior_to_search','Fixed52 tree + fixed reverse-KL coefficient'),('search_to_prior','Fixed52 tree + fixed forward-KL coefficient')]:
             x=d['results'][k]['results']['fixed_matched']['confirmation'];rows.append((label,x['ce'],x['expert_ce'],None,None))
+    d=read('deeper-pilot/results.json')
+    if d:
+        for k,x in d['results'].items():
+            x=x['metrics']['confirmation'];rows.append((f'Continuation expectation: {k}',x['ce'],x['expert_ce'],None,None))
+    d=read('reply-pilot/adaptive-selection.json')
+    if d:
+        for k,x in d['results'].items():
+            if k=='two_ply':continue
+            x=x['metrics']['confirmation'];rows.append((f'Adaptive calibration: {k}',x['ce'],x['expert_ce'],None,None))
     table('Small development check: 1,050 positions, 558 expert moves. Same pilot reused for research; not a fresh final holdout.',rows)
+    d=read('fast-deeper-pilot/results.json')
+    if d:
+        table('Cached engine verification on the same small development check; coefficients frozen before the port.',
+              [(name,x['ce'],x['expert_ce'],None,None) for name,x in d['methods'].items()])
     d=read('golden-v1/results.json') or read('golden-baseline/results.json')
     if d:
         table('Exact golden evaluation: 16-cell macro CE and four-cell expert macro CE; 1,553,058 scored moves.',
@@ -67,6 +87,13 @@ def main():
     text='# Inference research results\n\nTarget: both ≥2× macro and ≥10× expert training-equivalent CM. Not achieved.\n\n'
     text+='CM is computed only from matching golden metrics, using a frozen training-law shape anchored to the official raw checkpoint. Development-only rows stay pending. Search reports additionally separate gains beyond legal normalization.\n\n'
     text+='\n\n'.join(tables)+'\n\nOne preempt RTX6000Ada allocation; all reserved time, including idle time, is recorded in status.json. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'
+    d=read('engine-queue/002-mcts.result.json')
+    if d:
+        text+='\nWarm MCTS cost on 128 development roots (includes root inference and tree work):\n\n| Algorithm | Previous stack | Cached native-board stack | Speedup |\n|---|---:|---:|---:|\n'
+        for adaptive,name in [(False,'Fixed52'),(True,'Adaptive50')]:
+            pick=lambda engine:next(x['end_to_end_seconds'] for x in d['runs'] if x['roots']==128 and x['engine']==engine and x['adaptive']==adaptive)
+            a,b=pick('original'),pick('cached_native');text+=f'| {name} | {a:.3f} s | {b:.3f} s | {a/b:.2f}× |\n'
+        text+='\nBF16 kernel differences can change a few branches and predicted time budgets; the algorithm is unchanged. See search/engine/README.md for numerical drift and correctness tests.\n'
     tmp=ROOT/'REPORT.partial';tmp.write_text(text);tmp.replace(ROOT/'REPORT.md')
     print(text)
 
