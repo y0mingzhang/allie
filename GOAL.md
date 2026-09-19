@@ -16,7 +16,7 @@ available research direction over exhaustive weak variants.
 
 Current work: inference infrastructure is operational. Resume the existing10x/10x
 search goal with batched experiment execution and reporting. One preempt GPU (workbench 10503933) while general is reserved for Claude;
-the current 84-minute backfill ends at 19:28:51 UTC. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
+the current 84-minute backfill ends at 19:28:51 UTC. Dependent replacement10504460 is queued afterany:10503933, so allocations cannot overlap. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
 All prior compute charges and fixed-checkpoint targets remain unchanged.
 
 Infrastructure milestone completed: fast hackable SGLang inference port.

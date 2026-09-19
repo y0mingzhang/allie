@@ -123,3 +123,7 @@ Fit-only diagnostics: calibrated confidence53.7% versus accuracy53.9%; first20pl
 Next: inspect aug-deep-scale-v1/results.json after095. Costs and every arm required; no goldenCM conversion on this August cohort. No external memory or retrieval.
 
 A causal root-quota screen is now queued as096 smoke after095: quota_replay.py/.cpp. It reconstructs independent root-action traces from16K trees, observes Q128/Q256 only, and redistributes the remaining744simulations using action instability. Two sigma rules (plain and sqrt-visit scaled), clipped allocation multipliers. Every birth must match the reconstructed original schedule; baseline1000 Q/nodes must be bit-identical. Cache exhaustion is a hard error. Only run full after smoke passes. Counterfactual results remain conditional on cached NN predictions; any promotion needs actual live search due batch numerics. No newGPUallocation.
+
+## Allocation update19:07UTC
+Preempt replacement10504460 submittedafterany:10503933 (8h requested,time-min30min); never overlap owned GPUs. Peer notified before/after. STOPabsent, checkpoint/data verified, ledger12.699GPUh atsubmission, allchargesretained. Receiptjob-receipts/10504460.json. Do not submit anotherreplacement. Current10503933stillRUNNING;19:28:51UTCexpiry.
+CPU replayaudit passedfirst64: reconstructedall16K birthtimestamps; baseline1000 Q/nodes exact; futurebootstrapperturbations do notaffectQ128/Q256. Audit runtime/cpu-audit/quota-replay-check.json. C++stl converterinclude fixed before096 begins.
