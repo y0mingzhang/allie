@@ -85,6 +85,20 @@ LANES = dict(
             ("general", "normal", 4),
         )
     },
+    # one run on 4 L40S (the 3e17 ladder, as the data track's round6)
+    general4=(
+        1,
+        4,
+        """#SBATCH --account=dippolit
+#SBATCH --partition=general
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:L40S:4
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=200G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
 )
 
 
@@ -162,7 +176,7 @@ def variants(budget, base, specs, seeds=(42,)):
         set(data) - {"policy", "stores", "months", "history", "arch"} - set(DATA_FLAGS)
     )
     assert not unknown, f"baseline keys modelexp does not forward: {unknown}"
-    pf = base["pool_frac"][budget]
+    pf = base["pool_frac"].get(budget) or dx.pool_frac(budget)
     tag = f"pf{round(pf * 1000):03d}" + "h" * bool(data.get("history"))
     arch = lambda spec: data.get("arch", {}) | spec.get("arch", {})
     return [
@@ -425,6 +439,26 @@ wave(
     "preempt",
 )
 
+# 3e17 attribution ladder (user via main, ~11:00): the model recipe (boardcnn + swiglu + no key offset)
+# on the data recipe B_3, one run on 4 L40S, control's absolute schedule, FLOP-matched; its CM is read
+# against data-v1-round6 (B_3 at 3e17)
+wave(
+    "ladder3e17",
+    "model-v1-ladder3e17",
+    "ml3",
+    variants(
+        "3e17",
+        b,
+        {
+            "model": dict(
+                arch=dict(board="conv", mlp="swiglu", key_offset=False), abs_sched=True
+            )
+        },
+    ),
+    "3e17: B_3 + boardcnn + swiglu + no key offset, s42, vs data-v1-round6's B_3",
+    "general4",
+)
+
 
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
@@ -569,10 +603,13 @@ def task(key):
     i, k = int(os.environ["SLURM_ARRAY_TASK_ID"]), w["pack"]
     mine = runs[i * k : (i + 1) * k]
     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")
+    rg = w["gpus"] // w["pack"]  # GPUs per run (one torchrun process each)
     with ThreadPoolExecutor(len(mine)) as ex:
         ok = list(
             ex.map(
-                lambda j: run_one(study, mine[j], visible[j % w["gpus"]]),
+                lambda j: run_one(
+                    study, mine[j], ",".join(visible[j * rg : (j + 1) * rg])
+                ),
                 range(len(mine)),
             )
         )
@@ -749,7 +786,8 @@ def run_one(study, r, gpu):
         d = json.loads(done.read_text()) if done.exists() else {}
         if d.get("stop_reason") == "steps" or (leg and d.get("step", 0) >= leg):
             continue
-        cmd = [py, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1"]
+        cmd = [py, "-m", "torch.distributed.run", "--standalone"]
+        cmd += [f"--nproc_per_node={len(gpu.split(','))}"]
         cmd += [src / "modded_train.py", *train_args(study, r)]
         cmd += [
             "--max-seconds",
@@ -795,7 +833,7 @@ def run_one(study, r, gpu):
                         "--query-gpu=name",
                         "--format=csv,noheader",
                         "-i",
-                        gpu,
+                        gpu.split(",")[0],
                     ],
                     text=True,
                 ).strip(),
