@@ -85,6 +85,21 @@ LANES = dict(
             ("general", "normal", 4),
         )
     },
+    # one run on 4 fast preempt GPUs (the ladder's second seed)
+    preempt4=(
+        1,
+        4,
+        f"""#SBATCH --account=dippolit
+#SBATCH --partition=preempt
+#SBATCH --qos=preempt_qos
+#SBATCH --gres=gpu:4
+#SBATCH --constraint={FAST}
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=200G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
     # one run on 4 L40S (the 3e17 ladder, as the data track's round6)
     general4=(
         1,
@@ -457,6 +472,24 @@ wave(
     ),
     "3e17: B_3 + boardcnn + swiglu + no key offset, s42, vs data-v1-round6's B_3",
     "general4",
+)
+
+wave(
+    "ladder3e17s43",
+    "model-v1-ladder3e17s43",
+    "ml3s",
+    variants(
+        "3e17",
+        b,
+        {
+            "model": dict(
+                arch=dict(board="conv", mlp="swiglu", key_offset=False), abs_sched=True
+            )
+        },
+        seeds=(43,),
+    ),
+    "3e17 model recipe seed 43 on 4 fast preempt GPUs (second seed of the ladder arm)",
+    "preempt4",
 )
 
 
