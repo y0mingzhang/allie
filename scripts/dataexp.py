@@ -641,6 +641,26 @@ WAVES["round4s3"] = WAVES["round4"] | dict(
     purpose="B_3 (B_2 + OTB x4) at 1e17 seed 43, paired with round4s2's B_2 s43",
 )
 
+WAVES["round5p"] = WAVES["round4"] | dict(
+    study="data-v1-round5p",
+    prefix="r5p",
+    throttle=2,
+    runs=r3(
+        [
+            r
+            for p in (
+                "mover_rule+up8+noengine+otb_x4",
+                "mover_rule+up4+otb_x4+engine_x4",
+            )
+            for r in b2("1e17", p)
+        ],
+        "1e17",
+        **X,
+    ),
+    purpose="round 5: borderline 3e16 expert-adding changes promoted to 1e17 on B_3 (OTB's 3e16 macro cost vanished "
+    "at 1e17): up8 (5-seed z +2.2 / -2.8) and engine x4 (1-seed pass, 2-seed macro fail); vs B_3 s42 / s43",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
