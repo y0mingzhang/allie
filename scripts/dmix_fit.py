@@ -22,8 +22,18 @@ EVAL = ROOT.parent / "lm-eval"
 METRICS = ("move", "expert2400", "strat_macro", "strat_expert")
 BUDGETS = {"1e16": 1e16, "3e16": 3e16, "1e17": 1e17, "3e17": 3e17}
 TARGET = dict(move=2.0, expert2400=10.0, strat_macro=2.0, strat_expert=10.0)
-# Label of each tag's control runs; a tag without its own controls is not scored (no fallback).
-BASELINES = {"pf115h": "control+clk"}
+# Label of each tag's control runs, or (label, tag the controls come from); a tag without controls
+# is not scored (no fallback). Round 3 is scored against B_2; its external-source screens (b2x) use
+# the B_2 controls of round3g / round3p.
+B2 = "mover_rule+up4+cf3+lr5+t0.2+w0.2"
+BASELINES = {
+    "pf115h": "control+clk",
+    "pf052hb2": B2,
+    "pf115hb2": B2,
+    "pf052hb2x": (B2, "pf052hb2"),
+    "pf115hb2x": (B2, "pf115hb2"),
+    "pf052hb3": "mover_rule+up4+noengine+otb_x4+cf3+lr5+t0.2+w0.2",
+}
 
 
 def strat(name):
@@ -88,7 +98,8 @@ def main():
     rows, table, fit = results(), [], {}
     for tag in sorted({r["tag"] for r in rows}):
         base = BASELINES.get(tag, "control")
-        ctrl = [r for r in rows if r["policy"] == base and r["tag"] == tag]
+        base, src = base if isinstance(base, tuple) else (base, tag)
+        ctrl = [r for r in rows if r["policy"] == base and r["tag"] == src]
         if not ctrl:
             print(f"[{tag or 'untagged'}] no {base} controls: not scored")
             continue
