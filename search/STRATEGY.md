@@ -40,7 +40,7 @@ thinking time. These are separate ablation axes, not one indivisible method.
 - Entire-continuation rating interventions actual/+200/+400/equal2400 are complete. No resolved checking gain; no promotion.
 - FP32 WDL-only readout reduces critic numerical tails but gave no resolved CE gain on the full paired development study. Default unchanged.
 - Complementary two500-search portfolios lose to one1000 control; no promotion.
-- Tree-wide critic consistency is the current candidate. Project model values toward human-policy Bellman consistency, then apply the existing soft backup. Expanded August selects lambda3 and supports small paired gains at identical NN cost. Frozen golden comparison109 is underway; no10x claim.
+- Tree-wide critic consistency is the current candidate. Project model values toward human-policy Bellman consistency, then apply the existing soft backup. Expanded August selects lambda3 and supports small paired gains at identical NN cost. Frozen golden109 reaches3.083x/5.317x, with incremental paired CIs crossing0. Same969.81NN count; no established dominance or10x claim.
 
 Prioritize a clear intervention over a large parameter sweep. A null result
 rules out promoting that tested variant, not its entire algorithm family.

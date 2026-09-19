@@ -123,6 +123,12 @@ def main():
             for name in names:
                 x=d['methods'][name]
                 append(study+'/'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d.get('method_seconds',{}).get(name)))
+    projection=ROOT/'golden-bellman-projection-v1/results.json'
+    if projection.exists():
+        d=json.loads(projection.read_text())
+        for name in ('unchanged','lambda3'):
+            x=d['methods'][name]
+            append('bellman_projection/'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None,simulations=1000))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
@@ -137,7 +143,8 @@ def main():
                  'Original blocks lack per-root counts; August-selected curves include expert node costs in frontier.json and their source report.',
                  'August-selected snapshot timings include earlier backup extraction, not standalone method benchmarks; node counts determine this frontier.',
                  'Live time-allocation-v2 charges an additional full-root prepass to each arm:0.564s/431507tokens over8192 positions, on top of listed per-method timing; root queries are separate from nonroot node count.',
-                 'CM intervals and law-shape sensitivity remain in the source reports.'])
+                 'CM intervals and law-shape sensitivity remain in the source reports.',
+                 'Bellman projection uses identical fresh parent trees and adds0.774CPU seconds over8192 positions. Both were scored together in204.3s plus serialization/analysis; standalone per-method timing was not measured. Its incremental golden CIs cross0, so point dominance is not established dominance.'])
     result['caveats'].extend(['Cached routers represent prefix stopping on the same trees. Live routing changes inference batching; its separate row verifies actual execution.',
         'Node counters count logical nonterminal neural requests per position. Exact-prefix requests may deduplicate within batches; actual unique requests are also reported for live routing.',
         'Activation/history methods add one full-prefix query to their logical node cost; prefix tokens and head projections are in the study report, so node count alone understates their incremental work.',
