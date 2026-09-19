@@ -1,3 +1,55 @@
+## Current state: 2026-09-19 10:58 UTC
+
+Own inference goal remains ACTIVE, 10x macro AND expert CM, not achieved.
+Latest frozen golden output is golden-temperature-stack-v1:
+CE1.4445987842/1.3388551263, CM3.03536x/5.16714x,969.8158 nodes.
+Increment beyond the conditional-mixture parent is uncertain (paired CIs cross0).
+All reports/registry updated through this result (117 method/control entries).
+Current checkpoint/laws/split unchanged; main read-only. No outstanding peer review.
+
+GPU queue070-value-of-compute JUST QUEUED, same L40S allocation10498670,
+babel-t5-32, engine1713252, cache1.5Mtokens; ends12:52UTC. Do not duplicate.
+Producer search.engine.golden_value_of_compute; frozen plan
+golden-value-of-compute-v1/plan.json. Compares uniform512, August CV macro
+winner state0.1 and expert winner elo0.01. New growforest module continues
+same tree/KV from128 to chosen budget; deterministic-oracle tests match
+one-shot trees/values/counts exactly. No repeated NN calls. Root clocks
+aligned at target column-1, hash verified. Final actual live result authoritative.
+Every arm scored on same reused golden; fresh confirmation still reserved.
+
+New CPU research:
+- aug-budget-surface-v2:128/256/512/1000 simulations →125/250/499/972 nodes.
+  Selected policy (conditional strength + residual temperature) at each budget,
+  calibration re-fit within same3 game folds. August confirm:
+  1.46523/1.35627;1.45548/1.33943;1.45025/1.32894;1.44511/1.31588.
+- Numerical audit: legacy adaptive reducer retained tiny missing prior mass
+  after full expansion. Corrected diff reducer zeroes that tail. Largest
+  Q drift2.45e-5 on one action; refitted CE drift<4e-11. Failedv1 source,
+  log and audit preserved, including NFS stale-source v2 first attempt.
+- aug-value-of-compute-v2: ridge router predicts paired CE differences from
+  Elo/format, root entropy/time/clock and128-Q spread/policy KL only.
+  Regularization chosen on fit-gameCV; lambda budget price fitted on fit
+  inputs for mean<=512 nominal simulations. Macro winner state0.1 confirms
+  CE1.445912/1.315980 at502.84 nodes; expert winner elo0.01 confirms
+  1.448392/1.315885 at463.91. No golden CM until070. State gains over
+  uniform512 have both paired CIs below0 in August.
+  v1 is INVALID: FP32 zero padding with1e-300 caused NaN KL. Archived source
+  and INVALID.json. v2 castsfloat64 and asserts finite matrices; unit regression
+  test and known-budget-allocation test pass. No GPU/golden used by invalidv1.
+
+Retrieval069 completed: June63283games/3.80387Mpositions,3.93GBfp16.
+Local checksummed mmap cache in /scratch...search-retrieval/c3bae257... .
+All vs ANYsharedparticipant excluded, top512 sameplayer share0.113%.
+Large retrieval confirmation incremental CIs cross0; NOT promotedgolden.
+Whole069 warm invocation7.30s; query1.61s/16384positions. Attributions/storage
+notes sentClaude. No active retrieval jobs or reasons to rebuild bank.
+
+Next: inspect070 receipt/log and results, report CE/CM/node table, update
+frontier/report/registry, then keep researching towards10x/10x. No final success
+claim on reused golden. Need frozen winner fresh-game confirmation and
+batch/order invariance check before finalclaim. Archive failures, retain costs.
+Own new code only; no shared main/training/data/ledger changes.
+---
 ## Latest continuation: expanded stack and larger retrieval (2026-09-19 10:35 UTC)
 
 Goal10x macro AND10x expert remains ACTIVE and NOT achieved. Same oneGPU10498670,
