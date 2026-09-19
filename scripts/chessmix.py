@@ -12,8 +12,10 @@ import itertools
 import json
 import math
 import multiprocessing as mp
+import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -745,6 +747,7 @@ class Prefetch:
     def __init__(self, sampler, depth=8):
         self.sampler, self.depth, self.args = sampler, depth, None
         self.last, self.seq, self._seen = {}, 0, sampler.seen
+        self.waited = 0.0  # seconds training blocked on the child
 
     def batch(self, n, rank=0, world=1):
         if self.args is None:
@@ -752,7 +755,7 @@ class Prefetch:
             ctx = mp.get_context("spawn")
             self.q, self.req, self.ans = ctx.Queue(self.depth), ctx.Queue(), ctx.Queue()
             state, keep = self.sampler.state_dict(), 2 * self.depth + 4
-            ctx.Process(
+            self.proc = ctx.Process(
                 target=_produce,
                 args=(
                     self.sampler.init,
@@ -764,13 +767,28 @@ class Prefetch:
                     self.ans,
                 ),
                 daemon=True,
-            ).start()
+            )
+            self.proc.start()
         assert self.args == (n, rank, world), "prefetch needs fixed batch arguments"
-        item = self.q.get()
+        t = time.monotonic()
+        self.seq, rows, self.last, self._seen = self._get(self.q)
+        self.waited += time.monotonic() - t
+        return rows
+
+    def _get(self, q):
+        """Next item from the child; raises if it failed or died (e.g. OOM-killed) instead of hanging."""
+        while True:
+            try:
+                item = q.get(timeout=10)
+                break
+            except queue.Empty:
+                if not self.proc.is_alive():
+                    raise RuntimeError(
+                        f"prefetch worker died (exit {self.proc.exitcode})"
+                    ) from None
         if isinstance(item, BaseException):
             raise RuntimeError("prefetch worker failed") from item
-        self.seq, rows, self.last, self._seen = item
-        return rows
+        return item
 
     @property
     def seen(self):
@@ -784,10 +802,7 @@ class Prefetch:
         if self.args is None:
             return self.sampler.state_dict()
         self.req.put(self.seq)
-        state = self.ans.get()
-        if isinstance(state, BaseException):
-            raise RuntimeError("prefetch worker failed") from state
-        return state
+        return self._get(self.ans)
 
     def load_state_dict(self, state):
         assert self.args is None, "load state before the first batch"

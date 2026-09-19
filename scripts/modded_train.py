@@ -500,8 +500,8 @@ def main():
         )
 
     total_steps = a.wsd_end_step
-    window_start = time.monotonic()
-    window_tokens = 0
+    train_wait = lambda: getattr(train, "waited", 0.0)
+    window_start, window_tokens, wait0 = time.monotonic(), 0, train_wait()
     primary_sum = torch.zeros((), device="cuda")
     count_sum = torch.zeros((), device="cuda")
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
@@ -602,6 +602,7 @@ def main():
                     train_ce=(stats[0] / stats[1]).item(),
                     tokens=train.seen * 1024,
                     tokens_per_second=window_tokens / dt,
+                    sampler_wait=(train_wait() - wait0) / dt,
                     seconds=elapsed_prior + time.monotonic() - start,
                     useful_training_flops=stats[2].item(),
                     global_batch_tokens=manager.batch_size,
@@ -618,7 +619,7 @@ def main():
                     ),
                 ),
             )
-            window_start, window_tokens = time.monotonic(), 0
+            window_start, window_tokens, wait0 = time.monotonic(), 0, train_wait()
             primary_sum.zero_()
             count_sum.zero_()
             aux_sum.zero_()
@@ -670,7 +671,7 @@ def main():
             or stop_code
         ):
             save(step, metrics)
-            window_start, window_tokens = time.monotonic(), 0
+            window_start, window_tokens, wait0 = time.monotonic(), 0, train_wait()
             primary_sum.zero_()
             count_sum.zero_()
         if stop_code:
