@@ -118,6 +118,24 @@ def b2_pin(w):
     sha = b2.pop("sha256")
     digest = hashlib.sha256(json.dumps(b2, sort_keys=True).encode()).hexdigest()
     assert sha == digest, "B_2 edited after publishing"
+    keys = (
+        "policy",
+        "feats",
+        "input_lr",
+        "aux_time",
+        "aux_wdl",
+        "history",
+        "stores",
+        "months",
+    )
+    exact = [r for r in w["runs"] if all(r.get(k) == b2.get(k) for k in keys)]
+    assert exact or "history_counts" in w, "b2 wave without a run equal to B_2"
+    if "history_counts" not in w:
+        hist = hashlib.sha256(HISTORY.read_bytes()).hexdigest()
+        assert hist == b2["history_counts_sha256"], "history counts differ from B_2's"
+    assert all(set(b2["months"]) <= set(r["months"]) for r in w["runs"]), (
+        "a run drops B_2 months"
+    )
     return dict(b2_sha256=sha)
 
 
@@ -549,8 +567,7 @@ def plan(wave):
                 sizes=SIZES,
                 schedule=SCHEDULE,
                 runs=[r | dict(name=name(w, r)) for r in w["runs"]],
-                selection="original validation >=2400 CE",
-                months="data-v1 2025-01..2026-08 excluding 2026-07",
+                selection="golden strat-eval-v1 macro / expert macro",
                 **b2_pin(w),
             ),
             indent=2,
