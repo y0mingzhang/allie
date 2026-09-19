@@ -78,7 +78,11 @@ def main():
     for study, title in [('aug-conditional-mixture-v1','Expanded August causal state/clock-conditioned strength mixture; no extra model calls.'),
                          ('aug-temperature-stack-v1','Expanded August residual uncertainty calibration on the conditional strength mixture.'),
                          ('aug-budget-surface-v2','Expanded August cost ladder with the same selected recipe refit at each budget. Corrected reducer numerical drift audited.'),
-                         ('aug-value-of-compute-v2','Expanded August adaptive node allocation using only root and128-simulation signals; cached-prefix development, live golden separate.')]:
+                         ('aug-value-of-compute-v2','Expanded August adaptive node allocation using only root and128-simulation signals; cached-prefix development, live golden separate.'),
+                         ('aug-value-gap-v1','Expanded August smooth value-gap calibration; no resolved incremental gain, not promoted.'),
+                         ('aug-reverse-bellman-v1','Expanded August reverse-KL Bellman backups on identical trees, all arms and visited-only diagnostic reported.'),
+                         ('aug-critic-conditions-v1','Expanded August hypothetical-rating VALUE queries; actual human policy unchanged, extra calls charged, no resolved gain.'),
+                         ('aug-depth-mixture-v1','Expanded August latent deliberation-depth mixtures on shared trees; fit-CV selects unchanged policy.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
@@ -238,7 +242,8 @@ def main():
               [(k,d['methods'][k]['macro'],d['methods'][k]['expert_macro'],d['methods'][k]['macro_training_eq_cm'],d['methods'][k]['expert_macro_training_eq_cm'])
                for k in ('constant_single','subtree_sigma10','joint_sigma05','old_prior_s05','old4000')])
     for study,title,names in [('golden-conditional-mixture-v1','Frozen conditional search-strength mixtures. Actual pre-move clock is added information; no observed future think time. Reused golden.',('fixed','state0.01','all0.001')),
-                              ('golden-temperature-stack-v1','Frozen residual-temperature calibration. Its small incremental gain is not resolved by paired confidence intervals. Reused golden.',('all0.001','temperature'))]:
+                              ('golden-temperature-stack-v1','Frozen residual-temperature calibration. Its small incremental gain is not resolved by paired confidence intervals. Reused golden.',('all0.001','temperature')),
+                              ('golden-value-of-compute-v1','Actual two-stage search: continue the same tree/KV from128 to the dev-selected budget; no repeated NN queries. Reused golden.',('fixed512','elo0.01','state0.1','old1000'))]:
         d=read(study+'/results.json')
         if d:
             table(title,[(k,d['methods'][k]['macro'],d['methods'][k]['expert_macro'],d['methods'][k]['macro_training_eq_cm'],d['methods'][k]['expert_macro_training_eq_cm']) for k in names])

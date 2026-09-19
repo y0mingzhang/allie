@@ -1,3 +1,64 @@
+## Update: 2026-09-19 11:12 UTC
+
+071 is DONE,95.51s for4 value-conditioning variants ×16384positions,
+1,930,336 extra NNchildren. Analysiscompleted: noresolvedgain. Plus400
+(CVmacroselected) confirm1.445677/1.316248, equal1800+actual(CVexpertselected)
+1.445350/1.314913 vsparent1.445115/1.315885; all pairedCIs cross0.
+No deep counterfactualrating search justified. Bothrootprefixcalls andchild
+calls recorded. Actual model-forward16.02s, summedqueryblocks20.56s; most
+remainingtime is CPUoneplyboardlayout/I/O outsideblocktimers. Optimization
+canwaitunless thisprobe becomesrelevant; it didnotwin.
+
+CPU aug-depth-mixture-v1 DONE: current improved policies at128/256/512
+mixedwith1000 usingstatic/Elo/state+clock sigmoidgates. Bothfit-CV metrics
+select unchangedparent. Gateweightsnearlyzero, no newgoldenmethod.
+This wasdistinctfromcostrouting (allmixturespay1000nodes), and a retry
+ofoldfailedlatentbudgethypothesisusinglargerdata/currentbesttrees.
+Allscoredarmsreported.
+
+GPUqueueallrequests through071done;engineidlebutresident. Sameallocation
+10498670/engine1713252 ends12:52UTC. No new submissions/sharingchanges.
+Next hypothesis NOT implementedyet: uncertainty-dependent internal value
+geometry (temperature scaled by1-bootstrap^2, or transform critic to logodds
+before Bellman backup). Root-only nonlinear utilities alreadyfailed; any new
+testmustisolateINTERNALchange, useexactcontrolandindependentreference.
+Could inspectcriticvaluehistogrambeforechoosing. Goalunchanged10x/10x.
+---
+## Update: 2026-09-19 11:06 UTC
+
+070 is DONE. Live state0.1: CE1.445629/1.340769, CM2.98444x/5.01942x,
+500.524 mean nodes,59.01s/8192positions. Elo0.01:1.447947/1.338970,
+2.87387x/5.15814x,462.855nodes,52.60s. Uniform512:1.451049/1.356525,
+2.73399x/3.98781x,497.973nodes,53.58s. Analysis1.07s. Both routers'
+paired CIs vsuniform512 favor them onbothmetrics. Frozen plan/results in
+golden-value-of-compute-v1, receipt070. Updated123-entry registry/frontier.
+LATEST.md is the concise current artifact. Goal10x/10x remains unmet.
+
+CPU probes completed:
+- aug-value-gap-v1: smooth per-action Q-gap correction, no resolved incremental
+  win (expertbest -0.00097 butCI[-.00393,+.00252]). Not promotedgolden.
+- aug-reverse-bellman-v1: reverse-KL internal Bellman regularization.
+  Independent constrainedsolver/bounds/rootfinding/tinypriors/negamax testsPASS.
+  Forwardcontrol reproducedexactly. Reverse0.1/0.2/0.4 allworse; visited-only
+  reverse0.2 expertCE1.31365vs1.31588 butCIwide[-.01431,+.00818].
+  MacroCVselectsforward, expertCVvisited-only. No goldenpromotion.
+  Claude verifiedvalueformula; unseenmassdiagnostics saved.45.2sCPU.
+
+071-critic-conditions is RUNNING/finishing on sameGPU; do not duplicate.
+Producercritic_conditions.py, resultsaug-critic-conditions-v1. 16384August
+positions ×4 hypotheticalrating contexts(actual/equal1800/equal2400/both+400).
+Alllegalcandidatechild WDL; actualhumanpolicy staysunchanged, roots+childNN
+costscharged. Terminalsign/root-moverWDL correct; hypothesesuseONLYprefix.
+Afterworker.json appears, runCPU analyze_critic_conditions.py (written, syntax
+checked, not yet launched) in node-localruntime OMP_NUM_THREADS=1.
+This tests counterfactual VALUE queries, distinct from prior failedroot-logit
+counterfactualguidance. Ifnoresolvedgain, noexpensivedeepconditionedsearch.
+
+Current code through routercommitted ea810ce. Reverse/valuegap/criticprobe
+and latestdocs changes still needcommit. Allprivate, main untouched.
+Latestnodebabel-t5-32, job10498670 ends12:52UTC; sameengine1713252. No new
+Slurmjobs, additionalGPUs, sharedledgermutations. Observerretainsallcharges.
+---
 ## Current state: 2026-09-19 10:58 UTC
 
 Own inference goal remains ACTIVE, 10x macro AND expert CM, not achieved.

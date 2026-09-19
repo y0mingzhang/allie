@@ -113,13 +113,14 @@ def main():
             x=d['methods'][name]
             append('expanded_stack_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds']))
     for study, names in [('golden-conditional-mixture-v1', ('state0.01','all0.001')),
-                         ('golden-temperature-stack-v1', ('temperature',))]:
+                         ('golden-temperature-stack-v1', ('temperature',)),
+                         ('golden-value-of-compute-v1', ('fixed512','elo0.01','state0.1'))]:
         path=ROOT/study/'results.json'
         if path.exists():
             d=json.loads(path.read_text())
             for name in names:
                 x=d['methods'][name]
-                append(study+'/'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
+                append(study+'/'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d.get('method_seconds',{}).get(name)))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
