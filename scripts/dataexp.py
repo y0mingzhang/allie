@@ -403,9 +403,8 @@ def plan(wave):
     assert not study.exists(), "never overwrite a frozen study"
     for d in ("source-ours", "evaluator-ours", "logs", "results"):
         (study / d).mkdir(parents=True)
-    src = (
-        Path(__file__).resolve().parent
-    )  # this checkout's code (a worktree); results stay in ROOT
+    # this checkout's code (a worktree); results stay in ROOT
+    src = Path(__file__).resolve().parent
     for f in [
         *src.glob("modded_*.py"),
         *(
