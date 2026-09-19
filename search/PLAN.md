@@ -51,7 +51,8 @@ Freeze a method and substantially enlarge independent confirmation before final 
 ## Status
 
 Bug hunt finished in main worktree: results/codex-bug-report.md. No training files modified.
-Worktree and goal created; building the evaluation/candidate cache harness.
+Persistent oracle and expanded shallow confirmation completed; adding the requested
+released Allie adaptive-MCTS baseline before golden evaluation.
 
 The first CPU sweep also includes expert-only application of each correction. This
 uses the known mover Elo, leaves all nonexpert predictions exactly unchanged, and
@@ -98,3 +99,37 @@ cached root predictions. It preserves those original artifact identities and wri
 the new service identity separately. Expanded confirmation now advances roughly
 2,560 positions per 7–13 seconds after startup; use recorded timings, not this
 informal rate, in final inference-cost reporting.
+
+Expanded confirmation is complete: 64,366 positions / 1,269 games, including
+11,396 expert moves. Expert CE: canonical raw 1.509826, legal 1.501713,
+unchanged shallow correction 1.498192. Incremental expert delta vs legal is
+-0.003521, paired game-bootstrap 95% CI [-0.004778,-0.002315]. Expert top1
+accuracy improves from 51.5707% legal to 51.9042%. These remain development
+results; settings were not refit on the confirmation fold.
+
+## Required Allie baseline
+
+Official ICLR source: https://github.com/ippolito-cmu/allie,
+revision a50f2d86618798cec2195e37e3484da579631328,
+src/evaluation/decode.py MCTS and AdaptiveMCTS. MIT license retained in vendor.
+The old paper's y0mingzhang/allie URL now serves v2, so use the ICLR repository.
+Released default: c_puct=1.25, c_base=19652, depth limit100; round predicted
+seconds*mean_n_sims/4.64001, clamped0..200; adaptive c_puct is multiplied by
+sqrt(mean_n_sims/n_sims). Preserve the code's inverse-square-root scaling even
+though the appendix's prose suggests the opposite direction.
+Output uses pi(a)=lambda*prior(a)/(alpha-Q(a)), with normalization solved by
+bisection and lambda=c_puct*N/(number_of_legal_moves+N). This is the released
+reverse-KL solution, distinct from a forward-KL exponential tilt. Unvisited Q=0.
+No-simulation output is the legal prior. First UCB selection at zero root visits
+ties and follows python-chess legal iteration order; preserve and test it.
+
+Adapter: expected seconds from the 63 learned time bins (0..15 exact seconds,
+16*exp((bin-16)/7.06) for bins16..62; last open bin uses its representative);
+value = P(win)-P(loss), mover perspective, negated into parent perspective and
+alternating on backup. Checkmate=+1 to parent, automatic draw=0. Reconstruct
+board history so automatic repetition draws match python-chess and the reference.
+No observed future clock, outcome, or human move enters the allocation or tree.
+Batch across independent trees, not concurrent leaves in one tree, to preserve
+selection order. Test against the released class methods with a deterministic
+fake evaluator before GPU runs. Compare default fixed50, default adaptive50,
+and fixed budget matched to adaptive's fit-fold mean; report measured calls/time.

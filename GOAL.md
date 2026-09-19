@@ -36,6 +36,12 @@ value reranking; test uncertainty/time-adaptive expansion if value adds signal;
 then compare deeper model-guided search at measured cost. Record failures as well as wins.
 A successful playing-strength search is not automatically a better human predictor.
 
+Required comparison (Yiming, 2026-09-18): Allie-style adaptive MCTS from the ICLR
+paper, using the released implementation as reference, plus fixed-budget MCTS.
+Pin the source revision and document the adapter from categorical time/WDL heads.
+The released default uses a full-support regularized policy, not raw visit counts.
+Preserve that output for its CE comparison and measure actual inference cost.
+
 Recovery: read this file, search/PLAN.md and results/search-v1/status.json. Inspect own
 job receipts and live Slurm state before submission; never duplicate a job. Respect
 /data/group_data/dei-group/yimingz3/allie/controller/STOP. A controller restart does not
