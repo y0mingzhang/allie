@@ -698,7 +698,7 @@ wave(
     variants("3e16", b, {"dense": dict(arch=SHIP)}, seeds=(42, 43)) + variants("3e16", b, MOE1),
     "moe-v1 round 1 at 3e16 on single A6000s: dense ship recipe x2 seeds vs 10 MoE arms (granularity, sparsity incl. "
     "DeepSeek-V4.1 Flash's top-6 / sqrtsoftplus, ReLU^2 vs SwiGLU experts, capacity, shared expert), FLOP-matched",
-    "a6000p",
+    "dei1",
 )
 
 wave(
