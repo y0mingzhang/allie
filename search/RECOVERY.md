@@ -1,16 +1,16 @@
-# Search recovery — 2026-09-19 after preemption
+# Search recovery — stage paused2026-09-19
 
 ## Authority
 
-Goal active, explicitly resumed by Yiming. Find one frozen method reaching both10× golden macro and10× expert-macro training-equivalent CM, with an improved average NN-node/quality frontier. Current exploratory best is only~3.08×/~5.23×. Do not reset or mark complete. Reproduce on B₂ only after this fixed-checkpoint goal.
+Goal PAUSED by user-requested stage wrap-up. Own results/search-v1/STOP exists. No new experiments, GPU submissions or B₂ reproduction without explicit user instruction. Workbench10504460 released after the queue completed. See results/search-v1/STAGE_REPORT.md. Historical execution notes below are preserved for reproducibility, not instructions to restart. Find one frozen method reaching both10× golden macro and10× expert-macro training-equivalent CM, with an improved average NN-node/quality frontier. Current exploratory best is only~3.083×/~5.317×. Do not reset or mark complete. Reproduce on B₂ only after this fixed-checkpoint goal.
 
 Latest constraint: **NO EXTERNAL MEMORY**. No retrieval, game books, cross-game player profiles or episodic datastore. Allowed: fixed model, current-game context, rules and query-local tree/KV. Cached NN outputs for the same queries are research artifacts, not external-memory inputs. No neural-weight changes or Stockfish.
 
-Read controller/STOP and results/search-v1/STOP before work. Neither existed at last check. Never cancel tunnel/controller/Claude jobs or edit main. Own worktree: /data/group_data/dei-group/yimingz3/allie/worktrees/search-v1. Own status/ledger: results/search-v1/status.json and job-receipts/. Preserve all charges, including idle allocations.
+Read controller/STOP and results/search-v1/STOP before work. Own STOP exists; the shared controller STOP was not touched. Never cancel tunnel/controller/Claude jobs or edit main. Own worktree: /data/group_data/dei-group/yimingz3/allie/worktrees/search-v1. Own status/ledger: results/search-v1/status.json and job-receipts/. Preserve all charges, including idle allocations.
 
 ## Current execution
 
-- ONE job10504460 search-engine RUNNING on A10080G/babel-y9-24; restarted2026-09-19 19:56:19UTC. Previous Ada allocation was preempted. Keep both charges. Attempted pending Features update was rejected after restart; no change took effect.
+- Historical allocation: job10504460 search-engine, now CANCELLED at stage wrap-up, previously RUNNING on A10080G/babel-y9-24; restarted2026-09-19 19:56:19UTC. Previous Ada allocation was preempted. Keep both charges. Attempted pending Features update was rejected after restart; no change took effect.
 - Current enginePID2530027; ready_unix1789848043. Cold stage161.9s plus process startup98.1s. Logs engine-10504460.log. No other search GPU submitted. General/dei belong to Claude.
 -101 numerical audit,102/104 header intervention,103/105/106 critic precision all DONE. No new golden queued.
 -107/108 portfolio DONE; every independent-Q pair loses to single1000; both CV metrics choose unchanged. No caching/union infrastructure built.
@@ -36,7 +36,9 @@ New Bellman projection: search/engine/bellman_projection.cpp, tested independent
 -Expanded analysis initially stopped on1.55e-12 fitted-metric identity gap. Exact per-block Q identity passed. Recorded old source/plan and explicit analysis-revision.json allowing only driver change; tolerance1e-9, all final metric gaps <=1.55e-12. No algorithm/parameter/data change or rescoring selection.
 -109 golden-bellman-projection-v1 uses own live GPU because old golden score files did not retain compact trees. Parameters frozen from expanded lambda3/unchanged; fresh parent avoids hardware/batch drift. Raw softmax restricted to move vocabulary378:2346, legal and search reported separately. Golden remains exploratory; no target achieved yet. Result: fresh parent CE1.444230/1.339094, CM3.0538/5.1484; lambda3 CE1.443654/1.336986, CM3.0830/5.3168. Paired deltas-.000576 CI[-.001790,+.000575] and-.002107 CI[-.005720,+.001598]; uncertain incremental effect. Both969.8114NN; projection0.774CPU seconds/8192; blocks204.3s, total241.1s. Old cached parent reproduced exactly. Report/registry/frontier updated. No110queued and goal remains active.
 
-Next (not implemented/queued): mechanism ablation after completed109: root-only consistency vs full up/down projection vs bottom-up-only, on August only, lambda3 fixed. Root consistency can resemble nonlinear prior sharpening; need separate attribution. 109 is complete, but preserve its frozen source hashes and use a separate variant module or explicit new-study revision for further code. No newmethod/freshgold sample has been selected beyond109.
+Mechanism ablation completed, aug-bellman-mechanisms-v1: root-only CE1.445059/1.315753 is null; no-root1.443863/1.311531 and upward-only1.443749/1.310667 retain the full1.443771/1.311241 gain. Both CV criteria retain full. Dense-reference tests and unchanged/full action-value identity passed. No golden opened.
+
+Final CPU experiment search.bellman_variance COMPLETED. Seven arms, both CV criteria retain uniform lambda3. Confidence weighting did not improve move CE. Existing August outcome labels prove a useful diagnostic: root expected-score BCE improves .587065/.546359→.583225/.541840, paired intervals favor both; labels never enter predictions or method selection. Reports are in aug-bellman-{mechanisms,variance}-v1. No110GPU request exists. No unfinished research process needs recovery.
 
 All development is reused August, potentially training-seen. Current goal10x/10x remains unmet. Keep July raw anchors/laws fixed, fresh disjoint golden confirmation required for final claim. Do not turn stability probes into a new quality claim.
 

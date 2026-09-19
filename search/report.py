@@ -107,7 +107,9 @@ def main():
                          ('aug-precise-critic-v1','Reused August4096: FP32 WDL readout reduces numerical sensitivity but gives no resolved CE gain. Same1000 simulations; actual wall-time overhead reported.'),
                          ('aug-portfolio-search-v1','Reused August4096: complementary pairs of500 simulations versus one1000 search. Both queries/prefills charged, including duplicates; same-c permuted-order averaging control and all component arms reported.'),
                          ('aug-bellman-projection-v1','Reused August4096: tree-wide Gaussian Bellman consistency of model critics, followed by unchanged soft backup. Same nodes, no external information; lambda3 selected by both CV metrics.'),
-                         ('aug-bellman-projection-expanded-v1','Expanded reused August16384: critic-consistency result replicates at identical NN count. Both CV metrics select lambda3; nominal paired intervals favor both macro and expert. Not fresh confirmation; no golden CM conversion.')]:
+                         ('aug-bellman-projection-expanded-v1','Expanded reused August16384: critic-consistency result replicates at identical NN count. Both CV metrics select lambda3; nominal paired intervals favor both macro and expert. Not fresh confirmation; no golden CM conversion.'),
+                         ('aug-bellman-mechanisms-v1','Expanded reused August16384: fixed-lambda3 attribution. Root-only correction is null; deeper factors supply the gain. Both fit-CV metrics retain full projection. Same NN cost; no golden conversion.'),
+                         ('aug-bellman-variance-v1','Expanded reused August16384: confidence-dependent critic measurement regularization against uniform controls at the same three strengths. Root outcome diagnostics are separate from move CE; no golden conversion.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])

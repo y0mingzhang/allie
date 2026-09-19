@@ -1,7 +1,10 @@
 # Model-only inference research
 
 Owner: Codex. Worktree: `codex/search-v1`, independent of Claude's main worktree.
-Status: active, explicitly resumed by Yiming on 2026-09-19 after the usage reset.
+Status: PAUSED at Yiming's request to wrap up this stage on2026-09-19.
+The10x/10x target was NOT achieved; do not mark complete or automatically resume.
+Own results/search-v1/STOP is present. No further experiments, GPU submissions or B₂ reproduction without a new user instruction.
+Read results/search-v1/STAGE_REPORT.md for the final handoff. Historical goal and resource instructions below do not override this pause.
 
 Latest constraint (Yiming,2026-09-19): NO EXTERNAL MEMORY. Human-game retrieval,
 nearest-neighbor datastores, opening books of other games, cross-game player
@@ -14,9 +17,7 @@ reports as rejected/out-of-scope evidence; do not restart retrieval work.
 Ablate components before dismissing an entire idea; prioritize the strongest
 available research direction over exhaustive weak variants.
 
-Current work: inference infrastructure is operational. Resume the existing10x/10x
-search goal with batched experiment execution and reporting. One preempt GPU (workbench10504460,A10080G on babel-y9-24) while general is reserved for Claude. It was preempted and restarted at2026-09-19 19:56:19UTC; preserve both allocation charges.10503933timedout; the dependency prevented overlap. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
-All prior compute charges and fixed-checkpoint targets remain unchanged.
+Current work: stage wrapped. Workbench10504460 was released after all109GPU requests and both final CPU analyses completed. No pending requests, no training affected. Preserve every allocation charge in status.json and job-receipts/. The explicit pause supersedes the earlier resume.
 
 Infrastructure milestone completed: fast hackable SGLang inference port.
 Current priority: algorithm research and fair cost/quality comparisons. Latest refinement: make MCTS throughput per

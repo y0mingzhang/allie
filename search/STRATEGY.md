@@ -1,3 +1,7 @@
+# Stage paused
+
+Yiming requested wrap-up on2026-09-19. The10x/10x goal is unmet. No new experiments; workbench released. Final handoff: results/search-v1/STAGE_REPORT.md. The method and evidence below are retained for reference.
+
 # Current inference strategy
 
 Predict the distribution of human moves, using the fixed model and this game's

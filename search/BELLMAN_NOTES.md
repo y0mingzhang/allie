@@ -80,9 +80,22 @@ confidence in a chess evaluation. In this checkpoint there are no clock inputs;
 the later clock-conditioned B2 model would require care about hypothetical future
 clock states before asserting the same consistency relation.
 
-There is also an attribution question: a root-only consistency correction shifts
-child values in proportion to their prior probabilities. Some gain could therefore
-come from nonlinear prior calibration. Planned development controls are root-only,
-full upward/downward, upward-only, and exclusion of the root factor, with lambda3
-fixed. Those are not yet evidence for or against the mechanism. No variant will be
-selected by its golden score.
+The attribution check is complete on the same August cohort. Root-only correction
+changes checking macro/expert CE by only -0.000056/-0.000131, with intervals crossing
+zero. Removing the root factor retains most of the full projection's gain
+(-0.001252/-0.004354 versus unchanged). Upward-only correction also helps, but both
+fit-CV criteria still select full projection. This supports a contribution from
+deeper factors rather than root-only nonlinear prior calibration. It does not prove
+that the projected values are more accurate game-outcome predictions.
+
+The completed bounded check varies the relative measurement variance by critic confidence:
+`s_i = max(0.1, 1-y_i^2)`, versus constant1, each at lambda1/3/10. This is only a
+heuristic based on an upper bound on outcome variance; outcome uncertainty and
+network estimation error are different. The exact Gaussian objective replaces the
+measurement term by `(v_i-y_i)^2/s_i` and the unknown-tail variance by `r_i^2 s_i`.
+Dense-reference tests cover arbitrary positive variances, terminals and partial
+trees. Existing August game-result labels are used solely to diagnose root
+expected-score calibration after prediction, never as prediction inputs or to
+select an inference configuration. No July outcomes are read.
+
+Both fit-CV criteria retained uniform lambda3. Confidence weighting added no move-CE gain. The outcome diagnostic did support the denoising interpretation: root expected-score BCE improved from .587065/.546359 to .583225/.541840 (macro/expert), with paired intervals excluding zero. All evidence remains reused development; golden incremental move-CE uncertainty is unchanged.
