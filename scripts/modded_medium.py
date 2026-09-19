@@ -30,6 +30,11 @@ TIME_START, WDL_START = (
     VOCAB + 63,
 )  # padded logits: 63 think-time bins, then W/D/L
 COMMIT = "ecbb586296d3dac36fd206211f25d63bad4a6b35"
+MASTER_LABELS = (
+    "attn",
+    "mlp",
+    "mlp_proj",
+)  # FP32 matrices that --bf16-weights stores in BF16
 flex_kernel = torch.compile(flex_attention, dynamic=False)
 BOARD = False  # set by create_model when the model has a board branch; make_context then encodes
 
@@ -58,6 +63,9 @@ class Config:
     smear: bool = True  # previous-token smear gate
     doc_rope: bool = False  # rotary positions relative to each game's start
     rope_fp32: bool = False  # FP32 rotary cos/sin tables
+    bf16_weights: bool = (
+        False  # BF16 attention/MLP matrices, FP32 grads and master shards
+    )
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -267,7 +275,19 @@ def create_model(cfg, device="cuda"):
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)) and m not in fp32:
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
+        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
+            # the FP32 init seeds the optimizers' master shards (they drop it); grads summed in FP32
+            p.fp32, p.data, p.master, p.main_grad = (
+                p.data,
+                p.data.bfloat16(),
+                True,
+                None,
+            )
+            p.register_post_accumulate_grad_hook(core.accumulate_fp32)
+    for p in model.parameters():
         dist.broadcast(p.detach(), 0)
+        if hasattr(p, "fp32"):
+            dist.broadcast(p.fp32, 0)
     if torch.device(device).type == "cuda":
         torch.cuda.synchronize()
     return model

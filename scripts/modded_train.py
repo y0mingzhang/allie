@@ -162,6 +162,11 @@ def main():
         "--rope-fp32", action="store_true", help="FP32 rotary cos/sin tables"
     )
     p.add_argument(
+        "--bf16-weights",
+        action="store_true",
+        help="BF16 attention/MLP matrices; FP32 grads and master shards in the optimizers",
+    )
+    p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
     )
     p.add_argument(
@@ -233,6 +238,7 @@ def main():
     cfg.clock, cfg.elo, cfg.input_lr_mul = a.clock, a.elo, a.input_lr_mul
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
+    cfg.bf16_weights = a.bf16_weights
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,
@@ -333,6 +339,7 @@ def main():
             "doc_rope",
             "rope_fp32",
             "arch",
+            "bf16_weights",
         ):
             assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
                 f"Resume changes {key}"
