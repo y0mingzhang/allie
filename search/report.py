@@ -105,7 +105,9 @@ def main():
                          ('aug-convergence-router-v1','Reused August4096: add64-to128 convergence features to position-level allocation, fixed ridge and nested calibration targets. Unchanged state router selected at every cap; no extra NN queries or live promotion.'),
                          ('aug-conditioned-search-v1','Reused August4096: actual root policy retained; entire imagined continuation uses actual,+200,+400,or equal2400 ratings. Same1000 simulations, actual nodes and additional prefills charged. Controls and variants run on the same A100; no golden conversion.'),
                          ('aug-precise-critic-v1','Reused August4096: FP32 WDL readout reduces numerical sensitivity but gives no resolved CE gain. Same1000 simulations; actual wall-time overhead reported.'),
-                         ('aug-portfolio-search-v1','Reused August4096: complementary pairs of500 simulations versus one1000 search. Both queries/prefills charged, including duplicates; same-c permuted-order averaging control and all component arms reported.')]:
+                         ('aug-portfolio-search-v1','Reused August4096: complementary pairs of500 simulations versus one1000 search. Both queries/prefills charged, including duplicates; same-c permuted-order averaging control and all component arms reported.'),
+                         ('aug-bellman-projection-v1','Reused August4096: tree-wide Gaussian Bellman consistency of model critics, followed by unchanged soft backup. Same nodes, no external information; lambda3 selected by both CV metrics.'),
+                         ('aug-bellman-projection-expanded-v1','Expanded reused August16384: critic-consistency result replicates at identical NN count. Both CV metrics select lambda3; nominal paired intervals favor both macro and expert. Not fresh confirmation; no golden CM conversion.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
@@ -262,7 +264,8 @@ def main():
                        ('golden-utilities-v1/results.json','August-selected utility normalization on identical golden trees; zero additional model queries.'),
                        ('golden-permutation-v1/results.json','Numerical sensitivity audit: same frozen router, different fixed position order. Neither order is selected by quality.'),
                        ('golden-time-allocation-v2/results.json','Live fixed/predicted-time/shuffled-time allocation with modern search. All3 preregistered; extra root prepass separately charged; reusedgolden.'),
-                       ('golden-activation-v1/results.json','Frozen past-move activation correction and old-residual control. All three preregistered arms; one added full-prefix query, reused golden, uncertain expert gain.')]:
+                       ('golden-activation-v1/results.json','Frozen past-move activation correction and old-residual control. All three preregistered arms; one added full-prefix query, reused golden, uncertain expert gain.'),
+                       ('golden-bellman-projection-v1/results.json','Frozen lambda3 critic-consistency projection with paired fresh parent on identical live trees. Original full-set raw anchors and law unchanged; old cached parent shown separately for numerical drift. Reused golden, not final confirmation.')]:
         d=read(path)
         if d:
             table(title,[(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])

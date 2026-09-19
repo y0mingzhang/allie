@@ -39,7 +39,8 @@ thinking time. These are separate ablation axes, not one indivisible method.
   CE by about -0.00013/-0.00032. Adaptive permutation deltas were -0.000052/-0.000041; individual policies can vary more.
 - Entire-continuation rating interventions actual/+200/+400/equal2400 are complete. No resolved checking gain; no promotion.
 - FP32 WDL-only readout reduces critic numerical tails but gave no resolved CE gain on the full paired development study. Default unchanged.
-- Next: complementary two500-search portfolios versus one1000 control. Mild and strong exploration pairs, same-c numerical-ensemble control, fixed Q averaging, all queries/prefills charged and output calibration fit within game folds.
+- Complementary two500-search portfolios lose to one1000 control; no promotion.
+- Tree-wide critic consistency is the current candidate. Project model values toward human-policy Bellman consistency, then apply the existing soft backup. Expanded August selects lambda3 and supports small paired gains at identical NN cost. Frozen golden comparison109 is underway; no10x claim.
 
 Prioritize a clear intervention over a large parameter sweep. A null result
 rules out promoting that tested variant, not its entire algorithm family.

@@ -13,7 +13,9 @@ Read controller/STOP and results/search-v1/STOP before work. Neither existed at 
 - ONE job10504460 search-engine RUNNING on A10080G/babel-y9-24; restarted2026-09-19 19:56:19UTC. Previous Ada allocation was preempted. Keep both charges. Attempted pending Features update was rejected after restart; no change took effect.
 - Current enginePID2530027; ready_unix1789848043. Cold stage161.9s plus process startup98.1s. Logs engine-10504460.log. No other search GPU submitted. General/dei belong to Claude.
 -101 numerical audit,102/104 header intervention,103/105/106 critic precision all DONE. No new golden queued.
--107 portfolio smoke PASSED all7 components, fresh single1000 Q/root/counts exact versus same-A100104 control.108 full portfolio RUNNING/queued. Atomic256-root blocks; inspect queue result/error before any new work. Never duplicate.
+-107/108 portfolio DONE; every independent-Q pair loses to single1000; both CV metrics choose unchanged. No caching/union infrastructure built.
+-CPU Bellman-consistency screen DONE, expanded16384 DONE, promising. Current GPU request109 golden-bellman RUNNING/queued: frozen lambda3 plus fresh same-tree unchanged control, old cached control. One shared1000sim tree, no extraNN for projection; records full compact trees for follow-up output-only mechanisms. Do not duplicate or edit its frozen files.
+
 -Existing search.advance --watch preserves every allocation charge. Previous Python gate/observer sessions are finished; do not restart them.
 
 ## Current findings and next action
@@ -26,7 +28,15 @@ Read controller/STOP and results/search-v1/STOP before work. Neither existed at 
 
 104 is complete: all actual-control Q/root/counts equal101; no resolved header win.106 full FP32 critic search complete: macro1.408817/expert1.229608 vs BF16 1.408829/1.228056, ~972nodes,109vs105seconds for4096. Both checking intervals include0; no default change.
 
-108 aug-portfolio-search-v1: fresh single1000, half500 c2.5, half500 c2.5 globally permuted, c.5/5 and c1/4 components. Fixed equal-Q portfolios, both inherited scale16 and count-normalized8 variants. Identical root quotas for unpermuted500 arms make visit-weighted and plain means identical; assertions check this. Refit each output inside the same gameCV. All duplicate NN calls and both prefills charged. Same-c permutation is a numerical-ensemble control. No union cache infrastructure yet. Report ALL arms and per-cell/game CIs, no golden CM on August. Inspect results before deciding next algorithm.
+108 aug-portfolio-search-v1 DONE: 14arms, bothCV choose single1000. Pairs cost~975NN vs972 and regress macro+.006–.008/expert+.013–.017 with paired intervals excluding0. Exact all-block parent identity and identical unpermuted root quotas. All duplicate queries/prefills charged.
+
+New Bellman projection: search/engine/bellman_projection.cpp, tested independently against dense Gaussian normal equations; terminal constraints, lambda0 identity, and exclusion of future nodes pass. Minimize critic measurement error plus human-policy Bellman residuals. Unknown aggregate variance adds r², output clipped[-1,1]; Gaussian variances are not calibrated uncertainty. Raw critic still drives expansion, so this is output-only. No clock input in this checkpoint.
+-4096 screen: lambda3 selected bothCV, checking macro/expert deltas-.00240/-.00494; expert CI includes0. Source for original completed screen is git dfa2245.
+-Expanded16384 (includes4096, reused development): lambda0/1/3/10; bothCV select3. Macro delta-.001343 CI[-.002611,-.000081]; expert-.004644 CI[-.007936,-.001559]. Native projection+backup1.873CPU seconds over16384; no newNN, clipping0.0037%. Reports under aug-bellman-projection{,-expanded}-v1/REPORT.md.
+-Expanded analysis initially stopped on1.55e-12 fitted-metric identity gap. Exact per-block Q identity passed. Recorded old source/plan and explicit analysis-revision.json allowing only driver change; tolerance1e-9, all final metric gaps <=1.55e-12. No algorithm/parameter/data change or rescoring selection.
+-109 golden-bellman-projection-v1 uses own live GPU because old golden score files did not retain compact trees. Parameters frozen from expanded lambda3/unchanged; fresh parent avoids hardware/batch drift. Raw softmax restricted to move vocabulary378:2346, legal and search reported separately. Golden remains exploratory; no target achieved yet. Inspect result/error and log, then report loss/CM/paired intervals/node count, update registry/frontier. Do not select among methods on golden.
+
+Next mechanism ablation after109: root-only consistency vs full up/down projection vs bottom-up-only, on August only, lambda3 fixed. Root consistency can resemble nonlinear prior sharpening; need separate attribution. Do not edit bellman_projection.cpp while109 is running. No newmethod/freshgold sample has been selected beyond109.
 
 All development is reused August, potentially training-seen. Current goal10x/10x remains unmet. Keep July raw anchors/laws fixed, fresh disjoint golden confirmation required for final claim. Do not turn stability probes into a new quality claim.
 
