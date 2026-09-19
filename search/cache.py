@@ -1,5 +1,5 @@
 """One-GPU packed-prefix oracle and resumable model-only child-value cache."""
-import hashlib, json, os, sys, time
+import hashlib, json, os, sys, time, traceback
 from pathlib import Path
 import numpy as np
 import chess
@@ -106,6 +106,39 @@ def main():
             elapsed_seconds=time.monotonic()-started,**stats)
         (OUT/'cache-progress.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(report),flush=True)
+    # Persistent model server: new requests reuse this exact loaded model and compiled net.
+    if '--serve' in sys.argv:
+        queue=OUT/'queue';queue.mkdir(exist_ok=True)
+        for interrupted in queue.glob('*.running.json'):
+            interrupted.replace(interrupted.with_name(interrupted.name.replace('.running.json','.request.json')))
+        ready=dict(job_id=os.environ.get('SLURM_JOB_ID'),host=os.uname().nodename,
+                   checkpoint_sha256=identity['checkpoint_sha256'],gpu=torch.cuda.get_device_name(),pid=os.getpid())
+        (OUT/'server-ready.json').write_text(json.dumps(ready,indent=2)+'\n')
+        print('Persistent oracle ready',ready,flush=True)
+        while not (OUT/'STOP').exists():
+            work=sorted(queue.glob('*.request.json'))
+            if not work: time.sleep(.2);continue
+            for request in work:
+                running=request.with_name(request.name.replace('.request.json','.running.json'))
+                request.replace(running)
+                try:
+                    r=json.loads(running.read_text()); operation=r['op']
+                    if operation=='ping': result=ready|dict(stats=stats)
+                    elif operation=='score':
+                        inputs=Path(r['input']).resolve(); output=Path(r['output']).resolve()
+                        assert inputs.is_relative_to(OUT.resolve()) and output.is_relative_to(OUT.resolve())
+                        payload=json.loads(inputs.read_text()); begin=time.monotonic()
+                        predictions=forward(payload['prefixes'])
+                        atomic_npz(output,logits=predictions)
+                        result=dict(output=str(output),prefixes=len(predictions),seconds=time.monotonic()-begin,
+                                    input_sha256=sha(inputs),checkpoint_sha256=identity['checkpoint_sha256'])
+                    else: raise ValueError('Unknown oracle operation '+operation)
+                    done=running.with_name(running.name.replace('.running.json','.done.json'))
+                    tmp=done.with_suffix('.partial');tmp.write_text(json.dumps(result,indent=2)+'\n');tmp.replace(done)
+                except Exception:
+                    running.with_name(running.name.replace('.running.json','.error.txt')).write_text(traceback.format_exc())
+                finally: running.unlink(missing_ok=True)
+        (OUT/'server-ready.json').unlink(missing_ok=True)
     dist.destroy_process_group()
 
 if __name__=='__main__': main()

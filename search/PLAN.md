@@ -31,9 +31,8 @@ CPU sweeps then reuse these GPU predictions. No golden outcome scores in selecti
 The attempted custom development-set build was dropped at the user's request; its
 CPU attempt produced no dataset and no GPU work. Existing evaluation remains authoritative.
 
-Use one L40S on preempt, <=2 h initially, fixed frozen checkpoint and source. Checkpoint
-prediction batches atomically and resume by input/model/config digest. Do not hold an
-idle GPU while doing CPU method selection. Record cold compilation separately from
+Use the user-requested persistent one-GPU workbench on preempt, eight hours, fixed frozen checkpoint and source. Checkpoint
+prediction batches atomically and resume by input/model/config digest. Keep the model resident across CPU method selection, per the user's explicit preference; record idle allocation time too. Record cold compilation separately from
 warm throughput, GPU type, inference calls/tokens and wall time.
 
 Before scaling: verify packed/prefix equivalence and causal prefix truncation, legal

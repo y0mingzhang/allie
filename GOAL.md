@@ -20,7 +20,9 @@ Freeze method before golden evaluation. Never use the human next move, future mo
 actual thinking time or actual game outcome when selecting candidates or allocating search.
 
 Resources: user explicitly permits one reasonably fast GPU and infrastructure work.
-Initial evaluation pilot is bounded to two GPU-hours; record actual charges separately.
+Latest user instruction: maintain one long-running GPU session for fast iteration.
+Start with an eight-hour allocation; record all reserved GPU time, including idle time.
+The earlier two-hour pilot limit is superseded, not charged to training budgets.
 Coordinate preempt capacity with Claude. Do not displace/cancel its jobs, alter its
 sources, mutate its datasets, or use the final-training compute pool. No model training.
 

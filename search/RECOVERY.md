@@ -6,7 +6,8 @@ main results directory is used. The only external checkpoint inputs are read-onl
 
 1. Read GOAL.md and results/search-v1/status.json. Check controller/STOP.
 2. Inspect recorded job IDs with squeue/sacct before any submission. Do not resubmit a
-   running/pending job. The first pilot is 10497506, one preempt L40S, at most two hours.
+   running/pending job. Persistent workbench: 10497511, one modern preempt GPU, eight hours.
+   The earlier pending pilot 10497506 was cancelled with zero GPU time.
 3. If the pilot finishes successfully, run:
    /home/yimingz3/src/allie/.venv/bin/python -B search/analyze.py
 4. If preempted or failed, read logs and account its GPU time before deciding on a retry.
@@ -24,3 +25,19 @@ main results directory is used. The only external checkpoint inputs are read-onl
 The model oracle currently recomputes packed prefixes. It batches candidates and caches
 all raw predictions to make CPU policy sweeps cheap. KV caching or a specialized leaf-only
 head can be added if measured throughput says they are worth the implementation cost.
+
+Persistent session: results/search-v1/allocation.txt contains job, host, tmux socket,
+and the staged Python interpreter. The socket is unique to this job and unrelated
+ to the user's controller/tunnel. SSH to the allocated host and attach with:
+  tmux -L search-v1-10497511 attach -t oracle
+The worker leaves an interactive shell available if inference fails. Restart its
+oracle with SEARCH_PYTHON from allocation.txt and the command in worker.sh.
+
+When server-ready.json exists, send requests without reloading the model:
+  /home/yimingz3/src/allie/.venv/bin/python -B search/request.py ping
+  /home/yimingz3/src/allie/.venv/bin/python -B search/request.py score --input <json> --output <npz>
+Inputs have {"prefixes": [[tokens...], ...]}; paths must be inside results/search-v1.
+Queue requests and outputs are durable. Completed requests are not retried; requests
+interrupted by server restart are recovered. Check .done.json/.error.txt before retrying.
+The server will retain its GPU while idle, and all allocation time is charged.
+Writing results/search-v1/STOP releases only this workbench, not other Slurm jobs.
