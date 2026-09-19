@@ -520,6 +520,16 @@ WAVES["round3x"] = WAVES["round3p"] | dict(
 )
 
 
+WAVES["round3c"] = WAVES["round3p"] | dict(
+    study="data-v1-round3c",
+    prefix="r3c",
+    throttle=2,
+    runs=r3(b2("3e16", seeds=(45, 46))),
+    purpose="round 3 extra B_2 controls (s45, s46) at 3e16: B_2 seed spread is 0.0016 / 0.0024 golden "
+    "macro / expert with 3 seeds (7-10x round 2's control); same sources as round 3, pooled by both tracks",
+)
+
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
