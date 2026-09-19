@@ -18,6 +18,7 @@ from pathlib import Path
 import chess
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,17 +26,32 @@ from chess_vocab import MOVES
 from chessdata import END, align, end_state, eval_list
 
 PUSH = [chess.Move.from_uci(m) for m in MOVES]
-EVALS = {}  # game id -> raw evals, filled before the shard pool forks
 HF = False  # whether this pass has an eval source
+# Analysed games as flat arrays (sorted 8-byte ids, offsets into VALS, per-ply evals), set before the
+# shard pool forks: numpy buffers stay shared, unlike millions of small Python objects.
+SITES, OFF, VALS = np.array([], "S8"), np.zeros(1, np.int64), np.array([], np.int16)
 
 
 def hf_evals(path):
+    """(game ids, eval counts, evals) of the analysed games in one Hugging Face file."""
     t = pq.read_table(path, columns=["Site", "movetext"])
-    return {
-        site.rsplit("/", 1)[-1]: np.array(eval_list(mt), np.int16)
-        for site, mt in zip(t["Site"].to_pylist(), t["movetext"].to_pylist())
-        if mt and "%eval" in mt
-    }
+    t = t.filter(pc.fill_null(pc.match_substring(t["movetext"], "%eval"), False))
+    ids, lens, vals = [], [], []
+    for site, mt in zip(t["Site"].to_pylist(), t["movetext"].to_pylist()):
+        e = eval_list(mt)
+        ids.append(site.rsplit("/", 1)[-1])
+        lens.append(len(e))
+        vals.extend(e)
+    return np.array(ids, "S8"), np.array(lens, np.int64), np.array(vals, np.int16)
+
+
+def join(parts):
+    """Sorted flat arrays from per-file (ids, lens, vals)."""
+    ids, lens, vals = (np.concatenate(x) for x in zip(*parts))
+    order = np.argsort(ids, kind="stable")
+    start, lens = np.cumsum(lens) - lens, lens[order]
+    moved = np.repeat(start[order] - (np.cumsum(lens) - lens), lens)
+    return ids[order], np.r_[0, np.cumsum(lens)], vals[moved + np.arange(len(moved))]
 
 
 def annotated(path):
@@ -51,15 +67,17 @@ def shard(path):
     t = pq.read_table(path)
     moves = t.column("moves").combine_chunks()
     off, val = moves.offsets.to_numpy(), moves.values.to_numpy()
-    sites = t.column("site").to_pylist()
+    sites = np.array(t.column("site").to_pylist(), "S8")
+    j = np.searchsorted(SITES, sites).clip(max=max(0, len(SITES) - 1))
+    hit = SITES[j] == sites if len(SITES) else np.zeros(len(t), bool)
     end, evals = np.empty(len(t), np.int8), []
     for i in range(len(t)):
         b = chess.Board()
         for m in val[off[i] : off[i + 1]]:
             b.push(PUSH[m])
         end[i] = end_state(b)
-        raw = EVALS.get(sites[i])
-        evals.append([] if raw is None else align(raw.tolist(), off[i + 1] - off[i]))
+        raw = VALS[OFF[j[i]] : OFF[j[i] + 1]].tolist() if hit[i] else None
+        evals.append([] if raw is None else align(raw, off[i + 1] - off[i]))
     t = t.drop_columns([c for c in ("end", "evals") if c in t.column_names])
     new = t.append_column("end", pa.array(end)).append_column(
         "evals", pa.array(evals, pa.large_list(pa.int16()))
@@ -80,17 +98,20 @@ def shard(path):
 
 
 def main():
-    global HF
+    global HF, SITES, OFF, VALS
     month, hf = Path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else None
     HF = bool(hf)
     workers, start = len(os.sched_getaffinity(0)), time.monotonic()
     if hf:
-        with ProcessPoolExecutor(workers) as ex:
-            for d in ex.map(hf_evals, sorted(Path(hf).glob("*.parquet"))):
-                EVALS.update(d)
+        with ProcessPoolExecutor(
+            min(16, workers)
+        ) as ex:  # each holds a file's movetext
+            SITES, OFF, VALS = join(
+                ex.map(hf_evals, sorted(Path(hf).glob("*.parquet")))
+            )
         print(
             json.dumps(
-                dict(analysed=len(EVALS), seconds=round(time.monotonic() - start))
+                dict(analysed=len(SITES), seconds=round(time.monotonic() - start))
             ),
             flush=True,
         )
@@ -113,7 +134,7 @@ def main():
                 source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 games=games,
                 analysed=analysed,
-                analysed_in_source=len(EVALS),
+                analysed_in_source=len(SITES),
                 evals=bool(hf),
             )
         )

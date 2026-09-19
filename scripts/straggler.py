@@ -25,6 +25,15 @@ def projection(name, steps):
         if log.exists()
         else []
     )
+    # rows since the last restart (step goes back or tok/s collapses), minus its startup row
+    k = len(rows) - 1
+    while (
+        k > 0
+        and rows[k - 1]["step"] < rows[k]["step"]
+        and (rows[k]["tokens_per_second"] > 0.2 * rows[k - 1]["tokens_per_second"])
+    ):
+        k -= 1
+    rows = rows[k + 1 :]
     if len(rows) < 2:
         return None
     a, b = rows[max(0, len(rows) - 9)], rows[-1]

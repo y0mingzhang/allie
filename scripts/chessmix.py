@@ -8,9 +8,10 @@ the fly and packed into 1025-token rows like the original corpus: the overflowin
 """
 
 import copy
+import itertools
 import json
 import math
-import queue
+import multiprocessing as mp
 import sys
 import threading
 from pathlib import Path
@@ -519,6 +520,9 @@ class Sampler:
         feats=False,
         months=None,
     ):
+        self.init = {
+            k: v for k, v in locals().items() if k != "self"
+        }  # to rebuild elsewhere
         self.clock, self.aux, self.last = clock, aux, {}
         self.feats = feats
         self.channels = (
@@ -707,46 +711,85 @@ class Sampler:
         self.pool = list(zip(*chans)) if state["pool_lens"] else []
 
 
-class Prefetch:
-    """Builds the sampler's next batches on a background thread; same batches, same states."""
+def _produce(init, state, args, keep, q, req, ans):
+    """Child process: rebuild the sampler at `state`, stream numbered batches, and answer
+    state requests for any recently produced batch number."""
+    try:
+        s = Sampler(**init)
+        s.load_state_dict(state)
+        snaps, lock = {}, threading.Lock()
 
-    def __init__(self, sampler, depth=4):
-        self.sampler, self.depth, self.args, self.q = sampler, depth, None, None
-        self.snap, self.last = sampler.snapshot(), {}
-
-    def _fill(self):
-        try:
+        def serve():
             while True:
-                rows = self.sampler.batch(*self.args)
-                s = self.sampler
-                self.q.put((rows, s.last, s.snapshot()))
-        except (
-            BaseException
-        ) as e:  # surface in the training thread instead of hanging it
-            self.q.put(e)
+                k = req.get()
+                with lock:
+                    snap = snaps[k]
+                ans.put(s.state_dict(snap))
+
+        threading.Thread(target=serve, daemon=True).start()
+        for seq in itertools.count(1):
+            rows = s.batch(*args)
+            with lock:
+                snaps[seq] = s.snapshot()
+                snaps.pop(seq - keep, None)
+            q.put((seq, rows, s.last, s.seen))
+    except BaseException as e:  # surface in the training process instead of hanging it
+        q.put(e)
+        ans.put(e)
+
+
+class Prefetch:
+    """Builds the sampler's batches in a child process, so batch building never competes with
+    the training loop for the GIL; same batches and states as the sampler itself."""
+
+    def __init__(self, sampler, depth=8):
+        self.sampler, self.depth, self.args = sampler, depth, None
+        self.last, self.seq, self._seen = {}, 0, sampler.seen
 
     def batch(self, n, rank=0, world=1):
         if self.args is None:
-            self.args, self.q = (n, rank, world), queue.Queue(self.depth)
-            threading.Thread(target=self._fill, daemon=True).start()
+            self.args = (n, rank, world)
+            ctx = mp.get_context("spawn")
+            self.q, self.req, self.ans = ctx.Queue(self.depth), ctx.Queue(), ctx.Queue()
+            state, keep = self.sampler.state_dict(), 2 * self.depth + 4
+            ctx.Process(
+                target=_produce,
+                args=(
+                    self.sampler.init,
+                    state,
+                    self.args,
+                    keep,
+                    self.q,
+                    self.req,
+                    self.ans,
+                ),
+                daemon=True,
+            ).start()
         assert self.args == (n, rank, world), "prefetch needs fixed batch arguments"
         item = self.q.get()
         if isinstance(item, BaseException):
             raise RuntimeError("prefetch worker failed") from item
-        rows, self.last, self.snap = item
+        self.seq, rows, self.last, self._seen = item
         return rows
 
     @property
     def seen(self):
-        return self.snap["seen"]
+        return self._seen
 
     def __getattr__(self, k):
         return getattr(self.sampler, k)
 
     def state_dict(self):
-        return self.sampler.state_dict(self.snap)
+        """State after the last batch handed to training (the child runs ahead of it)."""
+        if self.args is None:
+            return self.sampler.state_dict()
+        self.req.put(self.seq)
+        state = self.ans.get()
+        if isinstance(state, BaseException):
+            raise RuntimeError("prefetch worker failed") from state
+        return state
 
     def load_state_dict(self, state):
         assert self.args is None, "load state before the first batch"
         self.sampler.load_state_dict(state)
-        self.snap = self.sampler.snapshot()
+        self._seen = self.sampler.seen
