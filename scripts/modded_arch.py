@@ -33,6 +33,7 @@ DEFAULTS = dict(
     moe_update="sign",
     moe_capacity=1.25,  # training capacity factor (eval is dropless)
     moe_shared=True,  # shared expert (half the active width); off: routed experts take all of it
+    moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     diff_attn=False,  # differential attention (modded_diffattn)
     aux_detach=False,  # think-time / W-D-L head rows read stop-gradient features (trunk unaffected)
 )
@@ -65,16 +66,16 @@ def moe_dims(width, arch):
     experts, topk = a["moe"]
     active = swiglu_hidden(width) if a["mlp"] == "swiglu" else 4 * width
     shared = active // 2 if a["moe_shared"] else 0
-    assert (active - shared) % topk == 0, (active, shared, topk)
     return (
         experts,
         topk,
-        (active - shared) // topk,
+        round((active - shared) / topk),  # extra_flops counts the rounding
         shared,
         *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
         a["moe_update"],
         a["moe_capacity"],
         a["mlp"],
+        a["moe_score"],
     )
 
 

@@ -49,10 +49,11 @@ class AddLoss(torch.autograd.Function):
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
-        gamma=1e-3, seq=0.0, update="sign", capacity=1.25, kind="relu2",
+        gamma=1e-3, seq=0.0, update="sign", capacity=1.25, kind="relu2", score="sigmoid",
     ):  # fmt: skip
         super().__init__()
-        assert update in ("sign", "prop")
+        assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
+        self.score = score
         self.experts, self.topk, self.capacity, self.kind = experts, topk, capacity, kind
         up = 2 if kind == "swiglu" else 1  # SwiGLU experts: gate and value rows
         # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
@@ -108,7 +109,8 @@ class MoE(nn.Module):
         t, e, k = h.shape[0], self.experts, self.topk
         n = t * k
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
-        s = torch.sigmoid(F.linear(h.to(g), self.router.to(g)))
+        s = F.linear(h.to(g), self.router.to(g))
+        s = torch.sigmoid(s) if self.score == "sigmoid" else F.softplus(s).sqrt()
         idx = torch.topk(s + self.bias, k, dim=-1).indices
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
