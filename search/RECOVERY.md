@@ -120,3 +120,10 @@ GPU tmux window runtime-cache runs recover_cache.sh: waits for the archive check
 stages locally, then replaces ONLY a still-not-ready engine. If the engine is already
 ready, it leaves it alone. Never interrupt scoring for a runtime switch. The archive
 builder remains controller-local and needs restart after reboot if incomplete.
+
+GPU tmux runtime-builder now runs ensure_archive.sh. It takes over the archive build
+if the controller-local builder dies, using the same durable flock (no double writer).
+Thus archive construction, local staging, cold-engine recovery, all experiments and
+analysis can progress even during the controller restart. Check these tmux windows
+before restarting ANY helper manually. PID accounting is the sole remaining
+controller-local task that requires restart after controller migration.
