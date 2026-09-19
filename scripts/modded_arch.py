@@ -32,6 +32,7 @@ DEFAULTS = dict(
     moe_seq=0.0,
     moe_update="sign",
     diff_attn=False,  # differential attention (modded_diffattn)
+    aux_detach=False,  # think-time / W-D-L head rows read stop-gradient features (trunk unaffected)
 )
 
 
@@ -80,6 +81,9 @@ def swiglu_hidden(width):
     return round(8 * width / 3 / 16) * 16
 
 
+AUX_ROWS = (
+    2432 - 2350
+)  # padded head rows from the first think-time bin (modded_medium.VOCAB)
 BOARD_FEATURES = (
     64 * 13 + 2 + 16 + 9
 )  # pieces one-hot, side, castling rights, en-passant file
@@ -101,6 +105,12 @@ def extra_flops(arch, width, layers):
     no input gradient: +0.5% FLOPs for boarddirect, against the board arms."""
     a = resolve(arch)
     extra = 2 * board_macs(a["board"], width)
+    if a[
+        "aux_detach"
+    ]:  # the aux head rows' second (detached) matmul: forward, x3 like every
+        extra += (
+            2 * width * AUX_ROWS
+        )  # matmul, though it has no input gradient (+0.1% at 8 x 512)
     if a["moe"]:  # nominal: k experts per token; dropped routes (logged) do no MLP work
         extra += 2 * (layers - 1) * width * a["moe"][0]  # routers
     if a["mlp"] == "swiglu":

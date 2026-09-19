@@ -1408,6 +1408,9 @@ class GPT(nn.Module):
             False  # rotary position = index in the game instead of the packed batch
         )
         self.use_x0 = self.use_embed2 = self.softcap = self.use_key_offset = True
+        self.aux_detach = (
+            None  # first aux-head row, when those rows get stop-gradient features
+        )
         self.fp32_embed = False  # FP32 embedding/head state: cast lookups to BF16
         self.board = None  # modded_board branch, added at every position when set
 
@@ -1560,6 +1563,12 @@ class GPT(nn.Module):
         x = norm(x)
 
         logits = self.lm_head(x)
+        if (
+            self.aux_detach
+        ):  # head rows from this index on (the aux heads) see stop-gradient features
+            k = self.aux_detach
+            aux = F.linear(x.detach(), self.lm_head.weight[k:].type_as(x))
+            logits = torch.cat((logits[..., :k], aux), -1)
         if not self.softcap:
             return logits
         return 23 * torch.sigmoid((logits + 5) / 7.5)

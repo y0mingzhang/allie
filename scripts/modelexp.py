@@ -495,6 +495,39 @@ wave(
     pool_sources="model-v1-screen1g",
     identity="model-v1-pilot2b",
 )
+# aux heads on stop-gradient features (main, ~08:00): the heads cost ~0.009 golden at any weight
+# 0.05-0.2 through the aux gradient on the trunk (CPU: no code-path change); aux_detach removes that
+# gradient. Pilot: default-path identity for the new core + the detached arm's compile / sanity
+AUXSG = {"auxsg": dict(arch=dict(aux_detach=True))}  # at B_2's 0.2 / 0.2
+wave(
+    "pilot2d",
+    "model-v1-pilot2d",
+    "mpil2d",
+    [
+        r | dict(stop_after=[50, 300])
+        for r in variants(
+            "3e16",
+            b,
+            # same switch (so the same FLOP-matched steps and schedule), heads unweighted
+            {"base": {}, "auxsg0": AUXSG["auxsg"] | dict(aux_time=0.0, aux_wdl=0.0)}
+            | AUXSG,
+        )
+    ],
+    "aux_detach pilot on L40S through 300 (past the split and a resume): base identity vs data-v1-"
+    "round3g's B_2 s42; auxsg's move train_ce must equal auxsg0's (same switch, aux weights 0) step for "
+    "step: detached heads leave the trunk's training unchanged (same GEMMs in BF16)",
+    "l40s",
+)
+wave(
+    "screen2d",
+    "model-v1-screen2d",
+    "m2d",
+    variants("3e16", b, AUXSG, seeds=(42, 43)),
+    "aux heads on stop-gradient features at 3e16 (0.2 / 0.2), s42 / s43; golden plus time_ce / wdl_ce",
+    "preempt",
+    pool_sources="model-v1-screen1g",
+    identity="model-v1-pilot2d",
+)
 wave(
     "screen2",
     "model-v1-screen2",

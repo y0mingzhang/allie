@@ -231,6 +231,9 @@ def create_model(cfg, device="cuda"):
             model.yarn.base_scale = cfg.head_dim**-0.5
         model.yarn.reset()
     model.use_x0, model.use_embed2 = arch["x0"], arch["embed2"]
+    model.aux_detach = (
+        VOCAB if arch["aux_detach"] else None
+    )  # aux head rows start at VOCAB
     model.softcap, model.use_key_offset = arch["softcap"], arch["key_offset"]
     for block in model.blocks:
         block.attn.qk_norm, block.attn.gates = arch["qk_norm"], arch["gates"]
