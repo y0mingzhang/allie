@@ -7,11 +7,30 @@ Improve human move prediction through inference-time methods using the model its
 starting with `r2-3e16-control-t20-w20-pf052h-s42`. No Stockfish or external value model.
 The small model is deliberate: optimize experiment speed and build reusable infrastructure.
 
-Provisional success: at least 0.01 nat lower expert macro CE than the same checkpoint's
-raw direct policy, with no clear overall macro CE regression, confirmed after method
-selection on separate development games. Report direct-policy calibration and legal-mask
-baselines separately, so their gains are not misattributed to search. Also report expert
-move accuracy, all 16 cell losses, calibration, and measured inference cost.
+Success (Yiming's latest instruction, 2026-09-18): one frozen inference method must
+achieve BOTH at least 2x golden macro training-equivalent CM AND at least 10x golden
+expert-macro training-equivalent CM over the same checkpoint's raw direct policy.
+Do not stop at the earlier 0.01-nat threshold. Select methods on separate development
+games before golden confirmation. Keep the base checkpoint and reference laws fixed
+when assessing these targets; changing either requires an explicit new comparison.
+Report direct-policy calibration and legal-mask baselines separately so their gains
+are not misattributed to search. Also report expert move accuracy, all 16 cell losses,
+calibration, and measured inference cost.
+
+For the initial checkpoint at ND=3e16, the frozen, vertically anchored independent
+isoflop laws imply these targets (conditional estimates, not empirical learning curves):
+- Macro: raw CE 1.5240077557 -> CE <= 1.4715234367 (gain >= 0.0524843190).
+- Expert macro: raw CE 1.4764288958 -> CE <= 1.2992929938 (gain >= 0.1771359021).
+Reference snapshots and calculations: results/search-v1/training-cm-laws.json and
+results/search-v1/goal-targets.json. Report law sensitivity and paired uncertainty;
+a point estimate alone is insufficient evidence of a robust improvement.
+
+Yiming requests training-equivalent CM whenever reporting results. For golden macro
+and expert macro, invert the corresponding frozen compute-optimal training law,
+anchored to this checkpoint's raw CE at its own training budget. Report total CM
+versus raw and incremental CM versus cheap calibration on that same curve. Label
+this a fitted training equivalence, distinct from measured inference cost. Do not
+convert development losses with a golden-evaluation law.
 
 Evaluation uses Claude's 16 format × mover-rating cells and four-cell expert macro.
 Do not tune against strat-eval-v1. Use the existing prepared dev/dev_expert splits for selection; split development
@@ -22,6 +41,7 @@ actual thinking time or actual game outcome when selecting candidates or allocat
 Resources: user explicitly permits one reasonably fast GPU and infrastructure work.
 Latest user instruction: maintain one long-running GPU session for fast iteration.
 Start with an eight-hour allocation; record all reserved GPU time, including idle time.
+Eight hours is an allocation/recovery boundary, not the new research stop condition.
 The earlier two-hour pilot limit is superseded, not charged to training budgets.
 Coordinate preempt capacity with Claude. Do not displace/cancel its jobs, alter its
 sources, mutate its datasets, or use the final-training compute pool. No model training.
@@ -47,9 +67,12 @@ job receipts and live Slurm state before submission; never duplicate a job. Resp
 /data/group_data/dei-group/yimingz3/allie/controller/STOP. A controller restart does not
 resume paused/completed work. Claude owns the main worktree's data/model goals.
 
-First-round stop rule, stated to user: finish when the golden target is confirmed
-or eight allocated GPU-hours are consumed. A search claim additionally requires
-an incremental win over the best cheap control with a paired game-level uncertainty
-estimate supporting improvement. If only masking/calibration helps, report it as
-such. End the round with a complete experiment and cost report; preliminary dev
-results do not establish completion.
+Stop condition: continue useful research until BOTH revised CM targets are confirmed,
+the user explicitly pauses/stops the work, or progress is blocked on required input
+or unavailable resources. Do not claim completion for exhausting an allocation or
+for a smaller gain. Before replacing an allocation, inspect jobs and cumulative
+usage and coordinate the single reserved GPU with Claude. A search claim additionally
+requires an incremental win over the best cheap control with a paired game-level
+uncertainty estimate supporting improvement. If only masking/calibration helps,
+report it as such. Preserve complete experiment and cost reports, including failures;
+preliminary development results do not establish completion.

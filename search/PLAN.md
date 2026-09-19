@@ -147,3 +147,29 @@ context in addition to the original100-ply limit; report any actual truncations.
 The resident service also supports causal full-document outputs. All128 probe
 root predictions are exactly unchanged when an extra legal move is appended,
 and compact float16 transport preserves the original BF16 logits exactly.
+
+## Revised success target and next checks (2026-09-18)
+
+Yiming now requires BOTH >=2x golden macro and >=10x golden expert training-equivalent
+CM. GOAL.md is authoritative; the previous 0.01-nat/eight-hour first-round stopping
+rule is superseded. This checkpoint needs approximately 0.0525 and 0.1771 nat CE
+improvements under the frozen anchored law. This is far beyond confirmed shallow
+search gains; do not imply that these gains or a completion ETA are established.
+
+The exact existing golden arrays are exposed by golden_data.py; a complete structural
+audit verifies every scored target, all 16 counts, game boundaries and SHA. No search
+golden scores have been used for selection. training_cm.py preserves the same raw
+anchor for both total and incremental CM and verifies its inversion numerically.
+
+The released adaptive MCTS and fit-budget-matched fixed52 comparisons are expanding
+to all 64,366 development confirmation positions. The two-ply reply-expectation
+pilot has selected beta4, all legal root moves and four policy-weighted opponent
+replies, with the unexpanded reply tail retaining the child's estimate. Its larger
+unchanged confirmation is queued behind MCTS. These are not fresh final holdouts
+across research rounds: reserve the untouched golden protocol for frozen choices.
+
+A separate strength-prompt pilot changes rating digits only, tests mixtures and
+contrastive strength logits, and uses the existing fit fold for selection. No golden
+or future human information enters these transformations. This cheap control found
+no fit-fold gain: its selected method is the unchanged legal policy at temperature1.
+Store that negative result rather than retuning on its confirmation fold.
