@@ -1,7 +1,8 @@
 """Publish the data baseline B_2 for the model track: results/recipe10x/data-v1-B2.json.
 
-usage: write_b2.py STUDY RUN_NAME
-Copies the chosen run's data/input/objective settings from its frozen plan, adds the per-budget
+usage: write_b2.py STUDY RUN_NAME [POLICY]
+Copies the chosen run's data/input/objective settings from its frozen plan (POLICY, if given,
+replaces its mixture policy; the ledger records why), adds the per-budget
 repetition-matched pool fractions (screen tokens / final tokens) and the hashes the model track pins.
 """
 
@@ -26,10 +27,11 @@ KEYS = (
 )
 
 
-def main(study, name):
+def main(study, name, policy=None):
     root = dataexp.ROOT / "results/recipe10x"
     plan = json.loads((root / study / "plan.json").read_text())
     run = next(r for r in plan["runs"] if r["name"] == name)
+    run = run | ({"policy": policy} if policy else {})
     counts = root / study / "history-counts.json"
     b2 = {k: run[k] for k in KEYS if k in run} | dict(
         source_study=study,
