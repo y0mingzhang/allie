@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import triton
-from modded_arch import extra_flops
+from modded_arch import attn_factor, extra_flops
 from modded_medium import (
     Config,
     TrainingManager,
@@ -82,6 +82,21 @@ def to_gpu(x):
     return torch.from_numpy(x).pin_memory().to("cuda", non_blocking=True)
 
 
+def moe_stats(manager):
+    """Per MoE layer: last step's max / mean and min / mean tokens per expert, experts under 10% of
+    the mean, dropped fraction, bias norm."""
+    if not manager.moe:
+        return {}
+    stats = torch.stack([m.stats for m in manager.moe]).tolist()
+    return dict(
+        moe_imbalance=[round(x[0], 3) for x in stats],
+        moe_min_load=[round(x[1], 3) for x in stats],
+        moe_starved=[int(x[2]) for x in stats],
+        moe_dropped=[round(x[3], 4) for x in stats],
+        moe_bias_norm=[round(m.bias.norm().item(), 4) for m in manager.moe],
+    )
+
+
 def useful_flops(rows, cfg, short_window, long_window):
     x = rows[:, :-1]
     pos = np.arange(x.shape[1])[None, :]
@@ -98,7 +113,7 @@ def useful_flops(rows, cfg, short_window, long_window):
     per_token = 24 * layers * d * d + 2 * d * 2432 + 2 * (gates * heads * 16 + 64)
     per_token += extra_flops(cfg.arch, d, layers)  # model-track branches (0 by default)
     pairs = (layers - long) * short_pairs + long * long_pairs
-    return 3 * (x.size * per_token + 4 * d * pairs)
+    return 3 * (x.size * per_token + 4 * d * pairs * attn_factor(cfg.arch))
 
 
 def main():
@@ -605,6 +620,7 @@ def main():
                     split_embed=model.split_embed,
                     windows=[manager.ws_short * 128, manager.ws_long * 128],
                     max_memory_gb=torch.cuda.max_memory_allocated() / 1e9,
+                    **moe_stats(manager),
                     **(
                         dict(
                             time_ce=(stats[3] / stats[4]).item(),

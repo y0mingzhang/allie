@@ -29,6 +29,8 @@ import triton.language as tl
 from torch import Tensor, nn
 
 from modded_arch import swiglu_hidden
+from modded_diffattn import diff_attention
+from modded_moe import MoE
 
 dynamo.config.recompile_limit = 64
 
@@ -1083,6 +1085,7 @@ class CausalSelfAttention(nn.Module):
         self.dim = dim
         self.hdim = num_heads * head_dim
         self.qk_norm = self.gates = True  # model-track ablations
+        self.diff = None  # modded_diffattn.DiffLambda: differential attention
 
         assert self.hdim == self.dim, "num_heads * head_dim must equal model_dim"
         std = self.dim**-0.5
@@ -1166,7 +1169,12 @@ class CausalSelfAttention(nn.Module):
         )
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
-        y = medium_attention(q, k, v, seqlens, bm_size, attn_scale)
+        attend = lambda q, k, v: medium_attention(q, k, v, seqlens, bm_size, attn_scale)
+        y = (
+            attend(q, k, v)
+            if self.diff is None
+            else diff_attention(q, k, v, self.diff(), self.diff.init, attend)
+        )
         y = y.view(B, T, self.num_heads, self.head_dim)
         gate = torch.sigmoid(
             self.attn_gate(x[..., : self.attn_gate.weight.size(-1)])
@@ -1228,10 +1236,12 @@ class Block(nn.Module):
         num_heads: int,
         layer_idx: int,
         mlp: str = "relu2",
+        moe: tuple | None = None,
     ):
         super().__init__()
         self.attn = CausalSelfAttention(dim, head_dim, num_heads, layer_idx)
-        self.mlp = MLP(dim, mlp)
+        # model track: MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
+        self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
     def forward(self, x: Tensor, attn_args: AttnArgs):
         x = x + self.attn(norm(x), attn_args)
@@ -1265,6 +1275,7 @@ class GPT(nn.Module):
         max_seq_len: int,
         mlp: str = "relu2",
         untie_ve: bool = False,
+        moe: tuple | None = None,
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -1295,7 +1306,10 @@ class GPT(nn.Module):
         for ve in self.value_embeds:
             ve.weight.label = "value_embed"
         self.blocks = nn.ModuleList(
-            [Block(model_dim, head_dim, num_heads, i, mlp) for i in range(num_layers)]
+            [
+                Block(model_dim, head_dim, num_heads, i, mlp, moe)
+                for i in range(num_layers)
+            ]
         )
         self.yarn = Yarn(head_dim, max_seq_len)
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
@@ -1649,9 +1663,13 @@ class TrainingManager:
             "embed2",
             "embed",
             "board",
+            "router",
+            "diff",
         ]
         scalar_labels = ["scalars"]
         muon_labels = ["attn_gate", "value_embed_gate", "attn", "mlp", "mlp_proj"]
+        muon_labels += ["moe", "mlp_shared"]
+        self.moe = [m for m in model.modules() if isinstance(m, MoE)]
         # model track: AdamW (base lr model.matrix_adam) for the attention / MLP matrices
         matrix_labels = (
             ["attn", "mlp", "mlp_proj"] if getattr(model, "matrix_adam", 0) else []
@@ -1795,6 +1813,9 @@ class TrainingManager:
                     opt.zero_grad(set_to_none=True)
                     if isinstance(opt, DistAdam):  # re-armed on the last micro-batch
                         opt.should_sync = False
+
+        for m in self.moe:
+            m.rebalance()
 
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()

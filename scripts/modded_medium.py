@@ -19,6 +19,7 @@ from torch.nn.attention.flex_attention import (
 )
 import modded_arch
 import modded_board
+import modded_diffattn
 import modded_medium_core as core
 from modded_runtime import prime_source_key
 
@@ -219,6 +220,7 @@ def create_model(cfg, device="cuda"):
         cfg.max_tokens,
         mlp=arch["mlp"],
         untie_ve=arch["untie_ve"],
+        moe=modded_arch.moe_dims(cfg.width, arch["moe"]),
     ).to(device)
     model.use_clock, model.use_elo = cfg.clock, cfg.elo
     model.use_feats = cfg.feats
@@ -255,6 +257,9 @@ def create_model(cfg, device="cuda"):
         m.weight.fp32_state = True
     if arch["board"]:
         model.board = modded_board.build(arch["board"], cfg.width).to(device)
+    if arch["diff_attn"]:
+        for i, block in enumerate(model.blocks):
+            block.attn.diff = modded_diffattn.DiffLambda(cfg.head_dim, i).to(device)
     model.use_value_embeds, model.use_skips, model.use_smear = (
         cfg.value_embeds,
         cfg.skips,

@@ -22,7 +22,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dataexp as dx
-from modded_arch import extra_flops
+from modded_arch import attn_factor, extra_flops
 
 ROOT = dx.ROOT
 B2 = ROOT / "results/recipe10x/data-v1-B2.json"
@@ -69,19 +69,21 @@ LANES = dict(
             1,
             1,
             f"""#SBATCH --account=dippolit
-#SBATCH --partition={lane}
+#SBATCH --partition={part}
 #SBATCH --qos={qos}
 #SBATCH --gres=gpu:1
-#SBATCH --constraint={FAST}
-#SBATCH --exclude=babel-x9-32
+#SBATCH --constraint={types}
+#SBATCH --exclude=babel-q9-32,babel-x9-32
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00""",
             share,
         )
-        for lane, qos, share in (
-            ("preempt", "preempt_qos", 8),
-            ("general", "normal", 4),
+        for lane, part, qos, types, share in (
+            ("preempt", "preempt", "preempt_qos", FAST, 8),
+            ("general", "general", "normal", FAST, 4),
+            # identity pilots: same GPU type as the reference runs (determinism is per type)
+            ("l40s", "preempt", "preempt_qos", "L40S", 2),
         )
     },
 )
@@ -117,7 +119,7 @@ def per_token(layers, width, head_dim=64, arch=None):
         24 * layers * width**2
         + 2 * width * 2432
         + 2 * (gates * (width // head_dim) * 16 + 64)
-        + 4 * width * layers * POS
+        + 4 * width * layers * POS * attn_factor(arch or {})
         + extra_flops(arch or {}, width, layers)
     )
 
@@ -249,8 +251,21 @@ SCREEN1 = {
 WAVES = {}
 
 
-def wave(key, study, prefix, runs, purpose, lane="dei", group=None):
-    """group: waves split across lanes share one set of controls in table()."""
+def wave(
+    key,
+    study,
+    prefix,
+    runs,
+    purpose,
+    lane="dei",
+    group=None,
+    pool_sources=None,
+    identity=None,
+):
+    """group: waves split across lanes share one set of controls in table(). pool_sources: the
+    study whose frozen sources pooled controls must match, for later tiers whose own sources differ
+    by new modules; identity: the pilot study whose identity.json (see identity()) proves this
+    code's default path bit-identical to those controls; plan() binds it into the study."""
     pack, gpus, sbatch, throttle = LANES[lane]
     WAVES[key] = dict(
         study=study,
@@ -262,6 +277,8 @@ def wave(key, study, prefix, runs, purpose, lane="dei", group=None):
         sbatch=sbatch,
         throttle=throttle,
         group=group or key,
+        pool_sources=pool_sources,
+        identity=identity,
     )
 
 
@@ -396,6 +413,47 @@ wave(
     "model-v1-smoke's base step for step (default-off identity)",
 )
 
+# tier 2: DeepSeek MoE at the dense MLP's active FLOPs (shared 2d + k experts of 2d / k, dense first
+# layer) and differential attention
+SCREEN2 = {
+    "moe32k4": dict(arch=dict(moe=[32, 4])),
+    "moe64k8": dict(arch=dict(moe=[64, 8])),
+    "diffattn": dict(arch=dict(diff_attn=True)),
+    # aux-head weights (user via main, 2026-09-19 ~03:30: an objective question, owned here; B_2 has
+    # think-time / W-D-L at 0.2 / 0.2, which cost 0.95x / 0.96x CM at 1e17; heads stay on unless
+    # CM < 0.9x, so the question is which weight); noaux is the cost reference
+    "aux0.1": dict(aux_time=0.1, aux_wdl=0.1),
+    "aux0.05": dict(aux_time=0.05, aux_wdl=0.05),
+    "noaux": dict(aux_time=0.0, aux_wdl=0.0),
+}
+wave(
+    "pilot2",
+    "model-v1-pilot2",
+    "mpil2",
+    [
+        r | dict(stop_after=[50, 300])
+        for r in variants(
+            "3e16",
+            b,
+            {"base": {}} | {k: SCREEN2[k] for k in ("moe32k4", "moe64k8", "diffattn")},
+        )
+    ],
+    "tier-2 sanity pilot on L40S: loss falls, no NaN, tokens/s vs base, MoE load not collapsed, "
+    "resume; base must match data-v1-round3g's B_2 s42 (L40S, same B_2) at common steps",
+    "l40s",
+)
+wave(
+    "screen2",
+    "model-v1-screen2",
+    "m2",
+    variants("3e16", b, SCREEN2),
+    "model screen 1, tier 2 at 3e16 on pinned B_2, trainer-FLOP matched: MoE x 2, diff attention, "
+    "aux-head weights 0.1 / 0.05 / 0",
+    "preempt",
+    pool_sources="model-v1-screen1g",
+    identity="model-v1-pilot2",
+)
+
 
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
@@ -424,11 +482,10 @@ def frozen_files(commit=None):
     if commit:
         names = git("ls-tree", "-r", "--name-only", commit, "scripts").decode().split()
         read = lambda n: git("show", f"{commit}:{n}")
-    else:
-        names = [
-            f"scripts/{p.name}" for p in (ROOT / "scripts").iterdir() if p.is_file()
-        ]
-        read = lambda n: (ROOT / n).read_bytes()
+    else:  # this checkout (a worktree)
+        here = Path(__file__).resolve().parent
+        names = [f"scripts/{p.name}" for p in here.iterdir() if p.is_file()]
+        read = lambda n: (here.parent / n).read_bytes()
     keep = ("lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py")
     keep += ("board_encode.cpp", "move-table.json")  # modded_board's encoder (Codex)
     out = {
@@ -479,6 +536,14 @@ def plan(key, commit=None):
             assert json.loads(p.read_text()).get("hashes") == hashes, (
                 f"{k} froze other files"
             )
+    if w["pool_sources"]:
+        proof = json.loads(
+            (ROOT / "results/recipe10x" / w["identity"] / "identity.json").read_text()
+        )
+        mine = {k: v for k, v in hashes.items() if k.startswith("source-ours/")}
+        assert proof["equal"] and all(proof["checks"].values()), proof["checks"]
+        assert proof["sources"] == mine, "identity proof is for other code"
+        assert proof["b2"] == hashes["b2"] and proof["reference"] == w["pool_sources"]
     study = ROOT / "results/recipe10x" / w["study"]
     assert not study.exists(), "never overwrite a frozen study"
     for d in ("source-ours", "evaluator-ours", "logs", "results"):
@@ -486,6 +551,11 @@ def plan(key, commit=None):
     for rel, data in files.items():
         (study / rel).write_bytes(data)
     shutil.copy2(history_file(), study / "history-counts.json")
+    if w["pool_sources"]:
+        shutil.copy2(
+            ROOT / "results/recipe10x" / w["identity"] / "identity.json", study
+        )
+        hashes["identity.json"] = sha(study / "identity.json")
     runs = [planned(w, r) for r in w["runs"]]
     for r in runs:
         if r["v"] == "base":
@@ -626,6 +696,65 @@ def trainer_sources(src):
     return {n: sha(src / n) for n in names}
 
 
+def identity(key, control_study, control, reference):
+    """Bit-identity proof that a pilot's default path is the reference study's: the pilot's base run
+    and the control run (data track, same B_2, same GPU type) log equal train_ce at every 25th step
+    through the pilot's last leg (past the embedding split and the resume); the control's executed
+    numerics equal the pilot base's, its trainer sources and evaluator are the reference study's,
+    and its study, result and the pilot share one B_2. Written to <pilot study>/identity.json."""
+    R = ROOT / "results/recipe10x"
+    study, cs, ref = R / WAVES[key]["study"], R / control_study, R / reference
+    plan = json.loads((study / "plan.json").read_text())
+    base = next(r for r in plan["runs"] if r["v"] == "base")
+    runs = [ROOT / "results/pretrain" / n for n in (base["name"], control)]
+    cfg = [json.loads((d / "config.json").read_text()) for d in runs]
+    rec = [
+        {
+            r["step"]: r["train_ce"]
+            for r in map(json.loads, open(d / "train.jsonl"))
+            if "train_ce" in r
+        }
+        for d in runs
+    ]
+    steps = list(range(25, base["stop_after"][-1] + 1, 25))
+    result = json.loads((cs / "results" / f"{control}.json").read_text())
+    control_b2 = json.loads((cs / "plan.json").read_text()).get("b2_sha256")
+    checks = dict(
+        steps=all(s in rec[0] and s in rec[1] for s in steps),
+        train_ce=all(rec[0].get(s) == rec[1].get(s) for s in steps),
+        numerics=numerics(cfg[0]["args"]) == numerics(cfg[1]["args"]),
+        control_sources=cfg[1]["source_sha256"] == trainer_sources(ref / "source-ours"),
+        control_evaluator=all(
+            sha(cs / "evaluator-ours" / f) == sha(ref / "evaluator-ours" / f)
+            for f in EVALUATOR
+        ),
+        b2=control_b2 == result.get("b2_sha256") == plan["hashes"]["b2"],
+        fresh=not cfg[1].get("continuation_provenance")
+        and not any(
+            cfg[1]["args"].get(k) for k in ("wsd_fork_from", "wsd_continue_from")
+        ),
+    )
+    proof = dict(
+        equal=all(checks.values()),
+        checks=checks,
+        steps=steps,
+        train_ce=[[rec[0].get(s), rec[1].get(s)] for s in steps],
+        runs=[base["name"], control],
+        control_study=control_study,
+        reference=reference,
+        logs_sha256=[sha(d / "train.jsonl") for d in runs],
+        jobs=[
+            c["job_id"] for c in cfg
+        ],  # pilot lane l40s; round3g's B_2 s42 ran on general L40S
+        sources={
+            k: v for k, v in plan["hashes"].items() if k.startswith("source-ours/")
+        },
+        b2=plan["hashes"]["b2"],
+    )
+    (study / "identity.json").write_text(json.dumps(proof, indent=2) + "\n")
+    print("identity", proof["equal"], checks)
+
+
 def pooled_controls(study, controls):
     """Data-track B_2 runs usable as this model study's controls: identical executed numerics (vs
     this study's base-equivalent run), trainer source hashes, evaluator files, B_2 (the control
@@ -640,8 +769,13 @@ def pooled_controls(study, controls):
             "the loaded B_2 is not the one this study froze"
         )
         want = numerics(parse(train_args(study, base)))
-        mine_src = trainer_sources(study / "source-ours")
-        mine_ev = {f: sha(study / "evaluator-ours" / f) for f in EVALUATOR}
+        ref = (
+            ROOT / "results/recipe10x" / w["pool_sources"]
+            if w["pool_sources"]
+            else study
+        )
+        mine_src = trainer_sources(ref / "source-ours")
+        mine_ev = {f: sha(ref / "evaluator-ours" / f) for f in EVALUATOR}
         for c in controls:
             cs = ROOT / "results/recipe10x" / c
             ev = {f: sha(cs / "evaluator-ours" / f) for f in EVALUATOR}
@@ -824,6 +958,8 @@ def table(*keys, controls=()):
             pooled[g] = pooled_controls(
                 ROOT / "results/recipe10x" / WAVES[key]["study"], controls
             )
+    for g, group_rows in pooled.items():
+        print(f"pooled for {g}:", ", ".join(r["name"] for r in group_rows))
     rows += [r for group_rows in pooled.values() for r in group_rows]
     out = {}
     for metric, field in (("strat_macro", "macro"), ("strat_expert", "expert_macro")):
@@ -865,6 +1001,10 @@ def table(*keys, controls=()):
             for f in ("macro", "expert_macro")
         )
         print(f"| {study} | {b2} | {budget} | {v} | {m['flops']:.3f} | {cells} |")
+    print(
+        "FLOPs are nominal: MoE counts k executed experts per token; routes dropped over capacity in "
+        "training do no MLP work (their rate is train.jsonl moe_dropped)"
+    )
 
 
 if __name__ == "__main__":
@@ -881,5 +1021,9 @@ if __name__ == "__main__":
         )
     elif cmd == "plan":  # plan WAVE [COMMIT]
         plan(*rest)
+    elif (
+        cmd == "identity"
+    ):  # identity PILOT_WAVE CONTROL_STUDY CONTROL_RUN REFERENCE_STUDY
+        identity(*rest)
     else:
         dict(submit=submit, task=task, status=status)[cmd](rest[0])
