@@ -87,6 +87,14 @@ def main():
     if d:
         table('Cached engine verification on the same small development check; coefficients frozen before the port.',
               [(name,x['ce'],x['expert_ce'],None,None) for name,x in d['methods'].items()])
+    d=read('mcts1000-pilot/results.json')
+    if d:
+        table('MCTS budget extension: 1,000 simulations per position; fit on fold0, report on the same small dev fold1. Higher node cost than the original 50-simulation baseline.',
+              [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    d=read('depth6-pilot/results.json')
+    if d:
+        table('Six-ply continuation extension: same development folds, every horizon and the predeclared deep/shallow-disagreement correction reported.',
+              [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
     d=read('golden-v1/results.json') or read('golden-baseline/results.json')
     if d:
         table('Exact golden evaluation: 16-cell macro CE and four-cell expert macro CE; 1,553,058 scored moves.',

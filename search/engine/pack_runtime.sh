@@ -8,7 +8,7 @@ exec 9>"$ARCHIVE.lock"
 flock -n 9 || exit 0
 [[ ! -f "$ARCHIVE.sha256" ]] || exit 0
 START=$(date +%s)
-tar --exclude='__pycache__' -C "$SOURCE" -cf - . | zstd -T2 -1 -f -o "$ARCHIVE.partial"
+/usr/bin/python3 -B -m search.engine.pack_runtime "$SOURCE" | zstd -T2 -1 -f -o "$ARCHIVE.partial"
 mv "$ARCHIVE.partial" "$ARCHIVE"
 sha256sum "$ARCHIVE" > "$ARCHIVE.sha256.partial"
 mv "$ARCHIVE.sha256.partial" "$ARCHIVE.sha256"

@@ -29,7 +29,7 @@ def metrics(p,rows):
 
 def freeze():
     out=ROOT/'golden-balanced-v1';plan=json.loads((out/'plan.json').read_text())
-    files=[Path(__file__), *[Path(__file__).with_name(f) for f in ('tree.py','direct.py','native_mcts.py','mcts.py','adaptive_pilot.py','adaptive_policy.py','policy.py','native_board.py')],Path(__file__).with_name('model.py'),Path(__file__).parent/'sglang_models/allie.py']
+    files=[Path(__file__), *[Path(__file__).with_name(f) for f in ('tree.py','direct.py','startup_env.py','native_mcts.py','mcts.py','adaptive_pilot.py','adaptive_policy.py','policy.py','native_board.py')],Path(__file__).with_name('model.py'),Path(__file__).parent/'sglang_models/allie.py']
     native=ROOT/'runtime/native'
     frozen=dict(plan_sha256=digest(out/'plan.json'),sample_sha256=digest(out/'sample.json'),direct_control_sha256=digest(out/'direct-control.json'),
                 source_sha256={str(p.relative_to(Path(__file__).parent)):digest(p) for p in files},

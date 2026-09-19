@@ -1,5 +1,7 @@
 """Per-cell paired difference estimates and whole-game uncertainty; no selection."""
+import hashlib
 import json
+import time
 from pathlib import Path
 import sys
 import numpy as np
@@ -27,6 +29,7 @@ def bootstrap_deltas(deltas,cells,games,repeats=2000,seed=919381):
 
 
 def main():
+    start=time.monotonic()
     sample=json.loads((OUT/'sample.json').read_text());rows=sample['positions'];n=len(rows)
     baseline=json.loads((ROOT/'golden-baseline/results.json').read_text())['methods']
     cells=np.array([r['cell'] for r in rows]);games=np.array([r['game'] for r in rows]);expert=np.arange(3,16,4)
@@ -71,6 +74,8 @@ def main():
                   macro_ci95=ci(draws.mean(1)),expert_macro_ci95=ci(draws[:,expert].mean(1)),
                   macro_accuracy=canonical['macro_accuracy']+float(cellmean(acc_delta[:,i],cells).mean()),
                   expert_macro_accuracy=canonical['expert_macro_accuracy']+float(cellmean(acc_delta[:,i],cells)[expert].mean()),
+                  macro_accuracy_ci95=ci(canonical['macro_accuracy']+boot[:,:,len(names)+i].mean(1)),
+                  expert_macro_accuracy_ci95=ci(canonical['expert_macro_accuracy']+boot[:,expert,len(names)+i].mean(1)),
                   sample_macro_ece=float(np.mean(ece)),sample_expert_ece=float(np.mean(np.array(ece)[expert])),
                   cells={c:dict(ce=float(point[j]),ci95=ci(draws[:,j]),sample_ce=float(ordinary[j]),sample_ece=float(ece[j]),
                                   delta_vs_legal=float(point[j]-anchored[j,legal_i]),
@@ -98,7 +103,8 @@ def main():
                 timing=dict(summed_four_ply_block_seconds=sum(c['seconds'] for c in cost if c['kind']=='tree'),
                             summed_two_MCTS_block_seconds=sum(c['seconds'] for c in cost if c['kind']=='mcts'),
                             note='Two-ply and cheap policies reuse four-ply/root predictions; standalone costs are measured separately on development data.'),
-                runtime=json.loads((OUT/'runtime.json').read_text()),execution=json.loads((OUT/'execution.json').read_text()))
+                runtime=json.loads((OUT/'runtime.json').read_text()),execution=json.loads((OUT/'execution.json').read_text()),
+                analysis_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),analysis_seconds=time.monotonic()-start)
     tmp=OUT/'results.partial';tmp.write_text(json.dumps(report,indent=2)+'\n');tmp.replace(OUT/'results.json')
     for k,v in methods.items():print(k,*(round(v[x],6) for x in ('macro','expert_macro','macro_training_eq_cm','expert_macro_training_eq_cm')),flush=True)
 

@@ -22,7 +22,7 @@ class DirectOracle:
         os.environ['SGLANG_DISABLED_MODEL_ARCHS']=','.join(p.stem for p in (package/'srt/models').glob('*.py'))
         os.environ.pop('ALLIE_BINARY_OUTPUT',None)
         from sglang.srt.server_args import ServerArgs,PortArgs
-        from sglang.srt.entrypoints.engine import _set_envs_and_config
+        from .startup_env import setup as _set_envs_and_config
         from sglang.srt.configs.model_config import ModelConfig
         from sglang.srt.model_executor.model_runner import ModelRunner
         from sglang.srt.layers.moe import initialize_moe_config

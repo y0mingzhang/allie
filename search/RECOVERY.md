@@ -90,3 +90,33 @@ Claude focused tier1 review is DONE. Inspected fixes for actual pooled-control B
 continuation provenance rejection and board meta matmul MACs. Exact same-run resumes
 are allowed. Launch still requires its real smoke5 identity/resume pass. MoE/diffattn
 remain a separate unreviewed delta. No main files were edited by us.
+
+After012:013-packed-plumbing is an experimental CPU/batching fast path, with exact
+logit/slot-map parity followed by repeated timings; it always restores the old runner.
+It does not alter the frozen golden computation.014-mcts1000 and015-depth6 are
+subsequent DEV-ONLY research, preregistered before opening first golden results:
+fixed/repaired MCTS1000 (128 roots/batch), six-ply continuation widths4,2,2,2,2
+(16 roots/batch). Analyze on original fit/confirmation game folds; never apply
+these dev losses to golden CM laws. These research tasks use only our existing GPU.
+Runtime archive builder now uses bounded parallel small-file reads (pack_runtime.py),
+excluding packaged tests and pycache; source code/libraries/metadata stay unchanged.
+
+05:13UTC startup amendment: oldPID1046638 was still in cold NFS imports after20min,
+not scoring. Replaced ONLY our engine pane; currentPID1097060. direct.py now executes
+the exact hash-checked SGLang setup function through startup_env.py, avoiding the
+full scheduler/tokenizer/multimodal import dependency. No model/search math changed.
+Golden execution was explicitly re-frozen before ANY method scores; original preserved
+as execution.before-startup-opt.json with startup-amendment.json. Plan/sample hashes
+unchanged. Queue011 parity is still mandatory. All requests restored; no newSlurmjob.
+Dev analyzers run in independent tmux window dev-report after014/015, then updateREPORT.
+Next experiment rationale is search/NEXT.md. Own source commits must survive restart.
+
+Controller requeue is imminent (~05:25UTC). Commit everything; all GPU tasks survive.
+Runtime archive packs ordinary packages but represents flashinfer_cubin/cubins as a
+symlink to its unchanged durable source (tens of thousands of unused architecture-
+specific binaries caused slow packing). All binaries remain available; local archive
+contents and linkage are checksummed. This made packing much faster.
+GPU tmux window runtime-cache runs recover_cache.sh: waits for the archive checksum,
+stages locally, then replaces ONLY a still-not-ready engine. If the engine is already
+ready, it leaves it alone. Never interrupt scoring for a runtime switch. The archive
+builder remains controller-local and needs restart after reboot if incomplete.
