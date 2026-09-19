@@ -579,6 +579,21 @@ WAVES["round3s"] = WAVES["round3g"] | dict(
     "vs r3g's B_2 1e17; same sources and merged history as round3x",
 )
 
+WAVES["round3x4"] = WAVES["round3x2"] | dict(
+    study="data-v1-round3x4",
+    prefix="r3x4",
+    throttle=2,
+    runs=r3(
+        b2("3e16", "mover_rule+up4+otb_x4+engine_x4")
+        + b2("3e16", "mover_rule+up4+nootb+engine_x4", seeds=(43,)),
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="round 3 stack at 3e16: B_2 + OTB x4 + engine x4 (engine x4 passes narrowly, z +1.1 / -1.7; its "
+    "leave-one-outs are the two single-source screens), and engine x4 seed 43",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
