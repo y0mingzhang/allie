@@ -61,8 +61,17 @@ while true; do
         [[ -s $project/scripts/claude-kickstart.txt ]] &&
             kick=("$(cat "$project/scripts/claude-kickstart.txt")")
         tmux -L "$socket" -f /dev/null new-session -d -s claude -x 160 -y 48 -c "$project" \
+            -e PHONE_A_FRIEND_THREAD="$thread" \
             "$claude" --resume "$session" --dangerously-skip-permissions \
+            --dangerously-load-development-channels server:phone-a-friend \
             --remote-control allie "${kick[@]}"
+        # Development channels always ask for confirmation.
+        for _ in {1..30}; do
+            tmux -L "$socket" capture-pane -p -t claude 2>/dev/null |
+                grep -q 'I am using this for local development' &&
+                { tmux -L "$socket" send-keys -t claude Enter; break; }
+            sleep 1
+        done
     fi
     # Background wait lets the shell handle Slurm signals immediately.
     sleep 60 & wait $! || true

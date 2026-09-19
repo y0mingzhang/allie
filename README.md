@@ -137,7 +137,7 @@ The training stack is cluster-specific. Ours uses the pinned PyTorch 2.10.0+cu12
 
 `scripts/prepare_tiny_scaling.py` records the exact training commands and freezes sources. Existing study directories are immutable; rerunning preparation must not overwrite completed runs. Resume historical checkpoints with their frozen source and runtime, not a newly edited working tree. `scripts/stage_corpus.py` restores a verified node-local cache from durable data. `scripts/budget.py ledger` reports cumulative Slurm usage.
 
-No training run is currently active. [GOAL.md](GOAL.md) records the research state; [CONTROLLER.md](CONTROLLER.md) describes the running controller. Cleanup does not authorize a new training run.
+IsoFLOP v1 (ours vs chess-v2 Qwen, 26 runs, 3e16–3e17) is complete: `results/recipe10x/isoflop-v1/RESULTS.md` supersedes the scaling fit above. [GOAL.md](GOAL.md) records the research state; [CONTROLLER.md](CONTROLLER.md) describes the running controller. Cleanup does not authorize a new training run.
 
 Next hypothesis discussed: change expert sampling proportions at fixed compute. A prior 3× expert loss-weighting trial at 128M/470M tokens worsened both overall and expert CE; it did not test additional expert-example exposure. No new mixture experiment has been launched.
 

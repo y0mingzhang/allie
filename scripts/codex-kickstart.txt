@@ -1,5 +1,5 @@
 This is the Allie Slurm controller restarting. Read the latest user messages,
-GOAL.md, BIG_RUN.md and CONTROLLER.md before acting. Preserve the current goal
+GOAL.md and CONTROLLER.md before acting. Preserve the current goal
 status: a restart does not resume a blocked/completed goal or authorize training.
 Read /data/group_data/dei-group/yimingz3/allie/controller/STOP before new work.
 Inspect live Slurm jobs, checkpoints, data and the cumulative ledger before any
