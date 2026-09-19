@@ -114,6 +114,42 @@ class BoardDirect(nn.Module):
         return features(states, dtype) @ self.weight.type(dtype) / 8
 
 
+class Conv3(torch.autograd.Function):
+    """3x3 same-padded conv on 8x8 boards. cuDNN's weight gradient for this shape (a reduction over
+    every square of every board into a tiny kernel) picks a slow kernel, 14 of the encoder's 21 ms on
+    an A6000. Here boards are zero-padded to 10 x 10 and flattened, so kernel offset (i, j) is a row
+    shift of 10 i + j of one flat (rows x C) matrix against the padded gradient: 9 copy-free GEMMs,
+    split along the rows (the O x C output is a single tile) and summed in FP32."""
+
+    @staticmethod
+    def forward(ctx, x, w):
+        ctx.save_for_backward(x, w)
+        return F.conv2d(x, w, padding=1)
+
+    @staticmethod
+    def backward(ctx, g):
+        x, w = ctx.saved_tensors
+        gx = torch.nn.grad.conv2d_input(x.shape, w, g, padding=1)
+        (t, c), o = x.shape[:2], g.shape[1]
+        c8, split = -c % 8, 1024  # GEMM alignment; row chunks
+        rows = -(-(t * 100) // split) * split  # all gradient rows, rounded up to whole chunks
+        extra = -(-(rows + 22) // 100) - t  # zero boards covering the rounding and the 22-row shift
+        xp = F.pad(x.permute(0, 2, 3, 1), (0, c8, 1, 1, 1, 1, 0, extra)).reshape(-1, c + c8)
+        gp = F.pad(g.permute(0, 2, 3, 1), (0, 0, 0, 2, 0, 2, 0, extra)).reshape(-1, o)
+        gm = gp[:rows].view(split, -1, o).transpose(1, 2)
+        gw = torch.stack(
+            [
+                torch.bmm(gm, xp[10 * i + j : 10 * i + j + rows].view(split, -1, c + c8))
+                .float()
+                .sum(0)
+                for i in range(3)
+                for j in range(3)
+            ],
+            -1,
+        )
+        return gx, gw[:, :c].reshape_as(w).to(w.dtype)
+
+
 class BoardConv(nn.Module):
     """Codex's BoardConv: 13 planes -> 3x3 conv 32 -> 2 residual 3x3 convs -> 1x1 squeeze 8 ->
     concat side / castling / en-passant embedding -> layer norm -> zero-init linear."""
@@ -139,9 +175,9 @@ class BoardConv(nn.Module):
             .reshape(-1, 8, 8, 13)
             .permute(0, 3, 1, 2)
         )
-        x = F.gelu(F.conv2d(x, self.first.type(dtype), padding=1), approximate="tanh")
+        x = F.gelu(Conv3.apply(x, self.first.type(dtype)), approximate="tanh")
         for w in self.residual:
-            x = x + F.gelu(F.conv2d(x, w.type(dtype), padding=1), approximate="tanh")
+            x = x + F.gelu(Conv3.apply(x, w.type(dtype)), approximate="tanh")
         x = F.conv2d(x, self.squeeze.type(dtype)).flatten(1)
         m = meta(states).to(dtype) @ self.meta.type(dtype)
         x = F.layer_norm(torch.cat((x, m), -1), (544,))

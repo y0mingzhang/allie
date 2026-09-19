@@ -128,6 +128,7 @@ def main():
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
+    p.add_argument("--profile", type=int, default=0, help="profile this step (CUDA kernels) into the log")
     p.add_argument("--resume")
     p.add_argument("--data", default="/scratch/yimingz3/allie/lichess_tokens_v2")
     p.add_argument(
@@ -527,6 +528,9 @@ def main():
     stop_reason = "steps"
     step = first
     for index in range(first, total_steps):
+        if a.profile and index + 1 == a.profile:
+            prof = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA])
+            prof.__enter__()
         manager.advance_schedule(index)
         accum = manager.batch_size // (world * a.micro_batch * 1024)
         assert accum > 0 and accum * world * a.micro_batch * 1024 == manager.batch_size
@@ -585,6 +589,11 @@ def main():
             window_tokens += rows.shape[0] * world * 1024
         manager.step_optimizers(index)
         step = index + 1
+        if a.profile and step == a.profile:
+            torch.cuda.synchronize()
+            prof.__exit__(None, None, None)
+            if rank == 0:
+                print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=40), flush=True)
         if step % 25 == 0 or step == total_steps:
             stats = torch.cat(
                 (
