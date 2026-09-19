@@ -1,6 +1,7 @@
 // Causal two-stage quota allocation on independent root-action trace prefixes.
 // No target moves or future value observations enter the allocation.
 #include "diff_backup.cpp"
+#include <pybind11/stl.h>
 struct Replay {
  std::vector<int> parent,born,roots,move,owner,branch,terminal_count;
  std::vector<double> terminal;
