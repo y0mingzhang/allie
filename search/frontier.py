@@ -114,7 +114,9 @@ def main():
             append('expanded_stack_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds']))
     for study, names in [('golden-conditional-mixture-v1', ('state0.01','all0.001')),
                          ('golden-temperature-stack-v1', ('temperature',)),
-                         ('golden-value-of-compute-v1', ('fixed512','elo0.01','state0.1'))]:
+                         ('golden-value-of-compute-v1', ('fixed512','elo0.01','state0.1')),
+                         ('golden-activation-v1', ('activation_h8_step1','activation_h8_step16','old_cosine_h8')),
+                         ('golden-time-allocation-v2', ('fixed512','predicted_time','shuffled_time'))]:
         path=ROOT/study/'results.json'
         if path.exists():
             d=json.loads(path.read_text())
@@ -134,9 +136,11 @@ def main():
                  'MCTS50 seconds measure traversal; MCTS1000/four-ply include root evaluation. Two-ply standalone golden wall time was not measured.',
                  'Original blocks lack per-root counts; August-selected curves include expert node costs in frontier.json and their source report.',
                  'August-selected snapshot timings include earlier backup extraction, not standalone method benchmarks; node counts determine this frontier.',
+                 'Live time-allocation-v2 charges an additional full-root prepass to each arm:0.564s/431507tokens over8192 positions, on top of listed per-method timing; root queries are separate from nonroot node count.',
                  'CM intervals and law-shape sensitivity remain in the source reports.'])
     result['caveats'].extend(['Cached routers represent prefix stopping on the same trees. Live routing changes inference batching; its separate row verifies actual execution.',
         'Node counters count logical nonterminal neural requests per position. Exact-prefix requests may deduplicate within batches; actual unique requests are also reported for live routing.',
+        'Activation/history methods add one full-prefix query to their logical node cost; prefix tokens and head projections are in the study report, so node count alone understates their incremental work.',
         'This golden sample has been reused; every scored method is listed in GOLDEN_METHODS.md. A final success claim requires fresh confirmation.'])
     path = ROOT / 'frontier.json'
     tmp = path.with_suffix('.partial'); tmp.write_text(json.dumps(result, indent=2)+'\n'); tmp.replace(path)

@@ -5,12 +5,12 @@ Status: active, explicitly resumed by Yiming on 2026-09-19 after the usage reset
 
 Current work: inference infrastructure is operational. Resume the existing10x/10x
 search goal with batched experiment execution and reporting. One preempt GPU
-(workbench10503413) while general is reserved for Claude; max8h, permit shorter
-backfill. The previous pause is superseded by the explicit user instruction.
+(workbench10503413) while general is reserved for Claude; actual54min backfill
+ends18:03:51UTC. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
 All prior compute charges and fixed-checkpoint targets remain unchanged.
 
-Current priority (Yiming, 2026-09-19 UTC): build a fast, hackable SGLang inference
-port before more search experiments. Latest refinement: make MCTS throughput per
+Infrastructure milestone completed: fast hackable SGLang inference port.
+Current priority: algorithm research and fair cost/quality comparisons. Latest refinement: make MCTS throughput per
 evaluated node comparable to four-ply by batching independent roots, including CPU
 tree overhead. After infrastructure, compare corrected adaptive MCTS with the released
 algorithm and continuation expectation at matched compute; isolate predicted-time
@@ -78,13 +78,11 @@ winner and obtain fresh confirmation with disjoint evaluation games and the same
 and its baseline anchor explicitly instead of silently treating a changed frame as
 the identical full-population control-variate estimate. Preserve current goal targets.
 
-Resources: user explicitly permits one reasonably fast GPU and infrastructure work.
-Latest allocation (2026-09-19 ~04:51UTC, relayed by Claude): ONE general/normal GPU,
-currently L40S, taken from the data track share, within the shared8-normal-GPU cap.
-Yiming permits a faster available accelerator; compare end-to-end throughput and
-startup cost before migrating. Optimize CPU tree/batching and I/O overhead as well. Keep only one
-GPU. Pending preempt replacement10498656 was cancelled; current10498670 replaces
-preempted10497511. All previous usage remains charged.
+Resources: ONE reasonably fast persistent preempt GPU while general is reserved
+for Claude's training/benchmark. Current workbench10503413 replaces timed-out
+10498670. Keep all prior charges. User permits infrastructure work and a faster
+available accelerator; compare end-to-end cost before migrating. Never exceed
+one GPU or displace peers. Coordinate the shared preempt cap with Claude.
 Latest user instruction: maintain one long-running GPU session for fast iteration.
 Start with an eight-hour allocation; record all reserved GPU time, including idle time.
 Eight hours is an allocation/recovery boundary, not the new research stop condition.

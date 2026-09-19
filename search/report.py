@@ -87,7 +87,13 @@ def main():
                          ('aug-value-geometry-v1','Expanded August internal value geometry and uncertainty-temperature backups; both CV metrics select unchanged forward backup.'),
                          ('aug-header-adaptation-v1','Expanded August latent Elo-gap adaptation from strictly past own moves; small uncertain gain, not promoted.'),
                          ('aug-action-calibration-v1','Expanded August rule-derived action-class calibration; uncertain gains, not promoted.'),
-                         ('aug-layer-lens-v1','Expanded August intermediate-layer readout contrasts; CV selects mature-only calibration control, no layer gain.')]:
+                         ('aug-layer-lens-v1','Expanded August intermediate-layer readout contrasts; CV selects mature-only calibration control, no layer gain.'),
+                         ('aug-activation-adaptation-v1','Expanded August strictly causal frozen-head activation correction; both CV choices and residual controls, CM pending golden.'),
+                         ('aug-activation-ridge-v1','Expanded August ridge-decorrelated past-hidden correction; scalar fit and separate confirmation; no golden promotion.'),
+                         ('aug-critic-transpositions-v1','Expanded August equivalent-history WDL mean/median, actual human policy unchanged. CV selects parent; no promotion.'),
+                         ('aug-time-allocation-v2','Reused August development: updated predicted-time budget allocation, fixed and within-cell shuffled controls. Cached-prefix screen, independent game folds.'),
+                         ('aug-budget-reverse-v1','Reused August development: reverse-KL root output inside current calibrated strength mixture. Same trees/Q, independently refitted output; loses at every budget.'),
+                         ('aug-tactical-v1','Reused August development: bounded rule-directed capture/promotion/check-evasion extensions, no external evaluator; strict node/depth caps and refitted residual output.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
@@ -237,7 +243,9 @@ def main():
                        ('golden-player-search-v1/results.json','Frozen static and past-choice-adapted search-strength mixtures; existing root trees plus new past-only queries. Total node cost includes both; reused golden.'),
                        ('golden-adaptive-temperature-v1/results.json','August-selected subtree-dependent soft backup, identical live1000 trees and nodes as its constant control; reused golden sample.'),
                        ('golden-utilities-v1/results.json','August-selected utility normalization on identical golden trees; zero additional model queries.'),
-                       ('golden-permutation-v1/results.json','Numerical sensitivity audit: same frozen router, different fixed position order. Neither order is selected by quality.')]:
+                       ('golden-permutation-v1/results.json','Numerical sensitivity audit: same frozen router, different fixed position order. Neither order is selected by quality.'),
+                       ('golden-time-allocation-v2/results.json','Live fixed/predicted-time/shuffled-time allocation with modern search. All3 preregistered; extra root prepass separately charged; reusedgolden.'),
+                       ('golden-activation-v1/results.json','Frozen past-move activation correction and old-residual control. All three preregistered arms; one added full-prefix query, reused golden, uncertain expert gain.')]:
         d=read(path)
         if d:
             table(title,[(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
