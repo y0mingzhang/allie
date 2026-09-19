@@ -75,3 +75,26 @@ and search separately. Do not attribute a numerical baseline change to search.
 
 Persistent allocation 10497511 is live on one RTX6000Ada. The initial 2,048-position
 root/top-eight-child cache completed; CPU fitting uses fold0 and reports on fold1.
+
+## First pilot result and expanded confirmation
+
+On the fixed development confirmation fold (1,050 sampled positions), canonical
+raw expert CE was 1.505234; legal masking gave 1.495676; the fit-selected one-ply
+correction (temperature1, beta2, top8, no time gate) gave 1.492570. Paired game-bootstrap
+95% interval for its incremental expert CE change vs legal calibration was
+[-0.007996,+0.001695], so this screen does not establish an incremental search win.
+Expert top1 accuracy was slightly worse. The settings are frozen in selected.json.
+
+Expanded confirmation: confirm.py applies those unchanged settings to all prepared
+fold1 development positions. It does no parameter search. Per-batch metrics, the
+fixed plan and resumable prediction caches live under results/search-v1/confirmation.
+These are development results, not the exact golden macro metrics.
+
+Transport: durable filesystem polling introduced several seconds per request due to
+shared-storage metadata visibility. rpc.py now serves authenticated HTTP directly
+from the resident process. Tokens are kept in an untracked mode0600 file and never
+printed. A transport-only restart verified exact equality with all 128 first-batch
+cached root predictions. It preserves those original artifact identities and writes
+the new service identity separately. Expanded confirmation now advances roughly
+2,560 positions per 7–13 seconds after startup; use recorded timings, not this
+informal rate, in final inference-cost reporting.

@@ -41,3 +41,16 @@ Queue requests and outputs are durable. Completed requests are not retried; requ
 interrupted by server restart are recovered. Check .done.json/.error.txt before retrying.
 The server will retain its GPU while idle, and all allocation time is charged.
 Writing results/search-v1/STOP releases only this workbench, not other Slurm jobs.
+
+Fast transport: server-ready.json includes the allocated host's HTTP URL. The client
+in confirm.py sends authenticated JSON prefixes and receives NumPy logits directly,
+optionally only requested columns. The token stays in results/search-v1/rpc-token
+(mode0600). Do not print or commit it. The filesystem request queue remains a recovery
+fallback. Use `bash search/worker.sh --serve-only` to restart the service without
+regenerating the completed pilot: it checks semantic identity and exact cached-root
+parity before exposing the server.
+
+Expanded confirmation command:
+  /home/yimingz3/src/allie/.venv/bin/python -B search/confirm.py
+It resumes completed batches and holds the selected parameters fixed. A running
+confirmation producer must not be duplicated. Check the process table first.

@@ -40,3 +40,10 @@ Recovery: read this file, search/PLAN.md and results/search-v1/status.json. Insp
 job receipts and live Slurm state before submission; never duplicate a job. Respect
 /data/group_data/dei-group/yimingz3/allie/controller/STOP. A controller restart does not
 resume paused/completed work. Claude owns the main worktree's data/model goals.
+
+First-round stop rule, stated to user: finish when the golden target is confirmed
+or eight allocated GPU-hours are consumed. A search claim additionally requires
+an incremental win over the best cheap control with a paired game-level uncertainty
+estimate supporting improvement. If only masking/calibration helps, report it as
+such. End the round with a complete experiment and cost report; preliminary dev
+results do not establish completion.

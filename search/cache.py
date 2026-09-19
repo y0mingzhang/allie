@@ -46,7 +46,11 @@ def main():
     identity=dict(checkpoint_sha256=sha(modelpath),data_sha256=sha(OUT/'dev.json'),
         code_sha256=sha(__file__),source=str(SOURCE),top_k=8,pack_tokens=4096,rotary='per-document canonical coordinates',alignment=128)
     manifest=OUT/'cache-identity.json'
-    if manifest.exists(): assert json.loads(manifest.read_text())==identity,'cache identity changed'
+    serve_only='--serve-only' in sys.argv
+    if manifest.exists():
+        previous=json.loads(manifest.read_text())
+        compare=lambda d:{k:v for k,v in d.items() if k!='code_sha256'}
+        assert previous==identity or (serve_only and compare(previous)==compare(identity)),'cache identity changed'
     else: manifest.write_text(json.dumps(identity,indent=2)+'\n')
     pack_tokens=4096; stats=dict(calls=0,prefix_tokens=0,padded_tokens=0,forward_seconds=0.)
     def forward(prefixes):
@@ -99,7 +103,12 @@ def main():
     stats={k:0 for k in stats}
     (OUT/'oracle-check.json').write_text(json.dumps(warmup,indent=2)+'\n')
     print('oracle warmup',warmup,flush=True)
-    for lo in range(0,len(positions),128):
+    if serve_only:
+        with np.load(OUT/'cache-00000.npz') as z:
+            repeat=forward([p['prefix'] for p in positions[:128]])
+            assert np.array_equal(repeat,z['root']),'Transport-only restart changed cached predictions'
+        (OUT/'server-identity.json').write_text(json.dumps(identity,indent=2)+'\n')
+    for lo in ([] if serve_only else range(0,len(positions),128)):
         dest=OUT/f'cache-{lo:05d}.npz'
         if dest.exists():
             with np.load(dest) as z: assert int(z['lo'])==lo and z['root'].shape[0]==min(128,len(positions)-lo)
@@ -130,13 +139,16 @@ def main():
         queue=OUT/'queue';queue.mkdir(exist_ok=True)
         for interrupted in queue.glob('*.running.json'):
             interrupted.replace(interrupted.with_name(interrupted.name.replace('.running.json','.request.json')))
-        ready=dict(job_id=os.environ.get('SLURM_JOB_ID'),host=os.uname().nodename,
+        from rpc import make_server
+        http=make_server(forward,OUT)
+        ready=dict(url=f'http://{os.uname().nodename}:{http.server_port}',job_id=os.environ.get('SLURM_JOB_ID'),host=os.uname().nodename,
                    checkpoint_sha256=identity['checkpoint_sha256'],gpu=torch.cuda.get_device_name(),pid=os.getpid())
         (OUT/'server-ready.json').write_text(json.dumps(ready,indent=2)+'\n')
         print('Persistent oracle ready',ready,flush=True)
         while not (OUT/'STOP').exists():
+            http.handle_request()
             work=sorted(queue.glob('*.request.json'))
-            if not work: time.sleep(.2);continue
+            if not work: continue
             for request in work:
                 running=request.with_name(request.name.replace('.request.json','.running.json'))
                 request.replace(running)
