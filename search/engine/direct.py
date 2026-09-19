@@ -13,7 +13,7 @@ import torch
 
 
 class DirectOracle:
-    def __init__(self,capacity=65536):
+    def __init__(self,capacity=65536,mem_fraction_static=.25):
         start=time.monotonic()
         os.environ['SGLANG_EXTERNAL_MODEL_PACKAGE']='search.engine.sglang_models'
         # Our explicit custom architecture is the only model this process serves.
@@ -31,7 +31,7 @@ class DirectOracle:
         root=Path(__file__).resolve().parents[2]
         args=ServerArgs(model_path=str(root/'results/search-v1/serving-export'),
             trust_remote_code=True,skip_tokenizer_init=True,dtype='bfloat16',
-            attention_backend='flashinfer',context_length=1025,mem_fraction_static=.25,
+            attention_backend='flashinfer',context_length=1025,mem_fraction_static=mem_fraction_static,
             max_total_tokens=capacity,max_running_requests=capacity,
             disable_cuda_graph=True,disable_overlap_schedule=True,
             enable_piecewise_cuda_graph=True,piecewise_cuda_graph_compiler='inductor',

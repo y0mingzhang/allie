@@ -21,7 +21,9 @@ def main():
         tables.append('\n'.join(lines))
     for path,title in [('aug-search-v1/results.json','August balanced tuning: may be training-seen; confirmation is game-disjoint from parameter fitting, not from model training.'),
                        ('aug-search-v1/distributional-results.json','August same-node outcome-distribution experiments: no golden CM conversion.'),
-                       ('aug-search-v1/unvisited-results.json','August unvisited-action fallback and visit shrinkage: no additional model nodes.')]:
+                       ('aug-search-v1/unvisited-results.json','August unvisited-action fallback and visit shrinkage: no additional model nodes.'),
+                       ('aug-compact-v1/asymmetric-results.json','August own/opponent soft-backup temperature scan: CPU-only analysis of the same cached trees.'),
+                       ('aug-conditioning-v1/results.json','August counterfactual-strength guidance, direct and stacked with search: extra full-prefix queries charged separately.')]:
         d=read(path)
         if d:
             rows=[]

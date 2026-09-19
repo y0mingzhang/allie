@@ -6,7 +6,7 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current state: 2026-09-19 ~06:40 UTC
+## Current state: 2026-09-19 ~07:25 UTC
 
 Active goal: BOTH >=10x golden macro and expert-macro training-equivalent CM,
 plus improved mean search-node / CM frontier. NOT achieved. Fixed checkpoint
@@ -18,7 +18,7 @@ checkpoint/targets stay fixed until then.
 
 Resource: one general/normal L40S job10498670 on babel-t5-32, running from
 04:52UTC with8h limit. Tmux socket search-v1-10498670, session oracle; resident
-engine PID1097060. Keep only one GPU, within Claude's shared8-normal cap.
+engine PID1232195 (verify ready.json). Keep only one GPU, within Claude's shared8-normal cap.
 No Slurm submissions this turn. Independent workbench survives controller restart.
 Accounting observer2682849 on controller, singletonflock; inspect before recovery.
 All previous usage preserved in status.json/job-receipts; main ledger untouched.
@@ -31,78 +31,77 @@ The original cold-NFS startup cost is charged, not erased by local staging.
 
 ## Immediate task
 
-LATEST: August023 and both CPU analyses are DONE. Worker289.63s; main calibration
-39.67s, distributional13.32s. Fit-CV selects MCTS1000 reverse/Elo for macro and
-softtau.1/1000 forward/Elo for expert; combined Q+softtau.5/Elo in the second
-family. Confirmation CE: legal1.52313/1.50320;4ply1.48301/1.40864;
-MCTS1000reverse/Elo1.47013/1.37818;soft1000/Elo1.46508/1.37369;
-combo1.46834/1.38287. Draw/outcome-consistency not selected. All reported.
-Most promising cost point: soft256/Elo1.47530/1.39715 at250.5nodes vs4ply835.7.
+Current: 2026-09-19 ~07:25 UTC. Goal 10x/10x still active and unmet.
+Keep the original r2 checkpoint until success; then reproduce on Claude B_2.
+Latest confirmed golden remains soft1000/Elo CE 1.4665905 / 1.3768662,
+CM 2.1510x / 3.0249x at970.926 nodes. Lower-cost soft256 is about250 nodes
+and CM1.8706x/2.2849x; strict statistical domination of4ply is not established.
 
-CPU unvisited-action fallback experiment DONE (34.34s), unvisited-results.json.
-No clear both-metric win: ordinaryMCTS1.47006/1.37773 vsrootcriticpseudo1
-1.46846/1.38251. Reported. Its MCTS-root prior has a tiny BF16 batching shift
-relative to the shared32-root prior used by the initial August analysis:
-root-batch-audit.json mean raw CEdelta -0.00009694, KL0.00002925. Not algorithm gain.
+GPU: existing job10498670,1 general L40S,babel-t5-32,ends~12:52UTC.
+Tmux socket search-v1-10498670/session oracle,window0. Current enginePID1232195,
+capacity786432,mem_fraction_static.5; verify engine-queue/ready.json. Starts from
+node-local archived runtime in22.8s total (engine20.1s). Do not start a second
+engine. All prior charges including failed026/startups/idle time remain recorded.
+Accounting observer2682849 owns status.json; do not race its writes.
 
-NEXT/RUNNING: frozen July study golden-augcal-v1, 11methods selected solely by
-August fitCV, budgets16/64/256/1000 on one shared tree. Queue024 failed reading
-a briefly empty NON-ATOMIC request BEFORE any scoring. Error retained. Retry
-025-golden-august.request.json published atomically, identical spec/frozen plan.
-ALWAYS publish queue requests by temp+rename, never apply_patch directly.
-Watch025 and golden-augcal-v1/results.json. Routine watcher watch_search_queue
-has the task, polls60s. The worker automatically runs analyze_augcal after scoring.
-Raw compact root/Q/soft/visits/WDL caches retained this time for future CPU-only
-calibration tests. Golden methods and coefficients are frozen in plan.json;
-do not edit its hashed inference/analysis sources while running.
-New scorer uses vocabulary-order tie breaking to match the canonical evaluator;
-also regresses old raw/legal/MCTS reverse scores against021 on every block.
+RUNNING:033-selection-pilot, search.engine.selection_pilot. Four first-play
+urgency/exploration variants: bootstrap, running mean, bootstrap minus.2sqrt
+visited-prior mass, and original zero-FPU with cpuct2.5. Same4096 August roots,
+512 roots/batch,1000 simulations with64/256/1000 snapshots. One GPU, no newSlurm.
+Outputs aug-selection-v1/<variant>/<block>.npz retain full compact trees too.
+Unit default path and independent FPU-sign check passed; live first512-root
+control must exactly match aug-compact-v1 before variants execute. Check
+aug-selection-v1/identity.json and033 error/result. Routine watcher
+/root/watch_search_queue polls60s up to12min; no substantive delegation.
+After033 completes run CPU search.engine.analyze_selection on GPU node's local
+Python with OMP_NUM_THREADS=1. It selects only from fit-gameCV and reports all
+arms on August confirmation. Then update report and table to user. No golden
+has been opened for these variants. Do not modify hashed running sources.
 
-After025: report CE/CM/node table and paired CIs vs4ply, updateREPORT/FRONTIER,
-commit current own code. Do not declare 10x success without actually meeting it.
-August raw outcome experiments are model-training-overlap development only.
+DONE031: aug-compact-v1 tree cache,129.438s for4096x1000. New compact.cpp and
+compact_native.py reconstruct every64/256/1000 snapshot and arbitrary own/
+opponent soft temperatures on CPU. Fake-oracle reference, checkmate signs,
+unchanged visits/tree, and real-GPU symmetric backups pass to3e-12.
+Asymmetric temperature scan0/.025/.1/.5/infinity x both roles,256/1000 budgets,
+global/Elo output calibration selected EXISTING symmetric.1/1000/Elo for both
+metrics. Confirmation1.465198/1.374123;256control1.475531/1.398580. No promotion.
+Analysis22.709s incl11.781s reductions. Results aug-compact-v1/asymmetric-results.json.
 
-User chose AUGUST tuning, even if training-seen, instead of insisting on another
-held-out development set. July golden remains unchanged. Existing dev/dev_expert
-are blitz-only, and Elo calibration trained there failed golden transfer.
+DONE032: aug-conditioning-v1, eight root-only hypothetical-rating query arms.
+Moved self/opponent Elo digits only; history/time-control identical. Full-prefix
+query work charged;3.756s GPU worker,6.592s CPU calibration. MacroCV selected
+unchanged soft1000. ExpertCV picked both ratings-200 guidance stacked on search:
+CE1.465481/1.372414 vs1.465198/1.374123, pairedexpertCI[-.00779,+.00362].
+No convincing improvement; not promoted or golden-scored. This repeats the
+previous blitz prompt idea on balanced16cell data and permits stacking.
 
-August build DONE: results/search-v1/aug-tune-v1/{manifest,strat,clocks,feats,games}.
-Source August2026, same cell/mask/tokenization rules, ~25–29K moves/cell.
-May overlap model training. Do NOT call it model-held-out or convert its CE with
-July's law. sample.json has4096 positions (128/cell/fold),2978 games, game-disjoint
-parameter-fit and confirmation folds. IDs/test documents excluded, golden exact
-token duplicates excluded, provenance hashed. No labels/future enter inference.
+INFRA030 PASSED: fresh old262144 and new786432 cache at SAME128-root batching
+are EXACT for roots/Q/visits.512-root batch improves blocktime38.16 ->26.98s
+for~993K node evaluations,1.4146x; root logits exact, internalBF16 branch noise
+is reported (meanQ gap.00116,4361 visit entries changed). Performance only.
+026 initially failed historical parity on1/1024roots;027/028 proved a fresh
+OLD-capacity process has identical rounding difference (meanrawCE5.3e-8nats,
+KL3.64e-9). Therefore not a capacity bug. Historical19changedvisit entries
+preserved; no numerical gain credited. Artifacts cache-root-diagnosis*.json,
+cache-benchmark-{small,large}.json. Never silently delete failures.
 
-Queue023-august runs search.engine.balanced_dev_pilot, writes aug-search-v1:
-- fixed continuation depths1..4, widths4/2/2; per-root node counters added to
-  tree.py; independent parity test against original passed at all depths/mate.
-- identical repaired MCTS tree snapshots16/64/256/1000; alternative expectation,
-  soft/minimax backups on the SAME tree, per-root node costs.
-- full categorical WDL visit means reconstructed in new isolated native module
-  distributional.cpp. Exact original scalar Q/tree, probability mass, terminal
-  and node counts checked. Existing binaries untouched. No extra model nodes.
+August tuning data is aug-tune-v1,4096 positions/2978games,128 percell per
+fit/confirmation fold. Both folds may overlap model training (user-approved).
+Only unchanged July golden establishes held-out quality/CM. Old dev/dev_expert
+are blitz-only. Earlier private July+2024 strat-dev-v1 was built/validated but
+never used; no need rebuild. Never open test/test_expert labels for scoring.
 
-Tmux window august-research runs search.engine.august_chain, log
-results/search-v1/logs/august-chain.log. It waits for023, then runs analyze_august
-and distributional_policy on CPU and report. Singletonlock; inspect before restart.
-The analysis source hashes were frozen in the request before new scoring.
-Do not edit those three analysis files mid-experiment.
+025 golden-augcal-v1 remains frozen; do not rerun after changing direct.py.
+It retains compact root/Q/visits/WDL caches for compatible CPU-only calibration.
+All selected coefficients froze from August fitCV.024 failed non-atomic request
+reading before scoring;025 identical retry succeeded. ALL new queue requests
+must use temp+atomic rename, never direct apply_patch to *.request.json.
 
-analyze_august: forward/reverse policy calibration, global/Elo/format groups.
-Only fitfold0 supplies parameters and3-way gameCV selections. All arms reported
-on fold1; paired whole-game CIs for named controls/CV selections.
-fit_policy.py uses tested analytic implicit gradients for reverse-KL normalization.
-distributional_policy.py tests Q+draw/risk/root-outcome-consistency and combined
-backup signals, SAME node budgets. Coherent root/children leave Bayesian ratio
-unchanged; normalization tested. No training or external chess evaluator.
-After023: inspect errors/results, report concise table with CM pending, update
-REPORT.md. Choose subsequent golden policies from fitCV, not golden scores.
-
-The unused strat-dev-v1 dataset also exists: exact July golden reconstruction
-passed, disjoint unused July for15cells plus unseen2024-04..07 expert-classical.
-July expert-classical golden fraction is1.0, so no disjoint July games exist.
-This temporal fallback was validated but user then chose August. It has NOT been
-used for parameter selection/scoring. Preserve its provenance; do not mix samples.
+Useful next: inspect FPU results; if no gain, test learned budget allocation
+with nested game CV, richer model-only search signals, or more simulations.
+Current symmetric backup is a useful control; separate-tau and rating-guidance
+experiments are recorded failures, not unreported wins. Report whole-game
+uncertainty, node cost, full-prefix work and training-law caveats.
 
 ## Fixed checkpoint/evaluation
 

@@ -65,9 +65,12 @@ def main():
     QUEUE.mkdir(exist_ok=True)
     with (QUEUE/'service.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        oracle=DirectOracle(capacity=262144)
+        capacity=int(os.environ.get('ALLIE_SEARCH_CACHE_TOKENS','262144'))
+        fraction=float(os.environ.get('ALLIE_SEARCH_MEMORY_FRACTION','.25'))
+        oracle=DirectOracle(capacity=capacity,mem_fraction_static=fraction)
         atomic(QUEUE/'ready.json',dict(pid=os.getpid(),job=os.environ.get('SLURM_JOB_ID'),
             startup_seconds=oracle.startup_seconds,ready_unix=time.time(),
+            capacity=capacity,mem_fraction_static=fraction,
             process_startup_seconds=time.time()-float(os.environ.get('ALLIE_SERVICE_STARTED',time.time()))))
         print('ready',oracle.startup_seconds,flush=True)
         while not (ROOT/'STOP').exists() and not GLOBAL_STOP.exists():
