@@ -121,7 +121,7 @@ def b2_pin(w):
     return dict(b2_sha256=sha)
 
 
-def screen(rs, pool_frac=0.014, history=False, stores=None, months=None):
+def screen(rs, pool_frac=0.014, history=False, stores=None, months=None, suffix=""):
     """Repetition matched: pool_frac = screen tokens / final tokens. With history, per-bucket
     repetition is that of the final run over all Lichess history (tag suffix h). months pins the
     month list so runs launched at different times see the same data."""
@@ -130,7 +130,7 @@ def screen(rs, pool_frac=0.014, history=False, stores=None, months=None):
         | dict(
             stores=stores or CURRENT_STORES,
             pool_frac=pool_frac,
-            tag=f"pf{round(pool_frac * 1000):03d}" + "h" * history,
+            tag=f"pf{round(pool_frac * 1000):03d}" + "h" * history + suffix,
         )
         | (dict(history=True) if history else {})
         | (dict(months=list(months)) if months else {})
@@ -393,6 +393,115 @@ WAVES["inputs"] = WAVES["wave2"] | dict(
 )
 
 
+# round 3 (2026-09-19): 3e16 screens on B_2 (data-v1-B2.json, baseline commit da0322b). B_2 x 3 seeds are
+# the shared data / model-track controls (s42 general L40S, s43 / s44 preempt; dei is full), B_2 at 1e17
+# is the kept-stack scale check (clean_term tripped the scale rule) and the model track's 1e17 control
+B2_RUN = dict(policy="mover_rule+up4", feats=3, input_lr=5.0, aux_time=0.2, aux_wdl=0.2)
+FAST = "RTX_PRO_6000|H100|H200|A100_80GB|A100_80G|L40S|6000Ada"
+EXT = "/data/group_data/dei-group/yimingz3/allie/ext-v1"
+EXT_MONTHS = [
+    f"{EXT}/{m}"
+    for m in (
+        "otb/20xx-broadcast",
+        "otb/20xx-pgnmentor",
+        "otb/20xx-twic",
+        "engine/20xx-ccrl404",
+        "engine/20xx-ccrl4040",
+        "engine/20xx-tcec",
+    )
+]
+
+
+def b2(budget, policy=B2_RUN["policy"], seeds=(42,), **kw):
+    """B_2 runs, optionally with another policy or other overrides."""
+    return [
+        r | B2_RUN | dict(policy=policy) | kw for r in runs(budget, [policy], seeds)
+    ]
+
+
+def r3(rs, budget="3e16", **kw):
+    return screen(
+        rs,
+        pool_frac=pool_frac(budget),
+        history=True,
+        stores=kw.pop("stores", STORES),
+        months=kw.pop("months", R2P_MONTHS),
+        suffix=kw.pop("suffix", "b2"),
+    )
+
+
+WAVES["round3g"] = WAVES["wave2"] | dict(
+    study="data-v1-round3g",
+    prefix="r3g",
+    b2=True,
+    sbatch="""#SBATCH --account=dippolit
+#SBATCH --partition=general
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:L40S:1
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=64G
+#SBATCH --time=12:00:00""",
+    runs=r3(b2("3e16")) + r3(b2("1e17"), "1e17"),
+    purpose="round 3, general L40S lane: B_2 seed 42 at 3e16 (shared data / model control) and B_2 at "
+    "1e17 (scale check of the kept stack, model-track 1e17 control)",
+)
+
+WAVES["round3p"] = WAVES["wave2"] | dict(
+    study="data-v1-round3p",
+    prefix="r3p",
+    b2=True,
+    throttle=6,
+    sbatch=WAVES["wave2"]["sbatch"] + f"\n#SBATCH --constraint={FAST}",
+    runs=r3(
+        b2("3e16", seeds=(43, 44))
+        + [
+            r
+            for p in (
+                "mover_rule+up8",
+                "mover_rule+up4_2200",
+                "mover_rule+up4_cooldown20_up16",
+                "mover_rule+balanced_c10+up4",
+                "mover_rule+balanced_nobullet_c10+up4",
+            )
+            for r in b2("3e16", p)
+        ]
+        + b2("3e16", aux_time=0.1, aux_wdl=0.1)
+        + b2("3e16", aux_time=0.05, aux_wdl=0.05)
+    ),
+    purpose="round 3 screen on B_2 (1 seed each, B_2 x 2 more seeds): expert weighting strength, "
+    "threshold and cooldown (up8, up4 at 2200, up4 then up16 in the last 20%), cell balance on top "
+    "of up4 with and without bullet, and cheaper aux heads (0.1, 0.05; aux cost 0.95x at 1e17)",
+)
+
+WAVES["round3x"] = WAVES["round3p"] | dict(
+    study="data-v1-round3x",
+    prefix="r3x",
+    throttle=4,
+    history_counts=ROOT / "results/recipe10x/data-v1-ext-history-counts.json",
+    runs=r3(
+        [
+            r
+            for p in (
+                "mover_rule+up4",
+                "mover_rule+up4+noengine",
+                "mover_rule+up4+noengine+otb_x4",
+                "mover_rule+up4+nootb",
+                "mover_rule+up4+nootb+engine_x4",
+                "mover_rule+up4+nootb+engine_cd_x10",
+            )
+            for r in b2("3e16", p)
+        ],
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="round 3 external sources on B_2 (ext-v1: OTB broadcast / TWIC / PGN Mentor, engine "
+    "TCEC / CCRL; merged all-history counts): both at natural weight, OTB only (x1, x4), engine only "
+    "(x1, x4, x10 in the cooldown only); compared with the B_2 controls of round3g / round3p",
+)
+
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
@@ -431,7 +540,7 @@ def plan(wave):
     shutil.copy2(src / "eval_strat.py", study / "evaluator-ours")
     shutil.copy2(__file__, study / "dataexp.py")
     if any(r.get("history") for r in w["runs"]):
-        shutil.copy2(HISTORY, study / "history-counts.json")
+        shutil.copy2(w.get("history_counts", HISTORY), study / "history-counts.json")
     (study / "plan.json").write_text(
         json.dumps(
             dict(
@@ -453,7 +562,7 @@ def plan(wave):
 {w["sbatch"]}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --array=0-{-(-len(w["runs"]) // w.get("pack", 1)) - 1}
+#SBATCH --array=0-{-(-len(w["runs"]) // w.get("pack", 1)) - 1}{"%" + str(w["throttle"]) if w.get("throttle") else ""}
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output={study}/logs/%x-%A_%a.out
