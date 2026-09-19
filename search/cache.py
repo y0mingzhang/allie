@@ -29,7 +29,7 @@ def main():
     state=torch.load(modelpath,map_location='cpu',weights_only=False)
     for name,h in state['source_sha256'].items(): assert sha(SOURCE/name)==h,name
     sys.path.insert(0,str(SOURCE))
-    from modded_medium import Config,core,create_model,make_context
+    from modded_medium import Config,Context,core,create_model,make_context
     from chess_vocab import MOVES
     cfg=Config(**state['config'])
     assert not cfg.clock and not cfg.elo,'This initial oracle requires the no-input-channel checkpoint'
@@ -52,7 +52,14 @@ def main():
         compare=lambda d:{k:v for k,v in d.items() if k!='code_sha256'}
         assert previous==identity or (serve_only and compare(previous)==compare(identity)),'cache identity changed'
     else: manifest.write_text(json.dumps(identity,indent=2)+'\n')
-    pack_tokens=4096; stats=dict(calls=0,prefix_tokens=0,padded_tokens=0,forward_seconds=0.)
+    fast_enabled=os.environ.get('SEARCH_FAST_CONTEXT')=='1'
+    if fast_enabled:
+        from fast_context import make_context as fast_make_context
+        parity=json.loads((OUT/'context-model-parity.json').read_text())
+        assert parity['status']=='bit-identical to original context and live service'
+    context_info=dict(context_impl='block-metadata-v1' if fast_enabled else 'original-create-block-mask',
+                      context_sha256=sha(Path(__file__).with_name('fast_context.py')) if fast_enabled else None)
+    pack_tokens=4096; stats=dict(calls=0,prefix_tokens=0,padded_tokens=0,forward_seconds=0.,context_seconds=0.)
     def forward(prefixes,all_tokens=False):
         outputs=[]; batch=[]; used=0
         def flush():
@@ -66,7 +73,10 @@ def main():
             xt=torch.as_tensor(x,device='cuda').reshape(1,-1)
             rp=torch.as_tensor(rotary_pos,device='cuda')
             model.yarn.cos[:pack_tokens].copy_(rotary_cos[rp]);model.yarn.sin[:pack_tokens].copy_(rotary_sin[rp])
-            ctx=make_context(xt,sched.ws_short*128,sched.ws_long*128)
+            torch.cuda.synchronize();context_start=time.monotonic()
+            ctx=(fast_make_context(x,xt,sched.ws_short*128,sched.ws_long*128,Context) if fast_enabled
+                 else make_context(xt,sched.ws_short*128,sched.ws_long*128))
+            torch.cuda.synchronize();stats['context_seconds']+=time.monotonic()-context_start
             torch.cuda.synchronize(); start=time.monotonic()
             with torch.inference_mode():
                 logits=net(xt.flatten(),xt.flatten(),ctx,sched).reshape(-1,2432)
@@ -108,7 +118,7 @@ def main():
         with np.load(OUT/'cache-00000.npz') as z:
             repeat=forward([p['prefix'] for p in positions[:128]])
             assert np.array_equal(repeat,z['root']),'Transport-only restart changed cached predictions'
-        (OUT/'server-identity.json').write_text(json.dumps(identity,indent=2)+'\n')
+        (OUT/'server-identity.json').write_text(json.dumps(identity|context_info,indent=2)+'\n')
     for lo in ([] if serve_only else range(0,len(positions),128)):
         dest=OUT/f'cache-{lo:05d}.npz'
         if dest.exists():
@@ -143,7 +153,7 @@ def main():
         from rpc import make_server
         http=make_server(forward,OUT,lambda:dict(stats))
         ready=dict(url=f'http://{os.uname().nodename}:{http.server_port}',job_id=os.environ.get('SLURM_JOB_ID'),host=os.uname().nodename,
-                   checkpoint_sha256=identity['checkpoint_sha256'],gpu=torch.cuda.get_device_name(),pid=os.getpid())
+                   checkpoint_sha256=identity['checkpoint_sha256'],gpu=torch.cuda.get_device_name(),pid=os.getpid(),**context_info)
         (OUT/'server-ready.json').write_text(json.dumps(ready,indent=2)+'\n')
         print('Persistent oracle ready',ready,flush=True)
         next_disk_poll=0.

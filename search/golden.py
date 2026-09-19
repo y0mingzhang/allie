@@ -32,10 +32,14 @@ def sha(path):
 
 def freeze():
     assert not OUT.exists(),'A frozen golden study is never overwritten'
+    baseline=json.loads((ROOT/'golden-baseline/results.json').read_text())
+    assert baseline['positions']==1553058
     # Each compared family must first finish the expanded unchanged dev check.
     for name in ('mcts-confirmation','reply-confirmation'):
         result=json.loads((ROOT/name/'results.json').read_text())
         assert result['positions']==64366 and result['expert_positions']==11396
+    calibrated=json.loads((ROOT/'reply-confirmation/calibrated-results.json').read_text())
+    assert calibrated['positions']==64366 and calibrated['expert_positions']==11396
     chosen=json.loads((ROOT/'reply-pilot/selected.json').read_text())['selected']['parameters']
     assert chosen['reply_mix']==1 and chosen['k']==1968 and chosen['gate']=='none'
     cal=json.loads((ROOT/'reply-pilot/calibrated-selection.json').read_text())['parameters']['all']
@@ -53,9 +57,11 @@ def freeze():
         adaptive=dict(mean_n_sims=50,reference=allie_mcts.REFERENCE),
         source_sha256={f:sha(Path(__file__).parent/f) for f in FILES},
         cm_law_sha256=sha(ROOT/'training-cm-laws.json'),
+        baseline_plan_sha256=sha(ROOT/'golden-baseline/plan.json'),
         selection_sha256={str(p.relative_to(ROOT)):sha(p) for p in [
             ROOT/'reply-pilot/selected.json',ROOT/'reply-pilot/calibrated-selection.json',
-            ROOT/'mcts-confirmation/results.json',ROOT/'reply-confirmation/results.json']},
+            ROOT/'mcts-confirmation/results.json',ROOT/'reply-confirmation/results.json',
+            ROOT/'reply-confirmation/calibrated-results.json']},
         games_per_block=32,notes=['Golden set has previously been used by the training/data research tracks.',
             'This is the first search-track comparison on it, not a globally untouched final test.',
             'Training-equivalent CM is conditional on a transferred fitted law, not measured additional training.'])
@@ -69,6 +75,7 @@ def validate():
     for f,h in plan['source_sha256'].items():assert sha(Path(__file__).parent/f)==h,f
     assert sha(OFFICIAL)==plan['official_raw_sha256']
     assert sha(ROOT/'training-cm-laws.json')==plan['cm_law_sha256']
+    assert sha(ROOT/'golden-baseline/plan.json')==plan['baseline_plan_sha256']
     for p,h in plan['selection_sha256'].items():assert sha(ROOT/p)==h,p
     assert Oracle().ready['checkpoint_sha256']==plan['checkpoint']
     return plan
@@ -85,6 +92,9 @@ def task(index,docs,plan):
     # Causality was verified against individually truncated prefixes on dev.
     # Taking all logits in one causal pass avoids recomputing each game's past.
     root_path=OUT/f'{index:05d}-roots.npz'
+    if not root_path.exists():
+        shared=ROOT/f'golden-baseline/{index:05d}-roots.npz'
+        if shared.exists():root_path=shared
     if root_path.exists():
         with np.load(root_path) as z:
             root=z['logits']

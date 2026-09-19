@@ -173,3 +173,21 @@ contrastive strength logits, and uses the existing fit fold for selection. No go
 or future human information enters these transformations. This cheap control found
 no fit-fold gain: its selected method is the unchanged legal policy at temperature1.
 Store that negative result rather than retuning on its confirmation fold.
+
+## Serving optimization and policy-output audit
+
+A prefix-aligned block-mask constructor avoids the dense quadratic mask-building
+pass. Differential tests match every active full/partial block at 4096 and8192
+tokens. On the reserved GPU, context preparation falls from median3.35ms to0.94ms
+for4096-token packs; full model forward stays approximately2.5ms. All128 tested
+root-logit vectors match the original context AND resident server bit-for-bit.
+Enable only on a coordinated service restart after current clients finish; preserve
+service counters first. This is an inference implementation change, not a policy
+change. No new GPU is allocated.
+
+ALLIE_REVIEW.md records the appendix/release differences in KL direction and
+budget-dependent coefficients. The released-code baseline stays unchanged.
+mcts_output.py first reuses existing pilot tree values to compare fixed-lambda
+reverse-KL and exponential-tilt output policies, choosing lambda on fixed52 fit
+games only and applying it unchanged to both fixed/adaptive trees. This output-only
+experiment cannot isolate a changed tree-allocation rule; that needs new trees.
