@@ -60,6 +60,12 @@ Freeze method before golden evaluation. Never use the human next move, future mo
 actual thinking time or actual game outcome when selecting candidates or allocating search.
 
 Resources: user explicitly permits one reasonably fast GPU and infrastructure work.
+Latest allocation (2026-09-19 ~04:51UTC, relayed by Claude): ONE general/normal GPU,
+currently L40S, taken from the data track share, within the shared8-normal-GPU cap.
+Yiming permits a faster available accelerator; compare end-to-end throughput and
+startup cost before migrating. Optimize CPU tree/batching and I/O overhead as well. Keep only one
+GPU. Pending preempt replacement10498656 was cancelled; current10498670 replaces
+preempted10497511. All previous usage remains charged.
 Latest user instruction: maintain one long-running GPU session for fast iteration.
 Start with an eight-hour allocation; record all reserved GPU time, including idle time.
 Eight hours is an allocation/recovery boundary, not the new research stop condition.

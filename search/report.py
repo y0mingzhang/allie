@@ -91,9 +91,23 @@ def main():
     if d:
         table('Exact golden evaluation: 16-cell macro CE and four-cell expert macro CE; 1,553,058 scored moves.',
               [(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
+    balanced=read('golden-balanced-v1/results.json')
+    if balanced:
+        table('Preregistered balanced golden confirmation: 512 positions per cell, 8,192 total. Full-set canonical means plus paired sample differences; every method reported.',
+              [(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in balanced['methods'].items()])
+        lines=['Paired whole-game bootstrap, 95% intervals. CM uncertainty is conditional on the frozen training-law shape.',
+               '', '| Method | Macro CE interval | Expert CE interval | Macro CM interval | Expert CM interval |',
+               '|---|---:|---:|---:|---:|']
+        for k,x in balanced['methods'].items():
+            interval=lambda key:'–'.join(f'{v:.4f}' for v in x[key])
+            lines.append(f'| {k} | {interval("macro_ci95")} | {interval("expert_macro_ci95")} | {interval("macro_cm_ci95")} | {interval("expert_macro_cm_ci95")} |')
+        tables.append('\n'.join(lines))
     text='# Inference research results\n\nTarget: both ≥2× macro and ≥10× expert training-equivalent CM. Not achieved.\n\n'
     text+='CM is computed only from matching golden metrics, using a frozen training-law shape anchored to the official raw checkpoint. Development-only rows stay pending. Search reports additionally separate gains beyond legal normalization.\n\n'
-    text+='\n\n'.join(tables)+'\n\nOne preempt RTX6000Ada allocation; all reserved time, including idle time, is recorded in status.json. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'
+    text+='\n\n'.join(tables)+'\n\nOne persistent GPU allocation at a time; previous preempt RTX6000Ada usage and its general L40S replacement remain charged in status.json, including idle time. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'
+    if balanced:
+        t=balanced['timing']
+        text+=f'\nBalanced confirmation timing: four-ply traversal {t["summed_four_ply_block_seconds"]:.1f} s (also supplies two-ply and cheap controls); both MCTS variants together {t["summed_two_MCTS_block_seconds"]:.1f} s. These are warm scoring times; cold startup is recorded separately. Full per-cell deltas, paired comparisons against calibration, accuracy, calibration and alternative-law sensitivity are in golden-balanced-v1/results.json.\n'
     d=read('engine-queue/002-mcts.result.json')
     if d:
         text+='\nWarm MCTS cost on 128 development roots (includes root inference and tree work):\n\n| Algorithm | Previous stack | Cached native-board stack | Speedup |\n|---|---:|---:|---:|\n'
