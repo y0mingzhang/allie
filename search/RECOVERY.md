@@ -6,7 +6,38 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current state: 2026-09-19 ~05:04 UTC
+## Current state: 2026-09-19 ~05:41 UTC
+
+POST-REBOOT UPDATE (takes precedence over the historical boot notes below):
+Controller10478640 is now on babel-s9-24. GPU10498670 on babel-t5-32 survived.
+Engine1097060 is READY and scoring; do not restart it for cache changes.
+Queue011 parity passed;012 golden completed;013 packed-plumbing completed.
+014 MCTS1000 and015 six-ply are next, followed by016/017/018 adaptive expectation
+(mass/policy/variance,1000 evaluated leaves/root,width2,depth8,development only).
+016–018 self-analyze with analyze_expectation.py; run search.report after each.
+Accounting watcher was restarted on the new controller (accounting.pid); inspect
+its process and lock before starting another. All old charges preserved.
+
+First golden results: golden-balanced-v1/results.json, REPORT.md. All methods
+reported to Yiming. 4ply macro/expertCE1.4775647/1.4018894 =1.8331x/2.2127xCM;
+95%CM1.645–2.067/1.871–2.670 conditional on the law. Goal NOT achieved.
+2ply1.4953081/1.4312654 =1.4361x/1.5833x. Releasedadaptive50 has no clear CE
+gain beyond cheap calibration. Repairedfixed50 small uncertain CE improvement;
+its expert accuracy point estimate is higher than4ply (report this separately).
+Low-rating cells have4ply point regressions; do not tune on these golden scores.
+Whole balanced comparison283.5s warm, CPU analysis8.8s;4ply traversal173.6s.
+Startup1125s cold was NFS imports/graphs, charged fully. Runtime archive helpers
+survived on GPU tmux; when archive finishes recover_cache leaves ready engine alone.
+Packed metadata gave exact parity but mixed/no reliable end-to-end timing gain;
+NOT adopted. Current engine remains DirectOracle.
+
+The new adaptive-expectation prototype is a development experiment, not a claimed
+win. Independent fake-oracle tests recover fixed-horizon values and enforce node
+caps/full root legal coverage. Predeclared priorities use only model predictions;
+WDL variance is a heuristic, not epistemic uncertainty. Calibration fits dev fold0,
+reports all fold1 arms. No golden CM conversion for blitz-only dev metrics.
+
+## Historical boot and frozen-comparison details
 
 Goal remains active: BOTH >=2x golden macro and >=10x expert training-equivalent
 CM, with incremental search improvement beyond cheap controls. Not achieved.

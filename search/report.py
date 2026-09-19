@@ -95,6 +95,11 @@ def main():
     if d:
         table('Six-ply continuation extension: same development folds, every horizon and the predeclared deep/shallow-disagreement correction reported.',
               [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    for priority in ('mass','policy','variance'):
+        d=read(f'expectation-{priority}-pilot/results.json')
+        if d:
+            table(f'Adaptive continuation expectation ({priority} priority, 1000-node cap): development folds only.',
+                  [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
     d=read('golden-v1/results.json') or read('golden-baseline/results.json')
     if d:
         table('Exact golden evaluation: 16-cell macro CE and four-cell expert macro CE; 1,553,058 scored moves.',
