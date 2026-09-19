@@ -4,7 +4,11 @@ Owner: Codex. Worktree: `codex/search-v1`, independent of Claude's main worktree
 Status: active, authorized by Yiming on 2026-09-18.
 
 Current priority (Yiming, 2026-09-19 UTC): build a fast, hackable SGLang inference
-port before more search experiments. Validate full-prefix versus cached branch
+port before more search experiments. Latest refinement: make MCTS throughput per
+evaluated node comparable to four-ply by batching independent roots, including CPU
+tree overhead. After infrastructure, compare corrected adaptive MCTS with the released
+algorithm and continuation expectation at matched compute; isolate predicted-time
+allocation from other uncertainty signals. Validate full-prefix versus cached branch
 outputs, then measure startup and end-to-end search latency. Cheap x86 CPU hosting
 on Lichess should remain possible through portable model math; implementing that
 hosting path is explicitly deferred. Keep the approved research target below.

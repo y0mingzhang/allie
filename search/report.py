@@ -94,6 +94,14 @@ def main():
             pick=lambda engine:next(x['end_to_end_seconds'] for x in d['runs'] if x['roots']==128 and x['engine']==engine and x['adaptive']==adaptive)
             a,b=pick('original'),pick('cached_native');text+=f'| {name} | {a:.3f} s | {b:.3f} s | {a/b:.2f}× |\n'
         text+='\nBF16 kernel differences can change a few branches and predicted time budgets; the algorithm is unchanged. See search/engine/README.md for numerical drift and correctness tests.\n'
+    d=read('engine-queue/007-equal-nodes-v2.result.json')
+    if d:
+        text+='\nEqual-node throughput after native tree and batched output-solver work (two repeats, mean wall time):\n\n| Method | Roots batched | Evaluated leaves | Seconds including root prefill |\n|---|---:|---:|---:|\n'
+        for kind,n in [('four_ply',64),('native_mcts',128),('native_mcts',512),('native_mcts',1024)]:
+            r=[x for x in d['benchmark']['runs'] if x['method']==kind and x['roots']==n]
+            seconds=sum(x.get('end_to_end_seconds',x['seconds']) for x in r)/len(r)
+            text+=f'| {kind} | {n} | {r[0]["nodes"]:,} | {seconds:.3f} |\n'
+        text+='\nThese throughput runs use different numbers of roots, so they are not a quality comparison. Small post-return cleanup costs were not included in this version; subsequent benchmarks measure the complete call.\n'
     tmp=ROOT/'REPORT.partial';tmp.write_text(text);tmp.replace(ROOT/'REPORT.md')
     print(text)
 

@@ -39,12 +39,17 @@ branching/reuse, and four-ply equivalence. The board extension is built atomical
 so a resident process never maps a truncated library. Restart the engine after a
 native library change. Existing completed experiments remain immutable.
 
-One restart encountered minutes of NFS metadata waits while importing unrelated
-Transformers models. A runtime tar archive is being prepared under our private
-runtime directory for staging to /scratch; the group copy stays authoritative.
-workbench.sh accepts SEARCH_ENGINE_RUNTIME for the scratch copy. direct.py now
-sets SGLANG_DISABLED_MODEL_ARCHS to skip unused built-in registry models. These
-startup changes have not yet been benchmarked. No additional GPU was requested.
+One restart took 393 s of NFS import/compile-cache waits. Serial tar staging was
+stopped; stage_runtime.py copies the environment to local NVMe with16 I/O workers
+(source remains durable). A supervisor is armed in tmux window fast-local using
+search/engine/use_local_runtime.sh. It waits for STAGED.json, verifies our old
+engine's PID and that no request is pending, stops ONLY that engine, creates
+008-local-final.request.json, and starts the cached runtime in the same allocation.
+Do not start another switch/engine. Local logs: engine-local.log, runtime-switch.log,
+stage-runtime.log. Original reference evaluator and all Slurm jobs stay untouched.
+The new node implementation allocates full child objects only upon visit; the
+batched output solver passes4096 bit-exact tests. Final bench008 includes real-model
+parity, lazy native nodes and post-return cleanup timing. No search golden was opened.
 
 The resident engine accepts coarse experiment requests; all tree edges stay in
 process. See search/engine/README.md. Completed blocks are atomic and immutable
