@@ -31,6 +31,7 @@ def main():
                        ('aug-deep-v1/results.json','August extension to4000 simulations, with own1000snapshot control; higher node cost, no dominance claim.'),
                        ('aug-coverage-deep-v1/results.json','August root-coverage extension to4000 simulations, with its own matched-batch1000 control.'),
                        ('aug-coverage-v1/results.json','August root coverage quotas, with ordinary PUCT below root.'),
+                       ('aug-influence-v1/results.json','August internal value-influence allocation, with the same root-coverage quota; compare to the root-coverage control.'),
                        ('aug-transpositions-v1/results.json','August legal transposition-history averaging: fixed original/variant-mean weights; full-prefix cost charged; no confirmation win.'),
                        ('aug-selection-v1/utilities.json','August nonlinear value utilities and policy-weighted standardization, same cached trees.'),
                        ('aug-selection-v1/discount.json','August recursively regularized critic backups; all depths use the same tree, with exact terminal values.'),

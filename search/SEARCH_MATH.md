@@ -167,3 +167,34 @@ implemented by choosing max weight/(1+visits). It keeps ordinary PUCT below
 root. This separates estimating the plausible-action distribution from the
 best-arm focus of playing-strength search. All likelihood calibration stays
 on August fit games, and node cost includes terminal visits separately.
+
+## Allocate internal work by its influence on the returned value
+
+The root-coverage intervention improved the reused golden sample: at about976
+nodes, macro/expert CE1.45297/1.35634, conditional CM2.65x/4.00x. Its actual
+Elo-budget router needs615 nodes and gives1.45405/1.35634. This does not complete
+the10x goal or replace fresh confirmation. Calibration normalization and commuting
+history averaging did not establish additional gains.
+
+For a soft Bellman value V=tau*log(sum_a prior_a*exp(q_a/tau)), the derivative
+with respect to q_a is the tilted distribution w_a proportional to
+prior_a*exp(q_a/tau). Under independent local estimation noise sigma_a^2/n_a,
+the delta-method value variance is sum_a w_a^2*sigma_a^2/n_a. Holding the local
+weights fixed, minimizing it at fixed total samples gives n_a proportional to
+w_a*sigma_a. This differs from the root likelihood surrogate's sqrt(p*(1-p)).
+
+The next test retains the successful root quota, and allocates internal visits
+by max(weight/(1+visits)): either the model prior, current soft-value derivative,
+or75% derivative +25% prior. The prior mixture guards against an erroneous early
+critic monopolizing later work. Soft values are recomputed along changed paths;
+the output backup and model calls are otherwise unchanged. Independent recursive
+values and selected-path tests must pass, including exact identity with ordinary
+root-coverage/PUCT when the internal change is disabled. This is a finite-budget
+heuristic: actual neural value errors are biased, correlated and not independent
+Monte Carlo samples. The derivative calculation alone predicts no quality win.
+
+A separate recursive-critic regularization test used
+V=(1-lambda)*critic+lambda*soft_backup, with exact terminal values. Its smaller
+lambdas worsen August confirmation, so lambda1 stays the baseline. Unlike a
+root-only shallow/deep mixture, this attenuates corrections at every tree depth;
+that mathematical distinction did not make it empirically helpful.

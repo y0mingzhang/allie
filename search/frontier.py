@@ -78,6 +78,16 @@ def main():
         for name in ('coverage_fixed','coverage_routed'):
             x=d['methods'][name]
             append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds'] if name=='coverage_fixed' else None))
+    live_coverage=ROOT/'golden-dynamic-coverage-v1/results.json'
+    if live_coverage.exists():
+        d=json.loads(live_coverage.read_text());x=d['methods']['dynamic']
+        append('live_coverage_router',x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds']))
+    utilities=ROOT/'golden-utilities-v1/results.json'
+    if utilities.exists():
+        d=json.loads(utilities.read_text())
+        for name in ('standardized10','standardized20'):
+            x=d['methods'][name]
+            append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']

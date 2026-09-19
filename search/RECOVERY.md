@@ -6,7 +6,39 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Latest continuation: root coverage and auxiliary-loss review
+## Next continuation: live coverage verified
+
+043 DONE: actual mixed coverage615.40076nodes, macro1.454045189/expert1.356337615,
+CM2.60708x/3.99839x.147.462s scoring,.814s summarize. Vs4ply delta95%
+macro[-.029540,-.017477],expert[-.061942,-.030034],at27%fewer nodes.
+Cached->live macroshift-.00001747,expertEXACT;maxpolicyabs.00575,
+meanKL1.30e-7,maxKL.0001724. MuchmorestablethanoldPUCTrouting.
+Stillneedswinnerpermutationaudit/freshgameconfirmationforfinalclaim.
+
+Goldenutilities DONE(CPU only): standard10 CE1.464542/1.373073,
+CM2.21806x/3.17971x,worsemacrothan cp2.5;standard20 CE1.461550/1.368086,
+CM2.32086x/3.39911x,incrementalCIs overlap0. Dropped; no stacking.
+All resultsreported to user; rootcoverage remainswinner.
+
+044-deep-coverage running onexistingGPU. 045-influence queued afterit:
+rootquotaunchanged, belowroot allocate byprior alone,softBellman derivative,
+or75%derivative+25%prior, each1000sim. Sourcesinfluence.cpp/native/pilot.
+CPUtest PASS: disabledchange exactcoveragecontrol, independently recomputed
+softvalues and ENTIREselected paths at every step for eachmode, terminals
+included. GPUfixturefirst512 will requireidentitybefore3arms. Expected7min
+after044. Analyzer standardanalyze_selection aug-influence-v1; must compare
+toexistingcoverage_bernoulli1000Elo fromaug-coverage-v1, notjusthistorical
+cp1.25 zero baseline. AllfitCV andconfirmationarmsreported,noCMuntilgolden.
+MathematicalmotivationandheuristiccaveatsinSEARCH_MATH.md. No validation-
+target or future moves inallocation. No newSlurmjobs.
+
+Reports/frontier include043/utility paths; rerunreport/frontier/registry.
+Watcherwatch_search_queue notified043finished;checkwhetherstillwatching044
+beforeassigning another. Deep4000analysis samegenericpipeline as039.
+No outstandingClaude review: tier2b done (auxsumfix), laterpropbias FYIs
+notrequestsanddidnotchangeourfiles.
+
+## Previous continuation: root coverage and auxiliary-loss review
 
 Current best actually executed golden: 042 root coverage, CE1.452971275/1.356337615,
 CM2.65168x/3.99839x,975.560 mean nodes. Selected sqrt(prior*(1-prior))
