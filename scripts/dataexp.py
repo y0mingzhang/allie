@@ -520,6 +520,80 @@ WAVES["round3x"] = WAVES["round3p"] | dict(
 )
 
 
+WAVES["round3c"] = WAVES["round3p"] | dict(
+    study="data-v1-round3c",
+    prefix="r3c",
+    throttle=2,
+    runs=r3(b2("3e16", seeds=(45, 46))),
+    purpose="round 3 extra B_2 controls (s45, s46) at 3e16: B_2 seed spread is 0.0016 / 0.0024 golden "
+    "macro / expert with 3 seeds (7-10x round 2's control); same sources as round 3, pooled by both tracks",
+)
+
+
+WAVES["round3x2"] = WAVES["round3x"] | dict(
+    study="data-v1-round3x2",
+    prefix="r3x2",
+    throttle=3,
+    runs=r3(
+        [
+            r
+            for p in ("otb_x10", "otb_x30")
+            for r in b2("3e16", f"mover_rule+up4+noengine+{p}")
+        ]
+        + b2("3e16", "mover_rule+up4+noengine+otb_x4", seeds=(43,)),
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="OTB dose-response on B_2: otb_x4 won (z -3.1 / -4.1); x10 and x30 find the peak, and x4 gets a "
+    "second seed (s43); same sources and merged history as round3x",
+)
+
+
+WAVES["round3x3"] = WAVES["round3x2"] | dict(
+    study="data-v1-round3x3",
+    prefix="r3x3",
+    throttle=1,
+    runs=r3(
+        b2("3e16", "mover_rule+up4+noengine+otb_x2"),
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="OTB dose below the peak: x1 null, x4 won, x10 and x30 lose (z +5.1 / +0.9, +36 / +26); x2 "
+    "brackets the peak; same sources and merged history as round3x",
+)
+
+WAVES["round3s"] = WAVES["round3g"] | dict(
+    study="data-v1-round3s",
+    prefix="r3s",
+    history_counts=ROOT / "results/recipe10x/data-v1-ext-history-counts.json",
+    runs=r3(
+        b2("1e17", "mover_rule+up4+noengine+otb_x4"),
+        "1e17",
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="round 3 kept stack at 1e17: B_2 + OTB x4, the only 3e16 pass on the 5-seed B_2 (z -3.6 / -4.7); "
+    "vs r3g's B_2 1e17; same sources and merged history as round3x",
+)
+
+WAVES["round3x4"] = WAVES["round3x2"] | dict(
+    study="data-v1-round3x4",
+    prefix="r3x4",
+    throttle=2,
+    runs=r3(
+        b2("3e16", "mover_rule+up4+otb_x4+engine_x4")
+        + b2("3e16", "mover_rule+up4+nootb+engine_x4", seeds=(43,)),
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="round 3 stack at 3e16: B_2 + OTB x4 + engine x4 (engine x4 passes narrowly, z +1.1 / -1.7; its "
+    "leave-one-outs are the two single-source screens), and engine x4 seed 43",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (

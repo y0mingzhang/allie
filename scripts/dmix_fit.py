@@ -31,6 +31,7 @@ BASELINES = {
     "pf052hb2": B2,
     "pf115hb2": B2,
     "pf052hb2x": (B2, "pf052hb2"),
+    "pf115hb2x": (B2, "pf115hb2"),
 }
 
 
