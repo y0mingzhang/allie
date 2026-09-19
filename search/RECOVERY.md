@@ -3,8 +3,9 @@
 ## Authority and goal
 Yiming explicitly resumed this goal after the usage reset:10x macro AND10x expert
 training-equivalent CM, fixed checkpoint/laws, improved NN-node/quality frontier.
-Do not reset/complete the goal. Goal UI get_goal failed database parsing earlier;
-GOAL.md in this worktree records status. Main GOAL is another track.
+Do not reset/complete the goal. Goal UI returnednull at18:02UTC; restoredthe
+sameexplicitlyresumedgoal withcreate_goal,no tokenbudget or changedtargets.
+GOAL.md in thisworktree recordsstatus. MainGOAL isanothertrack.
 Read both controller/STOP and results/search-v1/STOP before work. Neither existed
 at last check. Never cancel tunnel/controller/Claude jobs or mutate main.
 
