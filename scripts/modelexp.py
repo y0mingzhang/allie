@@ -464,6 +464,25 @@ wave(
     "base must match data-v1-round3g's B_2 s42 through step 300 (identity proof)",
     "l40s",
 )
+# tier 2c: the prop rule oscillated at gamma 1e-2 (bias range 0.17 vs a k / k+1 affinity margin of
+# ~0.006, drops 0.1-6% on alternating logged steps); gamma <= ~1/3 of the margin per step. Same code as
+# pilot2b (caf0c23), so pilot2b's identity proof binds and pilot2b's base is the reference
+# with the sequence-wise loss: pilot2b's no-seq v2 arm generalised far worse off training batches
+SCREEN2C = {
+    f"moe{e}k{k}sg{tag}": dict(
+        arch=dict(moe=[e, k], moe_seq=1e-3) | MOE_V2 | dict(moe_gamma=g)
+    )
+    for e, k in ((32, 4), (64, 8))
+    for tag, g in (("2e-3", 2e-3), ("1e-3", 1e-3))
+}
+wave(
+    "pilot2c",
+    "model-v1-pilot2c",
+    "mpil2c",
+    [r | dict(stop_after=[50, 300]) for r in variants("3e16", b, SCREEN2C)],
+    "tier-2c MoE bias-speed pilot on L40S (pilot2_gate vs pilot2b's base)",
+    "l40s",
+)
 wave(
     "screen2",
     "model-v1-screen2",
@@ -1009,18 +1028,20 @@ def table(*keys, controls=()):
                 row["flops"] = (
                     np.mean([r["useful_training_flops"] for r in mine]) / ctrl_flops
                 )  # logged, not planned: POS is an estimate
+                sd = float(np.std(ctrl, ddof=1)) if len(ctrl) > 1 else float("nan")
                 row[field] = (
                     loss,
                     loss - float(np.mean(ctrl)),
                     dmix_fit.multiplier(curve, loss, c),
+                    (loss - float(np.mean(ctrl))) / sd,  # in control seed sigmas
                 )
     print(
-        "| study | B_2 | budget | variant | FLOPs/ctrl | golden macro | Δ | CM | golden expert | Δ | CM |\n"
-        "|---|---|---|---|---|---|---|---|---|---|---|"
+        "| study | B_2 | budget | variant | FLOPs/ctrl | golden macro | Δ | Δ/σ | CM | golden expert | Δ | Δ/σ | CM |\n"
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
     )
     for (study, b2, budget, v), m in out.items():
         cells = " | ".join(
-            f"{m[f][0]:.4f} | {m[f][1]:+.4f} | {m[f][2]:.2f}x"
+            f"{m[f][0]:.4f} | {m[f][1]:+.4f} | {m[f][3]:+.1f} | {m[f][2]:.2f}x"
             for f in ("macro", "expert_macro")
         )
         print(f"| {study} | {b2} | {budget} | {v} | {m['flops']:.3f} | {cells} |")
