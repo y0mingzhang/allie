@@ -98,7 +98,8 @@ def main():
                          ('aug-perspective-v2','Reused August development: six own/opponent selectivity rules on identical current trees and output pipeline; unchanged symmetric rule selected by both fit-CV metrics.'),
                          ('aug-lapse-v1','Reused August development: explicit zero-deliberation, uniform-lapse and reversed-value components. No resolved confirmation gain; no extra NN queries.'),
                          ('aug-rating-precision-v1','Reused August development: common rating shifts of +/-3,25,100 points, preserving the rating gap. Three full-prefix queries per arm; no resolved gain.'),
-                         ('aug-value-uncertainty-v1','Reused August development: marginalize uncertainty along search refinement versus a diagonal approximation and signed drift. Same1000-node policies; no extra NN queries.')]:
+                         ('aug-value-uncertainty-v1','Reused August development: marginalize uncertainty along search refinement versus a diagonal approximation and signed drift. Same1000-node policies; no extra NN queries.'),
+                         ('aug-quota-replay-v1','Reused August4096-position cohort: causal root-action allocation from early value instability. Same1000 simulations, actual NN counts reported separately. Both variants worsen expert CE; unchanged rule selected by both CV metrics. No live or golden promotion.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
