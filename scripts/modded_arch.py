@@ -34,6 +34,7 @@ DEFAULTS = dict(
     moe_capacity=1.25,  # training capacity factor (eval is dropless)
     moe_shared=True,  # shared expert (half the active width); off: routed experts take all of it
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
+    moe_kernel="pad",  # pad (capacity bmm) | scatter (ScatterMoE, dropless)
     diff_attn=False,  # differential attention (modded_diffattn)
     aux_detach=False,  # think-time / W-D-L head rows read stop-gradient features (trunk unaffected)
 )
@@ -76,6 +77,7 @@ def moe_dims(width, arch):
         a["moe_capacity"],
         a["mlp"],
         a["moe_score"],
+        a["moe_kernel"],
     )
 
 

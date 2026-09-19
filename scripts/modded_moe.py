@@ -8,7 +8,9 @@ unique row per assignment, so both directions are index_copy / gathers without a
 static for torch.compile. Training: capacity 1.25, overflowing assignments dropped (their rows stay
 zero; the dropped fraction is logged). Evaluation: dropless (capacity = tokens), so a token's output
 does not depend on the rest of the batch. Nominal active FLOPs match the dense MLP (shared_hidden + k *
-expert_hidden = 4d, k experts executed per token); dropped routes do no MLP work.
+expert_hidden = 4d, k experts executed per token); dropped routes do no MLP work. kernel="scatter"
+replaces the padded dispatch with ScatterMoE's fused gather-GEMM-scatter kernels (modded_smoe):
+dropless in training too, no padding, capacity unused.
 """
 
 import math
@@ -17,6 +19,8 @@ import torch
 import torch.distributed as dist
 from torch import nn
 from torch.nn import functional as F
+
+from modded_smoe import parallel_linear
 
 # MoE.stats, per layer over the last step (modded_train logs them as moe_<name>)
 STATS = (
@@ -50,10 +54,12 @@ class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
         gamma=1e-3, seq=0.0, update="sign", capacity=1.25, kind="relu2", score="sigmoid",
+        kernel="pad",
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
-        self.score = score
+        assert kernel in ("pad", "scatter")
+        self.score, self.kernel = score, kernel
         self.experts, self.topk, self.capacity, self.kind = experts, topk, capacity, kind
         up = 2 if kind == "swiglu" else 1  # SwiGLU experts: gate and value rows
         # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
@@ -115,35 +121,29 @@ class MoE(nn.Module):
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
         flat = idx.flatten()
-        arange = torch.arange(n, device=h.device)
         count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
-        order = flat.argsort(stable=True)  # rank within its expert, in assignment order
-        start = count.cumsum(0) - count
-        pos = torch.empty_like(flat).index_copy_(0, order, arange - start[flat[order]])
-        cap = math.ceil(self.capacity * n / e) if self.training else t
+        order = flat.argsort(stable=True)
+        up = torch.stack(list(self.up)).type_as(h)
+        down = torch.stack(list(self.down)).type_as(h)
+        if self.kernel == "scatter":  # dropless: fused gather-GEMM-scatter (ScatterMoE)
+            offs = count.cumsum(0)
+            se = flat[order]
+            y = parallel_linear(h, up.transpose(1, 2), k, se, order, offs, grouped_out=True)
+            routed = parallel_linear(
+                self.act(y), down, 1, se, order, offs, grouped_in=True, gates=w.type_as(h)
+            )
+            dropped = torch.zeros((), dtype=torch.long, device=h.device)
+        else:
+            routed, dropped = self.padded(h, w, flat, count, order, up, down)
         if self.training:
             with torch.no_grad():
                 top = torch.topk(s, k + 1, dim=-1)
                 own = torch.zeros_like(s).scatter_(1, top.indices[:, :k], 1.0)
                 moved = (own.gather(1, idx) < 1).any(-1).sum()
                 margin = (top.values[:, k - 1] - top.values[:, k]).sum()
-                extra = [(pos >= cap).sum(), moved, torch.full_like(moved, t), margin]
+                extra = [dropped, moved, torch.full_like(moved, t), margin]
             self.load[:e] += count.float()
             self.load[e:] += torch.stack([v.float() for v in extra])
-        rows = e * cap  # expert slots, then one dummy row for every dropped assignment
-        slot = torch.where(pos < cap, flat * cap + pos, rows)
-        buf = h.new_zeros(rows + 1, d).index_copy(
-            0, slot, h[:, None].expand(t, k, d).reshape(n, d)
-        )
-        buf = buf[:rows].view(e, cap, d)
-        y = self.act(torch.bmm(buf, torch.stack(list(self.up)).type_as(h).transpose(1, 2)))
-        y = torch.bmm(y, torch.stack(list(self.down)).type_as(h))
-        # back to assignments by the inverse map (free slots to spare rows; the zero dummy row to
-        # a dropped assignment, whose output stays zero): a gather both ways
-        back = torch.arange(n, n + rows + 1, device=h.device).index_copy(0, slot, arange)
-        y = torch.cat((y.reshape(rows, d), y.new_zeros(1, d)))
-        y = y.new_zeros(n + rows + 1, d).index_copy(0, back, y)[:n].view(t, k, d)
-        routed = (y * w.type_as(y)[..., None]).sum(1)
         if self.shared:
             shared = self.act(F.linear(h, self.shared_up.type_as(h)))
             routed = routed + F.linear(shared, self.shared_down.T.type_as(h))
@@ -162,6 +162,28 @@ class MoE(nn.Module):
             loss = self.seq * scale * 1024 * (sel * e / k * prob).sum()
             out = AddLoss.apply(out, loss)
         return out
+
+    def padded(self, h, w, flat, count, order, up, down):
+        """Capacity-padded dispatch: a unique slot per kept assignment, so both directions are
+        index_copy / gathers without atomics and shapes are static."""
+        (t, k), (e, d), n = w.shape, (self.experts, h.shape[1]), flat.numel()
+        arange = torch.arange(n, device=h.device)
+        start = count.cumsum(0) - count
+        pos = torch.empty_like(flat).index_copy_(0, order, arange - start[flat[order]])
+        cap = math.ceil(self.capacity * n / e) if self.training else t
+        rows = e * cap  # expert slots, then one dummy row for every dropped assignment
+        slot = torch.where(pos < cap, flat * cap + pos, rows)
+        buf = h.new_zeros(rows + 1, d).index_copy(
+            0, slot, h[:, None].expand(t, k, d).reshape(n, d)
+        )
+        y = self.act(torch.bmm(buf[:rows].view(e, cap, d), up.transpose(1, 2)))
+        y = torch.bmm(y, down)
+        # back to assignments by the inverse map (free slots to spare rows; the zero dummy row to
+        # a dropped assignment, whose output stays zero): a gather both ways
+        back = torch.arange(n, n + rows + 1, device=h.device).index_copy(0, slot, arange)
+        y = torch.cat((y.reshape(rows, d), y.new_zeros(1, d)))
+        y = y.new_zeros(n + rows + 1, d).index_copy(0, back, y)[:n].view(t, k, d)
+        return (y * w.type_as(y)[..., None]).sum(1), (pos >= cap).sum()
 
     def act(self, x):
         if self.kind == "swiglu":
