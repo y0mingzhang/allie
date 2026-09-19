@@ -93,7 +93,8 @@ def main():
                          ('aug-critic-transpositions-v1','Expanded August equivalent-history WDL mean/median, actual human policy unchanged. CV selects parent; no promotion.'),
                          ('aug-time-allocation-v2','Reused August development: updated predicted-time budget allocation, fixed and within-cell shuffled controls. Cached-prefix screen, independent game folds.'),
                          ('aug-budget-reverse-v1','Reused August development: reverse-KL root output inside current calibrated strength mixture. Same trees/Q, independently refitted output; loses at every budget.'),
-                         ('aug-tactical-v1','Reused August development: bounded rule-directed capture/promotion/check-evasion extensions, no external evaluator; strict node/depth caps and refitted residual output.')]:
+                         ('aug-tactical-v1','Reused August development: bounded rule-directed capture/promotion/check-evasion extensions, no external evaluator; strict node/depth caps and refitted residual output.'),
+                         ('aug-tactical-budget-v1','Reused August development: substitute tactical extensions for ordinary search. See cost-comparison.json for randomized ordinary-search controls at equal expected node cost; no demonstrated efficiency win.')]:
         d=read(study+'/results.json')
         if d:
             table(title, [(k,x['confirmation']['macro_ce'],x['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])

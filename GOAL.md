@@ -15,9 +15,8 @@ Ablate components before dismissing an entire idea; prioritize the strongest
 available research direction over exhaustive weak variants.
 
 Current work: inference infrastructure is operational. Resume the existing10x/10x
-search goal with batched experiment execution and reporting. One preempt GPU
-(workbench10503413) while general is reserved for Claude; actual54min backfill
-ends18:03:51UTC. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
+search goal with batched experiment execution and reporting. One preempt GPU (workbench 10503933) while general is reserved for Claude;
+the current 84-minute backfill ends at 19:28:51 UTC. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
 All prior compute charges and fixed-checkpoint targets remain unchanged.
 
 Infrastructure milestone completed: fast hackable SGLang inference port.
@@ -90,8 +89,7 @@ and its baseline anchor explicitly instead of silently treating a changed frame 
 the identical full-population control-variate estimate. Preserve current goal targets.
 
 Resources: ONE reasonably fast persistent preempt GPU while general is reserved
-for Claude's training/benchmark. Current workbench10503413 replaces timed-out
-10498670. Keep all prior charges. User permits infrastructure work and a faster
+for Claude's training/benchmark. Current workbench 10503933 replaces timed-out 10503413. Keep all prior charges. User permits infrastructure work and a faster
 available accelerator; compare end-to-end cost before migrating. Never exceed
 one GPU or displace peers. Coordinate the shared preempt cap with Claude.
 Latest user instruction: maintain one long-running GPU session for fast iteration.

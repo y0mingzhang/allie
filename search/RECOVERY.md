@@ -1,4 +1,4 @@
-# Search recovery — 2026-09-19 17:51 UTC
+# Search recovery — 2026-09-19 18:15 UTC
 
 ## Authority and goal
 Latest user constraint: NO EXTERNAL MEMORY. No human-game retrieval/books/kNN,
@@ -15,15 +15,18 @@ Read both controller/STOP and results/search-v1/STOP before work. Neither existe
 at last check. Never cancel tunnel/controller/Claude jobs or mutate main.
 
 ## Running
-ONE preempt GPU10503413, RTX6000Ada on babel-x9-24,4CPUs/48G.
-Backfill ends18:03:51UTC (54min, not requested8h). General reserved for Claude.
-Engine3807432, tmux socket search-v1-10503413/sessionoracle. Ready/requests/results
-under results/search-v1/engine-queue. Runtime on GPU node:
-/scratch/yimingz3/allie/search-runtime/sglang-0.5.9-torch2.9.1-cu128/bin/python.
-Use this runtime for scipy; controller torch210 runtime lacks scipy.
-Observer search.advance --watch accounts all reserved/idle GPU hours. Previous
-cumulative10.7547222222GPUh preserved. Before any replacement inspect jobs/ledger/
-checkpoints/data/STOP and phone Claude. Keep only one GPU.
+ONE preempt GPU 10503933, RTX6000Ada on babel-x9-24, 4 CPUs / 48G.
+Backfill ends 19:28:51 UTC (84 minutes, not the requested 8 hours).
+10503413 timed out. No further replacement has been submitted. General remains
+reserved for Claude. New resident engine PID 3859509 is ready for job 10503933;
+startup 22.5 s. Requests/results: results/search-v1/engine-queue.
+Runtime on GPU node:
+/scratch/yimingz3/allie/search-runtime/sglang-0.5.9-torch2.9.1-cu128/bin/python
+Observer search.advance --watch reconciles sacct to own status.json, including idle
+time and every old charge. Before any replacement inspect jobs, ledger, data,
+checkpoints and STOP; phone Claude. Never overlap two owned GPUs.
+All queue tasks through 087 are DONE. No incomplete retrieval tasks. Do not run any
+retrieval or external-memory experiment, even if stale notes propose one.
 
 083-golden-time-allocation-v2 DONE:3 preregistered live arms fixed512,
 predicted_time,shuffled_time on current tree/output recipe. No neural training.
@@ -37,14 +40,30 @@ failed August CV (selected zero correction). No golden promotion.
 step16 CE1.44379446/1.33803906 CM3.07588/5.23182;oldcosinecontrol CE1.44375333/
 1.33801255 CM3.07797/5.23394. Expert gain CIs cross0;all3reported,nogoldselection.
 
-## Current hypothesis
-aug-time-allocation-v2 DONE CPU1.99s. On modern cached tree+policy, predicted time
-normalized by16-cell August mean wins gameCV for both metrics. Confirmation CE
-1.44914054/1.32620857 vs fixed5121.45025256/1.32893835 and shuffled1.45393713/
-1.33735081. Gain vs shuffle significant; gain vs fixed uncertain. Cached nodes
-503.75/499.69/501.28;nominal time/shuffle histograms equal. CM pendinggolden083.
-This tests Allie-like time allocation; NOT faithful released traversal or reverseKL.
-Revisit reverseKL output independently after this; quiescence idea not implemented.
+## Current evidence and next decision
+083 time allocation: normalized predicted time improves over within-cell shuffled
+signals, but not conclusively over fixed512. Existing broader router is better.
+084 reverse-KL output with modern mixture/calibration loses across all4 budgets.
+085 additive tactical residual gives small expert gains but adds ~201 queries.
+086/087 finish the cost-substitution check. Each lower-budget parent is refitted
+inside the same game folds. Exact expected-cost controls independently randomize
+between adjacent ordinary budgets; they do NOT execute both or ensemble policies.
+At 450.87 NN nodes, ordinary expected CE 1.451263/1.330967 vs tactical max/Elo
+1.452959/1.332198. All6 tactical variants lose on point estimates; some CIs cross0.
+At699.64 nodes the analogous gap is +.000541/+.000807, also uncertain.
+Reports: aug-tactical-budget-v1/{REPORT.md,results.json,cost-comparison.json}.
+Source modules tactical_budget.py and tactical_cost_compare.py; cached analysis
+10.13s + .35s, no new NN queries, no golden eval, CM pending.
+
+Do not promote this additive tactical residual or claim tactical search broadly
+fails. Any retry should reuse existing tree evaluations and target unstable
+frontier nodes, rather than repeatedly score all root children in a separate tree.
+Choose the next strongest hypothesis from actual evidence; avoid another broad
+parameter grid solely because cached evaluation is cheap. Current score plateau
+is far from10x macro, so marginal calibration wins alone are unlikely sufficient.
+Older asymmetric own/opponent backup grid (aug-compact-v1) selected symmetric
+.1/.1; it predates current root-coverage/count-decay/output stack. That is a
+possible controlled recheck, not a pending task or justification for a large scan.
 
 ## Fixed inputs and reporting
 Checkpoint durable main results/pretrain/r2-3e16-control-t20-w20-pf052h-s42/
@@ -61,9 +80,9 @@ search.frontier,search.golden_registry. No images unlessasked. Tables/artifacts
 LATEST.md,REPORT.md,FRONTIER.md,GOLDEN_METHODS.md underresults/search-v1.
 
 ## Parallel work and peers
-User requested Astra explainer agent search_explainer. Scope corrected by user:
-main algorithmFAMILIES inhuman-chessprediction,notonlyAlliecomparison. Agent owns
-results/search-v1/explainer/ only. Must reportartifactwhenready;do not duplicate.
+User-requested Astra algorithm-family explainer is DONE and delivered, and the
+user praised it. Artifact results/search-v1/explainer/index.html. No extra images
+requested. It marks retrieval excluded by the current goal.
 ClaudeMoE31249f5 reviewDONE:independentCPU8path/90MACchecks passed. Numericaledge
 sqrt(softplus(-110)) givesNaNgrad;eval384expert densepadding64xactivecost flagged.
 Reviewreportreviews/moe-31249f5.md;peerfixesfollowups mayarrive. Allolderreviewsclosed.
@@ -71,20 +90,4 @@ Reviewreportreviews/moe-31249f5.md;peerfixesfollowups mayarrive. Allolderreviews
 Earliernotes archivedresults/search-v1/recovery-history/before-20260919-1751.md.
 Do not read wholearchive unlessneeded;itcontains staleallocations/pausedstates.
 
-Update17:55UTC:084 reverse_surface DONE CPU50.6s. Reverse-KL modern output losesall4budgets.083 livegolden time beatswithin-cellshuffle,notresolvedvsfixed; newtablesLATEST/REPORT. No quiescence implemented. Replacement10503933 queuedpreempt afterany10503413,8h/max,min30min,oneGPU. Previousobserverhadexited; sacctreconciliation restoredcurrentcharges11.496944GPUh,setsidobserverrestarted logobserver-10503933.log. Checkitislive. Agentfinishedexplainer/index.html,validatedHTML/JS/links,notbrowserrender. UsercorrectedAugustnaming: reuseddevelopmentcheck,notnew/freshconfirmation.
-
-Update17:59UTC:085-tactical queued/running after independentCPUtestPASSED.
-Code tactical.cpp/tactical_native.py/tactical_pilot.py. Rootalllegal; thenonly
-captures/promotions(top2neuralprior) orallevasionsincheck,maximum256nonterminal
-NNnodes and6plies/root. Mean/soft.2/soft.05/maxbackup value-minusoneply residual
-onfrozenparent,global/Elo scalarfit. All arms reportedAugustonly first. Source
-frozenplan andatomicper256rootchunks; incompleteblocksrecompute afterpreemption.
-No NNweightchanges/externalengine. Inspect085result/error beforeanyretry.
-
-18:02UTC:085DONE92.5scollection+12.0sanalysis. Meanextra200.68 NN/rootinclprefill.
-AugustCVmacroselectstactical_.05:CE1.44443944/1.31318394 vsparent1.44511482/
-1.31588462;expertpairedCI[-.004728,-.000692],macroCIcross0. CVexpertselects
-max_elo:1.44394055/1.31245455,itsincrementalCIs cross0. No goldenpromoted:
-additional20%nodes doesn't establishfrontier dominance. Next CPUcheckusecached
-quiescencefeatures withlowerbasebudgets, so tacticalworkcanreplaceordinarynodes.
-Currentjobabouttotimeout;replacementdependencyshouldstartautomatically.
+Current worktree goal remains active. No new Slurm submission needed now.
