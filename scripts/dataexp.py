@@ -690,6 +690,23 @@ WAVES["round6c"] = WAVES["round3p"] | GPU4 | dict(
     purpose="matched control (control mix + cf3 + aux, B_2 stores/months/history) at 3e17 on 4 GPUs, for round6",
 )
 
+WAVES["round6p"] = WAVES["round6c"] | dict(
+    study="data-v1-round6p",
+    prefix="r6p",
+    throttle=2,
+    b2=False,
+    history_counts=WAVES["round4"]["history_counts"],
+    runs=r3(b2("3e17", B3C, seeds=(43,)), "3e17", **X),
+    purpose="3e17 ladder seed 43 on preempt fast (4 GPUs): B_3",
+)
+
+WAVES["round6cp"] = WAVES["round6c"] | dict(
+    study="data-v1-round6cp",
+    prefix="r6cp",
+    runs=r3(b2("3e17", "control", seeds=(43,)), "3e17"),
+    purpose="3e17 ladder seed 43 on preempt fast (4 GPUs): matched control",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
