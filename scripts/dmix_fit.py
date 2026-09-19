@@ -32,6 +32,7 @@ BASELINES = {
     "pf115hb2": B2,
     "pf052hb2x": (B2, "pf052hb2"),
     "pf115hb2x": (B2, "pf115hb2"),
+    "pf052hb3": "mover_rule+up4+noengine+otb_x4+cf3+lr5+t0.2+w0.2",
 }
 
 

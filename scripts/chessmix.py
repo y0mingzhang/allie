@@ -364,6 +364,7 @@ POLICIES.update(
     cooldown20_balanced=cooldown(balanced(30), 0.8),
     up8=upsampled(8),
     up4_cooldown20_up16=cooldown(upsampled(16), 0.8, before=upsampled(4)),
+    up4_cooldown20_up1=cooldown(control, 0.8, before=upsampled(4)),
     balanced_c30=balanced(30),
     up4_balanced=lambda g, p: (
         balanced(10)(g, p)[0] * np.where(np.maximum(g.welo, g.belo) >= 2400, 4, 1),
@@ -397,6 +398,7 @@ PHASES = dict(
     up2_cooldown20=(0.0, 0.8),
     cooldown20_balanced=(0.0, 0.8),
     up4_cooldown20_up16=(0.0, 0.8),
+    up4_cooldown20_up1=(0.0, 0.8),
 )
 
 
@@ -437,6 +439,20 @@ def sources(srcs, k, start=0.0):
         True,
     )
 
+
+def recent(k, since):
+    """control, with games from Lichess months >= since weighted k times."""
+    return lambda g, p: (
+        control(g, p)[0] * (k if g.month[:4].isdigit() and g.month >= since else 1),
+        True,
+        True,
+    )
+
+
+POLICIES.update(
+    {f"recent6_x{k}": recent(k, "2026-02") for k in (2, 4)}
+    | {f"recent12_x{k}": recent(k, "2025-08") for k in (2,)}
+)
 
 EXT = (("otb", OTB), ("engine", ENGINE))
 POLICIES.update(
@@ -492,6 +508,7 @@ class Grid:
         self.welo, self.belo, self.n = w[keep], b[keep], int(keep.sum())
         self.fmt = np.full(self.n, fmt)
         self.src = code // 100000
+        self.month = "9999-99"
         self.rated = np.ones(self.n, bool)
         self.wbot = self.bbot = np.zeros(self.n, bool)
         # fields cleaning policies read, set to the values that maximise any weight
@@ -523,6 +540,7 @@ class Shard:
         self.g.src = (
             int(Path(path).parent.name[1:]) // 100000
         )  # 0 lichess, else ext source
+        self.g.month = Path(path).parents[2].name
 
     def policy(self, fn, ph):
         if self.phase != ph:

@@ -594,6 +594,36 @@ WAVES["round3x4"] = WAVES["round3x2"] | dict(
     "leave-one-outs are the two single-source screens), and engine x4 seed 43",
 )
 
+B3C = "mover_rule+up4+noengine+otb_x4"
+X = dict(
+    stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+    months=[*R2P_MONTHS, *EXT_MONTHS],
+    suffix="b3",
+)
+WAVES["round4"] = WAVES["round3x"] | dict(
+    study="data-v1-round4",
+    prefix="r4",
+    b2=False,
+    throttle=6,
+    runs=r3(
+        b2("3e16", B3C, seeds=(42, 43, 44, 45))
+        + [
+            r
+            for p in (
+                f"{B3C}+recent6_x2",
+                f"{B3C}+recent6_x4",
+                f"{B3C}+recent12_x2",
+                "mover_rule+up4_cooldown20_up1+noengine+otb_x4",
+            )
+            for r in b2("3e16", p)
+        ],
+        **X,
+    ),
+    purpose="round 4 screen on the B_3 candidate B_2 + OTB x4 (its 1e17 check is round3s), 4 control seeds: "
+    "recency within buckets (last 6 months x2 / x4, last 12 x2; golden is 2026-07) and up4 back to control "
+    "in the last 20% (up16 there cost macro); sampler 211a8e6",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
