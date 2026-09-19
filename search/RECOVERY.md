@@ -25,7 +25,9 @@ Runtime on GPU node:
 Observer search.advance --watch reconciles sacct to own status.json, including idle
 time and every old charge. Before any replacement inspect jobs, ledger, data,
 checkpoints and STOP; phone Claude. Never overlap two owned GPUs.
-All queue tasks through 087 are DONE. No incomplete retrieval tasks. Do not run any
+Tasks through087 are DONE. 088 failed a2.3e-12 calibration audit tolerance;
+its source/error are retained. 089 is DONE (symmetric selected by both CV metrics).
+090 is DONE (one64-root deep-scaling smoke). 091 is RUNNING, then092 analyzes it. No incomplete retrieval tasks. Do not run any
 retrieval or external-memory experiment, even if stale notes propose one.
 
 083-golden-time-allocation-v2 DONE:3 preregistered live arms fixed512,
@@ -91,3 +93,25 @@ Earliernotes archivedresults/search-v1/recovery-history/before-20260919-1751.md.
 Do not read wholearchive unlessneeded;itcontains staleallocations/pausedstates.
 
 Current worktree goal remains active. No new Slurm submission needed now.
+
+## Live deep-scaling study (18:31 UTC)
+091-deep-scale-half calls search.engine.deep_scale, max_blocks32: first2048
+positions from a score-independent interleaving of128/cell/fold (4096 total).
+092-deep-scale-analyze-half follows automatically and fits each output recipe
+inside the original game folds. Do not duplicate requests or submit another GPU.
+The first block took44s including serialization; estimate~23min for2048.
+Studies and atomic chunks: results/search-v1/aug-deep-scale-v1.
+Progress: progress.json; results-prefix2048.json after analysis. Full4096 not
+requested yet; extending later uses the same collection module withoutmax_blocks.
+Growing trees1000->4000->16000 shareall evaluations. Compare constanttau.1,
+currenttau.2/sqrt(1+n/16), and normalizedtau.2/sqrt(1+n/(16*B/1000)). Current and
+normalized are exactlyequal at1000; count-scale recursion/identity tests passed.
+Purpose: separate more computation from increasingly optimizing continuation
+behavior. Ordinary search/root coverage unchanged. No golden access.
+
+Default controller Python (/home/yimingz3/miniconda3/bin/python3.11) DOES have
+numpy/scipy/torch; torch210 runtime lacks scipy. Default lacks pybind11/chess.
+No environment installation made. A cursory primary-paper search found Gumbel
+AlphaZero (https://openreview.net/pdf?id=bERaNdoegnO): its guarantee is playing
+policy improvement with correct values, not human likelihood; do not substitute
+best-action identification for the distribution-estimation objective blindly.
