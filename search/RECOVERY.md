@@ -6,7 +6,105 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current continuation: faster stack live; deeper golden running
+## Current continuation: completed rollout and cheap calibration screens
+
+059 human_rollout DONE, no GPU request after it. OneGPU10498670 unchanged,
+engine1713252 remains ready (idle time charged). Do not duplicate or reset.
+4096Augustroots,4 trajectories/legal root move; preserved Elo/TC and independent
+counter RNG, exact terminals/forced skip, full cache handles. CPU independent
+legality/categorical RNG/perspective/terminal/variance/batch independence tests
+passed. Initial test had a replica-ID lookup bug (shared first node); corrected
+test uses root/action/replica. Implementation unchanged. Logs retained.
+Scoring95.59s, total128.44s,7.125Mnonroot NNnodes.
+Elo-calibrated depth1 CE1.517948/1.492103(29nodes),
+depth4 1.488556/1.430232(379), depth8 1.497611/1.451025(840),
+depth16 1.515411/1.486457(1739); static1.452777/1.358349(971).
+BothfitCV choose static. Globalcalibration also reported, no promotion.
+Rollout+search and noise-shrunk rollout stacks also bothCV choose static.
+Noise diagnostics in aug-rollout-v1/stack.json. High horizon variance supports
+only a negative result for four samples, not a claim all rollout budgets fail.
+
+All private CPU screens done:
+- aug-retrieval-residual-v2: bothCV select search_log_ratio_k128 but confirmation
+1.453222/1.357116 vs1.452777/1.358349; bothpairedCIs overlap0. No promotion.
+- aug-boardbook-v1: macroCV selects count smoothing,1.452462/1.358064;
+expertCV unchanged; CIs overlap0. Exact-board bank covers~9%queries. No promotion.
+- aug-clock-calibration-v1: ONLYbefore-move feat[row,target_column-1,0], hashes
+verified and target/prefix/label alignment asserted. Clock-only alpha and
+search alpha/beta variants. Selected trouble_both and seconds_format_beta
+REGRESS onconfirmation; no golden. Adds legal info to r2noclock, explicitly
+separate from algorithm-only gain. First result write failed local Path variable
+shadowing; corrected, plan-first/executed-first preserved.
+- aug-outcome-consistency-v1: 1/4/16 Bayesian projections of child WDL to root
+WDL, scalarfit strength. MacroCV unchanged; expertCV iter4 worsensconfirmation.
+No future outcomes supplied. Small changes only, no golden.
+All usertables sent except outcome-consistency (send next).
+
+Failed retrieval first-producer code moved out of search/ to private
+results/search-v1/retrieval-failed-sources; original bank builder reconstructed
+and verified against original manifestsha. Correct producers remain*_v2.py;
+do not try rerunning failed queue modules: their error receipts prevent repeats.
+Current reports include new screens; rerunreport after any addedresults.
+
+Next hypothesis to consider: adaptive Bellman temperature based on actual
+subtree expansion (uncertain shallow nodes closer to policy expectation,
+well-expanded nodes more decisive), using cached coverage trees for cheap
+CPU selection. Not implemented or preregistered yet. Could instead pursue
+another justified model-only method. Currentgoal10x/10x stillnotachieved.
+No peer review outstanding, no sharedfiles or Slurm mutation.
+
+## Previous continuation: retrieval pilot and faster golden complete
+
+One unchanged GPU10498670/babel-t5-32, engine1713252, cache1.5M. No extra GPU.
+050 DONE: actual4000 gives golden CE1.44739937/1.34116928,
+CM2.89951/4.98924,3854.934mean nodes,555.79s scoring+.816s analysis.
+Own logical1000 control CE1.45296415/1.35638745 (CM2.65198/3.99557).
+Paired4000-1000 macroCI[-.007688,-.003369],expert[-.022537,-.008573].
+Higher cost alone not dominance; reused golden, not final fresh confirmation.
+Reports/frontier/registry updated (79 entries including duplicate controls).
+
+051 DONE: adaptive root curvature, own static control, all1000 sims.
+August static CE1.4527775/1.3583490; half-adaptive1.4526109/1.3579575;
+fullyadaptive1.4501743/1.3504992. BothfitCV choose half-adaptive; pairedCIs
+include0, so no golden promotion. Full arm not selected from confirmation.
+
+052 feature capture PASS: root logits identical normal/LAST/FULL, last states
+match, arbitrary changed future does not change preceding captured features.
+June-only retrieval bank:503281 targets/9057games after fixing game-end mask.
+Original retrieval-bank-v1 incorrectly labelled6920 terminal2346/2347 tokens;
+053 feature extraction STOPPED on target-range assertion before any result.
+Corrected retrieval-bank-v2 only masks those targets, keeps games/tokens unchanged,
+parent manifest hash retained. Original failed queue/artifacts retained.
+Builder now correct and points v3 to prevent overwrite; do not rebuild v3 blindly.
+055 retrieval-features-v2 DONE:733780inputtokens,~520MB,3.11s invocation.
+056 aug-retrieval-v1 neighbors DONE:4096roots,.286s prefill+.158s query,
+1.97s whole invocation. Same-cell, legal-move-filtered cosine neighbors.
+All9kernels×2baselines on August: direct retrieval fails; macroCV selects
+search+k32/temp.1 CE1.4509585/1.3556495 vssearch1.4527775/1.3583490,
+but pairedmacroCI[-.006415,+.001367]/expert[-.012944,+.002023] overlap0.
+ExpertCV picks unchangedsearch. No golden promotion.
+
+057 residual-neighbor GPU cache failed missing no_grad, before cache output.
+058 retrieval_residual_v2 fixes it, writes aug-retrieval-residual-v2.
+CPU retrieval_residual_analysis currently running (log retrieval-residual-analysis-v2.log).
+Tests residual zero-strength/zero-effect/support/fallback passed.
+Residual compares empirical neighbor actions against frozen-head expected moves,
+linear additive or smoothed log ratio; kernels32/128,temp.1, globalfit strength.
+No model weight updates, no query target enters GPU neighbor task.
+CPU boardbook.py running (log boardbook.log), exact board/cell empirical counts
+from the SAMEJune bank, constantmix/Dirichlet smoothing, matched static/direct
+controls. Output aug-boardbook-v1. No new data/GPU and no golden yet.
+Read results before any resubmission; service caches modules, use fresh names.
+Failed sources/requests stay as evidence, not quality results.
+
+Bank safeguards: preJuly Juneonly; dev/test/golden/August game IDs and full/clipped
+move hashes excluded (test moves read ONLY for exclusion fingerprints, unscored).
+All retrieval is additional training-corpus memory, separately labelled from
+pure search CM, with build/query/memory cost. Claude informed. No sharedchanges.
+After CPU results, show tables, updateREPORT/RECOVERY, commitprivatecode.
+Goal10x/10x still NOT achieved. No outstanding peer review.
+
+## Previous continuation: faster stack live; deeper golden running
 
 Resident engine now PID1713252, same general L40S job10498670 on babel-t5-32.
 Cache1500000 tokens, memory fraction0.8, 30s process startup. Log

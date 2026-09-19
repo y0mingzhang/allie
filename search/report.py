@@ -33,6 +33,14 @@ def main():
                        ('aug-coverage-v1/results.json','August root coverage quotas, with ordinary PUCT below root.'),
                        ('aug-coverage-v1/behavior.json','August expected outcome under the value-tilted continuation policy; unchanged soft backup selected.'),
                        ('aug-coverage-v1/format-calibration.json','August format-by-rating calibration, partially pooled toward Elo-only coefficients; no confirmation gain.'),
+                       ('aug-clock-calibration-v1/results.json','August pre-move remaining-clock calibration, direct and search; added legal information, no future thinking time.'),
+                       ('aug-outcome-consistency-v1/results.json','August root/child outcome-consistency projection, all model predictions; no true outcomes used.'),
+                       ('aug-rollout-v1/results.json','August human-policy Monte Carlo leaf values at1/4/8/16ply, four trajectories per action.'),
+                       ('aug-rollout-v1/stack.json','August rollout/search combinations and empirical noise shrinkage, additional rollout nodes charged.'),
+                       ('aug-retrieval-residual-v2/results.json','August residual retrieval: empirical human neighbors minus their frozen-model expectations; same June memory.'),
+                       ('aug-boardbook-v1/results.json','August exact-state June boardbook: same-cell frequencies, full support from neural prior; extra-data inference.'),
+                       ('aug-retrieval-v1/results.json','August June-datastore retrieval, alone and stacked with search; additional corpus memory and query costs, not pure search.'),
+                       ('aug-adaptive-root-v1/results.json','August updated-policy CE-curvature root allocation against a matched static control.'),
                        ('aug-influence-v1/results.json','August internal value-influence allocation, with the same root-coverage quota; compare to the root-coverage control.'),
                        ('aug-transpositions-v1/results.json','August legal transposition-history averaging: fixed original/variant-mean weights; full-prefix cost charged; no confirmation win.'),
                        ('aug-selection-v1/utilities.json','August nonlinear value utilities and policy-weighted standardization, same cached trees.'),
@@ -190,6 +198,7 @@ def main():
                        ('golden-explore-v1/results.json','August-selected broader-exploration golden check. Routed variant uses cached stopping; actual mixed-budget execution is separate.'),
                        ('golden-coverage-v1/results.json','August-selected root-coverage golden check. Routed variant is cached stopping, not yet an actual mixed-budget runtime measurement.'),
                        ('golden-dynamic-coverage-v1/results.json','Actual mixed-budget root-coverage search, with cached versus live numerical differences reported separately.'),
+                       ('golden-fast-coverage-v1/results.json','Faster root-coverage search: actual4000 simulations and logical1000 prefix, frozen August coefficients; higher cost alone is not dominance.'),
                        ('golden-utilities-v1/results.json','August-selected utility normalization on identical golden trees; zero additional model queries.'),
                        ('golden-permutation-v1/results.json','Numerical sensitivity audit: same frozen router, different fixed position order. Neither order is selected by quality.')]:
         d=read(path)

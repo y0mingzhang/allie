@@ -88,6 +88,12 @@ def main():
         for name in ('standardized10','standardized20'):
             x=d['methods'][name]
             append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
+    fast=ROOT/'golden-fast-coverage-v1/results.json'
+    if fast.exists():
+        d=json.loads(fast.read_text())
+        for name in ('fast1000','fast4000'):
+            x=d['methods'][name]
+            append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds'] if name=='fast4000' else None))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
