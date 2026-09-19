@@ -6,6 +6,7 @@ task WAVE     run one array task: train with --mix, score on original validation
 status WAVE   one line per run against the isoflop-v1 baseline of its size
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -106,6 +107,18 @@ CURRENT_STORES = STORES[
 
 
 HISTORY = ROOT / "results/recipe10x/data-v1-history-counts.json"
+B2 = ROOT / "results/recipe10x/data-v1-B2.json"
+
+
+def b2_pin(w):
+    """Verified sha256 of the published B_2 for waves built on it (the model track pools on it)."""
+    if not w.get("b2"):
+        return {}
+    b2 = json.loads(B2.read_text())
+    sha = b2.pop("sha256")
+    digest = hashlib.sha256(json.dumps(b2, sort_keys=True).encode()).hexdigest()
+    assert sha == digest, "B_2 edited after publishing"
+    return dict(b2_sha256=sha)
 
 
 def screen(rs, pool_frac=0.014, history=False, stores=None, months=None):
@@ -429,6 +442,7 @@ def plan(wave):
                 runs=[r | dict(name=name(w, r)) for r in w["runs"]],
                 selection="original validation >=2400 CE",
                 months="data-v1 2025-01..2026-08 excluding 2026-07",
+                **b2_pin(w),
             ),
             indent=2,
         )
@@ -641,10 +655,12 @@ def run_one(w, study, r, gpu):
             f"{log}.strat.log",
         )
     sv = json.loads(strat.read_text())
+    pin = json.loads((study / "plan.json").read_text())
     tmp = result.with_suffix(".tmp")  # atomic: a preempted write never looks complete
     tmp.write_text(
         json.dumps(
             r
+            | {k: pin[k] for k in ("b2_sha256",) if k in pin}
             | dict(
                 name=n,
                 ce={k: ev[k + "_ce"] for k in ("move", "expert2400", "expert2600")},
