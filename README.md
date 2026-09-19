@@ -2,6 +2,11 @@
 
 Human chess move prediction from move history and player ratings. This repository contains the current move-sequence model, Qwen controls, and the completed size/data scaling study.
 
+The completed [inference track](search/README.md) adds a resident search engine,
+Allie MCTS references, and [transfer results and Pareto plots](search/TRANSFER_REPORT.md)
+for the later 34M and 129M recipes with board and clock inputs. The architecture
+and scaling sections below describe the earlier move-only study.
+
 The objective is low next-move cross-entropy (CE), including moves played by players rated at least 2400 and 2600. Lower is better. The current scaling study uses no board features, distillation, or search.
 
 ## Architecture
