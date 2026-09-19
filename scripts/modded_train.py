@@ -16,6 +16,7 @@ import torch
 import torch.distributed as dist
 import triton
 from modded_arch import attn_factor, extra_flops
+from modded_moe import STATS
 from modded_medium import (
     Config,
     TrainingManager,
@@ -83,18 +84,11 @@ def to_gpu(x):
 
 
 def moe_stats(manager):
-    """Per MoE layer: last step's max / mean and min / mean tokens per expert, experts under 10% of
-    the mean, dropped fraction, bias norm."""
+    """Per MoE layer, over the last step (modded_moe.STATS)."""
     if not manager.moe:
         return {}
     stats = torch.stack([m.stats for m in manager.moe]).tolist()
-    return dict(
-        moe_imbalance=[round(x[0], 3) for x in stats],
-        moe_min_load=[round(x[1], 3) for x in stats],
-        moe_starved=[int(x[2]) for x in stats],
-        moe_dropped=[round(x[3], 4) for x in stats],
-        moe_bias_norm=[round(m.bias.norm().item(), 4) for m in manager.moe],
-    )
+    return {f"moe_{k}": [round(x[i], 4) for x in stats] for i, k in enumerate(STATS)}
 
 
 def useful_flops(rows, cfg, short_window, long_window):

@@ -220,7 +220,7 @@ def create_model(cfg, device="cuda"):
         cfg.max_tokens,
         mlp=arch["mlp"],
         untie_ve=arch["untie_ve"],
-        moe=modded_arch.moe_dims(cfg.width, arch["moe"]),
+        moe=modded_arch.moe_dims(cfg.width, arch),
     ).to(device)
     model.use_clock, model.use_elo = cfg.clock, cfg.elo
     model.use_feats = cfg.feats

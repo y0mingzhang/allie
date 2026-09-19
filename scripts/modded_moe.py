@@ -18,13 +18,48 @@ import torch.distributed as dist
 from torch import nn
 from torch.nn import functional as F
 
+# MoE.stats, per layer over the last step (modded_train logs them as moe_<name>)
+STATS = (
+    "imbalance",
+    "min_load",
+    "starved",
+    "dropped",
+    "bias_routed",
+    "bias_range",
+    "margin",
+)
+
+
+class AddLoss(torch.autograd.Function):
+    """Identity on x whose backward also sends gradient 1 into loss (DeepSeek's auxiliary-loss
+    hook): a loss term computed inside a module without changing its return value. Contract: the
+    loss's gradient is 1 regardless of how the objective is scaled downstream, so the caller bakes
+    the objective's scaling into loss (here the trainer's world / 8); a GradScaler or an external
+    loss weight would not reach it and needs the same treatment."""
+
+    @staticmethod
+    def forward(ctx, x, loss):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad, torch.ones((), dtype=torch.float32, device=grad.device)
+
 
 class MoE(nn.Module):
-    def __init__(self, dim, experts, topk, expert_hidden, shared_hidden, capacity=1.25):
+    def __init__(
+        self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
+        gamma=1e-3, seq=0.0, update="sign", capacity=1.25,
+    ):  # fmt: skip
         super().__init__()
+        assert update in ("sign", "prop")
         self.experts, self.topk, self.capacity = experts, topk, capacity
+        # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
+        # clamp((mean - load) / mean, -1, 1) x the rebalance() scale, which settles instead of
+        # cycling at +-gamma once balanced), sequence-wise balance loss weight
+        self.gamma, self.update, self.seq = gamma, update, seq
         bound = 3**0.5 * 0.5 * dim**-0.5  # the dense MLP's c_fc init
-        self.router = nn.Parameter(torch.randn(experts, dim) * 0.02)
+        self.router = nn.Parameter(torch.randn(experts, dim) * init)
         self.up = nn.ParameterList(
             nn.Parameter(torch.empty(expert_hidden, dim).uniform_(-bound, bound))
             for _ in range(experts)
@@ -36,7 +71,11 @@ class MoE(nn.Module):
             torch.empty(shared_hidden, dim).uniform_(-bound, bound)
         )
         self.shared_down = nn.Parameter(torch.zeros(shared_hidden, dim))
-        self.router.label, self.router.lr_mul, self.router.wd_mul = "router", 0.1, 0.0
+        self.router.label, self.router.lr_mul, self.router.wd_mul = (
+            "router",
+            router_lr_mul,
+            0.0,
+        )
         for p in (*self.up, *self.down):
             p.label = "moe"
         for p in (self.shared_up, self.shared_down):
@@ -46,12 +85,11 @@ class MoE(nn.Module):
         self.register_buffer(
             "bias", torch.zeros(experts)
         )  # selection only; checkpointed
-        # assignments per expert, then dropped assignments, accumulated over a step's micro-batches
-        self.register_buffer("load", torch.zeros(experts + 1), persistent=False)
-        # last step's max / mean and min / mean tokens per expert, experts under 10% of the mean,
-        # dropped fraction (collapse logging)
+        # accumulated over a step's micro-batches: assignments per expert, dropped assignments,
+        # tokens whose bias changed their top-k, tokens, summed k-th vs (k+1)-th affinity margins
+        self.register_buffer("load", torch.zeros(experts + 4), persistent=False)
         self.register_buffer(
-            "stats", torch.tensor([1.0, 1.0, 0.0, 0.0]), persistent=False
+            "stats", torch.tensor([1.0, 1, 0, 0, 0, 0, 0]), persistent=False
         )
 
     def forward(self, x):
@@ -69,8 +107,14 @@ class MoE(nn.Module):
         pos = (onehot.cumsum(0) * onehot).sum(-1) - 1  # rank within its expert
         cap = math.ceil(self.capacity * n / e) if self.training else t
         if self.training:
+            with torch.no_grad():
+                top = torch.topk(s, k + 1, dim=-1)
+                own = torch.zeros_like(s).scatter_(1, top.indices[:, :k], 1.0)
+                moved = (own.gather(1, idx) < 1).any(-1).sum()
+                margin = (top.values[:, k - 1] - top.values[:, k]).sum()
+                extra = [(pos >= cap).sum(), moved, torch.full_like(moved, t), margin]
             self.load[:e] += onehot.sum(0).float()
-            self.load[e] += (pos >= cap).sum().float()
+            self.load[e:] += torch.stack([v.float() for v in extra])
         rows = e * cap + n  # expert slots, then one spill row per assignment
         arange = torch.arange(n, device=h.device)
         slot = torch.where(pos < cap, flat * cap + pos, e * cap + arange)
@@ -89,21 +133,44 @@ class MoE(nn.Module):
         routed = (y * w.type_as(y)[..., None]).sum(1)
         shared = F.relu(F.linear(h, self.shared_up.type_as(h))).square()
         shared = F.linear(shared, self.shared_down.T.type_as(h))
-        return (routed + shared).view(shape)
+        out = (routed + shared).view(shape)
+        if self.training and self.seq:
+            # DeepSeek-V3's sequence-wise balance loss, one 1024-token row = one sequence: per row
+            # sum_i f_i P_i with f_i = e / k * share of the row's routes to expert i and P_i = its
+            # mean normalised affinity. The trainer's objective is a SUM over tokens (x world / 8),
+            # so each row's penalty is weighted by its 1024 input tokens (seq = weight per input
+            # token, scored or not; masking only changes which tokens carry the CE): the total is
+            # additive over rows, hence independent of how rows are split into micro-batches
+            assert t % 1024 == 0
+            sel = torch.zeros_like(s).scatter_(1, idx, 1.0).view(-1, 1024, e).mean(1)
+            prob = (s / s.sum(-1, keepdim=True)).view(-1, 1024, e).mean(1)
+            scale = dist.get_world_size() / 8 if dist.is_initialized() else 1 / 8
+            loss = self.seq * scale * 1024 * (sel * e / k * prob).sum()
+            out = AddLoss.apply(out, loss)
+        return out
 
     @torch.no_grad()
-    def rebalance(self, rate=1e-3):
-        """After an optimizer step: raise the bias of under-loaded experts, lower over-loaded ones."""
+    def rebalance(self, scale=1.0):
+        """After an optimizer step: raise the bias of under-loaded experts, lower over-loaded ones.
+        scale: the prop rule's decay (1 for the first 80% of training, then linearly to 0)."""
         if dist.is_initialized():
             dist.all_reduce(self.load)
-        load, dropped = self.load[:-1], self.load[-1]
-        self.bias += rate * torch.sign(load.mean() - load)
-        total = load.sum().clamp(min=1)
-        mean = total / load.numel()
-        starved = (load < 0.1 * mean).sum()
+        e = self.experts
+        load = self.load[:e]
+        dropped, moved, tokens, margin = self.load[e:]
+        mean = load.sum().clamp(min=1) / e
+        if self.update == "sign":
+            self.bias += self.gamma * torch.sign(load.mean() - load)
+        else:
+            self.bias += self.gamma * scale * ((mean - load) / mean).clamp(-1, 1)
+        tokens = tokens.clamp(min=1)
         self.stats.copy_(
             torch.stack(
-                (load.max() / mean, load.min() / mean, starved, dropped / total)
+                (
+                    load.max() / mean, load.min() / mean, (load < 0.1 * mean).sum().float(),
+                    dropped / (mean * e), moved / tokens, self.bias.max() - self.bias.min(),
+                    margin / tokens,
+                )
             )
-        )
+        )  # fmt: skip
         self.load.zero_()

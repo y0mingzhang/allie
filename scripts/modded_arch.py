@@ -24,6 +24,13 @@ DEFAULTS = dict(
     normuon=True,  # NorMuon second-moment variance reduction on the Muon update
     board=None,  # None | direct | conv: board-state input at every position (modded_board)
     moe=None,  # [experts, top-k]: DeepSeek MoE MLPs after the first layer (modded_moe)
+    # MoE routing: router init std, router Adam lr multiplier, bias update speed, sequence-wise balance
+    # loss weight (pilot2's defaults collapsed; tier 2b tunes them)
+    moe_init=0.02,
+    moe_router_lr_mul=0.1,
+    moe_gamma=1e-3,
+    moe_seq=0.0,
+    moe_update="sign",
     diff_attn=False,  # differential attention (modded_diffattn)
 )
 
@@ -45,14 +52,22 @@ def resolve(arch):
     return out
 
 
-def moe_dims(width, moe):
-    """(experts, top-k, expert hidden, shared hidden): a 2d shared expert plus k routed experts of
-    2d / k each, so the active hidden width is the dense MLP's 4d."""
-    if not moe:
+def moe_dims(width, arch):
+    """MoE constructor arguments: a 2d shared expert plus k routed experts of 2d / k each (active
+    hidden width = the dense MLP's 4d), then the routing settings."""
+    a = resolve(arch)
+    if not a["moe"]:
         return None
-    experts, topk = moe
+    experts, topk = a["moe"]
     assert 2 * width % topk == 0
-    return experts, topk, 2 * width // topk, 2 * width
+    hidden = (2 * width // topk, 2 * width)
+    return (
+        experts,
+        topk,
+        *hidden,
+        *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
+        a["moe_update"],
+    )
 
 
 def attn_factor(arch):

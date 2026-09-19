@@ -442,6 +442,28 @@ wave(
     "resume; base must match data-v1-round3g's B_2 s42 (L40S, same B_2) at common steps",
     "l40s",
 )
+# tier 2b: MoE with routing tuned for 2274-step runs (pilot2's defaults collapsed): DeepSeek's router
+# init 0.006, router lr ~DeepSeek's (lr_mul 0.01), bias speed 1e-2, and a sequence-wise loss 1e-3
+# proportional bias updates (no +-gamma limit cycle once balanced), decayed to 0 over the last 20%
+# of training (main's reviewer)
+MOE_V2 = dict(moe_init=0.006, moe_router_lr_mul=0.01, moe_gamma=1e-2, moe_update="prop")
+SCREEN2B = {
+    "moe32k4b": dict(arch=dict(moe=[32, 4]) | MOE_V2),
+    "moe32k4bs": dict(arch=dict(moe=[32, 4], moe_seq=1e-3) | MOE_V2),
+    "moe64k8bs": dict(arch=dict(moe=[64, 8], moe_seq=1e-3) | MOE_V2),
+}
+wave(
+    "pilot2b",
+    "model-v1-pilot2b",
+    "mpil2b",
+    [
+        r | dict(stop_after=[50, 300])
+        for r in variants("3e16", b, {"base": {}} | SCREEN2B)
+    ],
+    "tier-2b MoE routing pilot on L40S: drops < 2%, starved ~0 and max / mean <= ~2 after step 100; "
+    "base must match data-v1-round3g's B_2 s42 through step 300 (identity proof)",
+    "l40s",
+)
 wave(
     "screen2",
     "model-v1-screen2",
@@ -1003,8 +1025,9 @@ def table(*keys, controls=()):
         )
         print(f"| {study} | {b2} | {budget} | {v} | {m['flops']:.3f} | {cells} |")
     print(
-        "FLOPs are nominal: MoE counts k executed experts per token; routes dropped over capacity in "
-        "training do no MLP work (their rate is train.jsonl moe_dropped)"
+        "FLOPs are nominal: MoE counts k assigned experts per token. Dropped-route-adjusted FLOPs "
+        "(x (1 - moe_dropped)) are useful assigned FLOPs, not executed kernel FLOPs: the expert "
+        "bmm always runs the padded E x capacity shape; padding and wall time are reported apart"
     )
 
 

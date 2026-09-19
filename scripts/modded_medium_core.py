@@ -1814,8 +1814,13 @@ class TrainingManager:
                     if isinstance(opt, DistAdam):  # re-armed on the last micro-batch
                         opt.should_sync = False
 
-        for m in self.moe:
-            m.rebalance()
+        # prop bias rule: full speed for the first 80% of training, then linearly to 0 at the end
+        # (DeepSeek-V3 stops bias updates in its final phase)
+        if self.moe:
+            n = args.num_iterations
+            scale = min(1.0, max(0.0, (n - step) / (0.2 * n)))
+            for m in self.moe:
+                m.rebalance(scale)
 
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()
