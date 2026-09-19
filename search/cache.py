@@ -40,10 +40,11 @@ def main():
     for k in ('angular_freq','cos','sin'): getattr(model.yarn,k).copy_(inf['yarn'][k].to('cuda'))
     model.yarn.attn_scale=inf['yarn']['attn_scale']; model.eval()
     sched=core.ForwardScheduleConfig(None,inf['ws_short'],inf['ws_long'])
+    rotary_cos=model.yarn.cos.clone();rotary_sin=model.yarn.sin.clone()
     net=torch.compile(model,dynamic=False,fullgraph=True)
     data=json.loads((OUT/'dev.json').read_text()); positions=data['positions']
     identity=dict(checkpoint_sha256=sha(modelpath),data_sha256=sha(OUT/'dev.json'),
-        code_sha256=sha(__file__),source=str(SOURCE),top_k=8,pack_tokens=4096)
+        code_sha256=sha(__file__),source=str(SOURCE),top_k=8,pack_tokens=4096,rotary='per-document canonical coordinates',alignment=128)
     manifest=OUT/'cache-identity.json'
     if manifest.exists(): assert json.loads(manifest.read_text())==identity,'cache identity changed'
     else: manifest.write_text(json.dumps(identity,indent=2)+'\n')
@@ -53,30 +54,48 @@ def main():
         def flush():
             if not batch: return
             x=np.full(pack_tokens,2348,dtype=np.int64); idx=[]; cursor=0
+            rotary_pos=np.zeros(pack_tokens,dtype=np.int64);actual_tokens=0
             for p in batch:
-                x[cursor:cursor+len(p)]=p; cursor+=len(p); idx.append(cursor-1)
+                x[cursor:cursor+len(p)]=p;rotary_pos[cursor:cursor+len(p)]=np.arange(len(p))
+                idx.append(cursor+len(p)-1);actual_tokens+=len(p);cursor+=((len(p)+127)//128)*128
             xt=torch.as_tensor(x,device='cuda').reshape(1,-1)
+            rp=torch.as_tensor(rotary_pos,device='cuda')
+            model.yarn.cos[:pack_tokens].copy_(rotary_cos[rp]);model.yarn.sin[:pack_tokens].copy_(rotary_sin[rp])
             ctx=make_context(xt,sched.ws_short*128,sched.ws_long*128)
             torch.cuda.synchronize(); start=time.monotonic()
             with torch.inference_mode():
                 logits=net(xt.flatten(),xt.flatten(),ctx,sched).reshape(-1,2432)
                 y=logits[torch.as_tensor(idx,device='cuda')].float().cpu().numpy()
             torch.cuda.synchronize(); stats['forward_seconds']+=time.monotonic()-start
-            stats['calls']+=1; stats['prefix_tokens']+=cursor; stats['padded_tokens']+=pack_tokens
+            stats['calls']+=1; stats['prefix_tokens']+=actual_tokens; stats['padded_tokens']+=pack_tokens
             outputs.extend(y)
         for p in prefixes:
             assert 11<=len(p)<=1025 and p[0]==2348 and 2348 not in p[1:]
-            if used+len(p)>pack_tokens: flush(); batch=[]; used=0
-            batch.append(p); used+=len(p)
+            size=((len(p)+127)//128)*128
+            if used+size>pack_tokens: flush(); batch=[]; used=0
+            batch.append(p); used+=size
         flush()
         return np.array(outputs)
     started=time.monotonic()
-    p0=positions[0]['prefix']
-    a=forward([p0])[0]; b=forward([positions[1]['prefix'],p0])[1]
-    diff=float(np.max(np.abs(a-b)))
-    # BF16 and shifted rotary coordinates can introduce small differences.
-    assert diff<0.08,('packed oracle equivalence',diff)
-    warmup=dict(seconds=time.monotonic()-started,max_packed_logit_difference=diff,**stats)
+    # BF16 rotary tables are quantized at absolute packed coordinates. Test
+    # probability-level drift, rather than a max over thousands of tiny-probability logits.
+    probes=positions[:32]
+    reference=np.array([forward([p['prefix']])[0] for p in probes])
+    packed=forward([p['prefix'] for p in probes])
+    def logprob(x):
+        x=x[:,378:2346].astype(np.float64); z=x-x.max(1,keepdims=True)
+        return z-np.log(np.exp(z).sum(1,keepdims=True))
+    ref_lp,pack_lp=logprob(reference),logprob(packed)
+    target=np.array([p['target']-378 for p in probes]);ar=np.arange(len(probes))
+    bias=float(np.mean(ref_lp[ar,target]-pack_lp[ar,target]))
+    kl=float(np.mean(np.sum(np.exp(ref_lp)*(ref_lp-pack_lp),axis=1)))
+    diff=float(np.max(np.abs(reference-packed)))
+    warmup=dict(seconds=time.monotonic()-started,max_packed_logit_difference=diff,
+                packed_minus_reference_ce=bias,mean_policy_kl=kl,
+                caveat='Canonical per-document rotary coordinates; final baseline must also include unchanged official packing',**stats)
+    (OUT/'oracle-check.json').write_text(json.dumps(warmup,indent=2)+'\n')
+    print('oracle warmup',warmup,flush=True)
+    assert kl<1e-5 and abs(bias)<0.001,('packing drift too large for pilot',warmup)
     stats={k:0 for k in stats}
     (OUT/'oracle-check.json').write_text(json.dumps(warmup,indent=2)+'\n')
     print('oracle warmup',warmup,flush=True)

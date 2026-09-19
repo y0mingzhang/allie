@@ -58,3 +58,20 @@ uses the known mover Elo, leaves all nonexpert predictions exactly unchanged, an
 can reduce final search cost by scoring only the four expert cells. Any such restriction
 is reported explicitly; it cannot be sold as improving every rating group. The same
 conditional option is available to the cheap calibration control.
+
+## Serving equivalence check
+
+The frozen model stores BF16 rotary tables at absolute flattened coordinates. Moving
+32 development prefixes from offset zero into a packed buffer changed CE by +0.00505
+on this small probe (mean policy KL 0.000507); this is not a global bias estimate.
+The initial oracle therefore failed its check before producing experiment predictions.
+
+The inference adapter now copies the saved rotary coordinates relative to each document
+and aligns prefixes to 128-token boundaries. The same 32-position check then had zero
+logit difference, zero CE difference and zero policy KL. This is an explicit numerical
+inference variant, not a checkpoint/training edit. Final evaluation must report the
+unchanged official baseline, canonical-coordinate direct policy, cheap calibration,
+and search separately. Do not attribute a numerical baseline change to search.
+
+Persistent allocation 10497511 is live on one RTX6000Ada. The initial 2,048-position
+root/top-eight-child cache completed; CPU fitting uses fold0 and reports on fold1.
