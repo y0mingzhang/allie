@@ -7,17 +7,18 @@ from scipy.special import logsumexp
 from .service import ROOT,atomic
 from .balanced_eval import digest
 from .diff_backup_native import load,test
-from .retrieval_common import data
+from .sample_data import read
 from .fit_policy import fit,loss_gradient
 from .analyze_august import means
 
-def main():
+def main(folder='aug-diff-backup-v2',sample='aug-tune-v1',source_folder='aug-coverage-v1/coverage_bernoulli',batch_size=512):
     start=time.monotonic();module=load();test(module)
-    out=ROOT/'aug-diff-backup-v2';out.mkdir(exist_ok=True)
-    source=ROOT/'aug-coverage-v1/coverage_bernoulli'
-    plan=dict(sample_sha256=digest(ROOT/'aug-tune-v1/sample.json'),budget=1000,
-        inputs={p.name:digest(p) for p in sorted(source.glob('*.npz'))},
-        sources={p.name:digest(p) for p in [Path(__file__),Path(__file__).with_name('diff_backup.cpp'),Path(__file__).with_name('diff_backup_native.py')]},
+    out=ROOT/folder;out.mkdir(exist_ok=True)
+    source=ROOT/source_folder
+    plan=dict(sample_sha256=digest(ROOT/sample/'sample.json'),budget=1000,
+        inputs={p.name:digest(p) for p in sorted(source.glob('[0-9]*.npz'))},
+        sample=sample,source_folder=source_folder,batch_size=batch_size,
+        sources={p.name:digest(p) for p in [Path(__file__),Path(__file__).with_name('sample_data.py'),Path(__file__).with_name('diff_backup.cpp'),Path(__file__).with_name('diff_backup_native.py')]},
         formula='tau=exp(a)*(1+(descendants-1)/16)^b; a=log tau0, b=count exponent.',
         variants=['constant_control','fixed_output_2scalar','joint_output_10scalar'],
         bounds=dict(tau0=[.01,.4],count_exponent=[-1.,0.],alpha=[.4,1.6],beta=[0.,40.]),
@@ -27,9 +28,9 @@ def main():
     pp=out/'plan.json'
     if pp.exists():assert json.loads(pp.read_text())==plan
     else:atomic(pp,plan)
-    d=data();rows=d['rows'];cells=d['cells'];games=d['games'];fm=d['fit'];cv=d['cv'];ids=d['ids'];mask=d['mask'];target=d['target'];n=len(rows);ar=np.arange(n);group=cells%4
+    d=read(sample);rows=d['rows'];cells=d['cells'];games=d['games'];fm=d['fit'];cv=d['cv'];ids=d['ids'];mask=d['mask'];target=d['target'];n=len(rows);ar=np.arange(n);group=cells%4
     blocks=[];root=np.zeros((n,2432));cost=np.zeros(n)
-    for lo in range(0,n,512):
+    for lo in range(0,n,batch_size):
         with np.load(source/f'{lo:06d}.npz') as z:
             hi=lo+len(z['game']);np.testing.assert_array_equal(z['game'],games[lo:hi])
             payload={key:z[key] for key in ('parent','move','depth','born','degree','prior','boot','mass','terminal','roots')}
@@ -119,4 +120,9 @@ def main():
     with (out/'scores.npz').open('wb') as f:np.savez_compressed(f,names=list(losses),loss=np.stack(list(losses.values())),cells=cells,games=games,fit=fm)
     for name,rec in records.items():print(name,rec['confirmation'],flush=True)
     print('SELECTED',selected,'condition',conditioning,flush=True)
-if __name__=='__main__':main()
+if __name__=='__main__':
+    import sys
+    if len(sys.argv)>1:
+        assert sys.argv[1]=='expanded'
+        main('aug-expanded-backup-v1','aug-tune-expanded-v1','aug-expanded-search-v1',1024)
+    else:main()

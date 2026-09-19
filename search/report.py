@@ -62,6 +62,19 @@ def main():
                 score=x['confirmation'];selected=' [fit-CV selected]' if k in d.get('fit_cv_selected',{}).values() else ''
                 rows.append((k+selected,score['macro_ce'],score['expert_ce'],None,None))
             table(title,rows)
+    for path,title in [
+        ('aug-expanded-search-v1/results.json','Expanded August: 16384 moves, same game folds; backup and search-strength mixtures at256/1000 simulations.'),
+        ('aug-expanded-backup-v1/results.json','Expanded August differentiated backup: output-only two-scalar or joint ten-scalar fit; same1000 trees.'),
+        ('aug-expanded-stack-v1/results.json','Expanded August stacked fitted backups and search-strength mixtures; parameters refitted inside game folds.'),
+        ('aug-consideration-v1/results.json','Expanded August sampled consideration-set model; rejected on confirmation.'),
+        ('aug-retrieval-large-v1/results.json','Expanded August larger June retrieval datastore; additional data memory, shared-player exclusion ablation, all16 cells reported.')]:
+        d=read(path)
+        if d:
+            rows=[]
+            for k,x in d['results'].items():
+                score=x['confirmation'];selected=' [fit-CV selected]' if k in d.get('fit_cv_selected',{}).values() else ''
+                rows.append((k+selected,score['macro_ce'],score['expert_ce'],None,None))
+            table(title,rows)
     rows=[]
     d=read('confirmation/results.json')
     if d:
@@ -212,6 +225,11 @@ def main():
         d=read(path)
         if d:
             table(title,[(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
+    d=read('golden-expanded-stack-v2/results.json')
+    if d:
+        table('Live golden check of expanded-August CV-selected search stacks. Same1000 trees and nodes; reused golden, conditional training-equivalent CM.',
+              [(k,d['methods'][k]['macro'],d['methods'][k]['expert_macro'],d['methods'][k]['macro_training_eq_cm'],d['methods'][k]['expert_macro_training_eq_cm'])
+               for k in ('constant_single','subtree_sigma10','joint_sigma05','old_prior_s05','old4000')])
     audit=read('golden-permutation-v1/results.json')
     if audit:
         tables.append('Fixed position-permutation audit of the frozen live router: macro CE shift '+f"{audit['order_delta_ce']['macro']:+.6f}"+', expert shift '+f"{audit['order_delta_ce']['expert_macro']:+.6f}"+'. This measured order effect is separate from paired sampling intervals; one permutation does not estimate its full variance. Neither order is selected by quality.')

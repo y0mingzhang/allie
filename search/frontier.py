@@ -106,6 +106,12 @@ def main():
         for name in ('constant','prior_s05','prior_s10','adaptive_s05','adaptive_s10'):
             x=d['methods'][name]
             append('player_mixture_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
+    stack=ROOT/'golden-expanded-stack-v2/results.json'
+    if stack.exists():
+        d=json.loads(stack.read_text())
+        for name in ('constant_single','subtree_sigma10','joint_sigma05'):
+            x=d['methods'][name]
+            append('expanded_stack_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds']))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']

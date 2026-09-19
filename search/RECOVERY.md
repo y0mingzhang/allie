@@ -1,3 +1,64 @@
+## Latest continuation: expanded stack and larger retrieval (2026-09-19 10:35 UTC)
+
+Goal10x macro AND10x expert remains ACTIVE and NOT achieved. Same oneGPU10498670,
+babel-t5-32, general/normal, ends12:52UTC. Resident engine1713252 unchanged.
+Both STOP files absent; no Slurm/shared changes. Allocation observer preserves all charges.
+Claude round4 data@506e9fb mechanical review DONE; recency screen only pinned-month share,
+not all-history exposure emulation. Peer agreed month-exact1e17 check before promotion.
+
+065 expanded August16384trees DONE. Fourfold larger SAME August inventory/game folds.
+Expanded backup differentiable fitting now CV-selects joint10scalar; condition214.
+expanded_stack.py combines constant/subtree/joint with single/sigma.5/sigma1/learned.
+CV selects subtree_sigma10 macro and joint_sigma05 expert. All fold parameters retained.
+Joint fold parameters recovered from hashed previous execution log, full fits verified,
+all reused control scores reproduce exactly. No neural training or new golden tuning.
+
+066 golden attempt failed only overstrict reducer float64 parity (one value1.105e-12
+against2e-13 tolerance) before writing scored blocks. Original executed source archived
+under golden-expanded-stack-v1/executed-source, failure receipt and plan retained.
+067 golden_expanded_stack_v2 DONE,1e-10 tolerance + measured differences, same frozen fits:
+- constant_single CE1.45203346/1.35433497, CM2.691431/4.113747.
+- subtree_sigma10 CE1.44865908/1.34580384, CM2.840959/4.655957.
+- joint_sigma05 CE1.44868707/1.34565881, CM2.839675/4.665945.
+All969.8158nodes; scoring107.27s, analysis7.13s. Old4000 still best absolute quality
+1.44739937/1.34116928 at3854.934nodes. Reused golden108registry entries, no final claim.
+User got table. REPORT/FRONTIER/registry regenerated. No goal reset or new checkpoint.
+
+Expanded consideration-set rank-only choice FAILED:1.47944/1.37276 vs1.45426/1.33062.
+Future-legality idea already failed early blitz pilot; cached diagnostic median illegal
+mass.002, p99.088, but human-chosen children no cleaner; fitted coefficient0. Dropped,
+no new GPU probe. Claude informed. No material/Stockfish heuristic implemented.
+
+Next/current: larger temporally clean June datastore (separate retrieval attribution).
+retrieval_bank_large.py built retrieval-bank-large-v1:63283games/3803870positions,
+256K/cell target, actual expert-classical availability smaller. Same old exclusions:
+golden/dev/test/Aug games by site and full/clipped moves; test moves only exclusion hashes.
+068 retrieval_features_large DONE:3.93GB fp16keys,5.09Mprefilltokens,4.70sforward,
+8.95s summed block work,159.22s total incl loading/hashing/storage.
+Durable under own results/search-v1. Free group space checked~3TB.
+
+CPU retrieval_players.py currently running (SSH exec session10133): scans site/white/black
+from June bank source shards and exact August inventory prefixes, writes
+retrieval-players-large-v1/players.npz +manifest. Names hashed, IDs0 unknown; ablation excludes
+ANY shared participant. Log logs/retrieval-players-large.log. No shared store mutation.
+CPU local cache builder running (session85843), log retrieval-cache-large.log:
+retrieval_cache.py verifies each durable shard once and consolidates node-local mmap
+under /scratch/yimingz3/allie/search-retrieval/<report_sha>. Cold/warm timings recorded
+in retrieval-features-large-v1/local-cache.json. Prevent repeated NFS metadata/read costs.
+
+NOT yet queued: retrieval_neighbors_large.py, intended069. Wait for player sidecar and
+local cache completion, inspect errors. Existing feature bank complete. Collector returns
+512same-cell legal neighbors both with/without shared players; kernelsk32/128/512,temp.03/.1.
+After worker finishes run python -m search.engine.analyze_retrieval_large (OMP_NUM_THREADS=1).
+Analyzer fitsglobal lambda inside3gamefolds; baselinesdirectElotemp and fixedsubtree_sigma10
+(using exact stored fold params), scores all16cells and paired participant exclusion.
+No golden retrieval until CV/confirmation support a win. Adds data memory; reportbank/build/
+query/memory and extra rootprefill, not pure search. Claude no objection with exclusions.
+
+Runtime /scratch/yimingz3/allie/search-runtime/sglang-0.5.9-torch2.9.1-cu128/bin/python.
+Pyarrow CPU scripts need PYTHONPATH=/data/group_data/dei-group/yimingz3/allie/envs/chessmix-overlay.
+All own operations via SSH babel-t5-32 to avoid controllerNFS. Never kill tmux keeper.
+
 ## Latest continuation: mixtures and larger development sample (2026-09-19)
 
 All requests through064 completed; engine idle, no Slurm changes. 10498670 still
