@@ -52,3 +52,9 @@ Freeze a method and substantially enlarge independent confirmation before final 
 
 Bug hunt finished in main worktree: results/codex-bug-report.md. No training files modified.
 Worktree and goal created; building the evaluation/candidate cache harness.
+
+The first CPU sweep also includes expert-only application of each correction. This
+uses the known mover Elo, leaves all nonexpert predictions exactly unchanged, and
+can reduce final search cost by scoring only the four expert cells. Any such restriction
+is reported explicitly; it cannot be sold as improving every rating group. The same
+conditional option is available to the cheap calibration control.

@@ -37,10 +37,11 @@ def main():
     time_gate=softmax(raw[:,2350:2413],axis=1)[:,6:].sum(1)
     logits=raw[:,378:2346]
     def score(params):
-        x=logits/params['temperature']
+        enabled=(cells%4==3) if params.get('expert_only',False) else np.ones(len(rows),bool)
+        x=logits/np.where(enabled,params['temperature'],1.)[:,None]
         gate=time_gate if params.get('gate')=='time' else np.ones(len(rows))
-        x=x+params.get('beta',0)*gate[:,None]*advantage
-        if params.get('legal',False): x=np.where(legal,x,-np.inf)
+        x=x+params.get('beta',0)*(gate*enabled)[:,None]*advantage
+        if params.get('legal',False): x=np.where(legal | ~enabled[:,None],x,-np.inf)
         nll=logsumexp(x,axis=1)-x[ar,target]
         return nll,x.argmax(1)
     def objective(nll):
@@ -53,8 +54,9 @@ def main():
     for t in (.8,.9,1.,1.1,1.2):
         for beta in (-2.,-1.,0.,.5,1.,2.,4.):
             for gate in (('none',) if beta==0 else ('none','time')):
-                p=dict(temperature=t,beta=beta,gate=gate,legal=True)
-                nll,_=score(p);trials.append((objective(nll),p))
+                for expert_only in (False,True):
+                    p=dict(temperature=t,beta=beta,gate=gate,legal=True,expert_only=expert_only)
+                    nll,_=score(p);trials.append((objective(nll),p))
     selected=min(trials,key=lambda z:z[0])[1]
     calibration=min((x for x in trials if x[1]['beta']==0),key=lambda z:z[0])[1]
     frozen=dict(selected=selected,calibration=calibration,
