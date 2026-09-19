@@ -29,7 +29,11 @@ def main():
                        ('aug-selection-wide-v1/results.json','August broader exploration and FPU combination.'),
                        ('aug-child-features-v1/results.json','August predicted opponent difficulty from candidate-child time and policy heads; extra query cost charged.'),
                        ('aug-deep-v1/results.json','August extension to4000 simulations, with own1000snapshot control; higher node cost, no dominance claim.'),
+                       ('aug-coverage-deep-v1/results.json','August root-coverage extension to4000 simulations, with its own matched-batch1000 control.'),
                        ('aug-coverage-v1/results.json','August root coverage quotas, with ordinary PUCT below root.'),
+                       ('aug-transpositions-v1/results.json','August legal transposition-history averaging: fixed original/variant-mean weights; full-prefix cost charged; no confirmation win.'),
+                       ('aug-selection-v1/utilities.json','August nonlinear value utilities and policy-weighted standardization, same cached trees.'),
+                       ('aug-selection-v1/discount.json','August recursively regularized critic backups; all depths use the same tree, with exact terminal values.'),
                        ('aug-selection-v1/innovation.json','August search-innovation and shallow/deep value combination; no confirmation win.'),
                        ('aug-selection-v1/state-calibration.json','August state-dependent search correction; fit-game CV selection, fixed cached trees and node cost.'),
                        ('aug-soft-selection-v1/results.json','August soft Bellman values used for branch selection as well as final output; matched simulation budget.'),
@@ -181,6 +185,9 @@ def main():
     for path,title in [('golden-router-v1/results.json','Frozen budget allocation on cached golden trees; dynamic execution is reported separately.'),
                        ('golden-dynamic-router-v1/results.json','Actual mixed-budget golden inference; same frozen policy, no retuning.'),
                        ('golden-explore-v1/results.json','August-selected broader-exploration golden check. Routed variant uses cached stopping; actual mixed-budget execution is separate.'),
+                       ('golden-coverage-v1/results.json','August-selected root-coverage golden check. Routed variant is cached stopping, not yet an actual mixed-budget runtime measurement.'),
+                       ('golden-dynamic-coverage-v1/results.json','Actual mixed-budget root-coverage search, with cached versus live numerical differences reported separately.'),
+                       ('golden-utilities-v1/results.json','August-selected utility normalization on identical golden trees; zero additional model queries.'),
                        ('golden-permutation-v1/results.json','Numerical sensitivity audit: same frozen router, different fixed position order. Neither order is selected by quality.')]:
         d=read(path)
         if d:

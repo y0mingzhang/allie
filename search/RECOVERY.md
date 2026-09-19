@@ -6,7 +6,65 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current state: 2026-09-19 ~07:55 UTC
+## Latest continuation: root coverage and auxiliary-loss review
+
+Current best actually executed golden: 042 root coverage, CE1.452971275/1.356337615,
+CM2.65168x/3.99839x,975.560 mean nodes. Selected sqrt(prior*(1-prior))
+root quota by August fit-gameCV; interior cp2.5 zeroFPU. Same1000 sims.
+Vs cp2.5 paired delta95% macro[-.011486,-.004449],expert[-.023330,-.001908].
+Scoring223.72s, CM analysis.761s. Cached Elo stopping615.4005 nodes,
+CE1.45406266/1.35633761,CM2.60636x/3.99839x. NOT goal10x/10x; reusedgolden.
+Actual mixed execution is043-dynamic-coverage, queued/running; output
+golden-dynamic-coverage-v1. Its live results are authoritative, not cached ones.
+044-deep-coverage queued after043, Aug4096 roots ×4000sim,160batch,
+same root quota; own1000 snapshot controls batching. Expected~11min. Only
+q/logit snapshots saved (no duplicate full-tree gigabyte). Analyze with
+python -m search.engine.analyze_deep_selection aug-coverage-deep-v1.
+Routine watcher watch_search_queue follows043/044 at60s intervals,20min max.
+No new Slurm jobs; existing10498670, same L40S. STOP absent, ledger observer live.
+
+040 root quotas DONE420.55s. FitCV selected Bernoulli quota both metrics:
+Aug1.452666/1.357460,978.20nodes. sqrt prior1.451727/1.355295.
+Incremental Aug CIs vscp2.5 overlap0 (paired-vs-cp25.json); golden042 then
+showed improvement as above. All three quotas and all budget arms reported.
+041 history averaging DONE1.41s inference+1.94s analysis.88.65%coverage,
+mean3.18variants; bothCVmetrics select unchangedsearch. Arithmetic stack
+1.458212/1.358519,geometric1.458022/1.358474 vs1.457688/1.359266.
+CIs overlap0; notpromoted. Individual variant CE and percellcoverage saved.
+Generator seesprefixonly, exactFEN/legalcommutation, unchangedirreversible
+suffix; samepositionIDs. No clocks on r2; B2wouldneedclockconsistent variant.
+Sent results to Claude.
+
+CPU utilities DONE2.46s on cp2.5 trees. FitCV macroselectsstandardized20
+(confirmation1.455133/1.354195); expertselectsstandardized10
+(1.458242/1.353592). Incremental AugCIs overlap0. Eightarms incllinear,
+logodds,tanh,cubic,rank,std05/10/20 allreported. BothCVselectedarms frozen
+for CPU-onlygolden check in golden-utilities-v1; scriptgolden_utilities.py,
+loglogs/golden-utilities.log, maystillrunning (tool session82409).
+No new NNnodes; baselinecachedtrees unchanged.
+CPU recursivecriticregularization DONE: lambda0,.25,.5,.75 allworse,
+lambda1 (unchangedsearch) selectedboth. Values in aug-selection-v1/discount.json.
+Independentnative recursion/terminal/missingmass/budget checks pass;
+lambda1 bit-exact nativebaseline, productionq agrees3e-12.
+
+Claude tier2b review DONE after fixing normalization blocker. Original MoE
+seq balancing usedmean_rows while taskCE issummed, causing2x auxgradient
+change when2048tokenssplitinto2x1024. ActualCPUreproconfirmed. Claude fixed
+to1024*sum_rows (perinputtoken, inclunscored), explicitworld/8. AddLoss
+downstreamgradient-scalecontract documented. Warned dropped-route-adjusted
+FLOPs mean usefulassignedFLOPs, notphysicalpaddedBMMexecutedFLOPs.
+I sent explicitdone after readingfixandtest. Subsequentproportionalbias/stats
+FYI not reviewed; no outstanding requested review on that delta.
+
+All workprivate; no main/training/datasets/ledger changes. CPU preflight
+golden_coverage syntax issue was fixed before submission. Deepcoverage first
+queue attempt used systempython withoutscipy andfailedbeforequeue; queued
+properly044later. No duplicated GPU work. Observerchargesallreservedtime.
+Next: read043 andgoldenutilities; reporttables; analyze044; pursuefurther
+gains, notfinalize. Beforefinalclaimfreshdisjointgames/frameanchor and
+winnerbatch-orderaudit required. Currentgoalnotcomplete.
+
+## Historical state: 2026-09-19 ~07:55 UTC
 
 Active: fixed-checkpoint10x/10x golden training-equivalent CM + improved node/CM
 frontier. NOT achieved. Latest real golden quality: cpuct2.5 soft1000/Elo,
@@ -27,14 +85,12 @@ No Slurm or shared main mutations this turn; no outstanding peer reviews.
 
 ## Immediate work
 
-039-deep-selection is running on SAMEGPU: aug-deep-v1, ordinarycp2.5 zeroFPU,
-4000sim with64/256/1000/4000snapshots,160roots/batch. Conservative KVbound max
-650012<786432 checked before queue. Driver repeats512-root1000 identity then
-uses160-root actual batches. Own1000snapshot is matched-numerics control.
-After completion: OMP_NUM_THREADS=1 <runtime>/bin/python -m
-search.engine.analyze_deep_selection aug-deep-v1. This analyzer uses each
-variant's own logits and reports root drift vsold512batch; no silent baseline
-replacement. Current worker may take10min. Routine watcher assigned039.
+039-deep-selection DONE683.32s, analysis7.91s. Own160batch1000 snapshot:
+CE1.457260/1.358568 at973.87nodes;4000:1.454943/1.361713 at3870.72nodes.
+FitCV picks4000 both, but confirmationexpertworse. No clear cost/quality win;
+notpromotedgolden. Own1000snapshot keepsbatchnumerics matched. Rootlogitdrift
+vsold512batchmax.25,meanabs.000422 reported. All64/256/1000/4000scoresretained.
+
 
 038-soft-selection DONE; soft_cp25 and soft_cp5 output in aug-soft-selection-v1.
 FitCV pickssoft_cp5 for both; confirmation1.456085/1.358828 at976.63nodes.
@@ -45,7 +101,10 @@ Incremental softbackup exact CPUreference and livebaselineidentity passed.
 First unit-test failure was reference-test mass double count, fixed and rerun;
 keep both logs. Current code committedf7eeae0.
 
-039b-child-features is QUEUED between039 and040, SAMEGPU. Collect root and all
+039b-child-features DONE10.46s, CPUanalysis4.87s. FitCV selected unchanged
+baseline bothmetrics. Opponenttime1.459508/1.359330;time+entropy1.462279/1.361811
+vsbaseline1.457688/1.359266. No win; notpromoted. All7arms retained.
+Former description: Collect root and all
 legalchild time/WDL/policy heads from frozenmodel; test predictedopponent
 thinking time and replyentropy as actionfeatures. No futureobservedtime/reply.
 CPUuniform-head/mate/sign/illegalmass checks passed (child-features-unit.json).
@@ -54,7 +113,7 @@ python -m search.engine.analyze_child_features (OMP_NUM_THREADS=1,localruntime).
 All7arms, honestgameCV, sameexistingcp2.5 root/Q caches, extraNNqueries charged.
 Cheaponeply controls are also reported. No goldenpromotion/CM yet.
 
-040-coverage is QUEUED behind039 on SAMEGPU:
+040-coverage is RUNNING on SAMEGPU:
 coverage.cpp/coverage_native.py/coverage_pilot.py. Root quotas maximize
 prior**eta/(1+n), weights sqrt(p),p,sqrt(p*(1-p)), with ordinaryPUCTcp2.5 zeroFPU belowroot. Existing
 nodecounter and outputbackups unchanged; no terminal skipping. CPUunit tests PASS: disabled-mode exactbaseline,FPU sign, independentrootquota
@@ -62,6 +121,21 @@ choice at every64step for all3modes. Logs/coverage-test-v2.log. Queue040 exists:
 DO NOT duplicate. Expected~7min after039. Analyzer is standard
 analyze_selection aug-coverage-v1. All3arms share samecp2.5/zeroFPU interior.
 
+
+New history-transposition idea: transpose_history.py generates up to4 legal
+3/4ply commuting-window variants withidenticalendpointFEN, followedbyunchanged
+pawn/capture move beforecurrentroot. Entirealteredsuffix legality and automatic
+terminationchecked. No changes afterroot; generator seesprefixonly. r2hasnoclock
+input; B2future wouldneed consistent clockreconstruction (Claude warned).
+Unit test passed; CPUgenerationunderway/completed, seeaug-transpositions-v1/
+variants.json andlogs/transposition-build.log. NOT yetGPUqueued. Must report
+originalvsindividualvariants, coveragebycell andfixedweightoriginalvsvariantmean,
+includingallfallbacks. Sameabsoluteposition0..len-1foreachSGLangsequence. Model
+canhavehistorydependent humanpreferences; don'tclaiminvarianceofhumanchoices.
+
+Posthoccoverage-diagnostics.json:cp1.25rootpriorcoverage97.86%,cp5 99.30%;
+expert97.08%->99.09%;meancreatednodedepth5.46->5.35. Descriptiveassociation,
+notcausalproof. Motivates explicitrootquota040.
 
 CPUinnovation check DONE38.9s including dataread. Puredeep-minus-oneplyfailed:
 CE1.48037/1.42440 vsbaseline1.457688/1.359266. Learneddeep+one selected onCV

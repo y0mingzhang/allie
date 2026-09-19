@@ -72,6 +72,12 @@ def main():
         for name in ('cp25_fixed','cp25_routed'):
             x=d['methods'][name]
             append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds'] if name=='cp25_fixed' else None))
+    coverage=ROOT/'golden-coverage-v1/results.json'
+    if coverage.exists():
+        d=json.loads(coverage.read_text())
+        for name in ('coverage_fixed','coverage_routed'):
+            x=d['methods'][name]
+            append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds'] if name=='coverage_fixed' else None))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
