@@ -12,7 +12,11 @@ os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 import torch
 import torch.distributed as dist
 from torch.nn import functional as F
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    _create_sparse_block_from_block_mask,
+    create_block_mask,
+    flex_attention,
+)
 import modded_arch
 import modded_board
 import modded_medium_core as core
@@ -74,6 +78,20 @@ class Context:
     )
 
 
+def game_blocks(docs, size=128):
+    """create_block_mask's (partial, full) blocks for causal same-game attention, from each block's
+    first and last game (docs is nondecreasing) instead of the dense token grid."""
+    n = docs.numel()
+    lo = torch.arange(0, n, size, device=docs.device)
+    first, last = docs[lo], docs[(lo + size - 1).clamp(max=n - 1)]
+    whole = lo + size <= n
+    i = torch.arange(len(lo), device=docs.device)
+    below = i[:, None] > i[None, :]
+    full = below & (first[None, :] == last[:, None]) & whole[:, None] & whole[None, :]
+    some = (below & (last[None, :] == first[:, None])) | (i[:, None] == i[None, :])
+    return (some & ~full).to(torch.int8)[None, None], full.to(torch.int8)[None, None]
+
+
 def make_context(inputs, short_window, long_window, backend="flex", host=None):
     """Inputs are complete original rows (or shorter rows for correctness tests); host is the
     same rows as a numpy array, if at hand, so board models encode without a device sync."""
@@ -84,6 +102,7 @@ def make_context(inputs, short_window, long_window, backend="flex", host=None):
     docs = starts.to(torch.int32).cumsum(0)
     same = ~starts
     length = flat.numel()
+    blocks = []
 
     def make(window):
         if backend == "dense":
@@ -100,6 +119,13 @@ def make_context(inputs, short_window, long_window, backend="flex", host=None):
                 & (docs[q.clamp(max=length - 1)] == docs[k.clamp(max=length - 1)])
             )
 
+        # games never cross rows, so no allowed pair exceeds the window: blocks from game bounds
+        if window >= inputs.size(1) - 1:
+            if not blocks:
+                blocks.extend(game_blocks(docs))
+            return _create_sparse_block_from_block_mask(
+                tuple(blocks), allowed, (length, length), 128, 128
+            )
         return create_block_mask(
             allowed,
             1,
