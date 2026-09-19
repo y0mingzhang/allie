@@ -564,6 +564,21 @@ WAVES["round3x3"] = WAVES["round3x2"] | dict(
     "brackets the peak; same sources and merged history as round3x",
 )
 
+WAVES["round3s"] = WAVES["round3g"] | dict(
+    study="data-v1-round3s",
+    prefix="r3s",
+    history_counts=ROOT / "results/recipe10x/data-v1-ext-history-counts.json",
+    runs=r3(
+        b2("1e17", "mover_rule+up4+noengine+otb_x4"),
+        "1e17",
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="round 3 kept stack at 1e17: B_2 + OTB x4, the only 3e16 pass on the 5-seed B_2 (z -3.6 / -4.7); "
+    "vs r3g's B_2 1e17; same sources and merged history as round3x",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
