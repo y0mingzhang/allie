@@ -84,3 +84,34 @@ Report both CMs, per-cell CE, paired game uncertainty, average actual new model
 nodes (with expert cost separately), nominal simulations and wall time. Compare
 budget curves, not an expensive method against a much cheaper baseline. A point
 estimate of Pareto dominance is distinct from a statistically supported one.
+# August research additions
+
+The user chose August games for tuning, including games potentially seen in model
+training. Only unchanged July golden establishes held-out gains. Game splits and
+fit-only cross-validation prevent fitting output coefficients to the same game
+used for the immediate parameter check, but do not remove model-training overlap.
+
+The full categorical outcome head contains draw information discarded by scalar
+win-minus-loss backups. For each tree node, `local_visits = visits - sum(child
+visits)`; its WDL sum is local_visits times its own predicted WDL plus each child's
+WDL sum with win/loss exchanged. This reconstructs the original scalar visit mean
+exactly, including terminal and depth-limited visits, with no extra neural nodes.
+
+For root outcome distribution r and action-conditioned outcomes q(o|a), let
+qbar(o)=sum_a p(a)q(o|a). One coherent Bayesian mixture correction is
+p_new(a)=p(a) sum_o r(o) q(o|a)/qbar(o). It is normalized, and equals p exactly when
+r=qbar. This is an error-correction hypothesis, not a guarantee of lower human CE.
+The August experiment tests its log-ratio as a calibrated feature alongside Q and
+draw probability. Missing/unvisited action outcomes inherit the root distribution;
+they are never interpreted as certain draws. Scalar-MCTS controls retain Q=0 for
+unvisited actions so their original behavior is preserved.
+
+Next candidate, not yet implemented: remove root-action value blindness from MCTS.
+The current tree assigns Q=0 to unvisited actions, regardless of whether a position
+is winning or losing. This can inflate unvisited tails in losing positions and
+suppress them in winning positions. Fixed-depth search evaluates every legal root
+action and avoids this mismatch. Compare an all-root critic prepass plus MCTS with
+the original tree at equal total evaluated nodes; then distinguish (a) changing
+allocation, (b) changing the unvisited output fallback, and (c) shrinking noisy
+visit means toward their first critic. Do not attribute a more expensive prepass
+to an algorithmic gain without charging its nodes.
