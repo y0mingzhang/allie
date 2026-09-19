@@ -129,3 +129,26 @@ check against the cached stopping-policy simulation before claiming a deployment
 speedup. The present budget snapshots use a constant selection cpuct, so their
 prefixes are valid fixed-budget trees; a budget-dependent cpuct would invalidate
 that reuse.
+
+
+## Soft-value-guided allocation (2026-09-19)
+
+The successful output currently uses a regularized backup
+V(s)=tau log sum_a pi(a|s) exp(-V(s a)/tau), tau=0.1, with the current
+model value for unexpanded edges. Selection still used averaged rollout
+returns. These estimates answer different questions. The soft-selection pilot
+substitutes -V(child) for the visited edge's rollout mean in PUCT, retaining
+bootstrap first-play urgency, priors and the same simulation cap. Incremental
+updates recompute only the changed leaf-to-root path; independent recomputation
+of every node agrees, including terminal signs. This is a consistency hypothesis,
+not a theorem of superior finite-budget human prediction: stronger best-response
+planning can diverge from human choices, and optimism about unexpanded actions
+can redirect work poorly. Match nodes and measure the policy on separate games.
+
+The value-scale calibration probe treats the root correction strength as a
+function of root-predicted time, policy entropy, absolute predicted value and
+searched-action value spread. Its contextual weights are shared across Elo
+groups and regularized; all feature normalization and fits stay inside game CV.
+No observed human thinking time or future outcome is an input. The unrestricted
+linear beta may become negative in rare states, so this variant is a predictive
+logit calibration, not a claim of a universally positive rationality coefficient.

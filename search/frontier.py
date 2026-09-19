@@ -66,6 +66,12 @@ def main():
     if dynamic.exists():
         d=json.loads(dynamic.read_text());x=d['methods']['dynamic']
         append('live_router_cap768',x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds']))
+    explore=ROOT/'golden-explore-v1/results.json'
+    if explore.exists():
+        d=json.loads(explore.read_text())
+        for name in ('cp25_fixed','cp25_routed'):
+            x=d['methods'][name]
+            append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds'] if name=='cp25_fixed' else None))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']

@@ -6,133 +6,82 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current state: 2026-09-19 ~07:25 UTC
+## Current state: 2026-09-19 ~07:55 UTC
 
-Active goal: BOTH >=10x golden macro and expert-macro training-equivalent CM,
-plus improved mean search-node / CM frontier. NOT achieved. Fixed checkpoint
-and law snapshots remain unchanged. User wants sustained creative research,
-fast iterations, a table after each experiment, and images only when requested.
-Latest follow-up: AFTER this goal succeeds, reproduce the frozen winner on
-Claude's B_2 model; direct transfer first, later tuning separately. Current
-checkpoint/targets stay fixed until then.
+Active: fixed-checkpoint10x/10x golden training-equivalent CM + improved node/CM
+frontier. NOT achieved. Latest real golden quality: cpuct2.5 soft1000/Elo,
+CE1.46103765/1.36915556, CM2.33908x/3.35045x at971.869 mean logical nodes.
+Routed cached stopping:613.818 nodes, CE1.4635142/1.36915556,
+CM2.2527x/3.35045x. Actual cpuct2.5 mixed execution still pending.
+After current goal succeeds, reproduce frozen winner on Claude B_2; do not
+swap models or target law now. User requests table after experiments; no images
+unless asked. August tuning is user-approved potentially training-seen.
 
-Resource: one general/normal L40S job10498670 on babel-t5-32, running from
-04:52UTC with8h limit. Tmux socket search-v1-10498670, session oracle; resident
-engine PID1232195 (verify ready.json). Keep only one GPU, within Claude's shared8-normal cap.
-No Slurm submissions this turn. Independent workbench survives controller restart.
-Accounting observer2682849 on controller, singletonflock; inspect before recovery.
-All previous usage preserved in status.json/job-receipts; main ledger untouched.
+One general L40S job10498670 on babel-t5-32,04:52UTC through~12:52UTC.
+Tmux socket search-v1-10498670,session oracle,GPU0. EnginePID1232195,
+capacity786432,mem_fraction_static.5. Verify ready.json; do not restart a ready
+engine or submit a duplicate GPU. Queue requests MUST use temp+atomic rename.
+Runtime: /scratch/yimingz3/allie/search-runtime/sglang-0.5.9-torch2.9.1-cu128.
+Observer2682849 owns status.json; all wall/idle/startup/failure time charged.
+No Slurm or shared main mutations this turn; no outstanding peer reviews.
 
-Runtime archive and node-local STAGED.json are complete:
-/scratch/yimingz3/allie/search-runtime/sglang-0.5.9-torch2.9.1-cu128.
-Use its bin/python on GPU node for CPU helpers too; add chessmix-overlay to
-PYTHONPATH only for Parquet builders. Do not restart a ready resident engine.
-The original cold-NFS startup cost is charged, not erased by local staging.
+## Immediate work
 
-## Immediate task
+038-soft-selection is running on SAME GPU. New isolated soft_selection.cpp /
+soft_selection_native.py / soft_selection_pilot.py select branches with current
+soft Bellman values (tau.1), while preserving the same audited output backups.
+Two variants soft_cp25/soft_cp5,4096August roots,1000sims,512batch. Disabled mode
+matches old FPU path exactly. Independent CPU recomputation of EVERY node value,
+terminal signs and root output/PUCT choice passes. Live first512 baseline identity
+must pass before arms. First CPU test had a reference-test mass double count;
+fixed reference, rerun passed; keep both logs. After completion run:
+OMP_NUM_THREADS=1 <local-runtime>/bin/python -m search.engine.analyze_selection aug-soft-selection-v1
+Current analyzer supports its standard64/256/1000 snapshots. No golden use yet.
 
-NEWEST ~07:34UTC:034 actual mixed-budget golden PASSED.149.19s scoring,
-15.10s analysis,8192positions.614nodes,macro1.46792797/expert1.37614560,
-CM2.10868x/3.05354x. Against4ply paired95%CIs[-.01556,-.00340] /
-[-.03938,-.01268], conservative family8 upper bounds stillnegative.
-Frontier win on reused sample;10x goals remain unmet. Runtime host batching
-changes individual policies: maxprob diff.2404,maxL1.4830,meanKL.0004279,
-maxKL.4949. Reported to user and Claude; cached stopping is NOT bit-exact.
-Logical requests5,027,552 versusunique5,027,486; physical-token cost reported.
+035-selection-wide DONE414.34s. FitCV selects zero_cp10_1000_elo for macro and
+bootstrap_cp25_1000_elo for expert. Confirmation1.456151/1.359711 and
+1.456975/1.359714 respectively. Gains vs originalcp1.25, but incremental CIs vs
+cp2.5 overlap zero; paired-vs-cp25.json records this. No golden promotion yet.
+036-golden-explore DONE227.45s scoring +0.821s analysis (total260.66s).
+Frozen August cp2.5 winner, fixed1000 and Elo routing form. Quality above;
+paired gain vs cp1.25 CI macro[-.00800,-.00311],expert[-.01507,-.00050].
+All output params fit on August; no golden retune. Reused golden sample.
 
-033 selection pilot DONE550.397s +11.482s CPU. FitCV selectedzero_cp25_1000_elo
-for BOTH metrics. Augustconfirmation1.457688/1.359266 vsbaseline1.465198/1.374123;
-pairedCI macro[-.01154,-.00397],expert[-.02376,-.00657]. BootstrapFPU also helps
-macro but expertCI overlapszero. Not yet golden-scored. User table reported.
+037-permutation-audit DONE. Frozen actual cap768 cp1.25 router, same512batch,
+fixed permutation seed1938043. OriginalCE1.46792797/1.37614560,
+permuted1.46817144/1.37701178; shifts+.00024346/+.00086618.
+Paired game95% CIs[-.00000584,+.00051353] /[+.00010922,+.00168712].
+Expert numerical effect detectable and near.001 threshold. Both orders still
+significantly beat4ply. Do NOT pick better order. Maxpolicyabs.0793,meanKL9.1e-5,
+maxKL.0934; raw-rootmeanKL1.69e-5,maxKL.00564. Final winner needs own order audit
+or batch-invariant inference before fresh claim. Scoring150.69s; analysis78.74s
+included NFS stall (processD/rpc_wait_bit_killable). No traceback or lost results.
+Claude notified. Avoid calling this a variance estimate based on one permutation.
 
-035-selection-wide is queued/running on SAMEGPU: outputaug-selection-wide-v1,
-variants zero_cp5,zero_cp10,bootstrap_cp25 at1000sim. New selection_wide module
-reloads driver because residentservice caches Python imports. Old studies are
-complete. After035 run analyze_selection aug-selection-wide-v1 on local runtime.
-Driver now accepts explicit variants/output; old033sources preserved inb517a5a.
+CPU latent-budget mixture DONE3.08s. Nested gameCV components0/16/64/256/1000,
+Elo/time/state/shuffledtime gates; selected EXISTINGfixed1000 bothmetrics.
+No promotion; aug-search-v1/latent-budget.json. Removed dead ifFalse expression
+and verified exact result equivalence; latent-cleanup-equivalence.json.
+CPU state-dependent calibration DONE4.09s on cp2.5 trees. Shared contextual
+coefficients with Elo-specific basealpha/beta, fit/preprocess within gameCV.
+MacroCV selects state, expertCV value_scale. Confirmation1.454969/1.357212 and
+1.455569/1.358288, but paired CIs vsbaseline overlapzero. No promotion yet.
+All optimizer fits converged. General state arm permits a few negative betas;
+interpret as empirical logit correction, not universally positive rationality.
 
-Next immediate: freeze and golden-check cpuct2.5 selected on August, alongside
-its routed version if desired; all coefficients must come fromdev, no golden
-retuning. Current strongest CONFIRMED all-cell CM stays2.15x/3.05x dependingcost,
-not10x. New generic/latent-budget-mixture ideas remain unimplemented.
-Golden registryGOLDEN_METHODS.md/json now records completed reports; regen after
-new results. GOAL.md adds fresh confirmation before final10x claim, including
-explicit new-sampling-frame/baseline-anchor check (do not silently reusefull
-canonical baseline after excluding a different set ofgames).
+Earlier034 actualcap768 passed (613.7nodes,CM2.109/3.054); cached-vs-live
+maxpolicyabs.2404 is preserved in original report.037 is the controlled same-
+batch-size/order audit and does not replace that finding. Earlier033 FPU pilot
+pickedcp2.5;031asymmetricbackup and032strength-guidance were unsuccessful.
+Complete experiment tables: REPORT.md; node frontier: FRONTIER.md; all golden
+methods including duplicate controls: GOLDEN_METHODS.md. Regenerate via
+python -m search.report / search.frontier / search.golden_registry after results.
+Redirect verbose generated tables to logs. Full details in results subfolders.
 
-Older details below remain provenance;033/034 are FINISHED.
-
-Current: 2026-09-19 ~07:25 UTC. Goal 10x/10x still active and unmet.
-Keep the original r2 checkpoint until success; then reproduce on Claude B_2.
-Latest confirmed golden remains soft1000/Elo CE 1.4665905 / 1.3768662,
-CM 2.1510x / 3.0249x at970.926 nodes. Lower-cost soft256 is about250 nodes
-and CM1.8706x/2.2849x; strict statistical domination of4ply is not established.
-
-GPU: existing job10498670,1 general L40S,babel-t5-32,ends~12:52UTC.
-Tmux socket search-v1-10498670/session oracle,window0. Current enginePID1232195,
-capacity786432,mem_fraction_static.5; verify engine-queue/ready.json. Starts from
-node-local archived runtime in22.8s total (engine20.1s). Do not start a second
-engine. All prior charges including failed026/startups/idle time remain recorded.
-Accounting observer2682849 owns status.json; do not race its writes.
-
-RUNNING:033-selection-pilot, search.engine.selection_pilot. Four first-play
-urgency/exploration variants: bootstrap, running mean, bootstrap minus.2sqrt
-visited-prior mass, and original zero-FPU with cpuct2.5. Same4096 August roots,
-512 roots/batch,1000 simulations with64/256/1000 snapshots. One GPU, no newSlurm.
-Outputs aug-selection-v1/<variant>/<block>.npz retain full compact trees too.
-Unit default path and independent FPU-sign check passed; live first512-root
-control must exactly match aug-compact-v1 before variants execute. Check
-aug-selection-v1/identity.json and033 error/result. Routine watcher
-/root/watch_search_queue polls60s up to12min; no substantive delegation.
-After033 completes run CPU search.engine.analyze_selection on GPU node's local
-Python with OMP_NUM_THREADS=1. It selects only from fit-gameCV and reports all
-arms on August confirmation. Then update report and table to user. No golden
-has been opened for these variants. Do not modify hashed running sources.
-
-DONE031: aug-compact-v1 tree cache,129.438s for4096x1000. New compact.cpp and
-compact_native.py reconstruct every64/256/1000 snapshot and arbitrary own/
-opponent soft temperatures on CPU. Fake-oracle reference, checkmate signs,
-unchanged visits/tree, and real-GPU symmetric backups pass to3e-12.
-Asymmetric temperature scan0/.025/.1/.5/infinity x both roles,256/1000 budgets,
-global/Elo output calibration selected EXISTING symmetric.1/1000/Elo for both
-metrics. Confirmation1.465198/1.374123;256control1.475531/1.398580. No promotion.
-Analysis22.709s incl11.781s reductions. Results aug-compact-v1/asymmetric-results.json.
-
-DONE032: aug-conditioning-v1, eight root-only hypothetical-rating query arms.
-Moved self/opponent Elo digits only; history/time-control identical. Full-prefix
-query work charged;3.756s GPU worker,6.592s CPU calibration. MacroCV selected
-unchanged soft1000. ExpertCV picked both ratings-200 guidance stacked on search:
-CE1.465481/1.372414 vs1.465198/1.374123, pairedexpertCI[-.00779,+.00362].
-No convincing improvement; not promoted or golden-scored. This repeats the
-previous blitz prompt idea on balanced16cell data and permits stacking.
-
-INFRA030 PASSED: fresh old262144 and new786432 cache at SAME128-root batching
-are EXACT for roots/Q/visits.512-root batch improves blocktime38.16 ->26.98s
-for~993K node evaluations,1.4146x; root logits exact, internalBF16 branch noise
-is reported (meanQ gap.00116,4361 visit entries changed). Performance only.
-026 initially failed historical parity on1/1024roots;027/028 proved a fresh
-OLD-capacity process has identical rounding difference (meanrawCE5.3e-8nats,
-KL3.64e-9). Therefore not a capacity bug. Historical19changedvisit entries
-preserved; no numerical gain credited. Artifacts cache-root-diagnosis*.json,
-cache-benchmark-{small,large}.json. Never silently delete failures.
-
-August tuning data is aug-tune-v1,4096 positions/2978games,128 percell per
-fit/confirmation fold. Both folds may overlap model training (user-approved).
-Only unchanged July golden establishes held-out quality/CM. Old dev/dev_expert
-are blitz-only. Earlier private July+2024 strat-dev-v1 was built/validated but
-never used; no need rebuild. Never open test/test_expert labels for scoring.
-
-025 golden-augcal-v1 remains frozen; do not rerun after changing direct.py.
-It retains compact root/Q/visits/WDL caches for compatible CPU-only calibration.
-All selected coefficients froze from August fitCV.024 failed non-atomic request
-reading before scoring;025 identical retry succeeded. ALL new queue requests
-must use temp+atomic rename, never direct apply_patch to *.request.json.
-
-Useful next: inspect FPU results; if no gain, test learned budget allocation
-with nested game CV, richer model-only search signals, or more simulations.
-Current symmetric backup is a useful control; separate-tau and rating-guidance
-experiments are recorded failures, not unreported wins. Report whole-game
-uncertainty, node cost, full-prefix work and training-law caveats.
+Next: analyze038, pursue real algorithm improvements with dev selection before
+golden. Current10x thresholds remain far off. Final success requires frozen
+winner, fresh disjoint-game confirmation and correct sampling-frame/raw anchor;
+test/test_expert remain unopened. Never infer readiness from cached-only costs.
 
 ## Fixed checkpoint/evaluation
 
