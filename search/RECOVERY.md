@@ -1,3 +1,29 @@
+## Update: 2026-09-19 reset recovery
+
+Recovered after Yiming's explicit reset. Own search target remains unmet:
+best reused-golden CE 1.4445987842 / 1.3388551263, training-equivalent CM
+3.03536x / 5.16714x, about970 nodes. Do not mark complete or change targets.
+
+Job10498670 timed out at12:52UTC; no search GPU remains allocated.
+Ledger already records8.005GPUh for that job and10.7547222222 cumulativeGPUh.
+All requests through077 DONE; activation_adaptation.py is durable uncommitted WIP.
+Its independent CPU identity-adapter-gradient/zero-step/missing-history test PASSed.
+No078 request, GPU result, or analyzer exists. Do not report it as an experiment result.
+
+Latest peer coordination after recovery: Claude says no new experiments per the user,
+and asks to leave general capacity for the full-node performance benchmark; job10502628
+is waiting behind two B4 general tasks. No submission made. Keep GPU stopped pending
+updated user/capacity direction; peer messages do not themselves change our success goal.
+No controller/tunnel/training jobs touched. STOP files absent on recovery.
+
+Completed pending read-only review of perf-bf16@34e1893+92bc2da. No merge blocker
+for current same-version paths; explicit DONE sent via phone. Independently tested
+actual-hook NorMuon/matrix-Adam3-microbatch resume and storage aliases on CPU,
+checked job10501335 exact default-path metrics, verified Work.wait stream ordering
+against PyTorch2.10 source. Old Config field compatibility noted; no8-rank NCCL
+test claimed. Report: results/search-v1/reviews/perf-bf16-92bc2da.md.
+
+---
 ## Update: 2026-09-19 11:42 UTC
 
 Own 10x macro AND expert CM goal remains ACTIVE and unmet. New code through
