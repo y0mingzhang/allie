@@ -106,7 +106,16 @@ def main():
     assert ours.terminal_value(root) == 1.
     root.board = chess.Board('7k/5Q2/6K1/8/8/8/8/8 b - - 0 1')
     assert ours.terminal_value(root) == 0.
-    print('PASS: 24 differential tree comparisons, zero-budget prior, mate/stalemate orientation')
+    parent=chess.Board()
+    for move in ['g1f3','g8f6','f3g1','f6g8']*4:parent.push_uci(move)
+    original=parent.fen();stack=[m.uci() for m in parent.move_stack]
+    fast=ours.clone_board(parent);slow=parent.copy(stack=True)
+    assert fast.outcome()==slow.outcome() and fast.is_fivefold_repetition()
+    for _ in range(8):
+        fast.pop();slow.pop()
+        assert fast.fen()==slow.fen() and fast.outcome()==slow.outcome()
+    assert parent.fen()==original and [m.uci() for m in parent.move_stack]==stack
+    print('PASS: 24 differential tree comparisons, zero-budget prior, mate/stalemate orientation, history clone/repetition isolation')
 
 
 if __name__ == '__main__':

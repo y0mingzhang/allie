@@ -14,11 +14,17 @@ class Oracle:
         self.token = (OUT / 'rpc-token').read_text().strip()
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    def __call__(self, prefixes, columns=None):
+    def __call__(self, prefixes, columns=None, *, all_tokens=False, compact=False):
         body = dict(prefixes=prefixes)
+        if all_tokens:body['all_tokens']=True
+        if compact:body['dtype']='float16'
         if columns is not None:
             body['columns'] = columns
         req = urllib.request.Request(self.ready['url'], data=json.dumps(body).encode(),
             headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
         with self.opener.open(req, timeout=120) as response:
             return np.load(io.BytesIO(response.read()), allow_pickle=False)
+
+    def stats(self):
+        req=urllib.request.Request(self.ready['url']+'/stats',headers={'Authorization':'Bearer '+self.token})
+        with self.opener.open(req,timeout=30) as r:return json.loads(r.read())

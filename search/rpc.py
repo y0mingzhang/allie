@@ -3,7 +3,7 @@ import io,json,secrets,os
 from http.server import BaseHTTPRequestHandler,HTTPServer
 import numpy as np
 
-def make_server(forward,out):
+def make_server(forward,out,stats=None):
     token_path=out/'rpc-token'
     if not token_path.exists():
         fd=os.open(token_path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
@@ -11,14 +11,26 @@ def make_server(forward,out):
     token=token_path.read_text().strip()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
+        def do_GET(self):
+            if self.headers.get('Authorization')!='Bearer '+token:
+                self.send_error(403);return
+            if self.path!='/stats' or stats is None:
+                self.send_error(404);return
+            body=json.dumps(stats()).encode()
+            self.send_response(200);self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
         def do_POST(self):
             if self.headers.get('Authorization')!='Bearer '+token:
                 self.send_error(403);return
             size=int(self.headers.get('Content-Length',0))
             if not 0<size<=32*1024*1024:self.send_error(413);return
             try:
-                r=json.loads(self.rfile.read(size));pred=forward(r['prefixes'])
+                r=json.loads(self.rfile.read(size));pred=forward(r['prefixes'],all_tokens=r.get('all_tokens',False))
                 if 'columns' in r:pred=pred[:,r['columns']]
+                if r.get('dtype')=='float16':
+                    compact=pred.astype(np.float16)
+                    assert np.array_equal(compact.astype(np.float32),pred),'Requested compact transport is lossy'
+                    pred=compact
                 buf=io.BytesIO();np.save(buf,pred,allow_pickle=False);body=buf.getvalue()
                 self.send_response(200);self.send_header('Content-Type','application/octet-stream')
                 self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)

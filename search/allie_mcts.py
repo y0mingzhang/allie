@@ -32,6 +32,20 @@ def budgets(logits, mean_n_sims=50):
     return np.clip(np.rint(expected_seconds(logits) * mean_n_sims / TIME_MEAN), 0, 200).astype(int)
 
 
+def clone_board(board):
+    """Copy board/history lists while sharing read-only Move/_BoardState objects.
+
+    python-chess copy(stack=True) copies every Move object in the full history.
+    Search only pushes/pops moves; it never mutates existing moves or snapshots.
+    List copies isolate push/pop (including repetition checks) across branches.
+    Tested against public copy() and repetition checks in test_allie_mcts.py.
+    """
+    out=board.copy(stack=False)
+    out.move_stack=board.move_stack.copy()
+    out._stack=board._stack.copy()
+    return out
+
+
 class Node:
     __slots__ = ('prior', 'parent', 'move', 'board', 'prefix', 'children', 'n', 'w', 'depth')
 
@@ -44,7 +58,7 @@ class Node:
 
     def materialize(self):
         if self.board is None:
-            self.board = self.parent.board.copy(stack=True)
+            self.board = clone_board(self.parent.board)
             self.board.push(chess.Move.from_uci(MOVES[self.move - 378]))
             self.prefix = self.parent.prefix + [self.move]
         return self
@@ -131,7 +145,7 @@ def run(rows, root_logits, oracle, *, adaptive=False, n_sims=50, mean_n_sims=50)
     for iteration in range(int(ns.max(initial=0))):
         paths = []
         for i in np.flatnonzero(ns > iteration):
-            path = select_path(roots[i], float(cp[i]))
+            path = select_path(roots[i], float(cp[i]), min(100,1025-len(roots[i].prefix)))
             stats['max_depth'] = max(stats['max_depth'], len(path) - 1)
             value = terminal_value(path[-1])
             if value is None:

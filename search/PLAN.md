@@ -133,3 +133,17 @@ Batch across independent trees, not concurrent leaves in one tree, to preserve
 selection order. Test against the released class methods with a deterministic
 fake evaluator before GPU runs. Compare default fixed50, default adaptive50,
 and fixed budget matched to adaptive's fit-fold mean; report measured calls/time.
+
+The initial 2,048-position MCTS pilot is complete (code commit9ae9e95). On its
+1,050-position confirmation fold, expert CE is 1.495676 for legal masking,
+1.485615 fixed50, 1.491929 adaptive50, and 1.485006 fixed52. Adaptive has higher
+expert top1 in this small sample (52.688% versus 51.971% fixed50). Both metrics
+need larger confirmation; no method is selected using golden outcomes.
+
+Next implementation retains read-only chess Move/history snapshots when copying
+boards, while giving each branch independent lists. Differential tests cover
+repetition and parent isolation. Search is depth-limited by remaining1025-token
+context in addition to the original100-ply limit; report any actual truncations.
+The resident service also supports causal full-document outputs. All128 probe
+root predictions are exactly unchanged when an extra legal move is appended,
+and compact float16 transport preserves the original BF16 logits exactly.

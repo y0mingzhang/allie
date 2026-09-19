@@ -53,7 +53,7 @@ def main():
         assert previous==identity or (serve_only and compare(previous)==compare(identity)),'cache identity changed'
     else: manifest.write_text(json.dumps(identity,indent=2)+'\n')
     pack_tokens=4096; stats=dict(calls=0,prefix_tokens=0,padded_tokens=0,forward_seconds=0.)
-    def forward(prefixes):
+    def forward(prefixes,all_tokens=False):
         outputs=[]; batch=[]; used=0
         def flush():
             if not batch: return
@@ -61,7 +61,8 @@ def main():
             rotary_pos=np.zeros(pack_tokens,dtype=np.int64);actual_tokens=0
             for p in batch:
                 x[cursor:cursor+len(p)]=p;rotary_pos[cursor:cursor+len(p)]=np.arange(len(p))
-                idx.append(cursor+len(p)-1);actual_tokens+=len(p);cursor+=((len(p)+127)//128)*128
+                idx.extend(range(cursor,cursor+len(p))) if all_tokens else idx.append(cursor+len(p)-1)
+                actual_tokens+=len(p);cursor+=((len(p)+127)//128)*128
             xt=torch.as_tensor(x,device='cuda').reshape(1,-1)
             rp=torch.as_tensor(rotary_pos,device='cuda')
             model.yarn.cos[:pack_tokens].copy_(rotary_cos[rp]);model.yarn.sin[:pack_tokens].copy_(rotary_sin[rp])
@@ -140,13 +141,17 @@ def main():
         for interrupted in queue.glob('*.running.json'):
             interrupted.replace(interrupted.with_name(interrupted.name.replace('.running.json','.request.json')))
         from rpc import make_server
-        http=make_server(forward,OUT)
+        http=make_server(forward,OUT,lambda:dict(stats))
         ready=dict(url=f'http://{os.uname().nodename}:{http.server_port}',job_id=os.environ.get('SLURM_JOB_ID'),host=os.uname().nodename,
                    checkpoint_sha256=identity['checkpoint_sha256'],gpu=torch.cuda.get_device_name(),pid=os.getpid())
         (OUT/'server-ready.json').write_text(json.dumps(ready,indent=2)+'\n')
         print('Persistent oracle ready',ready,flush=True)
-        while not (OUT/'STOP').exists():
+        next_disk_poll=0.
+        while True:
             http.handle_request()
+            if time.monotonic()<next_disk_poll:continue
+            next_disk_poll=time.monotonic()+1.
+            if (OUT/'STOP').exists():break
             work=sorted(queue.glob('*.request.json'))
             if not work: continue
             for request in work:
