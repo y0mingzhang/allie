@@ -55,8 +55,13 @@ small and expanded development checks from golden macro results; label CM pendin
 when the available scaling law does not apply to the evaluated split.
 
 Evaluation uses Claude's 16 format × mover-rating cells and four-cell expert macro.
-Do not tune against strat-eval-v1. Use the existing prepared dev/dev_expert splits for selection; split development
-confirmation by game, not move. No replacement stratified evaluation dataset.
+Do not tune against strat-eval-v1. Latest user direction (2026-09-19): use August
+games for parameter tuning, even though some were available to model training.
+Split tuning/confirmation by game. Label both as potentially training-seen;
+held-out quality and CM are established only on unchanged July golden. Earlier
+dev/dev_expert inventories are blitz-only and cannot establish macro transfer.
+The private July-plus-2024 dev build was validated but is not the selected tuning
+dataset. No replacement or relabeling of the golden benchmark.
 Freeze method before golden evaluation. Never use the human next move, future moves,
 actual thinking time or actual game outcome when selecting candidates or allocating search.
 

@@ -1,0 +1,86 @@
+# Search for prediction rather than playing strength
+
+The target is 10× training-equivalent CM on both golden macros, with an improved
+average model-node/CE frontier. Laws and checkpoint stay fixed. Macro targets are
+CE 1.383204 and expert CE 1.299293. The law is a conditional training equivalence,
+not a measurement of a tenfold training saving.
+
+An exact autoregressive model does not improve its next-move distribution simply
+by summing its own future rollouts: their conditional probabilities sum to one.
+Search must correct approximation error, reconcile auxiliary predictions, or
+introduce a better behavioral model. Stronger chess play alone is insufficient.
+
+## Preserve human-policy tails
+
+For legal prior p and score Q, forward-KL regularization gives
+π(a) ∝ p(a) exp(βQ(a)). Reverse KL gives π(a) = λp(a)/(ν−Q(a)), λ=1/β,
+where ν normalizes the distribution. Since ν ≤ max Q + λ,
+
+π_reverse(a) ≥ p(a)/(1 + β range(Q)).
+
+The corresponding forward lower bound is p(a) exp(−β range(Q)). Reverse KL thus
+limits how aggressively value errors suppress moves humans might still play.
+This is a mathematical property, not proof that reverse KL always predicts better.
+Our golden1000 result favors reverse over forward with the frozen calibrations.
+A mixture (1−η)p + ηπ_search gives a still more explicit floor (1−η)p and caps
+per-position CE degradation relative to p at −log(1−η). Fit η on representative
+development games; do not use golden to choose its value.
+
+## What a deeper critic estimates
+
+If V exactly predicts outcomes under policy p, the tower property gives
+V(s)=Σ_a p(a|s)V(s,a). Policy-expectation rollout then agrees with the shallow
+critic in expectation. Disagreement measures inconsistency. An optimizing search
+additionally changes the assumed continuation behavior; its Q need not match V.
+
+We tested separate shallow/search coefficients on cached blitz development trees.
+Pure Q_search−Q_shallow was worse. Combining six-ply policy expectation with MCTS
+improved that dev loss but pays for both trees; it does not establish a frontier win.
+
+The next implementation computes several backups on ONE fixed tree. Unexpanded
+action mass keeps its parent's critic. For current-mover action values q:
+
+V_τ(s)=τ log Σ_a p(a|s) exp(q(a)/τ).
+
+τ→∞ is policy expectation; τ→0 is maximization. Opponent signs flip on every
+edge; checkmate/draw values come from rules. These backups use identical model
+nodes. CPU traversal cost is measured separately. Independent recursive tests,
+terminal-sign checks, original-MCTS identity and per-root node counts passed.
+The first shared-calibration blitz comparison did not beat native MCTS averaging.
+Representative development calibration is required before a broader conclusion.
+
+## Reconcile outcome predictions instead of always rewarding wins
+
+The model predicts root outcome probabilities r(o), and searched continuations
+can estimate q(o|a), o∈{win,draw,loss}. Coherence would require
+r(o)=Σ_a p(a)q(o|a). Mean win-minus-loss discards draw/risk information.
+
+A proposed experiment (NOT implemented or validated yet) preserves the prior as
+far as possible while reducing this discrepancy:
+
+min_π KL(π||p) + κ · divergence(r, Σ_a π(a)q(·|a)).
+
+An exact moment constraint, when feasible, yields an exponential tilt whose dual
+coefficients are chosen from the auxiliary consistency condition, rather than
+from an assumption that every human maximizes wins. Use soft constraints or bounded
+mixtures when r lies outside the convex hull of the child distributions. A necessary
+negative control is the already-coherent case: π must remain p. Another is κ=0.
+No actual game result or future human move may enter this inference computation.
+
+Alternative behavioral hypothesis: marginalize a latent search budget using the
+predicted thinking-time distribution, rather than plug its mean into one search.
+These operations are generally unequal. A shared-prefix simulation ladder makes
+mixtures cheap, but useful time information must beat a shuffled-time control.
+The current equal-total-budget routing experiment did NOT pass that test.
+
+## How to decide
+
+Use representative 16-cell development games, game-disjoint fit/confirmation folds,
+and regularize calibration complexity. The old entire dev inventory is blitz-only;
+its Elo-calibration win failed golden transfer. Report failures rather than retune
+against those golden results. Freeze methods before each golden confirmation.
+
+Report both CMs, per-cell CE, paired game uncertainty, average actual new model
+nodes (with expert cost separately), nominal simulations and wall time. Compare
+budget curves, not an expensive method against a much cheaper baseline. A point
+estimate of Pareto dominance is distinct from a statistically supported one.

@@ -1,202 +1,143 @@
 # Search worktree recovery
 
-Codex owns this worktree (`codex/search-v1`), its GOAL.md, search/ and private
+Codex owns this worktree (`codex/search-v1`), GOAL.md, search/ and private
 results/search-v1/. Claude owns main and training/data/model research. Read
 GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current state: 2026-09-19 ~06:17 UTC
+## Current state: 2026-09-19 ~06:40 UTC
 
-LATEST (takes precedence over older details below): User raised the target to 10x
-on BOTH golden macro and expert macro, plus improved average search-node / CM
-frontier. Own GOAL.md updated; goal-targets-10x-both.json gives CE1.383204/1.299293.
-No new training or Slurm jobs. GPU10498670 and resident engine1097060 unchanged.
-Runtime archive and node-local STAGED.json are complete; no need restaging or restart.
-Accounting observer2682849 survived this turn; preserve all charges.
+Active goal: BOTH >=10x golden macro and expert-macro training-equivalent CM,
+plus improved mean search-node / CM frontier. NOT achieved. Fixed checkpoint
+and law snapshots remain unchanged. User wants sustained creative research,
+fast iterations, a table after each experiment, and images only when requested.
 
-019 MCTS4000 done: dev CE1.42596/expert1.37671, ~589s. 020 Allie budget retry done:
-predicted-time routing does not beat its shuffled control at equal total sims.
-Literal Grill lambda hurts CE; dev-calibrated scale required. All results reported.
-021 frozen MCTS1000 GOLDEN done: reverse macro1.480187/expert1.395653 =1.7662x/2.3859x.
-Elo-calibrated output failed transfer:1.498775/1.452528 =1.3719x/1.2658x. Report all.
-Actual golden mean nodes970.926, versus844.1 four-ply. No Pareto domination by MCTS.
-FRONTIER.md/json records both CMs and nodes; point dominance is not a confidence claim.
+Resource: one general/normal L40S job10498670 on babel-t5-32, running from
+04:52UTC with8h limit. Tmux socket search-v1-10498670, session oracle; resident
+engine PID1097060. Keep only one GPU, within Claude's shared8-normal cap.
+No Slurm submissions this turn. Independent workbench survives controller restart.
+Accounting observer2682849 on controller, singletonflock; inspect before recovery.
+All previous usage preserved in status.json/job-receipts; main ledger untouched.
 
-022 backup-ladder-dev queued on the existing GPU. Same repaired MCTS tree at
-16/64/256/1000 sims: native averages, human-policy expectation, soft regularized
-backups(tau.5/.1/.025), minimax. Native read-only instrumentation independently
-tested: exact original tree visits/Q, Python recursive backup agreement, mate signs,
-per-root node accounting. New library runtime/backups does not overwrite old binaries.
-Needs development analysis after cache completion; no golden promotion yet.
+Runtime archive and node-local STAGED.json are complete:
+/scratch/yimingz3/allie/search-runtime/sglang-0.5.9-torch2.9.1-cu128.
+Use its bin/python on GPU node for CPU helpers too; add chessmix-overlay to
+PYTHONPATH only for Parquet builders. Do not restart a ready resident engine.
+The original cold-NFS startup cost is charged, not erased by local staging.
 
-CPU residual-policy-dev/results.json done: pure search-minus-shallow underperforms;
-combining MCTS and six-ply expectation improves blitz dev, but costs both trees.
-Do not turn these dev scores into golden CM. New backup experiment tests whether
-their complementary values can be computed on the SAME tree at no extra model nodes.
+## Immediate task
 
-Methodology next: old FULL dev/dev_expert inventories are blitz-only (2070/483games),
-not just our subsample. Claude confirms no balanced dev exists. Prepare balanced
-development from the unused July2026 store using the exact golden builder semantics,
-private output and full game disjointness. Do NOT use a naive per-cell offset alone:
-different white/black cell thresholds can overlap golden. Explicitly exclude any game
-selected on either side by the golden rule, test/dev IDs and validation leaks; verify
-token/game hashes. Golden itself stays unchanged and untuned. This build is not done.
+User chose AUGUST tuning, even if training-seen, instead of insisting on another
+held-out development set. July golden remains unchanged. Existing dev/dev_expert
+are blitz-only, and Elo calibration trained there failed golden transfer.
 
-Claude round3 data review DONE at209bbc0: no blockers, pins/index/caps/warm-up/resume
-checked, metadata/pinning nits relayed and fixed by Claude1c33cfa. Tier2 model review
-NOT done: sent confirmed MoE eval batch-dependence/drop bug; requires dropless eval.
-FP8 historical evidence/paths sent to Claude perf fork (e2e-optimization-v1).
+August build DONE: results/search-v1/aug-tune-v1/{manifest,strat,clocks,feats,games}.
+Source August2026, same cell/mask/tokenization rules, ~25–29K moves/cell.
+May overlap model training. Do NOT call it model-held-out or convert its CE with
+July's law. sample.json has4096 positions (128/cell/fold),2978 games, game-disjoint
+parameter-fit and confirmation folds. IDs/test documents excluded, golden exact
+token duplicates excluded, provenance hashed. No labels/future enter inference.
 
-## Earlier state: 2026-09-19 ~05:41 UTC
+Queue023-august runs search.engine.balanced_dev_pilot, writes aug-search-v1:
+- fixed continuation depths1..4, widths4/2/2; per-root node counters added to
+  tree.py; independent parity test against original passed at all depths/mate.
+- identical repaired MCTS tree snapshots16/64/256/1000; alternative expectation,
+  soft/minimax backups on the SAME tree, per-root node costs.
+- full categorical WDL visit means reconstructed in new isolated native module
+  distributional.cpp. Exact original scalar Q/tree, probability mass, terminal
+  and node counts checked. Existing binaries untouched. No extra model nodes.
 
-POST-REBOOT UPDATE (takes precedence over the historical boot notes below):
-Controller10478640 is now on babel-s9-24. GPU10498670 on babel-t5-32 survived.
-Engine1097060 is READY and scoring; do not restart it for cache changes.
-Queue011 parity passed;012 golden completed;013 packed-plumbing completed.
-014 MCTS1000 and015 six-ply are next, followed by016/017/018 adaptive expectation
-(mass/policy/variance,1000 evaluated leaves/root,width2,depth8,development only).
-016–018 self-analyze with analyze_expectation.py; run search.report after each.
-Accounting watcher was restarted on the new controller (accounting.pid); inspect
-its process and lock before starting another. All old charges preserved.
+Tmux window august-research runs search.engine.august_chain, log
+results/search-v1/logs/august-chain.log. It waits for023, then runs analyze_august
+and distributional_policy on CPU and report. Singletonlock; inspect before restart.
+The analysis source hashes were frozen in the request before new scoring.
+Do not edit those three analysis files mid-experiment.
 
-First golden results: golden-balanced-v1/results.json, REPORT.md. All methods
-reported to Yiming. 4ply macro/expertCE1.4775647/1.4018894 =1.8331x/2.2127xCM;
-95%CM1.645–2.067/1.871–2.670 conditional on the law. Goal NOT achieved.
-2ply1.4953081/1.4312654 =1.4361x/1.5833x. Releasedadaptive50 has no clear CE
-gain beyond cheap calibration. Repairedfixed50 small uncertain CE improvement;
-its expert accuracy point estimate is higher than4ply (report this separately).
-Low-rating cells have4ply point regressions; do not tune on these golden scores.
-Whole balanced comparison283.5s warm, CPU analysis8.8s;4ply traversal173.6s.
-Startup1125s cold was NFS imports/graphs, charged fully. Runtime archive helpers
-survived on GPU tmux; when archive finishes recover_cache leaves ready engine alone.
-Packed metadata gave exact parity but mixed/no reliable end-to-end timing gain;
-NOT adopted. Current engine remains DirectOracle.
+analyze_august: forward/reverse policy calibration, global/Elo/format groups.
+Only fitfold0 supplies parameters and3-way gameCV selections. All arms reported
+on fold1; paired whole-game CIs for named controls/CV selections.
+fit_policy.py uses tested analytic implicit gradients for reverse-KL normalization.
+distributional_policy.py tests Q+draw/risk/root-outcome-consistency and combined
+backup signals, SAME node budgets. Coherent root/children leave Bayesian ratio
+unchanged; normalization tested. No training or external chess evaluator.
+After023: inspect errors/results, report concise table with CM pending, update
+REPORT.md. Choose subsequent golden policies from fitCV, not golden scores.
 
-The new adaptive-expectation prototype is a development experiment, not a claimed
-win. Independent fake-oracle tests recover fixed-horizon values and enforce node
-caps/full root legal coverage. Predeclared priorities use only model predictions;
-WDL variance is a heuristic, not epistemic uncertainty. Calibration fits dev fold0,
-reports all fold1 arms. No golden CM conversion for blitz-only dev metrics.
+The unused strat-dev-v1 dataset also exists: exact July golden reconstruction
+passed, disjoint unused July for15cells plus unseen2024-04..07 expert-classical.
+July expert-classical golden fraction is1.0, so no disjoint July games exist.
+This temporal fallback was validated but user then chose August. It has NOT been
+used for parameter selection/scoring. Preserve its provenance; do not mix samples.
 
-## Historical boot and frozen-comparison details
+## Fixed checkpoint/evaluation
 
-Goal remains active: BOTH >=2x golden macro and >=10x expert training-equivalent
-CM, with incremental search improvement beyond cheap controls. Not achieved.
-User wants a fast resident inference workbench, then sustained creative research.
-One fast GPU is allowed; it need not be L40S. Keep one allocation at a time.
+Checkpoint r2-3e16-control-t20-w20-pf052h-s42, last.pt resolves to
+checkpoints/step-00002274-9a5e6eb1/model.pt under durable main results/pretrain.
+SHA3739d0d90f2ea826874ddb29a0ec8f99e28a0ef843ab8f0e1e6d9f4f7f9b5cc5.
+Frozen source data-v1-round2/source-ours. Move/strength headers unchanged;
+no clock/Elo/continuous side-inputs, but time and WDL output heads present.
+Model ~34Mtotal/25Mnonembedding,8x512. Model training stores only data-v1.
 
-Current GPU job10498670: general/normal, 1 L40S, babel-t5-32, 8h from04:52UTC.
-Socket search-v1-10498670, session oracle, direct engine PID1046638. Inspect live
-Slurm/processes before any submission. Previous10497511 was PREEMPTED at04:48:30
-(9899seconds=2.74972GPUh); pending replacement10498656 was cancelled at0 GPUh.
-All old engines/reference oracle died with10497511. Do not restart them.
-Current engine imports are slow from cold shared storage (~10min at this update).
-Its log is logs/engine-10498670.log. ready.json is stale until its job is10498670.
-The GPU is not failing: Python is blocked on cold library/import I/O.
-A library-prefetch helper completed4.36GB in92.6s; it did not eliminate all imports.
+Golden is unchanged strat-eval-v1, SHA94530acf164812ba1123256fb7ba975e5270dcde9444cded497fcc3ca2ad8d2f.
+Exact16cell macro, expert4cell macro;1,553,058moves/338248expert/26278games.
+Official raw macro1.524007755681445, expert1.476428895813994.
+Training CM laws in training-cm-laws.json are immutable vertically anchored
+isoflop shapes, ND3e16. CM is conditional training equivalence, not speedup.
+10x targets macro<=1.3832044316765544, expert<=1.2992929937638005;
+see goal-targets-10x-both.json. Law uncertainty not covered by game bootstrap.
 
-Private paths below are relative to results/search-v1/ unless stated otherwise.
-- engine-queue/011-l40s-recovery.request.json: existing2048dev positions, validates
-  new hardware port/caching drift and four-ply timing. No method tuning.
-- engine-queue/012-balanced-golden.request.json: first frozen golden comparison.
-  It checks011 parity before scoring. Atomic immutable blocks resume automatically.
-- tmux window final-report: search/engine/finish_balanced.sh waits for012, runs
-  analyzer and report on this independent GPU allocation; survives controller death.
-- Accounting: search/advance.py --watch (PID in accounting.pid), singleton flock;
-  restart after controller reboot only if dead. sacct-D per-incarnation charges
-  and job-receipts/ preserve all usage. Main compute.json remains untouched.
-- Runtime archive builder: bash search/engine/pack_runtime.sh, controller process;
-  writes runtime/sglang-0.5.9-torch2.9.1-cu128.tar.zst plus.sha256 atomically.
-  Restart if controller reboots before completion. This packs the pinned environment
-  for node-local staging without thousands of network metadata accesses. A completed
-  archive is used automatically by search/engine/workbench.sh on later cold boots.
-  Do not interrupt an active scoring task to switch runtimes.
+Golden sample golden-balanced-v1/sample.json:8192=512/cell,6752games,
+seed1926731, SHA6e3bfafbdceaf473eb070dd1a426aefadf0e11dc314d2bac2aeb07728b6f59ff.
+Estimator exact canonical-raw cellCE + paired sample(method-canonical), then
+16/4cell mean. Whole-game bootstrap. Full raw/port/legal/search chain reported.
+All policies frozen before golden.021 reuses this already reported sample;
+never call it newly untouched. Final test/test_expert scoring remains unopened.
 
-Claude plans to requeue controller10478640 with5min warning. Our Slurm workbench
-and its tmux/tasks survive. Controller-local archive/accounting processes do not.
+## Completed results
 
-## Frozen golden confirmation
+012 golden baseline suite (results golden-balanced-v1/results.json):
+- legal1.514130/1.464733,CM1.1279/1.1200,0nodes.
+-2ply1.495308/1.431265,CM1.4361/1.5833,147.1nodes.
+-4ply1.477565/1.401889,CM1.8331/2.2127,844.1nodes.
+-releasedadaptive50 CM1.1299/1.1110; repairedfixed50 CM1.1836/1.1864.
+Warm suite283.5s,4ply173.6s; CPUanalysis8.8s.
 
-8192 existing scored moves (512/cell,6752 games), seed1926731; same strat-eval-v1
-mask/labels/headers, no replacement dataset. sample.json is immutable; never reroll.
-plan SHA68c73ab4a7bcb132c7b749d49653b7b82aa97edcc526a1e6393a76d3b6620496
-sample SHA6e3bfafbdceaf473eb070dd1a426aefadf0e11dc314d2bac2aeb07728b6f59ff
-Directory golden-balanced-v1 contains plan.json/sample.json/direct-control.json/
-execution.json, with checkpoint, source/binary, export and dataset provenance.
-All method choices were fixed before new golden scoring: legal, dev-fit temperature,
-calibrated2ply, calibrated4ply, releasedadaptive50, repairedfixed50+reverseKL.
-No choosing among them or tuning parameters on golden. Report every method.
+021 frozen MCTS1000 golden:
+-reverse1.480187/1.395653,CM1.7662/2.3859;970.926nodes;311ssearch/6.43sanalysis.
+-forwardCM1.2615/1.6917.
+-Elo-calibrated output failed transfer:CM1.3719/1.2658.
+No statistically supported domination of4ply. FRONTIER.md/json has nodes/CM;
+point dominance is not significance. Expert subset costs unavailable in older
+cache block totals; new instrumentation records them per root.
 
-Estimator: exact full canonical-raw cell means + paired sample(method-raw), then
-unweighted16/4cell macros. Whole-game bootstrap is shared across methods/cells;
-report port drift, all cell deltas, accuracy, calibration, timing and law sensitivity.
-CM = frozen vertically anchored training-law equivalence, not inference speedup.
-Cheap/legal gains are separate. Test/test_expert remain unopened. This checkpoint
-has no clock/Elo/continuous side inputs; strength/game headers remain unchanged.
+Old blitz-only development experiments (CM not applicable):
+014 MCTS1000 reverseCE1.430671/expert1.396336 (~85ssearch).
+015 sixply1.434642/1.400756;231.7s,~8.17Mnodes.
+016–018 adaptiveexpectation1000 not better thanMCTS1000.
+019 MCTS4000 forward1.425956/1.376713;589s;smaller batches harmedthroughput.
+020 predicted-time budget retry: matchedtotal2,048,000sims; predicted allocation
+1.430423/1.395646 vsfixed1.430671/1.396336 vsSHUFFLED1.428628/1.393605.
+No evidence true predicted time helps relative toshuffle. LiteralGrilllambda
+hurtsCE; calibratedlambda needed. Allie formulation review in ALLIE_REVIEW.md.
 
-CPU analyzer: OPENBLAS_NUM_THREADS=2 <runtime>/bin/python -B -m search.engine.analyze_balanced
-Report: <python> -B -m search.report
-Analyzer's equal-cell/paired/game-bootstrap invariants pass test_balanced.
-Queue errors must be diagnosed explicitly; never delete completed scores to retune.
+022 shared-tree backup ladder DONE/REPORTED:
+94.36s for2048roots, all16/64/256/1000snapshots and6backups. At1000/commoncal:
+native1.430671/1.396336;expectation1.454060/1.421198;softtau.1 1.444358/1.412361;
+minimax1.462296/1.446491. No1000win with shared calibration. Exact old tree/cache
+identity passed. Small-budget gain is confounded by1000-budget calibration.
 
-## Completed work
+CPU residual-policy-dev: mixingMCTS+sixply improvesblitz but costsboth trees.
+Same-node distributions/backup mixtures are the next attempt to keep gains cheap.
+SEARCH_MATH.md contains coherent-policy/projection ideas and reverseKLtailbounds.
 
-009-nvme-final: real-model MCTS replay exact paths/visits/output; ~62k leaves takes
-1.69s four-ply vs1.81s MCTS512roots,1.92s MCTS1024roots. These are throughput checks,
-not quality comparisons. Warm model-runner wall time is ~.5-.7s; remainder includes
-CPU tree/plumbing/cleanup. Local cached-runtime cold process startup30.7s on old node.
-Port BF16 is not bit-identical; existing2048dev mean CE drift near zero, KL~.001.
+## Claude reviews
 
-010-adaptive-repairs completed8 dev variants in69.7s. Practical first-visit/depth
-repairs help slightly; predicted-time allocation did not beat fixed allocation.
-Calibrated repaired fixed expert devCE1.4775 vslegal1.4947. Four-ply's earlier small
-confirmation expertCE1.4157 is promising, not a golden metric. Dev CM stays pending.
-Full cumulative tables are REPORT.md, generated by search/report.py. After EACH
-experiment show user important loss/CM results. No new images unless requested.
-
-Our ALLIE_REVIEW.md addresses the uploaded critique: distinguish lambda algebra,
-KL direction, practical bugs and empirical historical evidence; no theory alone
-establishes human-move CE gains or proves reported paper runs were unaffected.
-
-Claude focused tier1 review is DONE. Inspected fixes for actual pooled-control B2 SHA,
-continuation provenance rejection and board meta matmul MACs. Exact same-run resumes
-are allowed. Launch still requires its real smoke5 identity/resume pass. MoE/diffattn
-remain a separate unreviewed delta. No main files were edited by us.
-
-After012:013-packed-plumbing is an experimental CPU/batching fast path, with exact
-logit/slot-map parity followed by repeated timings; it always restores the old runner.
-It does not alter the frozen golden computation.014-mcts1000 and015-depth6 are
-subsequent DEV-ONLY research, preregistered before opening first golden results:
-fixed/repaired MCTS1000 (128 roots/batch), six-ply continuation widths4,2,2,2,2
-(16 roots/batch). Analyze on original fit/confirmation game folds; never apply
-these dev losses to golden CM laws. These research tasks use only our existing GPU.
-Runtime archive builder now uses bounded parallel small-file reads (pack_runtime.py),
-excluding packaged tests and pycache; source code/libraries/metadata stay unchanged.
-
-05:13UTC startup amendment: oldPID1046638 was still in cold NFS imports after20min,
-not scoring. Replaced ONLY our engine pane; currentPID1097060. direct.py now executes
-the exact hash-checked SGLang setup function through startup_env.py, avoiding the
-full scheduler/tokenizer/multimodal import dependency. No model/search math changed.
-Golden execution was explicitly re-frozen before ANY method scores; original preserved
-as execution.before-startup-opt.json with startup-amendment.json. Plan/sample hashes
-unchanged. Queue011 parity is still mandatory. All requests restored; no newSlurmjob.
-Dev analyzers run in independent tmux window dev-report after014/015, then updateREPORT.
-Next experiment rationale is search/NEXT.md. Own source commits must survive restart.
-
-Controller requeue is imminent (~05:25UTC). Commit everything; all GPU tasks survive.
-Runtime archive packs ordinary packages but represents flashinfer_cubin/cubins as a
-symlink to its unchanged durable source (tens of thousands of unused architecture-
-specific binaries caused slow packing). All binaries remain available; local archive
-contents and linkage are checksummed. This made packing much faster.
-GPU tmux window runtime-cache runs recover_cache.sh: waits for the archive checksum,
-stages locally, then replaces ONLY a still-not-ready engine. If the engine is already
-ready, it leaves it alone. Never interrupt scoring for a runtime switch. The archive
-builder remains controller-local and needs restart after reboot if incomplete.
-
-GPU tmux runtime-builder now runs ensure_archive.sh. It takes over the archive build
-if the controller-local builder dies, using the same durable flock (no double writer).
-Thus archive construction, local staging, cold-engine recovery, all experiments and
-analysis can progress even during the controller restart. Check these tmux windows
-before restarting ANY helper manually. PID accounting is the sole remaining
-controller-local task that requires restart after controller migration.
+Round3 data review DONE at209bbc0; metadata/pinning nits fixed1c33cfa.
+Tier1 model focusedreview DONE; poolingB2 SHA/fresh provenance/boardMAC fixes.
+Tier2 focusedreview DONE after fixing MoE eval capacitydrop/batchdependence and
+binding identityproof to control sources/evaluator/B2/numerics/freshness and every
+25-step log through300 (post split/resume). Real pilot/unit/per-variant checks
+remain Claude's launch prerequisites. Latest gate-FP32/stats delta no objection.
+No shared files changed by us. Historical FP8 failure/code paths sent to perfagent.
+Phone via tools.mcp__phone_a_friend__phone for sharedstate or costly review questions.

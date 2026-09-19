@@ -19,6 +19,15 @@ def main():
             fmt=lambda x:'Pending' if x is None else f'{x:.3f}×'
             lines.append(f'| {name} | {ce:.5f} | {ex:.5f} | {fmt(cm)} | {fmt(ecm)} |')
         tables.append('\n'.join(lines))
+    for path,title in [('aug-search-v1/results.json','August balanced tuning: may be training-seen; confirmation is game-disjoint from parameter fitting, not from model training.'),
+                       ('aug-search-v1/distributional-results.json','August same-node outcome-distribution experiments: no golden CM conversion.')]:
+        d=read(path)
+        if d:
+            rows=[]
+            for k,x in d['results'].items():
+                score=x['confirmation'];selected=' [fit-CV selected]' if k in d.get('fit_cv_selected',{}).values() else ''
+                rows.append((k+selected,score['macro_ce'],score['expert_ce'],None,None))
+            table(title,rows)
     rows=[]
     d=read('confirmation/results.json')
     if d:
@@ -116,6 +125,10 @@ def main():
     d=read('allie-allocation-pilot/results.json')
     if d:
         table('Allie allocation retry: exactly 1000 simulations/position on average; fixed controls reused, calibration shared across allocation methods.',
+              [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    d=read('backup-ladder-dev/results.json')
+    if d:
+        table('Same-tree backup comparison at 16/64/256/1000 simulations: fixed output calibration, identical node cost within each budget; blitz development only.',
               [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
     for study in ('mcts1000-pilot', 'allie-allocation-pilot'):
         d=read(study+'/regularization-results.json')

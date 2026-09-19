@@ -10,6 +10,7 @@ def batch(rows,oracle,widths=(4,2,2),batch_size=1024):
     root_logits=oracle([r['prefix'] for r in rows])
     white=[b.white for b in roots];q=np.full((len(widths)+1,len(rows),1968),np.nan,np.float64)
     active=[];leaves=[];calls=1;limited=0
+    nodes_by_root=[]
     for i,(row,board) in enumerate(zip(rows,roots)):
         for token in board.legal():
             child=board.child(token);terminal=child.outcome()
@@ -19,6 +20,7 @@ def batch(rows,oracle,widths=(4,2,2),batch_size=1024):
     for depth in range(1,len(widths)+2):
         if depth>1:q[depth-1]=q[depth-2]+terminal_delta
         leaves.append(len(active));next_nodes=[]
+        nodes_by_root.append(np.bincount([n[0] for n in active],minlength=len(rows)).tolist())
         last=depth==len(widths)+1
         for lo in range(0,len(active),batch_size):
             nodes=active[lo:lo+batch_size];prefixes=[n[2] for n in nodes]
@@ -50,4 +52,4 @@ def batch(rows,oracle,widths=(4,2,2),batch_size=1024):
     for i,row in enumerate(rows):assert np.isfinite(q[:,i,np.array(row['legal'])-378]).all()
     assert np.nanmin(q)>-1e-10 and np.nanmax(q)<1+1e-10
     return q.astype(np.float32),root_logits,dict(seconds=time.monotonic()-start,requests=calls,
-        leaves_by_depth=leaves,context_limited=limited)
+        leaves_by_depth=leaves,context_limited=limited,nodes_by_depth_and_root=nodes_by_root)
