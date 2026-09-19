@@ -152,17 +152,24 @@ def schedule(r, steps):
 
 
 def variants(budget, base, specs, seeds=(42,)):
-    """Runs: B_2 data config x model spec (label -> overrides) x seeds. pool_frac is set per run in
+    """Runs: baseline config x model spec (label -> overrides) x seeds. The baseline's arch (B_4 on)
+    is merged into every run, a spec's arch overriding it key by key. pool_frac is set per run in
     plan() from its own tokens, so FLOP-matched shapes keep the final run's repetition."""
     data = {
         k: v for k, v in base.items() if k not in ("pool_frac", "provisional", "meta")
     }
-    unknown = set(data) - {"policy", "stores", "months", "history"} - set(DATA_FLAGS)
-    assert not unknown, f"B_2 keys modelexp does not forward: {unknown}"
+    unknown = (
+        set(data) - {"policy", "stores", "months", "history", "arch"} - set(DATA_FLAGS)
+    )
+    assert not unknown, f"baseline keys modelexp does not forward: {unknown}"
     pf = base["pool_frac"][budget]
     tag = f"pf{round(pf * 1000):03d}" + "h" * bool(data.get("history"))
+    arch = lambda spec: data.get("arch", {}) | spec.get("arch", {})
     return [
-        data | spec | dict(v=label, budget=budget, seed=s, tag=tag)
+        data
+        | spec
+        | ({"arch": arch(spec)} if arch(spec) else {})
+        | dict(v=label, budget=budget, seed=s, tag=tag)
         for label, spec in specs.items()
         for s in seeds
     ]
