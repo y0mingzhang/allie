@@ -89,3 +89,22 @@ within-track hashes need driver/evaluator coverage. Wait for the frozen snapshot
 before explicit done-review; cross-track controls must compare executed configs,
 source/evaluator hashes and B2 SHA rather than requiring identical drivers. No main
 files were edited. User's MCTS optimization retains priority.
+
+Update 2026-09-19 ~04:45UTC: NVMe stage completed (10.5GB,17min). The original
+interactive pane had a queued command that respawned the old group-runtime engine;
+the lock prevented duplication. That private pane was closed and replaced with
+noninteractive tmux window `engine-nvme`; PID402708 is the resident local runner.
+HTTP prototype PID374393 was stopped; the original reference oracle remains alive.
+009-nvme-final passed actual-model replay parity and end-to-end timing, with30.7s
+process startup. 008 ran on the group runtime, explained in its provenance sidecar.
+010-adaptive-repairs is queued/running: 2048 existing dev positions, mean50,
+released baselines, first-visit/depth-limit repairs, decoupled allocation controls.
+Native experimental module `_allie_board_v2` is separate from the loaded reference
+module; test_mcts_repairs passes default equivalence and repair invariants.
+Once complete, run `python -m search.engine.analyze_adaptive results/search-v1/adaptive-repairs-pilot`
+and update REPORT.md. This is development only; no search golden opened.
+Claude focused common-path review was sent 'done with findings': control B_2 SHA
+still not actually checked before pooling; new32x32 CNN meta matmul absent from
+MAC count; retain smoke5 identity/resume prerequisite. No main files changed.
+
+010 completed: eight tree variants in69.7s including writes. Analysis results.json is complete; small first-visit repair gains, no evidence time allocation beats fixed. Fixed+repairs+reverse-KL calibrated expert devCE1.4775 versuslegal1.4947; four-ply remains stronger in its own small check. CM remains pending golden. Claude tier1 remaining fixes inspected and explicit done sent; exact same-run resume accepted.

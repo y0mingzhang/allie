@@ -63,19 +63,25 @@ struct Position {
 
 #include "mcts_native.hpp"
 
-PYBIND11_MODULE(_allie_board,m){
+#ifndef ALLIE_MODULE
+#define ALLIE_MODULE _allie_board
+#endif
+PYBIND11_MODULE(ALLIE_MODULE,m){
     m.def("initialize",[](const std::vector<std::string>& vocabulary){
         if(vocabulary.size()!=1968)throw std::invalid_argument("wrong vocabulary");
         moves=vocabulary;ids.clear();for(int i=0;i<(int)moves.size();++i)ids[moves[i]]=378+i;
     });
-    py::class_<Position>(m,"Position")
+    py::class_<Position>(m,"Position",py::module_local())
         .def(py::init<>()).def(py::init<const std::string&>())
         .def("push",&Position::push).def("child",&Position::child)
         .def("legal",&Position::legal).def("outcome",&Position::outcome)
         .def("fen",[](const Position&p){return p.board.getFen();})
         .def_property_readonly("white",[](const Position&p){return p.board.sideToMove()==chess::Color::WHITE;});
-    py::class_<NativeMCTS>(m,"NativeMCTS")
+    py::class_<NativeMCTS>(m,"NativeMCTS",py::module_local())
         .def(py::init<const std::vector<std::vector<int>>&,NativeMCTS::Scores,std::vector<int>,std::vector<double>>())
+        .def_readwrite("first_prior",&NativeMCTS::first_prior)
+        .def_readwrite("preserve_depth",&NativeMCTS::preserve_depth)
+        .def_readwrite("max_search_depth",&NativeMCTS::max_search_depth)
         .def("select",&NativeMCTS::select).def("update",&NativeMCTS::update)
         .def("summaries",&NativeMCTS::summaries).def("stats",&NativeMCTS::stats)
         .def_property_readonly("done",[](const NativeMCTS& x){return x.iteration>=x.limit && x.pending.empty();});

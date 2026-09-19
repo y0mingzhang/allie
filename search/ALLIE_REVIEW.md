@@ -57,3 +57,43 @@ on development games, compare reverse-KL and exponential-tilt outputs, and retai
 the released baseline unchanged. Existing pilot tree Q/visit caches can test the
 output-policy change without spending GPU inference; they cannot establish the
 effect of a changed tree-selection rule without new trees.
+
+## Follow-up audit of the external critique (2026-09-19)
+
+The external critique correctly observes the algebraic cancellation in the adaptive
+**output** coefficient: c_tree = c0*sqrt(Nmean/N), hence
+lambda_out = c0*sqrt(Nmean)*sqrt(N)/(K+N). This has Grill's functional form with
+c_output = c0*sqrt(Nmean). However c_tree is not c_output. Ignoring the small log
+term, the output coefficient is still sqrt(N) times the coefficient associated
+with that tree's own PUCT traversal. The cancellation therefore does not restore
+the traversal/output correspondence. Grill's Proposition1 is a local statement
+about selection and the regularized objective; the convergence-rate result also
+assumes a fixed target policy. It is not a human-prediction improvement guarantee.
+
+Two practical issues deserve independent ablations:
+- At zero root visits every selection score is zero; the first rollout follows
+  move-generation order. Fixing the exploration numerator to sqrt(max(N,1)) makes
+  it follow the learned prior while retaining exact simulation/visit accounting.
+  Do not infer the loss effect from the fraction 1/N of simulations affected:
+  this visit also changes subsequent selection and value estimates.
+- Re-expanding an already expanded node at the depth boundary destroys its child
+  statistics. The repaired variant retains its bootstrap value and subtree,
+  backs up that value, and spends no redundant network call at the boundary.
+  The original depth100/small budgets rarely reach it, but 'unreachable' is too
+  strong (and the remaining context can impose a tighter bound).
+
+Our reference adapter already reuses root predictions, avoiding the released
+implementation's duplicate root forward pass without changing its tree policy.
+
+Do not claim that an audit of the present public commit proves the exact executable
+behind the published results. Nor does finding a mismatch itself invalidate a
+measured result. Reproduction and matched-coefficient ablations are needed to
+separate empirical performance from its proposed mechanism. Both explicit KL
+objectives are valid; their human CE and calibration must be measured.
+
+The development pilot retains released fixed/adaptive distributions, then changes
+only the practical repairs, and separately holds tree exploration/output
+calibration fixed while comparing fixed, predicted-time, shuffled-time and
+entropy allocations. Exact total simulation counts are enforced for the allocation
+ablation; actual evaluated leaves and wall time are additionally reported. No
+observed thinking time or future outcome enters allocation.

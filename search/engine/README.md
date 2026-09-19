@@ -106,3 +106,5 @@ host dispatch and synchronization; it is not a CUDA-kernel-only measurement.
 The HTTP prototype (`serve.sh`, `client.py`, `transport.py`) is retained for
 comparison and integration work; the in-process runner is the research fast path.
 The binary HTTP hook is specific to pinned SGLang 0.5.9 and is not used by it.
+
+Latest verification (009-nvme-final): the NVMe runtime starts in30.7s including Python imports and graph setup. Real-model fixed/adaptive tree replay again has identical paths, visits and zero output-policy difference. Roughly62k leaves cost1.76–2.09s in1024-root MCTS including prefill and tree destruction. The resident runner removes per-experiment startup. One-time10.5GB runtime staging took17min; this is charged infrastructure time, not omitted from the allocation ledger.

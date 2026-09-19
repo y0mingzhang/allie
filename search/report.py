@@ -76,6 +76,13 @@ def main():
             if k=='two_ply':continue
             x=x['metrics']['confirmation'];rows.append((f'Adaptive calibration: {k}',x['ce'],x['expert_ce'],None,None))
     table('Small development check: 1,050 positions, 558 expert moves. Same pilot reused for research; not a fresh final holdout.',rows)
+    d=read('adaptive-repairs-pilot/results.json')
+    if d:
+        keep=('legal','released_fixed','fixed_repairs','released_time','released_time_repairs',
+              'fixed_repairs_reverse','released_time_repairs_reverse','decoupled_time_reverse',
+              'time_repairs_reverse','shuffled_time_reverse','entropy_reverse')
+        table('Adaptive-MCTS repair pilot: same 1,050-position development confirmation; calibration fit on fixed-tree fold0, then shared across allocations.',
+              [(k,d['results'][k]['metrics']['confirmation']['ce'],d['results'][k]['metrics']['confirmation']['expert_ce']) for k in keep])
     d=read('fast-deeper-pilot/results.json')
     if d:
         table('Cached engine verification on the same small development check; coefficients frozen before the port.',
@@ -94,14 +101,14 @@ def main():
             pick=lambda engine:next(x['end_to_end_seconds'] for x in d['runs'] if x['roots']==128 and x['engine']==engine and x['adaptive']==adaptive)
             a,b=pick('original'),pick('cached_native');text+=f'| {name} | {a:.3f} s | {b:.3f} s | {a/b:.2f}× |\n'
         text+='\nBF16 kernel differences can change a few branches and predicted time budgets; the algorithm is unchanged. See search/engine/README.md for numerical drift and correctness tests.\n'
-    d=read('engine-queue/007-equal-nodes-v2.result.json')
+    d=read('engine-queue/009-nvme-final.result.json')
     if d:
         text+='\nEqual-node throughput after native tree and batched output-solver work (two repeats, mean wall time):\n\n| Method | Roots batched | Evaluated leaves | Seconds including root prefill |\n|---|---:|---:|---:|\n'
         for kind,n in [('four_ply',64),('native_mcts',128),('native_mcts',512),('native_mcts',1024)]:
             r=[x for x in d['benchmark']['runs'] if x['method']==kind and x['roots']==n]
             seconds=sum(x.get('end_to_end_seconds',x['seconds']) for x in r)/len(r)
             text+=f'| {kind} | {n} | {r[0]["nodes"]:,} | {seconds:.3f} |\n'
-        text+='\nThese throughput runs use different numbers of roots, so they are not a quality comparison. Small post-return cleanup costs were not included in this version; subsequent benchmarks measure the complete call.\n'
+        text+='\nThese throughput runs use different numbers of roots, so they are not a quality comparison. These final measurements include native tree destruction and the complete call. The local runtime started in 30.7 s including Python imports; it stays resident between experiments.\n'
     tmp=ROOT/'REPORT.partial';tmp.write_text(text);tmp.replace(ROOT/'REPORT.md')
     print(text)
 
