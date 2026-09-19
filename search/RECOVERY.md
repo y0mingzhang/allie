@@ -45,6 +45,15 @@ Incremental softbackup exact CPUreference and livebaselineidentity passed.
 First unit-test failure was reference-test mass double count, fixed and rerun;
 keep both logs. Current code committedf7eeae0.
 
+039b-child-features is QUEUED between039 and040, SAMEGPU. Collect root and all
+legalchild time/WDL/policy heads from frozenmodel; test predictedopponent
+thinking time and replyentropy as actionfeatures. No futureobservedtime/reply.
+CPUuniform-head/mate/sign/illegalmass checks passed (child-features-unit.json).
+Outputsaug-child-features-v1. Aftercompletion runCPU
+python -m search.engine.analyze_child_features (OMP_NUM_THREADS=1,localruntime).
+All7arms, honestgameCV, sameexistingcp2.5 root/Q caches, extraNNqueries charged.
+Cheaponeply controls are also reported. No goldenpromotion/CM yet.
+
 040-coverage is QUEUED behind039 on SAMEGPU:
 coverage.cpp/coverage_native.py/coverage_pilot.py. Root quotas maximize
 prior**eta/(1+n), weights sqrt(p),p,sqrt(p*(1-p)), with ordinaryPUCTcp2.5 zeroFPU belowroot. Existing
