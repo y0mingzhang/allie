@@ -31,6 +31,8 @@ def main():
                        ('aug-deep-v1/results.json','August extension to4000 simulations, with own1000snapshot control; higher node cost, no dominance claim.'),
                        ('aug-coverage-deep-v1/results.json','August root-coverage extension to4000 simulations, with its own matched-batch1000 control.'),
                        ('aug-coverage-v1/results.json','August root coverage quotas, with ordinary PUCT below root.'),
+                       ('aug-coverage-v1/behavior.json','August expected outcome under the value-tilted continuation policy; unchanged soft backup selected.'),
+                       ('aug-coverage-v1/format-calibration.json','August format-by-rating calibration, partially pooled toward Elo-only coefficients; no confirmation gain.'),
                        ('aug-influence-v1/results.json','August internal value-influence allocation, with the same root-coverage quota; compare to the root-coverage control.'),
                        ('aug-transpositions-v1/results.json','August legal transposition-history averaging: fixed original/variant-mean weights; full-prefix cost charged; no confirmation win.'),
                        ('aug-selection-v1/utilities.json','August nonlinear value utilities and policy-weighted standardization, same cached trees.'),
@@ -217,6 +219,16 @@ def main():
             seconds=sum(x.get('end_to_end_seconds',x['seconds']) for x in r)/len(r)
             text+=f'| {kind} | {n} | {r[0]["nodes"]:,} | {seconds:.3f} |\n'
         text+='\nThese throughput runs use different numbers of roots, so they are not a quality comparison. These final measurements include native tree destruction and the complete call. The local runtime started in 30.7 s including Python imports; it stays resident between experiments.\n'
+    d=read('handle-benchmark-v1/results.json')
+    if d:
+        text+='\nNode-handle inference bridge timing (same root-action forest, two repeats):\n\n| Positions × simulations | Full-history bridge | Node-handle bridge | Speedup |\n|---|---:|---:|---:|\n'
+        for n,b in [(512,1000),(160,4000)]:
+            avg=lambda kind:sum(d['measurements'][f'{n}-{b}-{kind}-{rep}']['seconds'] for rep in range(2))/2
+            a,c=avg('prefix'),avg('handle');text+=f'| {n} × {b} | {a:.2f} s | {c:.2f} s | {a/c:.2f}× |\n'
+        text+='\nThis is an implementation benchmark, not a new golden CE/CM result. Exact-oracle tests preserve search; measured GPU batching differences are retained in handle-benchmark-v1/results.json.\n'
+    d=read('thread-benchmark-v1/results.json')
+    if d:
+        text+='\nParallel leaf expansion passes bit-exact live-model output checks at 1/2/4 threads. The job reserves eight CPUs; only leaf expansion is parallel, and value backups retain their original serial order. Two threads give nearly the same wall time as four and leave more CPU headroom.\n'
     tmp=ROOT/'REPORT.partial';tmp.write_text(text);tmp.replace(ROOT/'REPORT.md')
     print(text)
 

@@ -6,7 +6,96 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Next continuation: live coverage verified
+## Current continuation: faster stack live; deeper golden running
+
+Resident engine now PID1713252, same general L40S job10498670 on babel-t5-32.
+Cache1500000 tokens, memory fraction0.8, 30s process startup. Log
+results/search-v1/logs/engine-10498670-1500k.log. Tmux oracle has reserve keeper
+and engine1500k windows; do not kill the server/session. Old PID1232195 exited.
+No new Slurm job or extra GPU. All allocation time remains charged by observer.
+
+046 forest benchmark: exact CPU scheduling identity, but only~1.2x deep speedup.
+047 handle bridge:512x1000 13.10s->8.02s (1.63x),160x4000 18.69s->13.08s
+(1.43x). Fixed-policy CE drift on timing subsets +.0000075/+ .0000127;
+max policy abs .000611/.000157. No golden quality claim from timing.
+048 parallel expansion:1/2/4 threads give BIT-EXACT queries and outputs.
+2threads~7.14s/12.00s vs8.30s/13.16s;4 gives7.05s/12.03s. Choose2 for headroom.
+049 larger cache:1024x1000 ~13.38s (4threads),320x4000~21.11s (2threads).
+All timing source/config/results retained; not a same-position quality comparison.
+
+050-fast-golden-coverage is running/queued, NOT duplicate:
+golden-fast-coverage-v1, frozen golden_fast_coverage.py.
+Actual4000sim,320root blocks,2 expansion threads, forced-move exact skip.
+Logical prefix1000 reconstructed from birth indices, with its old output
+coefficients from aug-coverage-v1;4000 coefficients from aug-coverage-deep-v1,
+selected by both fit-CV metrics before golden. Own raw/legal port and prior
+1000 gold controls included. About9min. Routine watcher watch_search_queue
+will notify completion/error; report fulltable, uncertainty and cost.
+This is reused golden, not fresh final confirmation; higher cost isn't dominance.
+No further GPU request after050 yet.
+
+CPU expected-outcome backup ablation completed, all4 temperatures worse than
+unchanged regularized soft backup on August. Both fit-CV metrics selected
+unchanged control. aug-coverage-v1/behavior.json and executed-source snapshot.
+One check needed double-roundoff tolerance1e-9 (actual largest mismatch9e-12);
+initial log preserved. Unit independent recursive/reference tests passed.
+
+Next research idea: adaptive root quota proportional to the square root of
+the CE sensitivity of the UPDATED policy, mixed with original-prior quota.
+Static successful quota only knows the prior. Keep PUCT below root and tested
+soft backup. Update weights at block boundaries so root subtrees can still run
+in parallel; zero-mixture must reproduce static allocation under exact oracle.
+Not implemented yet.
+
+Potential later retrieval axis: Claude has no index; use June2026 or earlier
+bank (NOT August, to avoid future-player/style retrieval). Exclude bank games
+by full-game token hashes against all golden/dev/test and August tune/confirm
+games; same-cell neighbors or header-aware keys; fit mixing on August only.
+Disclose extra datastore, build/query memory/cost and retrieval-vs-search gains.
+No bank built and no retrieval requests yet. User inference scope allows ideas,
+but don't silently claim a datastore is a pure tree-search improvement.
+
+## Previous continuation: parallel root-action scheduler
+
+044 deep coverage completed: August own 1000 snapshot 1.452653/1.357165,
+4000 snapshot 1.446924/1.344827 at 3886.63 mean nodes. Paired macro delta
+-.005730 CI[-.010462,-.000650]; expert -.012339 CI[-.028694,+.004799].
+No golden 4000 yet; higher cost alone is not Pareto dominance.
+
+045 internal allocation completed. Against coverage 1.452666/1.357460:
+prior 1.458130/1.367425; soft derivative 1.452756/1.358427;
+75% derivative+25% prior 1.452481/1.357144. Selected-arm paired CIs overlap
+zero. No promotion. Results and paired-vs-reference.json are in aug-influence-v1.
+User received all three-arm table.
+
+Format-specific calibration failed confirmation; aug-coverage-v1/
+format-calibration.json. Final all fits converged after coordinate rescaling.
+One intermediate rerun executed stale behavior even while recording a new end
+source hash (likely NFS/bytecode caching); preserved stale-rerun and first
+artifacts. Final ran exec(compile(exact_read_bytes)) with before/after hash
+verification. Prefer immutable module names / exact byte execution when editing
+producers. This CPU-only issue did not invalidate golden or NN results.
+
+046-forest-benchmark queued/running on existing 10498670, no new Slurm job.
+forest.cpp/native.py implement independent root-action subtrees with precomputed
+root-quota logical visit times. Each subtree still ordinary cp2.5 PUCT; tree
+births record ORIGINAL simulation time, so reductions reconstruct prefix budgets.
+CPU deterministic-oracle test passed: exact node/boot/birth/structure, soft values,
+mixed/zero budgets, forced actions, terminal and depth limits, and prefix NN counts.
+Forest requests can contain many root branches; same cache size.
+Benchmark: 512x1000 and160x4000, sequential/forest with and without exact forced-
+action policy shortcut. First no-skip forest shows no speedup because forced
+moves create a1000-round tail. Wait for full report. CPU identity does not imply
+GPU BF16 identity; drift explicitly measured with fixed calibration. This is
+timing, not golden quality selection.
+
+New uncommitted files forest.cpp, forest_native.py, forest_benchmark.py,
+format_calibration.py, paired_august.py, report/RECOVERY edits.
+Engine caches imported modules: don't mutate imported implementation for another
+request without a fresh module/library identity. No outstanding peer reviews.
+Current best remains actual 043: CM2.60708x/3.99839x,615.40076nodes,147.46s.
+
+## Previous continuation: live coverage verified
 
 043 DONE: actual mixed coverage615.40076nodes, macro1.454045189/expert1.356337615,
 CM2.60708x/3.99839x.147.462s scoring,.814s summarize. Vs4ply delta95%

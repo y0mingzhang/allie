@@ -108,3 +108,25 @@ comparison and integration work; the in-process runner is the research fast path
 The binary HTTP hook is specific to pinned SGLang 0.5.9 and is not used by it.
 
 Latest verification (009-nvme-final): the NVMe runtime starts in30.7s including Python imports and graph setup. Real-model fixed/adaptive tree replay again has identical paths, visits and zero output-policy difference. Roughly62k leaves cost1.76–2.09s in1024-root MCTS including prefill and tree destruction. The resident runner removes per-experiment startup. One-time10.5GB runtime staging took17min; this is charged infrastructure time, not omitted from the allocation ledger.
+
+## Parallel root-coverage implementation
+
+The root quota depends only on root prior probabilities. forest.cpp schedules
+independent root-action subtrees concurrently, preserving each branch's visit
+order and original logical simulation birth indices. The latter allow exact
+prefix-budget reduction with a deterministic oracle. Coverage inside each
+branch remains PUCT. Forced roots may skip all search because their legal
+policy is exactly one.
+
+handles.py passes node/parent/move/length arrays to SGLang and copies parent KV
+indices on the GPU. It avoids transferring full histories through Python for
+each leaf. threadforest.cpp expands independent leaves on two CPU threads, then
+backs values up in the original serial order. The job reserves eight CPUs.
+Actual CPU and GPU regression checks, timing breakdowns and numerical drift are
+under results/search-v1/{forest,handle,thread,wide}-benchmark-v1.
+
+On the current L40S,512 positions x1000 simulations take about7s, compared with
+13.5s before these changes.320 positions x4000 take about21s. These are warm
+timing subsets, not full evaluation timings. The resident cache now holds1.5M
+tokens and uses about35GB; new-process startup took30s. No CPU hosting port is
+implemented yet.
