@@ -701,6 +701,16 @@ wave(
     "dei1",
 )
 
+# round 2's 1e17 control, started while round 1 runs (user: keep general full): dense ship recipe
+wave(
+    "moe2d",
+    "moe-v1-round2d",
+    "mo2d",
+    variants("1e17", b, {"dense": dict(arch=SHIP)}, seeds=(42, 43)),
+    "moe-v1 round 2 dense control at 1e17: ship recipe (B_3 + boardcnn + swiglu + no key offset) x2 seeds, 4 L40S each",
+    "general4",
+)
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
