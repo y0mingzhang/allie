@@ -550,6 +550,20 @@ WAVES["round3x2"] = WAVES["round3x"] | dict(
 )
 
 
+WAVES["round3x3"] = WAVES["round3x2"] | dict(
+    study="data-v1-round3x3",
+    prefix="r3x3",
+    throttle=1,
+    runs=r3(
+        b2("3e16", "mover_rule+up4+noengine+otb_x2"),
+        stores=[*STORES, f"{EXT}/otb", f"{EXT}/engine"],
+        months=[*R2P_MONTHS, *EXT_MONTHS],
+        suffix="b2x",
+    ),
+    purpose="OTB dose below the peak: x1 null, x4 won, x10 and x30 lose (z +5.1 / +0.9, +36 / +26); x2 "
+    "brackets the peak; same sources and merged history as round3x",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
