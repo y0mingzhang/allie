@@ -43,9 +43,9 @@ def main():
                        ('aug-outcome-consistency-v1/results.json','August root/child outcome-consistency projection, all model predictions; no true outcomes used.'),
                        ('aug-rollout-v1/results.json','August human-policy Monte Carlo leaf values at1/4/8/16ply, four trajectories per action.'),
                        ('aug-rollout-v1/stack.json','August rollout/search combinations and empirical noise shrinkage, additional rollout nodes charged.'),
-                       ('aug-retrieval-residual-v2/results.json','August residual retrieval: empirical human neighbors minus their frozen-model expectations; same June memory.'),
-                       ('aug-boardbook-v1/results.json','August exact-state June boardbook: same-cell frequencies, full support from neural prior; extra-data inference.'),
-                       ('aug-retrieval-v1/results.json','August June-datastore retrieval, alone and stacked with search; additional corpus memory and query costs, not pure search.'),
+                       ('aug-retrieval-residual-v2/results.json','Historical, now excluded: August residual retrieval using June human games. No longer eligible under the no-external-memory constraint.'),
+                       ('aug-boardbook-v1/results.json','Historical, now excluded: August exact-state June boardbook. No longer eligible under the no-external-memory constraint.'),
+                       ('aug-retrieval-v1/results.json','Historical, now excluded: August June-datastore retrieval. No longer eligible under the no-external-memory constraint.'),
                        ('aug-adaptive-root-v1/results.json','August updated-policy CE-curvature root allocation against a matched static control.'),
                        ('aug-influence-v1/results.json','August internal value-influence allocation, with the same root-coverage quota; compare to the root-coverage control.'),
                        ('aug-transpositions-v1/results.json','August legal transposition-history averaging: fixed original/variant-mean weights; full-prefix cost charged; no confirmation win.'),
@@ -67,7 +67,7 @@ def main():
         ('aug-expanded-backup-v1/results.json','Expanded August differentiated backup: output-only two-scalar or joint ten-scalar fit; same1000 trees.'),
         ('aug-expanded-stack-v1/results.json','Expanded August stacked fitted backups and search-strength mixtures; parameters refitted inside game folds.'),
         ('aug-consideration-v1/results.json','Expanded August sampled consideration-set model; rejected on confirmation.'),
-        ('aug-retrieval-large-v1/results.json','Expanded August larger June retrieval datastore; additional data memory, shared-player exclusion ablation, all16 cells reported.')]:
+        ('aug-retrieval-large-v1/results.json','Historical, now excluded: expanded August larger June retrieval datastore. Retained only as an audit record; no-external-memory constraint applies.')]:
         d=read(path)
         if d:
             rows=[]
@@ -274,6 +274,7 @@ def main():
     if audit:
         tables.append('Fixed position-permutation audit of the frozen live router: macro CE shift '+f"{audit['order_delta_ce']['macro']:+.6f}"+', expert shift '+f"{audit['order_delta_ce']['expert_macro']:+.6f}"+'. This measured order effect is separate from paired sampling intervals; one permutation does not estimate its full variance. Neither order is selected by quality.')
     text='# Inference research results\n\nTarget: both ≥10× macro and ≥10× expert training-equivalent CM, with an improved average-search-nodes versus quality frontier. Not achieved.\n\n'
+    text+='Current constraint: **no external memory**. Retrieval and game-book results below are historical audit records only; they are excluded from new runs and winner selection.\n\n'
     text+='CM is computed only from matching golden metrics, using a frozen training-law shape anchored to the official raw checkpoint. Development-only rows stay pending. Search reports additionally separate gains beyond legal normalization.\n\n'
     text+='\n\n'.join(tables)+'\n\nOne persistent GPU allocation at a time; previous preempt RTX6000Ada usage and its general L40S replacement remain charged in status.json, including idle time. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'
     if balanced:

@@ -24,6 +24,9 @@ def load():
 
 
 def run(oracle,spec):
+    if not spec.get('smoke'):
+        receipt=ROOT/'engine-queue/096-quota-replay-smoke.result.json'
+        assert receipt.exists() and json.loads(receipt.read_text()).get('smoke')=='passed','Require completed replay smoke'
     start=time.monotonic();native=load();reducer=backup_load();source=ROOT/'aug-deep-scale-v1'
     out=ROOT/'aug-quota-replay-v1';out.mkdir(exist_ok=True);d=read(source.name)
     n=len(d['rows']);assert n==4096 and json.loads((source/'worker.json').read_text())['completed']==n

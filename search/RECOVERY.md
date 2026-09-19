@@ -127,3 +127,5 @@ A causal root-quota screen is now queued as096 smoke after095: quota_replay.py/.
 ## Allocation update19:07UTC
 Preempt replacement10504460 submittedafterany:10503933 (8h requested,time-min30min); never overlap owned GPUs. Peer notified before/after. STOPabsent, checkpoint/data verified, ledger12.699GPUh atsubmission, allchargesretained. Receiptjob-receipts/10504460.json. Do not submit anotherreplacement. Current10503933stillRUNNING;19:28:51UTCexpiry.
 CPU replayaudit passedfirst64: reconstructedall16K birthtimestamps; baseline1000 Q/nodes exact; futurebootstrapperturbations do notaffectQ128/Q256. Audit runtime/cpu-audit/quota-replay-check.json. C++stl converterinclude fixed before096 begins.
+
+097-quota-replay-full is queued after096 and hard-requires096's passed receipt. No newmodelcalls; ~64cachedtreechunks. Sourcehashesfrozenwhen096begins, donotedit quota_replay.py/.cpp thereafter. Currentcommit containsa researchderivation insearch/ALLOCATION_NOTES.md. report.py nowmarksallretrievalrows historical/excluded andkeeps themoutofwinnerselection.
