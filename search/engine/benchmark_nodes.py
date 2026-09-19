@@ -21,9 +21,10 @@ def run(oracle,spec):
             oracle.reset();start=time.monotonic();z=oracle([r['prefix'] for r in rows[:n]])
             prefill_seconds=time.monotonic()-start;prefill_tokens=oracle.new_tokens;prefill_gpu=oracle.forward_seconds
             sims=int(round(budget/n));out,stats=mcts(rows[:n],z,oracle,n_sims=sims)
+            total_seconds=time.monotonic()-start
             stats.update(method='native_mcts',roots=n,repeat=repeat,simulations_per_root=sims,
                 nodes=stats['evaluated_leaves'],prefill_seconds=prefill_seconds,
-                end_to_end_seconds=prefill_seconds+stats['seconds'],new_tokens=oracle.new_tokens,
+                end_to_end_seconds=total_seconds,new_tokens=oracle.new_tokens,
                 prefill_tokens=prefill_tokens,forward_seconds=oracle.forward_seconds,
                 search_forward_seconds=oracle.forward_seconds-prefill_gpu)
             stats['nodes_per_second']=stats['nodes']/stats['seconds'];records.append(stats)

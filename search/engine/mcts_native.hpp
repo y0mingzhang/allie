@@ -4,10 +4,17 @@
 #include <limits>
 #include <pybind11/numpy.h>
 
+struct SearchEdge {
+    int move,child=-1;
+    double prior;
+    SearchEdge(int m,double p):move(m),prior(p){}
+};
+
 struct SearchNode {
     double prior=0.,w=0.;
     int parent=-1,move=-1,depth=0,n=0;
-    std::vector<int> children,prefix;
+    std::vector<SearchEdge> children;
+    std::vector<int> prefix;
     std::unique_ptr<Position> position;
 };
 
@@ -39,7 +46,7 @@ struct NativeMCTS {
         for(int t:legal)max=std::max(max,double(z[t]));
         std::vector<double> p;for(int t:legal){p.push_back(std::exp(double(z[t])-max));sum+=p.back();}
         nodes[id].children.clear();nodes[id].children.reserve(legal.size());
-        for(size_t j=0;j<legal.size();++j){int child=add(id,legal[j],p[j]/sum);nodes[id].children.push_back(child);}
+        for(size_t j=0;j<legal.size();++j)nodes[id].children.emplace_back(legal[j],p[j]/sum);
         max=std::max({double(z[2413]),double(z[2414]),double(z[2415])});
         double win=std::exp(double(z[2413])-max),draw=std::exp(double(z[2414])-max),loss=std::exp(double(z[2415])-max);
         return loss/(win+draw+loss)-win/(win+draw+loss);
@@ -74,11 +81,18 @@ struct NativeMCTS {
             while(!nodes[id].children.empty() && nodes[id].depth<depth_limit){
                 double factor=(std::log((nodes[id].n+19652.+1)/19652.)+cp[i])*std::sqrt(double(nodes[id].n));
                 int best=-1;double best_u=-std::numeric_limits<double>::infinity();
-                for(int child:nodes[id].children){
-                    auto& c=nodes[child];double u=(c.n?c.w/c.n:0.)+factor*c.prior/(1+c.n);
-                    if(u>best_u){best_u=u;best=child;}
+                for(size_t j=0;j<nodes[id].children.size();++j){
+                    auto& edge=nodes[id].children[j];
+                    int n=edge.child<0?0:nodes[edge.child].n;
+                    double q=n?nodes[edge.child].w/n:0.;
+                    double u=q+factor*edge.prior/(1+n);
+                    if(u>best_u){best_u=u;best=int(j);}
                 }
-                id=best;materialize(id);
+                if(nodes[id].children[best].child<0){
+                    int move=nodes[id].children[best].move;double prior=nodes[id].children[best].prior;
+                    int child=add(id,move,prior);nodes[id].children[best].child=child;
+                }
+                id=nodes[id].children[best].child;materialize(id);
             }
             max_depth=std::max(max_depth,nodes[id].depth);
             double outcome=nodes[id].position->outcome();
@@ -100,7 +114,11 @@ struct NativeMCTS {
         py::list result;
         for(size_t i=0;i<roots.size();++i){
             auto& root=nodes[roots[i]];std::vector<int> ids,counts;std::vector<double> q,p;
-            int total=0;for(int id:root.children){auto& c=nodes[id];ids.push_back(c.move-378);counts.push_back(c.n);q.push_back(c.n?c.w/c.n:0.);p.push_back(c.prior);total+=c.n;}
+            int total=0;for(auto& edge:root.children){
+                int n=edge.child<0?0:nodes[edge.child].n;
+                ids.push_back(edge.move-378);counts.push_back(n);
+                q.push_back(n?nodes[edge.child].w/n:0.);p.push_back(edge.prior);total+=n;
+            }
             if(total!=budgets[i] || root.n!=budgets[i])throw std::runtime_error("visit accounting");
             result.append(py::make_tuple(ids,counts,q,p));
         }

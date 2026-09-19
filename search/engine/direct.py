@@ -99,12 +99,17 @@ class DirectOracle:
             for rec,z in zip(records,predictions):results[rec[0]]=z;self.nodes[rec[0]]=rec[1]
             records=[];ntokens=0
         for key in unique:
-            assert 1<=len(key)<=1025 and min(key)>=0 and max(key)<2432
+            assert 1<=len(key)<=1025
             if self.next_row>=self.capacity:raise RuntimeError('Tree row cache full; reset between root batches')
             row=self.next_row;self.next_row+=1
             if key in self.nodes:parent,plen=self.nodes[key],len(key)-1
-            elif key[:-1] in self.nodes:parent,plen=self.nodes[key[:-1]],len(key)-1
-            else:parent,plen=None,0
+            else:
+                parent=self.nodes.get(key[:-1])
+                plen=len(key)-1 if parent is not None else 0
+                # A cached parent has already been validated. Check only new
+                # tokens; never rescan the entire history for each tree edge.
+                suffix=key[plen:]
+                assert min(suffix)>=0 and max(suffix)<2432
             n=len(key)-plen
             if ntokens+n>4096:flush()
             records.append((key,row,parent,plen));ntokens+=n

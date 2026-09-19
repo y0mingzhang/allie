@@ -7,8 +7,11 @@ checkpoint. The source checkpoint and training runtime are read-only.
 it to SGLang paged attention and compiled graphs. `direct.py` calls the model
 runner in process: tree edges do not travel through HTTP, a tokenizer, a sampling
 API, or the serving scheduler. `tree.py` implements human-policy continuation
-expectation; `mcts.py` preserves the released Allie MCTS algorithm. `board.cpp`
-accelerates chess rules only; it contains no engine evaluation or search policy.
+expectation. `native_mcts.py` / `mcts_native.hpp` preserve the released Allie MCTS
+algorithm with C++ selection, expansion and backup; `policy.py` batches its exact
+FP32 output solver. `mcts.py` retains the intermediate Python-tree adapter for
+differential tests. `board.cpp` wraps chess rules and our tree mechanics; it
+contains no external engine evaluation or external search policy.
 
 The architecture needs two extra cached states besides K/V: the embedding before
 the previous-token smear, and the unshifted stationary key components. Both use
@@ -65,6 +68,10 @@ silently retried. Inspect its traceback before reissuing a request.
   predictions, two batch sizes and a forced mate.
 - `test_mcts`: identical paths, visits, values, budgets and policies to the
   audited Allie adapter under deterministic predictions.
+- `validate_mcts_gpu`: real-logit replay across 128 trees; fixed and adaptive
+  paths/visits match exactly, with zero output-policy difference in the test.
+- `test_policy`: 4,096 random/tied/zero-budget cases match the released per-tree
+  FP32 policy solver bit-for-bit.
 - `check_math`: eager portable model matches the frozen source using the same
   dense kernel exactly on the tested inputs. The actual compiled serving kernels
   have different BF16 rounding. They are **not bit-identical** to the evaluator.
@@ -81,7 +88,20 @@ On the reserved RTX6000Ada, warmed four-ply search measures roughly 35–44 root
 positions/s on the tested 16/32/64-root batches, including rules, tree assembly,
 GPU forward and score transfer. Model-runner initialization takes 18–25 s with
 cached compilation, excluding Python imports. The resident service amortizes
-startup. These are measured small-batch rates, not a full-evaluation guarantee.
+startup. One cold shared-filesystem restart took several minutes of dependency
+and compilation-cache I/O. `stage_runtime.py` stages the same environment on local
+NVMe; its durable source stays under results/. The command can resume an interrupted
+copy and publishes STAGED.json only after all workers complete. `workbench.sh`
+accepts SEARCH_ENGINE_RUNTIME to use that cache. Cold-start timing for this staged
+path still needs verification. The full 2,048-root four-ply task took 58.6 s warm,
+including atomic result writing; this is a measured task, not a throughput extrapolation.
+
+Equal-node cost is in engine-queue/004-equal-nodes.result.json: about 62k evaluated
+leaves take 1.56–2.02 s for four-ply, and 2.01–2.04 s for C++ MCTS batched over
+1,024 roots, plus 0.066 s MCTS root prefill. The former uses 64 roots with wider
+trees. This isolates throughput, not prediction quality or equal effort per root.
+`forward_seconds` measures wall time inside the model runner, including metadata,
+host dispatch and synchronization; it is not a CUDA-kernel-only measurement.
 
 The HTTP prototype (`serve.sh`, `client.py`, `transport.py`) is retained for
 comparison and integration work; the in-process runner is the research fast path.
