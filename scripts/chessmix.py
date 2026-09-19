@@ -628,7 +628,8 @@ class Sampler:
         self.paths = [p for c in self.codes for p, _ in self.units[c]]
         self.ends = [int(self.games.sum())]
         self.resident, self.weights_phase = {}, None  # code -> Shard
-        self.preload = {}  # path -> Shard read ahead for the current chunk
+        self.preload, self.ahead = {}, {}  # path -> Shard / future, read ahead of use
+        self.ex = getattr(self, "ex", None)
 
     def _weights(self, p):
         ph = phase(self.policy, p)
@@ -666,19 +667,30 @@ class Sampler:
         for k, count in zip(*np.unique(drawn, return_counts=True)):
             yield int(k), self._take(int(k), int(count), rng, cursor)
 
-    def _warm(self):
-        """Read the shards the next chunk opens in parallel (cold NFS reads are latency-bound),
-        found by replaying its draws on copies of the rng and cursors."""
+    def _paths(self):
+        """Non-resident shards the next chunk opens, found by replaying its draws on copies of the
+        rng and cursors."""
         rng, cursor, need = copy.deepcopy(self.rng), copy.deepcopy(self.cursor), {}
         for k, pieces in self._chunk(rng, cursor):
             for path, _, idx in pieces:
                 rng.random(len(idx))
                 r = self.resident.get(self.codes[k])
-                if (r is None or r.path != path) and path not in self.preload:
+                if r is None or r.path != path:
                     need[path] = None
-        load = lambda p: Shard(p, self.clock, self.aux, self.feats)
-        with ThreadPoolExecutor(32) as ex:
-            self.preload |= dict(zip(need, ex.map(load, need)))
+        return list(need)
+
+    def _load(self, paths):
+        """Futures reading shards on a shared thread pool (cold NFS reads are latency-bound)."""
+        self.ex = self.ex or ThreadPoolExecutor(32)
+        return {
+            p: self.ex.submit(Shard, p, self.clock, self.aux, self.feats) for p in paths
+        }
+
+    def _warm(self):
+        """Read the shards the next chunk opens in parallel, reusing reads started ahead of it."""
+        need, ahead = self._paths(), self.ahead
+        ahead |= self._load([p for p in need if p not in ahead])
+        self.preload, self.ahead = {p: ahead[p].result() for p in need}, {}
 
     def _shard(self, k, path):
         code = self.codes[k]
@@ -709,7 +721,10 @@ class Sampler:
                         game += (shard.g.feats(i, len(game[0])),)
                     out.append(game)
         assert not self.preload, "warm-up replay diverged from the draws"
-        return [out[i] for i in self.rng.permutation(len(out))]
+        out = [out[i] for i in self.rng.permutation(len(out))]
+        # start reading the chunk after this one; a hint only, its own replay decides what is used
+        self.ahead = self._load(self._paths())
+        return out
 
     def batch(self, n, rank=0, world=1):
         cols = [[] for _ in self.channels]
@@ -803,7 +818,7 @@ class Prefetch:
     """Builds the sampler's batches in a child process, so batch building never competes with
     the training loop for the GIL; same batches and states as the sampler itself."""
 
-    def __init__(self, sampler, depth=8):
+    def __init__(self, sampler, depth=256):
         self.sampler, self.depth, self.args = sampler, depth, None
         self.last, self.seq, self._seen = {}, 0, sampler.seen
         self.waited = 0.0  # seconds training blocked on the child
