@@ -85,6 +85,9 @@ LANES = dict(
             ("general", "general", "normal", FAST, 4),
             # identity pilots: same GPU type as the reference runs (determinism is per type)
             ("l40s", "preempt", "preempt_qos", "L40S", 2),
+            # single A6000s: dei-group first (user), preempt overflow
+            ("dei1", "dei-group", "dei_group_qos", "A6000", 8),
+            ("a6000p", "preempt", "preempt_qos", "A6000", 14),
         )
     },
     # one run on 4 fast preempt GPUs (the ladder's second seed)
@@ -671,6 +674,47 @@ wave(
     "general8",
 )
 
+
+# moe-v1 round 1 (main, user 2026-09-19: >= 2x CM over the dense control at 1e18, growing with scale): 3e16 screens on
+# the ship recipe (B_3 + boardcnn + swiglu + no key offset); experts SwiGLU unless noted; MoE v2 routing + seq loss 1e-3
+SHIP = dict(board="conv", mlp="swiglu", key_offset=False)
+MOE = lambda e, k, **kw: dict(arch=SHIP | dict(moe=[e, k], moe_seq=1e-3) | MOE_V2 | kw)
+MOE1 = {
+    "moe64k8": MOE(64, 8),
+    "moe64k8relu": MOE(64, 8, mlp="relu2"),
+    "moe32k4": MOE(32, 4),
+    "moe128k8": MOE(128, 8),
+    "moe128k6": MOE(128, 6),
+    "moe256k6": MOE(256, 6),
+    "moe384k6": MOE(384, 6),
+    "moe64k8ssp": MOE(64, 8, moe_score="sqrtsoftplus"),
+    "moe64k8cap2": MOE(64, 8, moe_capacity=2.0),
+    "moe64k8noshared": MOE(64, 8, moe_shared=False),
+}
+wave(
+    "moe1",
+    "moe-v1-round1",
+    "mo1",
+    variants("3e16", b, {"dense": dict(arch=SHIP)}, seeds=(42, 43)) + variants("3e16", b, MOE1),
+    "moe-v1 round 1 at 3e16 on single A6000s: dense ship recipe x2 seeds vs 10 MoE arms (granularity, sparsity incl. "
+    "DeepSeek-V4.1 Flash's top-6 / sqrtsoftplus, ReLU^2 vs SwiGLU experts, capacity, shared expert), FLOP-matched",
+    "a6000p",
+)
+
+wave(
+    "moe1s",
+    "moe-v1-smoke1",
+    "mos1",
+    [
+        r | dict(stop_after=[40])
+        for r in variants(
+            "3e16", b, {k: MOE1[k] for k in ("moe64k8", "moe384k6", "moe64k8ssp", "moe64k8noshared")}
+        )
+    ],
+    "moe-v1 smoke: 40 steps of the new MoE paths (SwiGLU experts, 384 experts' memory, sqrtsoftplus, no shared "
+    "expert) on A6000: compile, finite loss, optimizer labels, tokens/s",
+    "a6000p",
+)
 
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
