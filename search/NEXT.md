@@ -43,3 +43,19 @@ MCTS at measured node count and time. No claim of a theoretical guarantee on hum
 All adaptive policies retain a nonzero legal prior and frozen dev calibration. Any
 method that skips a position falls back and remains in the denominator. All reports
 include failed ideas; golden results never tune these choices.
+
+Update after the first dev extensions (2026-09-19):
+- 1000-simulation calibrated MCTS beats four-ply on reused dev; six-ply improves
+  continuation but spends about4x the nodes for expertCE comparable to MCTS1000.
+- The mass/policy/variance adaptive-continuation priorities are nearly tied.
+- Cached MCTS postprocessing (search/mcts_postprocess.py) selects Elo-dependent
+  value weighting by fit-game CV for both the rating macro and expert metrics.
+  Extra GPU cost is zero. Shrinking root Q toward the root critic loses quality.
+- Queue019 tests4000 fixed simulations. Queue020 retries Allie allocation at
+  exactly1000 simulations/root on average, with predicted-time-only allocation,
+  the paper's inverse-sqrt exploration coupling, and shuffled-time allocation.
+  Fixed controls are reused byte for byte from014 with provenance checks.
+  Output calibration stays shared across arms first. Allocation alone and time-
+  dependent output regularization are distinct effects; analyze them separately.
+- All higher-budget work remains development-only; do not convert its losses with
+  golden CM laws or pick parameters against the first golden comparison.

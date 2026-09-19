@@ -100,6 +100,28 @@ def main():
         if d:
             table(f'Adaptive continuation expectation ({priority} priority, 1000-node cap): development folds only.',
                   [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    d=read('mcts1000-postprocess/results.json')
+    if d:
+        table('CPU-only MCTS output ablations: same cached 1000-simulation trees; family selection uses game CV within fit fold, all development confirmation arms reported.',
+              [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    d=read('mcts4000-pilot/results.json')
+    if d:
+        table('MCTS budget extension to 4000 simulations: existing development folds only.',
+              [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    d=read('residual-policy-dev/results.json')
+    if d:
+        for budget,run in d['results'].items():
+            table(f'Cached {budget}-simulation value corrections and expectation combinations: development only; combined-tree cost is additional.',
+                  [(k,x['confirmation']['ce'],x['confirmation']['expert_ce'],None,None) for k,x in run['results'].items()])
+    d=read('allie-allocation-pilot/results.json')
+    if d:
+        table('Allie allocation retry: exactly 1000 simulations/position on average; fixed controls reused, calibration shared across allocation methods.',
+              [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
+    for study in ('mcts1000-pilot', 'allie-allocation-pilot'):
+        d=read(study+'/regularization-results.json')
+        if d:
+            table(f'Grill reverse-KL regularization formula versus its dev-calibrated common scale ({study}); development only.',
+                  [(k,x['metrics']['confirmation']['ce'],x['metrics']['confirmation']['expert_ce'],None,None) for k,x in d['results'].items()])
     d=read('golden-v1/results.json') or read('golden-baseline/results.json')
     if d:
         table('Exact golden evaluation: 16-cell macro CE and four-cell expert macro CE; 1,553,058 scored moves.',
@@ -115,7 +137,11 @@ def main():
             interval=lambda key:'–'.join(f'{v:.4f}' for v in x[key])
             lines.append(f'| {k} | {interval("macro_ci95")} | {interval("expert_macro_ci95")} | {interval("macro_cm_ci95")} | {interval("expert_macro_cm_ci95")} |')
         tables.append('\n'.join(lines))
-    text='# Inference research results\n\nTarget: both ≥2× macro and ≥10× expert training-equivalent CM. Not achieved.\n\n'
+    d=read('golden-mcts1000-v1/results.json')
+    if d:
+        table('Frozen 1000-simulation MCTS confirmation: existing balanced golden sample, 512 positions/cell. All dev-frozen arms reported; training-law-conditional CM.',
+              [(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
+    text='# Inference research results\n\nTarget: both ≥10× macro and ≥10× expert training-equivalent CM, with an improved average-search-nodes versus quality frontier. Not achieved.\n\n'
     text+='CM is computed only from matching golden metrics, using a frozen training-law shape anchored to the official raw checkpoint. Development-only rows stay pending. Search reports additionally separate gains beyond legal normalization.\n\n'
     text+='\n\n'.join(tables)+'\n\nOne persistent GPU allocation at a time; previous preempt RTX6000Ada usage and its general L40S replacement remain charged in status.json, including idle time. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'
     if balanced:

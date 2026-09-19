@@ -24,7 +24,7 @@ starting with `r2-3e16-control-t20-w20-pf052h-s42`. No Stockfish or external val
 The small model is deliberate: optimize experiment speed and build reusable infrastructure.
 
 Success (Yiming's latest instruction, 2026-09-18): one frozen inference method must
-achieve BOTH at least 2x golden macro training-equivalent CM AND at least 10x golden
+achieve BOTH at least 10x golden macro training-equivalent CM AND at least 10x golden
 expert-macro training-equivalent CM over the same checkpoint's raw direct policy.
 Do not stop at the earlier 0.01-nat threshold. Select methods on separate development
 games before golden confirmation. Keep the base checkpoint and reference laws fixed
@@ -35,10 +35,11 @@ calibration, and measured inference cost.
 
 For the initial checkpoint at ND=3e16, the frozen, vertically anchored independent
 isoflop laws imply these targets (conditional estimates, not empirical learning curves):
-- Macro: raw CE 1.5240077557 -> CE <= 1.4715234367 (gain >= 0.0524843190).
+- Macro: raw CE 1.5240077557 -> CE <= 1.3832044317 (gain >= 0.1408033240).
 - Expert macro: raw CE 1.4764288958 -> CE <= 1.2992929938 (gain >= 0.1771359021).
 Reference snapshots and calculations: results/search-v1/training-cm-laws.json and
-results/search-v1/goal-targets.json. Report law sensitivity and paired uncertainty;
+results/search-v1/goal-targets-10x-both.json (the earlier goal-targets.json remains
+historical). Report law sensitivity and paired uncertainty;
 a point estimate alone is insufficient evidence of a robust improvement.
 
 Yiming requests training-equivalent CM whenever reporting results. For golden macro
@@ -94,7 +95,18 @@ job receipts and live Slurm state before submission; never duplicate a job. Resp
 /data/group_data/dei-group/yimingz3/allie/controller/STOP. A controller restart does not
 resume paused/completed work. Claude owns the main worktree's data/model goals.
 
-Stop condition: continue useful research until BOTH revised CM targets are confirmed,
+Efficiency requirement (Yiming, 2026-09-19): measure the frontier of average nodes
+searched over the golden population versus macro and expert CM. Count actual new
+model-evaluated search nodes per position, average per cell then macro-average, and
+also report nominal simulations, prefix/prefill tokens, and wall time. Report expert
+subset cost separately. Show budget sweeps against the existing fixed-ply and MCTS
+baselines. A winning algorithm must improve the quality/cost frontier: no greater
+average node cost with no worse macro or expert CE, with a strict supported gain
+in at least one quality measure. Do not present a more expensive point alone as
+Pareto dominance. Cheap direct-policy points remain part of the frontier.
+
+Stop condition: continue useful research until BOTH revised 10x CM targets and the
+efficiency requirement are confirmed,
 the user explicitly pauses/stops the work, or progress is blocked on required input
 or unavailable resources. Do not claim completion for exhausting an allocation or
 for a smaller gain. Before replacing an allocation, inspect jobs and cumulative

@@ -6,7 +6,49 @@ GOAL.md and /data/group_data/dei-group/yimingz3/allie/controller/STOP first.
 Never submit training, stop the tunnel/controller, or change Claude's jobs.
 The UI goal is stale/paused; do not reset it. Our authorized goal is in GOAL.md.
 
-## Current state: 2026-09-19 ~05:41 UTC
+## Current state: 2026-09-19 ~06:17 UTC
+
+LATEST (takes precedence over older details below): User raised the target to 10x
+on BOTH golden macro and expert macro, plus improved average search-node / CM
+frontier. Own GOAL.md updated; goal-targets-10x-both.json gives CE1.383204/1.299293.
+No new training or Slurm jobs. GPU10498670 and resident engine1097060 unchanged.
+Runtime archive and node-local STAGED.json are complete; no need restaging or restart.
+Accounting observer2682849 survived this turn; preserve all charges.
+
+019 MCTS4000 done: dev CE1.42596/expert1.37671, ~589s. 020 Allie budget retry done:
+predicted-time routing does not beat its shuffled control at equal total sims.
+Literal Grill lambda hurts CE; dev-calibrated scale required. All results reported.
+021 frozen MCTS1000 GOLDEN done: reverse macro1.480187/expert1.395653 =1.7662x/2.3859x.
+Elo-calibrated output failed transfer:1.498775/1.452528 =1.3719x/1.2658x. Report all.
+Actual golden mean nodes970.926, versus844.1 four-ply. No Pareto domination by MCTS.
+FRONTIER.md/json records both CMs and nodes; point dominance is not a confidence claim.
+
+022 backup-ladder-dev queued on the existing GPU. Same repaired MCTS tree at
+16/64/256/1000 sims: native averages, human-policy expectation, soft regularized
+backups(tau.5/.1/.025), minimax. Native read-only instrumentation independently
+tested: exact original tree visits/Q, Python recursive backup agreement, mate signs,
+per-root node accounting. New library runtime/backups does not overwrite old binaries.
+Needs development analysis after cache completion; no golden promotion yet.
+
+CPU residual-policy-dev/results.json done: pure search-minus-shallow underperforms;
+combining MCTS and six-ply expectation improves blitz dev, but costs both trees.
+Do not turn these dev scores into golden CM. New backup experiment tests whether
+their complementary values can be computed on the SAME tree at no extra model nodes.
+
+Methodology next: old FULL dev/dev_expert inventories are blitz-only (2070/483games),
+not just our subsample. Claude confirms no balanced dev exists. Prepare balanced
+development from the unused July2026 store using the exact golden builder semantics,
+private output and full game disjointness. Do NOT use a naive per-cell offset alone:
+different white/black cell thresholds can overlap golden. Explicitly exclude any game
+selected on either side by the golden rule, test/dev IDs and validation leaks; verify
+token/game hashes. Golden itself stays unchanged and untuned. This build is not done.
+
+Claude round3 data review DONE at209bbc0: no blockers, pins/index/caps/warm-up/resume
+checked, metadata/pinning nits relayed and fixed by Claude1c33cfa. Tier2 model review
+NOT done: sent confirmed MoE eval batch-dependence/drop bug; requires dropless eval.
+FP8 historical evidence/paths sent to Claude perf fork (e2e-optimization-v1).
+
+## Earlier state: 2026-09-19 ~05:41 UTC
 
 POST-REBOOT UPDATE (takes precedence over the historical boot notes below):
 Controller10478640 is now on babel-s9-24. GPU10498670 on babel-t5-32 survived.
