@@ -454,7 +454,7 @@ class Grid:
     """Synthetic games spanning a bucket's Elo ranges, to bound the policy weight."""
 
     def __init__(self, code):
-        fmt, hi, lo = code // 10000 - 1, code // 100 % 100, code % 100
+        fmt, hi, lo = code // 10000 % 10 - 1, code // 100 % 100, code % 100
         high = np.arange(
             0 if hi == 6 else hi * 100, 3500 if hi == 30 else hi * 100 + 100, 10
         )
