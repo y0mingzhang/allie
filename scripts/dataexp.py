@@ -403,7 +403,9 @@ def plan(wave):
     assert not study.exists(), "never overwrite a frozen study"
     for d in ("source-ours", "evaluator-ours", "logs", "results"):
         (study / d).mkdir(parents=True)
-    src = ROOT / "scripts"
+    src = (
+        Path(__file__).resolve().parent
+    )  # this checkout's code (a worktree); results stay in ROOT
     for f in [
         *src.glob("modded_*.py"),
         *(
@@ -414,7 +416,7 @@ def plan(wave):
         shutil.copy2(f, study / "source-ours")
     for f in ("eval_modded.py", "ce_alignment.py", "modded_runtime.py"):
         shutil.copy2(OLD_EVAL / f, study / "evaluator-ours")
-    shutil.copy2(ROOT / "scripts/eval_strat.py", study / "evaluator-ours")
+    shutil.copy2(src / "eval_strat.py", study / "evaluator-ours")
     shutil.copy2(__file__, study / "dataexp.py")
     if any(r.get("history") for r in w["runs"]):
         shutil.copy2(HISTORY, study / "history-counts.json")
