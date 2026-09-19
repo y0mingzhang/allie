@@ -74,3 +74,11 @@ NNnodes and6plies/root. Mean/soft.2/soft.05/maxbackup value-minusoneply residual
 onfrozenparent,global/Elo scalarfit. All arms reportedAugustonly first. Source
 frozenplan andatomicper256rootchunks; incompleteblocksrecompute afterpreemption.
 No NNweightchanges/externalengine. Inspect085result/error beforeanyretry.
+
+18:02UTC:085DONE92.5scollection+12.0sanalysis. Meanextra200.68 NN/rootinclprefill.
+AugustCVmacroselectstactical_.05:CE1.44443944/1.31318394 vsparent1.44511482/
+1.31588462;expertpairedCI[-.004728,-.000692],macroCIcross0. CVexpertselects
+max_elo:1.44394055/1.31245455,itsincrementalCIs cross0. No goldenpromoted:
+additional20%nodes doesn't establishfrontier dominance. Next CPUcheckusecached
+quiescencefeatures withlowerbasebudgets, so tacticalworkcanreplaceordinarynodes.
+Currentjobabouttotimeout;replacementdependencyshouldstartautomatically.
