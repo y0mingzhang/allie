@@ -31,6 +31,37 @@ The original cold-NFS startup cost is charged, not erased by local staging.
 
 ## Immediate task
 
+NEWEST ~07:34UTC:034 actual mixed-budget golden PASSED.149.19s scoring,
+15.10s analysis,8192positions.614nodes,macro1.46792797/expert1.37614560,
+CM2.10868x/3.05354x. Against4ply paired95%CIs[-.01556,-.00340] /
+[-.03938,-.01268], conservative family8 upper bounds stillnegative.
+Frontier win on reused sample;10x goals remain unmet. Runtime host batching
+changes individual policies: maxprob diff.2404,maxL1.4830,meanKL.0004279,
+maxKL.4949. Reported to user and Claude; cached stopping is NOT bit-exact.
+Logical requests5,027,552 versusunique5,027,486; physical-token cost reported.
+
+033 selection pilot DONE550.397s +11.482s CPU. FitCV selectedzero_cp25_1000_elo
+for BOTH metrics. Augustconfirmation1.457688/1.359266 vsbaseline1.465198/1.374123;
+pairedCI macro[-.01154,-.00397],expert[-.02376,-.00657]. BootstrapFPU also helps
+macro but expertCI overlapszero. Not yet golden-scored. User table reported.
+
+035-selection-wide is queued/running on SAMEGPU: outputaug-selection-wide-v1,
+variants zero_cp5,zero_cp10,bootstrap_cp25 at1000sim. New selection_wide module
+reloads driver because residentservice caches Python imports. Old studies are
+complete. After035 run analyze_selection aug-selection-wide-v1 on local runtime.
+Driver now accepts explicit variants/output; old033sources preserved inb517a5a.
+
+Next immediate: freeze and golden-check cpuct2.5 selected on August, alongside
+its routed version if desired; all coefficients must come fromdev, no golden
+retuning. Current strongest CONFIRMED all-cell CM stays2.15x/3.05x dependingcost,
+not10x. New generic/latent-budget-mixture ideas remain unimplemented.
+Golden registryGOLDEN_METHODS.md/json now records completed reports; regen after
+new results. GOAL.md adds fresh confirmation before final10x claim, including
+explicit new-sampling-frame/baseline-anchor check (do not silently reusefull
+canonical baseline after excluding a different set ofgames).
+
+Older details below remain provenance;033/034 are FINISHED.
+
 Current: 2026-09-19 ~07:25 UTC. Goal 10x/10x still active and unmet.
 Keep the original r2 checkpoint until success; then reproduce on Claude B_2.
 Latest confirmed golden remains soft1000/Elo CE 1.4665905 / 1.3768662,

@@ -56,6 +56,16 @@ def main():
             x=d['methods'][name]
             append('aug_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],
                 seconds=None,simulations=plan['methods'][name]['budget']))
+    routed=ROOT/'golden-router-v1/results.json'
+    if routed.exists():
+        d=json.loads(routed.read_text())
+        for name in ('cap256','cap512','cap768','fixed1000'):
+            x=d['methods'][name]
+            append('cached_router_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
+    dynamic=ROOT/'golden-dynamic-router-v1/results.json'
+    if dynamic.exists():
+        d=json.loads(dynamic.read_text());x=d['methods']['dynamic']
+        append('live_router_cap768',x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds']))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
@@ -70,6 +80,9 @@ def main():
                  'Original blocks lack per-root counts; August-selected curves include expert node costs in frontier.json and their source report.',
                  'August-selected snapshot timings include earlier backup extraction, not standalone method benchmarks; node counts determine this frontier.',
                  'CM intervals and law-shape sensitivity remain in the source reports.'])
+    result['caveats'].extend(['Cached routers represent prefix stopping on the same trees. Live routing changes inference batching; its separate row verifies actual execution.',
+        'Node counters count logical nonterminal neural requests per position. Exact-prefix requests may deduplicate within batches; actual unique requests are also reported for live routing.',
+        'This golden sample has been reused; every scored method is listed in GOLDEN_METHODS.md. A final success claim requires fresh confirmation.'])
     path = ROOT / 'frontier.json'
     tmp = path.with_suffix('.partial'); tmp.write_text(json.dumps(result, indent=2)+'\n'); tmp.replace(path)
     lines = ['# Golden search cost and quality', '', result['node_definition'], '', result['population'], '',

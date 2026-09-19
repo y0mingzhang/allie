@@ -23,7 +23,9 @@ def main():
                        ('aug-search-v1/distributional-results.json','August same-node outcome-distribution experiments: no golden CM conversion.'),
                        ('aug-search-v1/unvisited-results.json','August unvisited-action fallback and visit shrinkage: no additional model nodes.'),
                        ('aug-compact-v1/asymmetric-results.json','August own/opponent soft-backup temperature scan: CPU-only analysis of the same cached trees.'),
-                       ('aug-conditioning-v1/results.json','August counterfactual-strength guidance, direct and stacked with search: extra full-prefix queries charged separately.')]:
+                       ('aug-conditioning-v1/results.json','August counterfactual-strength guidance, direct and stacked with search: extra full-prefix queries charged separately.'),
+                       ('aug-search-v1/budget-router.json','August budget allocation by known Elo group, selected on fit CV under a node cap.'),
+                       ('aug-selection-v1/results.json','August first-play urgency and exploration-strength selection ablations.')]:
         d=read(path)
         if d:
             rows=[]
@@ -168,6 +170,11 @@ def main():
             ec='unavailable' if x['expert_mean_nodes'] is None else f'{x["expert_mean_nodes"]:.1f}'
             lines.append(f'| {k} | {x["mean_nodes"]:.1f} | {ec} | {fmt("macro_delta_vs_previous_four_ply_ci95")} | {fmt("expert_macro_delta_vs_previous_four_ply_ci95")} |')
         tables.append('\n'.join(lines))
+    for path,title in [('golden-router-v1/results.json','Frozen budget allocation on cached golden trees; dynamic execution is reported separately.'),
+                       ('golden-dynamic-router-v1/results.json','Actual mixed-budget golden inference; same frozen policy, no retuning.')]:
+        d=read(path)
+        if d:
+            table(title,[(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
     text='# Inference research results\n\nTarget: both ≥10× macro and ≥10× expert training-equivalent CM, with an improved average-search-nodes versus quality frontier. Not achieved.\n\n'
     text+='CM is computed only from matching golden metrics, using a frozen training-law shape anchored to the official raw checkpoint. Development-only rows stay pending. Search reports additionally separate gains beyond legal normalization.\n\n'
     text+='\n\n'.join(tables)+'\n\nOne persistent GPU allocation at a time; previous preempt RTX6000Ada usage and its general L40S replacement remain charged in status.json, including idle time. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'

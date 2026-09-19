@@ -65,6 +65,13 @@ dataset. No replacement or relabeling of the golden benchmark.
 Freeze method before golden evaluation. Never use the human next move, future moves,
 actual thinking time or actual game outcome when selecting candidates or allocating search.
 
+The current golden sample has been reused across research rounds. Maintain a registry
+of every method scored on it. Before declaring the 10x goal achieved, freeze the
+winner and obtain fresh confirmation with disjoint evaluation games and the same
+16-cell definitions; keep test/test_expert unopened. Check the new sampling frame
+and its baseline anchor explicitly instead of silently treating a changed frame as
+the identical full-population control-variate estimate. Preserve current goal targets.
+
 Resources: user explicitly permits one reasonably fast GPU and infrastructure work.
 Latest allocation (2026-09-19 ~04:51UTC, relayed by Claude): ONE general/normal GPU,
 currently L40S, taken from the data track share, within the shared8-normal-GPU cap.

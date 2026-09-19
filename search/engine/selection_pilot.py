@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import time
 import numpy as np
-from .service import ROOT,GLOBAL_STOP,atomic
+from .service import ROOT,GLOBAL_STOP,atomic,inside
 from .selection_native import load,test
 
 VARIANTS=[('bootstrap',1,0.,1.25),('mean',2,0.,1.25),
@@ -14,9 +14,11 @@ VARIANTS=[('bootstrap',1,0.,1.25),('mean',2,0.,1.25),
 def run(oracle,spec):
     module=load();test(module)
     source=ROOT/'aug-tune-v1/sample.json';rows=json.loads(source.read_text())['positions']
-    out=ROOT/'aug-selection-v1';out.mkdir(exist_ok=True);bs=512;budgets=[64,256,1000]
+    out=inside(spec.get('output',ROOT/'aug-selection-v1'));out.mkdir(exist_ok=True);bs=512;budgets=[64,256,1000]
+    variants=spec.get('variants',VARIANTS)
+    assert all(len(v)==4 and v[1] in (0,1,2) and 0<=v[2]<=1 and 0<v[3]<=10 for v in variants)
     sources=[Path(__file__),*[Path(__file__).with_name(s) for s in ('selection.cpp','selection_native.py','compact.cpp','backups.cpp','mcts_native.hpp','board.cpp','direct.py')]]
-    plan=dict(variants=VARIANTS,budgets=budgets,roots_per_batch=bs,
+    plan=dict(variants=variants,budgets=budgets,roots_per_batch=bs,
         sample_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
         sources={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
         stage='August model-training-seen development. Only tree allocation changes. Shared output calibration is independently fit on August fit folds. No next-move labels enter search.')
@@ -34,7 +36,7 @@ def run(oracle,spec):
             np.testing.assert_array_equal(z,ref['z'])
             for key,value in t.compact().items():np.testing.assert_array_equal(value,ref[key])
         del t;atomic(out/'identity.json',dict(equal=True,positions=bs,budget=1000,source=plan['sources']))
-    for name,mode,reduction,cpuct in VARIANTS:
+    for name,mode,reduction,cpuct in variants:
         folder=out/name;folder.mkdir(exist_ok=True)
         for lo in range(0,len(rows),bs):
             path=folder/f'{lo:06d}.npz'
@@ -62,5 +64,5 @@ def run(oracle,spec):
                     game=np.array([r['game'] for r in part]),stats=json.dumps(stats))
             tmp.replace(path)
             print('Selection pilot',name,lo+len(part),'/',len(rows),stats['seconds'],flush=True)
-    result=dict(positions=len(rows),variants=len(VARIANTS),seconds=time.monotonic()-start)
+    result=dict(positions=len(rows),variants=len(variants),seconds=time.monotonic()-start)
     atomic(out/'worker.json',result);return result

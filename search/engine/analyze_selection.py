@@ -8,17 +8,18 @@ from .service import ROOT,atomic
 from .compact_native import load
 from .fit_policy import fit,loss_gradient
 from .analyze_august import means
-from .selection_pilot import VARIANTS
 
 
-def main():
-    start=time.monotonic();out=ROOT/'aug-selection-v1';rows=json.loads((ROOT/'aug-tune-v1/sample.json').read_text())['positions']
+def main(folder='aug-selection-v1'):
+    start=time.monotonic();out=ROOT/folder;assert out.resolve().parent==ROOT.resolve()
+    variant_spec=json.loads((out/'plan.json').read_text())['variants']
+    rows=json.loads((ROOT/'aug-tune-v1/sample.json').read_text())['positions']
     n=len(rows);ar=np.arange(n);cells=np.array([r['cell'] for r in rows]);games=np.array([r['game'] for r in rows]);fm=np.array([r['fold']==0 for r in rows])
     cv=np.array([int(hashlib.sha256(('cv:'+g).encode()).hexdigest(),16)%3 for g in games])
     k=max(len(r['legal']) for r in rows);ids=np.zeros((n,k),int);mask=np.zeros((n,k),bool);target=np.zeros(n,int)
     for i,r in enumerate(rows):ids[i,:len(r['legal'])]=np.array(r['legal'])-378;mask[i,:len(r['legal'])]=True;target[i]=r['legal'].index(r['target'])
     module=load();variants={};budgets=[64,256,1000]
-    for name in ['zero',*[v[0] for v in VARIANTS]]:
+    for name in ['zero',*[v[0] for v in variant_spec]]:
         q=np.zeros((3,n,k));cost=np.zeros((3,n));root=np.zeros((n,2432))
         for lo in range(0,n,512):
             file=(ROOT/'aug-compact-v1' if name=='zero' else out/name)/f'{lo:06d}.npz'
@@ -71,4 +72,6 @@ def main():
     print('SELECTED',selected,'seconds',report['analysis_seconds'],flush=True)
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    import sys
+    main(sys.argv[1] if len(sys.argv)>1 else 'aug-selection-v1')
