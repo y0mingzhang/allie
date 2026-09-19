@@ -25,7 +25,8 @@ import dataexp as dx
 from modded_arch import extra_flops
 
 ROOT = dx.ROOT
-B2 = ROOT / "results/recipe10x/data-v1-B2.json"
+# the pinned data baseline this branch screens on: B_3 (B_2 + OTB x4; main, 2026-09-19 ~10:00)
+B2 = ROOT / "results/recipe10x/data-v1-B3.json"
 B2_META = (
     "source_study",
     "source_run",
@@ -84,6 +85,49 @@ LANES = dict(
             ("general", "normal", 4),
         )
     },
+    # one run on 4 fast preempt GPUs (the ladder's second seed)
+    preempt4=(
+        1,
+        4,
+        f"""#SBATCH --account=dippolit
+#SBATCH --partition=preempt
+#SBATCH --qos=preempt_qos
+#SBATCH --gres=gpu:4
+#SBATCH --constraint={FAST}
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=200G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
+    # one run on a whole 8 x L40S node (the 3e17 ship run; user, ~11:30)
+    general8=(
+        1,
+        8,
+        """#SBATCH --account=dippolit
+#SBATCH --partition=general
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:L40S:8
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=48
+#SBATCH --mem=400G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
+    # one run on 4 L40S (the 3e17 ladder, as the data track's round6)
+    general4=(
+        1,
+        4,
+        """#SBATCH --account=dippolit
+#SBATCH --partition=general
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:L40S:4
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=200G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
 )
 
 
@@ -151,17 +195,24 @@ def schedule(r, steps):
 
 
 def variants(budget, base, specs, seeds=(42,)):
-    """Runs: B_2 data config x model spec (label -> overrides) x seeds. pool_frac is set per run in
+    """Runs: baseline config x model spec (label -> overrides) x seeds. The baseline's arch (B_4 on)
+    is merged into every run, a spec's arch overriding it key by key. pool_frac is set per run in
     plan() from its own tokens, so FLOP-matched shapes keep the final run's repetition."""
     data = {
         k: v for k, v in base.items() if k not in ("pool_frac", "provisional", "meta")
     }
-    unknown = set(data) - {"policy", "stores", "months", "history"} - set(DATA_FLAGS)
-    assert not unknown, f"B_2 keys modelexp does not forward: {unknown}"
-    pf = base["pool_frac"][budget]
+    unknown = (
+        set(data) - {"policy", "stores", "months", "history", "arch"} - set(DATA_FLAGS)
+    )
+    assert not unknown, f"baseline keys modelexp does not forward: {unknown}"
+    pf = base["pool_frac"].get(budget) or dx.pool_frac(budget)
     tag = f"pf{round(pf * 1000):03d}" + "h" * bool(data.get("history"))
+    arch = lambda spec: data.get("arch", {}) | spec.get("arch", {})
     return [
-        data | spec | dict(v=label, budget=budget, seed=s, tag=tag)
+        data
+        | spec
+        | ({"arch": arch(spec)} if arch(spec) else {})
+        | dict(v=label, budget=budget, seed=s, tag=tag)
         for label, spec in specs.items()
         for s in seeds
     ]
@@ -396,6 +447,84 @@ wave(
     "model-v1-smoke's base step for step (default-off identity)",
 )
 
+# B_4 = B_3 + boardcnn (user, ~10:00: confirmed model-track wins join the baseline). (1) the 1e17
+# check against B_3's 1e17 pair (control's absolute schedule, FLOP-matched), s42 / s43, on general;
+# (2) B_4 x 4 seeds at 3e16 as the next screens' pooled controls, on the faster sampler (7e8d2a2)
+BOARD = dict(arch=dict(board="conv"))
+wave(
+    "b4check",
+    "model-v1-b4check",
+    "mb4c",
+    variants("1e17", b, {"b4": BOARD | dict(abs_sched=True)}, seeds=(42, 43)),
+    "B_4 (B_3 + boardcnn) at 1e17, control schedule, s42 / s43, vs B_3's 1e17 pair",
+    "general",
+)
+wave(
+    "b4ctl",
+    "model-v1-b4ctl",
+    "mb4",
+    variants("3e16", b, {"b4": BOARD}, seeds=(42, 43, 44, 45)),
+    "B_4 x 4 seeds at 3e16: pooled controls for the next screens on B_4",
+    "preempt",
+)
+
+# 3e17 attribution ladder (user via main, ~11:00): the model recipe (boardcnn + swiglu + no key offset)
+# on the data recipe B_3, one run on 4 L40S, control's absolute schedule, FLOP-matched; its CM is read
+# against data-v1-round6 (B_3 at 3e17)
+wave(
+    "ladder3e17",
+    "model-v1-ladder3e17",
+    "ml3",
+    variants(
+        "3e17",
+        b,
+        {
+            "model": dict(
+                arch=dict(board="conv", mlp="swiglu", key_offset=False), abs_sched=True
+            )
+        },
+    ),
+    "3e17: B_3 + boardcnn + swiglu + no key offset, s42, vs data-v1-round6's B_3",
+    "general4",
+)
+
+wave(
+    "ladder3e17s43",
+    "model-v1-ladder3e17s43",
+    "ml3s",
+    variants(
+        "3e17",
+        b,
+        {
+            "model": dict(
+                arch=dict(board="conv", mlp="swiglu", key_offset=False), abs_sched=True
+            )
+        },
+        seeds=(43,),
+    ),
+    "3e17 model recipe seed 43 on 4 fast preempt GPUs (second seed of the ladder arm)",
+    "preempt4",
+)
+
+# the ship recipe at 3e17 on one 8-GPU node (user: ship fast); same run as ladder3e17 (the gradient
+# normalisation is fixed at /8, so world size does not change the math)
+wave(
+    "ship3e17",
+    "model-v1-ship3e17",
+    "msh",
+    variants(
+        "3e17",
+        b,
+        {
+            "model": dict(
+                arch=dict(board="conv", mlp="swiglu", key_offset=False), abs_sched=True
+            )
+        },
+    ),
+    "3e17 ship recipe on 8 x L40S: B_3 + boardcnn + swiglu + no key offset, s42",
+    "general8",
+)
+
 
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
@@ -540,10 +669,13 @@ def task(key):
     i, k = int(os.environ["SLURM_ARRAY_TASK_ID"]), w["pack"]
     mine = runs[i * k : (i + 1) * k]
     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")
+    rg = w["gpus"] // w["pack"]  # GPUs per run (one torchrun process each)
     with ThreadPoolExecutor(len(mine)) as ex:
         ok = list(
             ex.map(
-                lambda j: run_one(study, mine[j], visible[j % w["gpus"]]),
+                lambda j: run_one(
+                    study, mine[j], ",".join(visible[j * rg : (j + 1) * rg])
+                ),
                 range(len(mine)),
             )
         )
@@ -635,7 +767,10 @@ def pooled_controls(study, controls):
     w = WAVES[plan["wave"]]
     rows = []
     for budget in sorted({r["budget"] for r in plan["runs"]}):
-        base = planned(w, variants(budget, b, {"base": {}})[0])
+        # the run a control must equal: base at 3e16, the absolute-schedule control model above
+        ref = "base" if budget == "3e16" else "control"
+        spec = {} if ref == "base" else dict(abs_sched=True)
+        base = planned(w, variants(budget, b, {ref: spec})[0])
         assert base["b2"] == plan["hashes"]["b2"], (
             "the loaded B_2 is not the one this study froze"
         )
@@ -671,7 +806,7 @@ def pooled_controls(study, controls):
                 rows.append(
                     res
                     | dict(
-                        v="base",
+                        v=ref,
                         study=plan["runs"][0]["group"],
                         b2=plan["hashes"]["b2"],
                         useful_training_flops=train[-1]["useful_training_flops"],
@@ -717,7 +852,8 @@ def run_one(study, r, gpu):
         d = json.loads(done.read_text()) if done.exists() else {}
         if d.get("stop_reason") == "steps" or (leg and d.get("step", 0) >= leg):
             continue
-        cmd = [py, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1"]
+        cmd = [py, "-m", "torch.distributed.run", "--standalone"]
+        cmd += [f"--nproc_per_node={len(gpu.split(','))}"]
         cmd += [src / "modded_train.py", *train_args(study, r)]
         cmd += [
             "--max-seconds",
@@ -763,7 +899,7 @@ def run_one(study, r, gpu):
                         "--query-gpu=name",
                         "--format=csv,noheader",
                         "-i",
-                        gpu,
+                        gpu.split(",")[0],
                     ],
                     text=True,
                 ).strip(),
@@ -824,6 +960,8 @@ def table(*keys, controls=()):
             pooled[g] = pooled_controls(
                 ROOT / "results/recipe10x" / WAVES[key]["study"], controls
             )
+    for g, group_rows in pooled.items():
+        print(f"pooled for {g}:", ", ".join(r["name"] for r in group_rows))
     rows += [r for group_rows in pooled.values() for r in group_rows]
     out = {}
     for metric, field in (("strat_macro", "macro"), ("strat_expert", "expert_macro")):
