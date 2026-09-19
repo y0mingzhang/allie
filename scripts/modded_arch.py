@@ -1,0 +1,73 @@
+"""Model-track architecture switches carried in Config.arch (torch-free: modelexp imports it too).
+
+An empty arch is the inherited modded-nanogpt recipe; every key defaults to that behaviour.
+"""
+
+DEFAULTS = dict(
+    qk_norm=True,  # RMS-norm q and k
+    gates=True,  # attention output gate and value-embedding gate
+    key_offset=True,  # 1-layer-induction key shift on long-window layers
+    full_rope=False,  # rotate every head dim (default: half-truncated RoPE)
+    mlp="relu2",  # relu2 | gelu | swiglu
+    x0=True,  # re-inject the input embedding x0 at every layer
+    embed2=True,  # second input embedding x02 mixed in at every layer
+    softcap=True,  # logits 23 * sigmoid((z + 5) / 7.5)
+    plain_init=False,  # residual lambdas 1.0 and attention scale 1/sqrt(head_dim)
+    untie_ve=False,  # one value-embedding table per layer instead of layers i and i+k sharing
+    matrix_adam=0.0,  # > 0: AdamW for attention/MLP matrices instead of NorMuon, at this base lr
+    # (the WSD schedule multiplies base lrs by up to its plateau, 4.0 in the model track)
+    matrix_wd=0.005,  # their DistAdam weight decay: each step decays by lr^2 * wd
+    adam_every=False,  # Adam groups step every step (default: odd steps only)
+    uniform_mults=False,  # embed2 lr/wd multipliers and embed/lm_head wd multiplier -> 1
+    fp32_embed=False,  # FP32 embedding/head params and Adam state, BF16 forward
+    cautious_wd=True,  # cautious (sign-gated) decoupled weight decay
+    normuon=True,  # NorMuon second-moment variance reduction on the Muon update
+    board=None,  # None | direct | conv: board-state input at every position (modded_board)
+)
+
+
+def resolve(arch):
+    unknown = set(arch) - set(DEFAULTS)
+    assert not unknown, f"unknown arch keys {unknown}"
+    out = DEFAULTS | arch
+    assert out["mlp"] in ("relu2", "gelu", "swiglu") and out["board"] in (
+        None,
+        "direct",
+        "conv",
+    )
+    # the key offset shifts exactly the dims half-truncated RoPE leaves stationary
+    assert not (out["full_rope"] and out["key_offset"]), (
+        "full_rope needs key_offset=False"
+    )
+    return out
+
+
+def swiglu_hidden(width):
+    """Hidden width giving SwiGLU (3 matrices) the relu2 MLP's 8 d^2 parameters."""
+    return round(8 * width / 3 / 16) * 16
+
+
+BOARD_FEATURES = (
+    64 * 13 + 2 + 16 + 9
+)  # pieces one-hot, side, castling rights, en-passant file
+BOARD_IN = BOARD_FEATURES + 5  # padded to a multiple of 8
+
+
+def board_macs(kind, width):
+    """Dense multiply-adds per position of the board branch (Codex's modded_spatial for conv)."""
+    if kind == "direct":
+        return BOARD_IN * width
+    if kind == "conv":
+        return 64 * (13 * 32 * 9 + 2 * 32 * 32 * 9 + 32 * 8) + 32 * 32 + 544 * width
+    return 0
+
+
+def extra_flops(arch, width, layers):
+    """Forward FLOPs per token beyond modded_train.useful_flops' dense count (may be negative).
+    The board's one-hot input matmul is counted like any matmul (x3 for training), though it needs
+    no input gradient: +0.5% FLOPs for boarddirect, against the board arms."""
+    a = resolve(arch)
+    extra = 2 * board_macs(a["board"], width)
+    if a["mlp"] == "swiglu":
+        extra += 2 * layers * (3 * width * swiglu_hidden(width) - 8 * width * width)
+    return extra

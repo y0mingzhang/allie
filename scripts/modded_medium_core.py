@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from collections import defaultdict
+from collections import Counter, defaultdict
 from itertools import accumulate
 from pathlib import Path
 import gc
@@ -27,6 +27,8 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 from torch import Tensor, nn
+
+from modded_arch import swiglu_hidden
 
 dynamo.config.recompile_limit = 64
 
@@ -469,6 +471,22 @@ def cautious_wd_and_update_inplace(p, v, wd_tensor, lr_tensor):
 
 
 @torch.compile(dynamic=False, fullgraph=True)
+def plain_wd_and_update_inplace(p, v, wd_tensor, lr_tensor):
+    """Plain decoupled weight decay + parameter update (model-track ablation)."""
+    wd_factor = wd_tensor.to(p.dtype)
+    lr_factor = lr_tensor.to(p.dtype)
+    p.copy_(p - (p * wd_factor * lr_factor) - (v * lr_factor))
+
+
+CAUTIOUS_WD = (
+    True  # model track: plain decoupled weight decay (NorMuon and DistAdam) when False
+)
+NORMUON = (
+    True  # model track: plain Muon, no second-moment variance reduction, when False
+)
+
+
+@torch.compile(dynamic=False, fullgraph=True)
 def apply_normuon_variance_reduction(v_chunk, second_momentum_buffer, beta2, red_dim):
     """NorMuon variance reduction. Algebraically fuses the normalization steps to minimize memory ops."""
     v_mean = v_chunk.float().square().mean(dim=red_dim, keepdim=True)
@@ -540,8 +558,14 @@ class NorMuon(torch.optim.Optimizer):
             lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2
         )
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
-        # custom sizing requires 8 GPUs
-        if custom_sizing and dist.get_world_size() == 8 and args.num_layers == 16:
+        # custom sizing requires 8 GPUs and the upstream 16-layer matrices
+        params = list(params)
+        layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
+        if (
+            custom_sizing
+            and dist.get_world_size() == 8
+            and Counter(p.label for p in params) == layout
+        ):
             param_groups = self.generate_custom_param_groups(params)
         else:
             param_groups = self.generate_standard_param_groups(params)
@@ -726,9 +750,10 @@ class NorMuon(torch.optim.Optimizer):
             # is 'incorrect' for O. However, correcting this showed no improvement. @chrisjmccormick
             red_dim = -1 if (is_gate or param_shape[-2] >= param_shape[-1]) else -2
 
-            v_chunk = apply_normuon_variance_reduction(
-                v_chunk, second_momentum_buffer, group["beta2"], red_dim
-            )
+            if NORMUON:
+                v_chunk = apply_normuon_variance_reduction(
+                    v_chunk, second_momentum_buffer, group["beta2"], red_dim
+                )
 
             v_chunk = v_chunk.view(grad_shape)
 
@@ -739,7 +764,11 @@ class NorMuon(torch.optim.Optimizer):
                 param_chunk = torch.stack(params[module_idx : module_idx + num_params])
 
                 for local_idx in range(num_params):
-                    cautious_wd_and_update_inplace(
+                    (
+                        cautious_wd_and_update_inplace
+                        if CAUTIOUS_WD
+                        else plain_wd_and_update_inplace
+                    )(
                         param_chunk[local_idx],
                         v_chunk[local_idx],
                         eff_wd_cpu[local_idx],
@@ -809,7 +838,8 @@ class DistAdam(torch.optim.Optimizer):
         # init state: small params (numel < 1024) use full-sized state, others use sharded
         for p in params:
             chunk = p if p.numel() < 1024 else p[: p.size(0) // self.world_size]
-            exp_avg = torch.zeros_like(chunk, dtype=torch.bfloat16, device=p.device)
+            dtype = torch.float32 if getattr(p, "fp32_state", False) else torch.bfloat16
+            exp_avg = torch.zeros_like(chunk, dtype=dtype, device=p.device)
             self.state[p] = dict(
                 step=0, exp_avg=exp_avg, exp_avg_sq=torch.zeros_like(exp_avg)
             )
@@ -851,8 +881,9 @@ class DistAdam(torch.optim.Optimizer):
 
     def copy_lm_to_embed(self):
         # run at 1/6 of training
-        lm_head = self.param_groups[0]["params"][0]
-        embed = self.param_groups[-1]["params"][0]
+        # by label, not group position: other Adam groups (e.g. the model track's board) may follow
+        by_label = {p.label: p for g in self.param_groups for p in g["params"]}
+        lm_head, embed = by_label["lm_head"], by_label["embed"]
         lm_head_state = self.state[lm_head]
         embed_state = self.state[embed]
         embed_state["step"] = lm_head_state["step"]
@@ -902,11 +933,13 @@ class DistAdam(torch.optim.Optimizer):
                 denom = exp_avg_sq.sqrt().add_(eps)
                 step_size = lr * (bias2**0.5 / bias1)
                 update = exp_avg.div(denom).mul_(step_size)
-                # cautious weight decay
-                mask = (update * p_slice) > 0
                 # lr as weight decay schedule
                 eff_weight_decay = lr * wd * getattr(param, "wd_mul", 1.0)
-                update.addcmul_(p_slice, mask, value=eff_weight_decay * lr)
+                if CAUTIOUS_WD:
+                    mask = (update * p_slice) > 0
+                    update.addcmul_(p_slice, mask, value=eff_weight_decay * lr)
+                else:
+                    update.add_(p_slice, alpha=eff_weight_decay * lr)
 
                 p_slice.add_(other=update, alpha=-1.0)
 
@@ -971,16 +1004,24 @@ class Yarn(nn.Module):
         self.head_dim = head_dim
         self.max_seq_len = max_seq_len
         self.fp32 = False  # model track: FP32 cos/sin tables (default BF16)
+        self.full = (
+            False  # model track: rotate every head dim (default: half-truncated)
+        )
+        self.base_scale = 0.1  # attention scale restored by reset()
         self.reset()
 
     def reset(self):
+        quarter = self.head_dim // 4
         angular_freq = (1 / 1024) ** torch.linspace(
-            0, 1, steps=self.head_dim // 4, dtype=torch.float32, device=device
+            0,
+            1,
+            steps=2 * quarter if self.full else quarter,
+            dtype=torch.float32,
+            device=device,
         )
-        # half-truncate RoPE by @YouJiacheng (w/ base freq tuning)
-        angular_freq = torch.cat(
-            [angular_freq, angular_freq.new_zeros(self.head_dim // 4)]
-        )
+        if not self.full:
+            # half-truncate RoPE by @YouJiacheng (w/ base freq tuning)
+            angular_freq = torch.cat([angular_freq, angular_freq.new_zeros(quarter)])
         t = torch.arange(self.max_seq_len, dtype=torch.float32, device=device)
         theta = torch.outer(t, angular_freq)
         dt = torch.float32 if self.fp32 else torch.bfloat16
@@ -988,7 +1029,7 @@ class Yarn(nn.Module):
         self.sin = nn.Buffer(theta.sin().to(dt), persistent=False)
         self.angular_freq = angular_freq
         # start with 0.1, inspired by 0.12 from @leloykun and learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
-        self.attn_scale = 0.1
+        self.attn_scale = self.base_scale
 
     def apply(self, old_window: int, new_window: int, alpha: int = 1, beta: int = 32):
         rotations = args.block_size * old_window * self.angular_freq / (2 * torch.pi)
@@ -1041,6 +1082,7 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = head_dim
         self.dim = dim
         self.hdim = num_heads * head_dim
+        self.qk_norm = self.gates = True  # model-track ablations
 
         assert self.hdim == self.dim, "num_heads * head_dim must equal model_dim"
         std = self.dim**-0.5
@@ -1091,7 +1133,8 @@ class CausalSelfAttention(nn.Module):
             .view(B, T, 3 * self.num_heads, self.head_dim)
             .chunk(3, dim=-2)
         )
-        q, k = norm(q), norm(k)  # QK norm @Grad62304977
+        if self.qk_norm:
+            q, k = norm(q), norm(k)  # QK norm @Grad62304977
         q, k = rotary(q, cos, sin), rotary(k, cos, sin)
         if key_offset:
             # shift keys forward for the stationary head dims. Enables 1-layer induction.
@@ -1112,6 +1155,8 @@ class CausalSelfAttention(nn.Module):
             ve_gate_out = 2 * torch.sigmoid(
                 self.value_embed_gate(x[..., : self.value_embed_gate.weight.size(-1)])
             ).view(B, T, self.num_heads, 1)
+            if not self.gates:  # identity gate; the gate weight keeps a (zero) gradient
+                ve_gate_out = ve_gate_out * 0 + 1
             v = v + ve_gate_out * ve.view_as(v)  # @ KoszarskyB & @Grad62304977
 
         max_len = (
@@ -1123,9 +1168,12 @@ class CausalSelfAttention(nn.Module):
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
         y = medium_attention(q, k, v, seqlens, bm_size, attn_scale)
         y = y.view(B, T, self.num_heads, self.head_dim)
-        y = y * torch.sigmoid(
+        gate = torch.sigmoid(
             self.attn_gate(x[..., : self.attn_gate.weight.size(-1)])
         ).view(B, T, self.num_heads, 1)
+        y = y * (
+            gate if self.gates else gate * 0 + 0.5
+        )  # sigma(0): the default gate at init
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side
@@ -1136,15 +1184,19 @@ class CausalSelfAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, kind: str = "relu2"):
         super().__init__()
-        hdim = 4 * dim
+        self.kind = kind  # relu2 | gelu | swiglu (model track)
+        hdim = swiglu_hidden(dim) if kind == "swiglu" else 4 * dim
         # Transposed layout to match attention weights
-        self.c_fc = nn.Parameter(torch.empty(hdim, dim))
+        self.c_fc = nn.Parameter(
+            torch.empty(hdim * (2 if kind == "swiglu" else 1), dim)
+        )
         self.c_proj = nn.Parameter(torch.empty(hdim, dim))
-        # label all modules for explicit optimizer grouping
+        # label all modules for explicit optimizer grouping; NorMuon stacks a label's params, so
+        # SwiGLU's differently shaped projection gets its own label
         self.c_fc.label = "mlp"
-        self.c_proj.label = "mlp"
+        self.c_proj.label = "mlp_proj" if kind == "swiglu" else "mlp"
         self.c_proj.lr_mul = 2.0
 
         std = 0.5 * (dim**-0.5)
@@ -1155,18 +1207,31 @@ class MLP(nn.Module):
 
     def forward(self, x: Tensor):
         x = F.linear(x, self.c_fc.type_as(x))
-        x = F.relu(
-            x
-        ).square()  # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
+        if self.kind == "swiglu":
+            a, b = x.chunk(2, dim=-1)
+            x = F.silu(a) * b
+        elif self.kind == "gelu":
+            x = F.gelu(x)
+        else:
+            x = F.relu(
+                x
+            ).square()  # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
         x = F.linear(x, self.c_proj.T.type_as(x))
         return x
 
 
 class Block(nn.Module):
-    def __init__(self, dim: int, head_dim: int, num_heads: int, layer_idx: int):
+    def __init__(
+        self,
+        dim: int,
+        head_dim: int,
+        num_heads: int,
+        layer_idx: int,
+        mlp: str = "relu2",
+    ):
         super().__init__()
         self.attn = CausalSelfAttention(dim, head_dim, num_heads, layer_idx)
-        self.mlp = MLP(dim)
+        self.mlp = MLP(dim, mlp)
 
     def forward(self, x: Tensor, attn_args: AttnArgs):
         x = x + self.attn(norm(x), attn_args)
@@ -1198,6 +1263,8 @@ class GPT(nn.Module):
         head_dim: int,
         model_dim: int,
         max_seq_len: int,
+        mlp: str = "relu2",
+        untie_ve: bool = False,
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -1219,15 +1286,16 @@ class GPT(nn.Module):
         self.value_embeds = nn.ModuleList(
             [
                 nn.Embedding(vocab_size, model_dim)
-                for _ in range(min(5, num_layers // 2))
+                for _ in range(min(5, num_layers // 2) * (2 if untie_ve else 1))
             ]
         )
+        self.untie_ve = untie_ve  # model track: one table per value-embedding layer
         for embed in self.value_embeds:
             nn.init.zeros_(embed.weight)
         for ve in self.value_embeds:
             ve.weight.label = "value_embed"
         self.blocks = nn.ModuleList(
-            [Block(model_dim, head_dim, num_heads, i) for i in range(num_layers)]
+            [Block(model_dim, head_dim, num_heads, i, mlp) for i in range(num_layers)]
         )
         self.yarn = Yarn(head_dim, max_seq_len)
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
@@ -1325,6 +1393,9 @@ class GPT(nn.Module):
         self.doc_rope = (
             False  # rotary position = index in the game instead of the packed batch
         )
+        self.use_x0 = self.use_embed2 = self.softcap = self.use_key_offset = True
+        self.fp32_embed = False  # FP32 embedding/head state: cast lookups to BF16
+        self.board = None  # modded_board branch, added at every position when set
 
     def forward(
         self,
@@ -1355,6 +1426,8 @@ class GPT(nn.Module):
         # set lambdas
         resid_lambdas = self.scalars[: 1 * self.num_layers]
         x0_lambdas = self.x0_lambdas.view(-1, 2)
+        if not self.use_x0:  # drop x0 re-injection; keep the x02 column
+            x0_lambdas = torch.stack((x0_lambdas[:, 0] * 0, x0_lambdas[:, 1]), 1)
         sa_lambdas = self.scalars[1 * self.num_layers : 3 * self.num_layers].view(-1, 2)
         smear_lambda = self.scalars[3 * self.num_layers]
         backout_lambda = self.scalars[3 * self.num_layers + 1]
@@ -1369,7 +1442,7 @@ class GPT(nn.Module):
         ]
         assert len(bm_sizes) == self.num_layers
         key_offset = [
-            b == long_bm for b in bm_sizes
+            b == long_bm and self.use_key_offset for b in bm_sizes
         ]  # apply partial key offset to long windows
 
         # weight-tied: use lm_head.weight for embedding lookup (or separate embed after split)
@@ -1377,6 +1450,8 @@ class GPT(nn.Module):
             x = self.embed(input_seq)
         else:
             x = F.embedding(input_seq, self.lm_head.weight)
+        if self.fp32_embed:
+            x = x.bfloat16()
         if self.use_clock:
             ids = torch.zeros_like(input_seq) if clock_seq is None else clock_seq
             x = x + self.clock_embed(ids)
@@ -1393,14 +1468,19 @@ class GPT(nn.Module):
             f = (f * (t >= 0)[..., None]).flatten(1)  # absent values (-1) give zeros
             f = F.pad(f, (0, 64 - f.shape[1]))
             x = x + f.type_as(x) @ self.feat_embed.weight.type_as(x)
+        if self.board is not None:
+            x = x + self.board(seqlens.board, x.dtype)
         ve = [value_embed(input_seq) for value_embed in self.value_embeds]
+        if self.fp32_embed:
+            ve = [v.bfloat16() for v in ve]
         if (
             not self.use_value_embeds
         ):  # ablated by zero so every parameter keeps a gradient
             ve = [v * 0 for v in ve]
         # 012 ... 012 structure on token value embeddings by @YouJiacheng, improved on @leloykun's U-net structure
         # dropping first layer updates this to .12 ... 012
-        ve = ve + [None] * (self.num_layers - 2 * len(ve)) + ve
+        k = len(ve) // 2 if self.untie_ve else len(ve)
+        ve = ve[:k] + [None] * (self.num_layers - 2 * k) + ve[-k:]
         assert len(ve) == self.num_layers
 
         # smear token embed forward 1 position @classiclarryd
@@ -1414,7 +1494,10 @@ class GPT(nn.Module):
         )
         x = x0 = norm(x[None])
 
-        x02 = norm(self.embed2(input_seq)[None])
+        e2 = self.embed2(input_seq)
+        x02 = norm((e2.bfloat16() if self.fp32_embed else e2)[None])
+        if not self.use_embed2:
+            x02 = x02 * 0
 
         cos, sin = self.yarn.cos, self.yarn.sin
         if self.doc_rope:
@@ -1463,6 +1546,8 @@ class GPT(nn.Module):
         x = norm(x)
 
         logits = self.lm_head(x)
+        if not self.softcap:
+            return logits
         return 23 * torch.sigmoid((logits + 5) / 7.5)
 
 
@@ -1563,9 +1648,18 @@ class TrainingManager:
             "x0_lambdas",
             "embed2",
             "embed",
+            "board",
         ]
         scalar_labels = ["scalars"]
-        muon_labels = ["attn_gate", "value_embed_gate", "attn", "mlp"]
+        muon_labels = ["attn_gate", "value_embed_gate", "attn", "mlp", "mlp_proj"]
+        # model track: AdamW (base lr model.matrix_adam) for the attention / MLP matrices
+        matrix_labels = (
+            ["attn", "mlp", "mlp_proj"] if getattr(model, "matrix_adam", 0) else []
+        )
+        muon_labels = [l for l in muon_labels if l not in matrix_labels]
+        matrix_params = [
+            p for p in model.parameters() if getattr(p, "label", None) in matrix_labels
+        ]
         adam_params = [
             p for p in model.parameters() if getattr(p, "label", None) in adam_labels
         ]
@@ -1575,8 +1669,8 @@ class TrainingManager:
         muon_params = [
             p for p in model.parameters() if getattr(p, "label", None) in muon_labels
         ]
-        assert set(getattr(p, "label", None) for p in model.parameters()) == set(
-            adam_labels + scalar_labels + muon_labels
+        assert set(getattr(p, "label", None) for p in model.parameters()) <= set(
+            adam_labels + scalar_labels + muon_labels + matrix_labels
         ), "All params must have label"
 
         self.adam_opt = DistAdam(
@@ -1599,6 +1693,16 @@ class TrainingManager:
             muon_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2
         )
         self.optimizers = [self.adam_opt, self.scalar_opt, self.muon_opt]
+        if matrix_params:
+            self.matrix_opt = DistAdam(
+                matrix_params,
+                matrix_labels,
+                lr=model.matrix_adam,
+                betas=(0.9, 0.95),
+                eps=1e-8,
+                weight_decay=model.matrix_wd,
+            )
+            self.optimizers.append(self.matrix_opt)
         # split after odd number step
         self.split_step = (
             math.ceil(args.split_embed_frac * args.num_scheduled_iterations) | 1
@@ -1689,7 +1793,7 @@ class TrainingManager:
                         group["lr"] = group["initial_lr"] * step_lr
                     opt.step()
                     opt.zero_grad(set_to_none=True)
-                    if opt.odd_step_only:
+                    if isinstance(opt, DistAdam):  # re-armed on the last micro-batch
                         opt.should_sync = False
 
         if step == self.split_step:

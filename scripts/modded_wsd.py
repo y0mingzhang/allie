@@ -13,6 +13,9 @@ class Schedule:
     plateau: float = 2.0
     final_lr: float = 0.1
     decay_shape: str = "linear"
+    momentum_warmup: bool = (
+        True  # Muon momentum 0.85 -> 0.95 over warmup_steps; False: 0.95
+    )
 
     def validate(self):
         assert self.decay_shape in ("linear", "cosine")
@@ -35,6 +38,8 @@ class Schedule:
         return self.plateau * min(1.0, (step + 1) / self.warmup_steps)
 
     def momentum(self, step):
+        if not self.momentum_warmup:
+            return 0.95
         return 0.85 + 0.10 * min(1.0, step / self.warmup_steps)
 
     def mtp(self, step):

@@ -22,9 +22,19 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dataexp as dx
+from modded_arch import extra_flops
 
 ROOT = dx.ROOT
 B2 = ROOT / "results/recipe10x/data-v1-B2.json"
+B2_META = (
+    "source_study",
+    "source_run",
+    "final_tokens",
+    "history_counts",
+    "history_counts_sha256",
+    "chessmix_sha256",
+    "sha256",
+)
 # B_2 input keys -> modded_train flags (True: bare flag; other truthy values: flag + value)
 DATA_FLAGS = dict(
     clock="--clock",
@@ -79,8 +89,12 @@ LANES = dict(
 
 def baseline():
     """Pinned data config (B_2 once written by the data track; provisional control + clock + aux)."""
-    if B2.exists():
-        return json.loads(B2.read_text())
+    if B2.exists():  # scripts/write_b2.py; provenance kept under "meta"
+        b2 = json.loads(B2.read_text())
+        body = {k: v for k, v in b2.items() if k != "sha256"}
+        want = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+        assert b2.get("sha256") == want, "B_2 was edited after write_b2.py hashed it"
+        return b2 | dict(meta={k: b2.pop(k) for k in B2_META if k in b2})
     return dict(
         policy="control",
         clock=True,
@@ -94,15 +108,17 @@ def baseline():
     )
 
 
-def per_token(layers, width, head_dim=64):
+def per_token(layers, width, head_dim=64, arch=None):
     """Forward trainer FLOPs per token: modded_train.useful_flops for this depth's layer pattern,
-    with both attention windows covering whole rows (every layer attends to POS earlier positions)."""
+    with both attention windows covering whole rows (every layer attends to POS earlier positions),
+    plus the arch's extra branches (modded_arch.extra_flops)."""
     gates = layers + 2 * min(5, layers // 2)
     return (
         24 * layers * width**2
         + 2 * width * 2432
         + 2 * (gates * (width // head_dim) * 16 + 64)
         + 4 * width * layers * POS
+        + extra_flops(arch or {}, width, layers)
     )
 
 
@@ -115,7 +131,7 @@ def shape(r):
     steps = round(
         base["steps"]
         * per_token(base["layers"], base["width"])
-        / per_token(layers, width)
+        / per_token(layers, width, arch=r.get("arch"))
     )
     return layers, width, steps
 
@@ -129,13 +145,17 @@ def schedule(r, steps):
     mtp = 0 if not r.get("mtp", True) else max(1, round(f["mtp"] * steps))
     split = steps + 1 if f["split"] is None else max(mtp, round(f["split"] * steps))
     s = dx.SCHEDULE | dict(warmup_steps=warmup, mtp_steps=mtp, split_step=split | 1)
+    if r.get("momentum_warmup") is False:  # constant Muon momentum 0.95
+        s |= dict(momentum_warmup=False)
     return s, max(warmup, round(f["decay"] * steps))
 
 
 def variants(budget, base, specs, seeds=(42,)):
     """Runs: B_2 data config x model spec (label -> overrides) x seeds. pool_frac is set per run in
     plan() from its own tokens, so FLOP-matched shapes keep the final run's repetition."""
-    data = {k: v for k, v in base.items() if k not in ("pool_frac", "provisional")}
+    data = {
+        k: v for k, v in base.items() if k not in ("pool_frac", "provisional", "meta")
+    }
     unknown = set(data) - {"policy", "stores", "months", "history"} - set(DATA_FLAGS)
     assert not unknown, f"B_2 keys modelexp does not forward: {unknown}"
     pf = base["pool_frac"][budget]
@@ -195,6 +215,35 @@ SCREEN1 = {
     # Codex (inference work): BF16 rotary tables indexed by packed-batch position
     "docrope": dict(doc_rope=True),
     "ropefp32": dict(rope_fp32=True),
+    # quirk sweep A (user, 2026-09-18 ~23:55): inherited modded-nanogpt choices, one each
+    "noembed2": dict(arch=dict(embed2=False)),
+    "nox0": dict(arch=dict(x0=False)),
+    "nosoftcap": dict(arch=dict(softcap=False)),
+    "nogates": dict(arch=dict(gates=False)),
+    "nokeyoffset": dict(arch=dict(key_offset=False)),
+    # full RoPE has no stationary dims for the key offset to shift (reviewer, 2026-09-19)
+    "fullropenokeyoffset": dict(arch=dict(full_rope=True, key_offset=False)),
+    "gelu": dict(arch=dict(mlp="gelu")),
+    "swiglu": dict(arch=dict(mlp="swiglu")),
+    "plaininit": dict(arch=dict(plain_init=True)),
+    # Adam matrices at peak lr 1e-3 / 3e-3 (base lr x the schedule's 4.0 plateau), FP32 moments and
+    # DistAdam's decay: cautious and lr^2-scheduled, calibrated to 0.1 * lr at the peak only
+    "adamw1e-3": dict(arch=dict(matrix_adam=2.5e-4, matrix_wd=0.1 / 1e-3)),
+    "adamw3e-3": dict(arch=dict(matrix_adam=7.5e-4, matrix_wd=0.1 / 3e-3)),
+    "adamevery": dict(arch=dict(adam_every=True)),
+    "uniformmults": dict(arch=dict(uniform_mults=True)),
+    "fp32embed": dict(arch=dict(fp32_embed=True)),
+    "untieve": dict(arch=dict(untie_ve=True)),
+    "noqknorm": dict(arch=dict(qk_norm=False)),
+    "plainwd": dict(arch=dict(cautious_wd=False)),
+    # plain decay hits every entry, cautious about half: 0.5x plain ~ 1x cautious in effective decay
+    # (base / wd2 / plainwd / plainwd-half = mask x strength 2x2; main, 2026-09-19)
+    "plainwd-half": dict(arch=dict(cautious_wd=False), wd=0.5),
+    "plainmuon": dict(arch=dict(normuon=False)),
+    "nomomwarmup": dict(momentum_warmup=False),
+    # board input (B6 / B7): Codex's encoder and CNN, zero-init branch
+    "boarddirect": dict(arch=dict(board="direct")),
+    "boardcnn": dict(arch=dict(board="conv")),
 }
 
 WAVES = {}
@@ -217,7 +266,24 @@ def wave(key, study, prefix, runs, purpose, lane="dei", group=None):
 
 
 b = baseline()
-B2_HASH = hashlib.sha256(json.dumps(b, sort_keys=True).encode()).hexdigest()[:12]
+B2_HASH = (  # full sha256: verified in baseline(); the provisional config hashes itself
+    b.get("meta", {}).get("sha256")
+    or hashlib.sha256(json.dumps(b, sort_keys=True).encode()).hexdigest()
+)
+
+
+def history_file():
+    """The history counts B_2 pins (checked against its hash), else the data track's default."""
+    if "meta" not in b:
+        return dx.HISTORY
+    p, meta = Path(b["meta"]["history_counts"]), b["meta"]
+    assert (
+        hashlib.sha256(p.read_bytes()).hexdigest() == meta["history_counts_sha256"]
+    ), p
+    assert meta["final_tokens"] == dx.FINAL_TOKENS, meta["final_tokens"]
+    return p
+
+
 wave(
     "smoke",
     "model-v1-smoke",
@@ -238,23 +304,79 @@ wave(
     "1-GPU-each smoke of every screen-1 variant (40 steps, golden eval) on the provisional baseline; "
     "base vs frozen round2p source checks default-off flags are training-identical",
 )
-# screen 1 over three lanes (gpu-allocation.md): controls and the longest shape on general (not
-# preempted), fast preempt for the rest of the long / scale-sensitive runs, dei A6000 packed for the
-# component ablations; table() pools them as group "screen1"
-# one control seed per lane, so the control spread includes GPU-type variation (Codex)
-S1 = dict(
-    general=(42, ("d1.5w0.75", "lr0.5", "lr2")),
-    preempt=(43, ("d1.25w0.875", "w1.125", "docrope", "ropefp32", "wd2", "wsd80")),
-    dei=(44, ("split50", "nosplit", "nomtp", "nove", "noskip", "nosmear")),
+wave(
+    "smoke3",
+    "model-v1-smoke3",
+    "msmk3",
+    [
+        r | dict(stop_after=[50, 90])
+        for r in variants(
+            "3e16", b, {"base": {}} | {k: SCREEN1[k] for k in ("d1.5w0.75", "docrope")}
+        )
+    ],
+    "smoke on the 87effcb sources (child-process sampler prefetch): base must match "
+    "model-v1-smoke's base step for step; a shape and a rotary variant run end to end",
 )
-assert sorted(k for _, ks in S1.values() for k in ks) == sorted(SCREEN1)
-for lane, (seed, keys) in S1.items():
+TIER1_NEW = [
+    k for k in SCREEN1 if "arch" in SCREEN1[k] or "momentum_warmup" in SCREEN1[k]
+]
+wave(
+    "smoke4",
+    "model-v1-smoke4",
+    "msmk4",
+    [
+        r | dict(stop_after=[50, 90])
+        for r in variants(
+            "3e16",
+            b,
+            {"base": {}} | {k: SCREEN1[k] for k in ["d1.5w0.75", *TIER1_NEW]},
+        )
+    ],
+    "tier-1 smoke on 74999ad + the model-track switches: base must match model-v1-smoke's base "
+    "step for step (default-off identity, sampler_wait logged); every new variant runs 50 -> "
+    "resume -> 90 steps and scores; d1.5w0.75 rerun after the run-name fix",
+    "preempt",
+)
+wave(
+    "smoke5",
+    "model-v1-smoke5",
+    "msmk5",
+    [
+        r | dict(stop_after=[50, 90])
+        for r in variants(
+            "3e16",
+            b,
+            {"base": {}} | {k: SCREEN1[k] for k in ["d1.5w0.75", *TIER1_NEW]},
+        )
+    ],
+    "smoke4 after the per-variant review fixes (boarddirect / 8 and lr 0.1, boardcnn one-hot meta, "
+    "AdamW wd and FP32 moments, nogates 0.5, fullrope without key offset, host-side board encoding, "
+    "DistAdam hook disarm): base must still match model-v1-smoke's base step for step",
+    "general",
+)
+# tier 1 (36 runs): longest / board runs on general (not preempted), schedule-sensitive and optimizer
+# runs on fast preempt, cheap flags packed on dei A6000. Controls (user, 2026-09-19 ~00:25): the data
+# track's round-3 B_2 x 3 (one seed per lane, same commit, recipe, budget, pool, schedule), pooled in
+# table() only if their executed args, source and evaluator hashes and B_2 match
+# dei is unavailable (babel-t9-24 draining, babel-s9-24's GPUs mostly held by others; main, ~00:45):
+# 12 runs on general (4 at a time, 3 cycles), 25 on preempt (8 at a time, 4 cycles)
+S1 = dict(
+    general=("d1.5w0.75", "d1.25w0.875", "w1.125", "boarddirect", "boardcnn", "lr0.5")
+    + ("lr2", "swiglu", "adamw1e-3", "adamw3e-3", "untieve", "fp32embed"),
+    preempt=("docrope", "ropefp32", "wd2", "wsd80", "noqknorm", "plainwd", "plainmuon")
+    + ("plainwd-half",)
+    + ("nox0", "nomomwarmup", "noembed2", "nosoftcap", "split50", "nosplit", "nomtp")
+    + ("nove", "noskip", "nosmear", "nogates", "nokeyoffset", "fullropenokeyoffset")
+    + ("gelu",)
+    + ("plaininit", "adamevery", "uniformmults"),
+)
+assert sorted(k for ks in S1.values() for k in ks) == sorted(SCREEN1)
+for lane, keys in S1.items():
     wave(
         f"screen1{lane[0]}",
         f"model-v1-screen1{lane[0]}",
         f"m1{lane[0]}",
-        variants("3e16", b, {"base": {}}, (seed,))
-        + variants("3e16", b, {k: SCREEN1[k] for k in keys}),
+        variants("3e16", b, {k: SCREEN1[k] for k in keys}),
         "model screen 1 at 3e16 on pinned B_2, trainer-FLOP matched: shape, embedding split, "
         "MTP, speedrun components, LR, weight decay, schedule, rotary",
         lane,
@@ -276,29 +398,78 @@ wave(
 
 
 def name(w, r):
-    return f"{w['prefix']}-{r['budget']}-{r['v']}-{r['tag']}-s{r['seed']}"
+    v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
+    return f"{w['prefix']}-{r['budget']}-{v}-{r['tag']}-s{r['seed']}"
 
 
-def source_files():
-    src = ROOT / "scripts"
-    return [*src.glob("modded_*.py")] + [
-        src / x
-        for x in ("lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py")
-    ]
+EVALUATOR = ("eval_modded.py", "ce_alignment.py", "modded_runtime.py", "eval_strat.py")
 
 
-def frozen_hashes():
-    h = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-    return {f.name: h(f) for f in sorted(source_files())} | {
-        "history-counts.json": h(dx.HISTORY),
-        "b2": B2_HASH,
+def sha(p):
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+def study_hashes(study):
+    """Hashes of a frozen study's copies, keyed as its plan's hashes (b2 from the plan)."""
+    plan = json.loads((study / "plan.json").read_text())
+    return {k: sha(study / k) for k in plan["hashes"] if k != "b2"} | {
+        "b2": plan["hashes"]["b2"],
     }
 
 
-def plan(key):
+def frozen_files(commit=None):
+    """{path inside the study: bytes} for sources, evaluator and drivers, from a git commit (the
+    shared B_2 baseline commit) or the working tree."""
+    git = lambda *a: subprocess.check_output(["git", "-C", ROOT, *a])
+    if commit:
+        names = git("ls-tree", "-r", "--name-only", commit, "scripts").decode().split()
+        read = lambda n: git("show", f"{commit}:{n}")
+    else:
+        names = [
+            f"scripts/{p.name}" for p in (ROOT / "scripts").iterdir() if p.is_file()
+        ]
+        read = lambda n: (ROOT / n).read_bytes()
+    keep = ("lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py")
+    keep += ("board_encode.cpp", "move-table.json")  # modded_board's encoder (Codex)
+    out = {
+        f"source-ours/{Path(n).name}": read(n)
+        for n in sorted(names)
+        if Path(n).name in keep
+        or (Path(n).name.startswith("modded_") and n.endswith(".py"))
+    }
+    out |= {
+        f"evaluator-ours/{f}": (dx.OLD_EVAL / f).read_bytes() for f in EVALUATOR[:3]
+    }
+    out["evaluator-ours/eval_strat.py"] = read("scripts/eval_strat.py")
+    return out | {
+        f: read(f"scripts/{f}") for f in ("modelexp.py", "dataexp.py", "modded_arch.py")
+    }
+
+
+def planned(w, r):
+    layers, width, steps = shape(r)
+    s, decay = schedule(r, steps)
+    return r | dict(
+        pool_frac=steps * 512 * 1024 / dx.FINAL_TOKENS,
+        b2=B2_HASH,
+        group=w["group"],
+        name=name(w, r),
+        layers=layers,
+        width=width,
+        steps=steps,
+        schedule=s,
+        decay_start=decay,
+    )
+
+
+def plan(key, commit=None):
     w = WAVES[key]
     assert key.startswith("smoke") or not b.get("provisional"), "B_2 not written yet"
-    hashes = frozen_hashes()
+    # store contents change as history months land: screen exactly B_2's month list
+    assert b.get("months"), "B_2 has no pinned month list"
+    files = frozen_files(commit)
+    hashes = {k: hashlib.sha256(v).hexdigest() for k, v in files.items()}
+    hashes |= {"history-counts.json": sha(history_file()), "b2": B2_HASH}
     for (
         k,
         o,
@@ -306,49 +477,32 @@ def plan(key):
         p = ROOT / "results/recipe10x" / o["study"] / "plan.json"
         if k != key and o["group"] == w["group"] and p.exists():
             assert json.loads(p.read_text()).get("hashes") == hashes, (
-                f"{k} froze other sources/B_2"
+                f"{k} froze other files"
             )
     study = ROOT / "results/recipe10x" / w["study"]
     assert not study.exists(), "never overwrite a frozen study"
     for d in ("source-ours", "evaluator-ours", "logs", "results"):
         (study / d).mkdir(parents=True)
-    src = ROOT / "scripts"
-    for f in source_files():
-        shutil.copy2(f, study / "source-ours")
-    for f in ("eval_modded.py", "ce_alignment.py", "modded_runtime.py"):
-        shutil.copy2(dx.OLD_EVAL / f, study / "evaluator-ours")
-    shutil.copy2(src / "eval_strat.py", study / "evaluator-ours")
-    for f in (__file__, src / "dataexp.py"):
-        shutil.copy2(f, study)
-    shutil.copy2(dx.HISTORY, study / "history-counts.json")
-    runs = []
-    for r in w["runs"]:
-        layers, width, steps = shape(r)
-        s, decay = schedule(r, steps)
-        pf = steps * 512 * 1024 / dx.FINAL_TOKENS
+    for rel, data in files.items():
+        (study / rel).write_bytes(data)
+    shutil.copy2(history_file(), study / "history-counts.json")
+    runs = [planned(w, r) for r in w["runs"]]
+    for r in runs:
         if r["v"] == "base":
-            assert abs(pf - b["pool_frac"][r["budget"]]) < 1e-9, (pf, b["pool_frac"])
-        runs.append(
-            r
-            | dict(
-                pool_frac=pf,
-                b2=B2_HASH,
-                group=w["group"],
-                name=name(w, r),
-                layers=layers,
-                width=width,
-                steps=steps,
-                schedule=s,
-                decay_start=decay,
-            )
-        )
+            assert abs(r["pool_frac"] - b["pool_frac"][r["budget"]]) < 1e-9, r[
+                "pool_frac"
+            ]
     (study / "plan.json").write_text(
         json.dumps(
-            dict(wave=key, purpose=w["purpose"], hashes=hashes, runs=runs), indent=2
+            dict(
+                wave=key, purpose=w["purpose"], commit=commit, hashes=hashes, runs=runs
+            ),
+            indent=2,
         )
         + "\n"
     )
-    (study / "run.sbatch").write_text(f"""#!/bin/bash
+    (study / "run.sbatch").write_text(
+        f"""#!/bin/bash
 #SBATCH --job-name={w["prefix"]}
 {w["sbatch"]}
 #SBATCH --nodes=1
@@ -358,7 +512,8 @@ def plan(key):
 #SBATCH --open-mode=append
 #SBATCH --output={study}/logs/%x-%A_%a.out
 exec {ROOT}/.venv/bin/python {study}/modelexp.py task {key}
-""")
+"""
+    )
 
 
 def submit(key):
@@ -377,7 +532,11 @@ def submit(key):
 def task(key):
     w = WAVES[key]
     study = ROOT / "results/recipe10x" / w["study"]
-    runs = json.loads((study / "plan.json").read_text())["runs"]  # frozen at plan time
+    plan = json.loads((study / "plan.json").read_text())
+    got = study_hashes(study)
+    bad = sorted(k for k in plan["hashes"] if got.get(k) != plan["hashes"][k])
+    assert not bad, f"frozen copies changed since plan: {bad}"
+    runs = plan["runs"]  # frozen at plan time
     i, k = int(os.environ["SLURM_ARRAY_TASK_ID"]), w["pack"]
     mine = runs[i * k : (i + 1) * k]
     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")
@@ -390,6 +549,135 @@ def task(key):
         )
     if not all(ok):
         subprocess.run(["scontrol", "requeue", dx.task_id()], check=True)
+
+
+def train_args(study, r):
+    """modded_train arguments of a planned run (all but --max-seconds / --stop-after / --resume)."""
+    args = [
+        "--name", r["name"], "--width", r["width"], "--layers", r["layers"], "--head-dim", 64,
+        "--steps", r["steps"], "--extension-steps", 0, "--initial-batch-rows", 512, "--micro-batch", 16,
+        "--lr-scale", r.get("lr", 1), "--seed", r["seed"], "--eval-every", 10**7,
+        "--checkpoint-every", 128, "--keep-checkpoints", 2, "--val-rows", 1024, "--deterministic",
+        "--data", dx.DATA, "--mix", r["policy"], "--mix-pool-frac", r["pool_frac"],
+        "--mix-stores", ",".join(r["stores"]), "--mix-months", ",".join(r["months"]),
+        "--wsd-schedule", json.dumps(r["schedule"], sort_keys=True),
+        "--wsd-end-step", r["steps"], "--wsd-decay-start", r["decay_start"],
+    ]  # fmt: skip
+    if r.get("history"):
+        args += ["--mix-history", study / "history-counts.json"]
+    for k, flag in DATA_FLAGS.items():
+        if r.get(k) is True:
+            args += [flag]
+        elif r.get(k):
+            args += [flag, r[k]]
+    args += ["--no-value-embeds"] * (not r.get("value_embeds", True))
+    args += ["--no-skips"] * (not r.get("skips", True))
+    args += ["--no-smear"] * (not r.get("smear", True))
+    args += ["--doc-rope"] * bool(r.get("doc_rope"))
+    args += ["--rope-fp32"] * bool(r.get("rope_fp32"))
+    if r.get("arch"):
+        args += ["--arch", json.dumps(r["arch"], sort_keys=True)]
+    if r.get("wd", 1) != 1:
+        args += ["--wd-scale", r["wd"]]
+    return args
+
+
+# modded_train arguments that change what a run computes (operational ones such as name, seed,
+# checkpoint cadence, time limits and resume paths are excluded); absent flags take these defaults
+NUMERIC = dict(
+    width=None, layers=None, head_dim=None, steps=None, extension_steps=None,
+    initial_batch_rows=None, micro_batch=None, lr_scale=None, deterministic=False, mix=None,
+    mix_stores=None, mix_pool_frac=None, mix_months=None, mix_history="", clock=False, elo=False,
+    clock_feats=0, input_lr_mul=75.0, aux_time=0.0, aux_wdl=0.0, wsd_schedule=None,
+    wsd_end_step=None, wsd_decay_start=None, no_value_embeds=False, no_skips=False,
+    no_smear=False, wd_scale=1.0, doc_rope=False, rope_fp32=False, arch="{}",
+)  # fmt: skip
+
+
+def numerics(args):
+    """Comparable form of a run's arguments: history file by content, numbers as floats."""
+    out = {}
+    for k, default in NUMERIC.items():
+        v = args.get(k, default)
+        if k == "mix_history":
+            v = sha(v) if v else ""
+        elif k == "arch":
+            v = json.dumps(json.loads(v) if isinstance(v, str) else v, sort_keys=True)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            v = float(v)
+        out[k] = v if isinstance(v, (bool, float)) else str(v)
+    return out
+
+
+def parse(argv):
+    out, i = {}, 0
+    while i < len(argv):
+        k = str(argv[i]).removeprefix("--").replace("-", "_")
+        more = i + 1 < len(argv) and not str(argv[i + 1]).startswith("--")
+        out[k], i = (argv[i + 1], i + 2) if more else (True, i + 1)
+    return out
+
+
+def trainer_sources(src):
+    """The files modded_train hashes into config.json's source_sha256 for a --mix run."""
+    names = [p.name for p in src.glob("modded_*.py")] + [
+        "lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py"
+    ]  # fmt: skip
+    return {n: sha(src / n) for n in names}
+
+
+def pooled_controls(study, controls):
+    """Data-track B_2 runs usable as this model study's controls: identical executed numerics (vs
+    this study's base-equivalent run), trainer source hashes, evaluator files, B_2 (the control
+    study's plan and the run's result both record this study's b2_sha256), and fresh runs (no fork
+    or continuation; a same-run resume is an exact continuation and allowed)."""
+    plan = json.loads((study / "plan.json").read_text())
+    w = WAVES[plan["wave"]]
+    rows = []
+    for budget in sorted({r["budget"] for r in plan["runs"]}):
+        base = planned(w, variants(budget, b, {"base": {}})[0])
+        assert base["b2"] == plan["hashes"]["b2"], (
+            "the loaded B_2 is not the one this study froze"
+        )
+        want = numerics(parse(train_args(study, base)))
+        mine_src = trainer_sources(study / "source-ours")
+        mine_ev = {f: sha(study / "evaluator-ours" / f) for f in EVALUATOR}
+        for c in controls:
+            cs = ROOT / "results/recipe10x" / c
+            ev = {f: sha(cs / "evaluator-ours" / f) for f in EVALUATOR}
+            planned_b2 = json.loads((cs / "plan.json").read_text()).get("b2_sha256")
+            for p in sorted((cs / "results").glob("*.json")):
+                res = json.loads(p.read_text())
+                cfg = ROOT / "results/pretrain" / res["name"] / "config.json"
+                if res.get("budget") != budget or not cfg.exists():
+                    continue
+                config = json.loads(cfg.read_text())
+                why = (
+                    [k for k, v in numerics(config["args"]).items() if want[k] != v]
+                    + ["sources"] * (config["source_sha256"] != mine_src)
+                    + ["evaluator"] * (ev != mine_ev)
+                    + ["B_2"] * (not planned_b2 == res.get("b2_sha256") == base["b2"])
+                    + [
+                        k
+                        for k in ("wsd_fork_from", "wsd_continue_from")
+                        if config["args"].get(k)
+                    ]
+                    + ["continuation"] * bool(config.get("continuation_provenance"))
+                )
+                if why:
+                    print(f"not pooled: {res['name']} ({', '.join(why)})")
+                    continue
+                train = [json.loads(l) for l in open(cfg.parent / "train.jsonl")]
+                rows.append(
+                    res
+                    | dict(
+                        v="base",
+                        study=plan["runs"][0]["group"],
+                        b2=plan["hashes"]["b2"],
+                        useful_training_flops=train[-1]["useful_training_flops"],
+                    )
+                )
+    return rows
 
 
 def run_one(study, r, gpu):
@@ -429,32 +717,12 @@ def run_one(study, r, gpu):
         d = json.loads(done.read_text()) if done.exists() else {}
         if d.get("stop_reason") == "steps" or (leg and d.get("step", 0) >= leg):
             continue
-        cmd = [
-            py, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1", src / "modded_train.py",
-            "--name", n, "--width", r["width"], "--layers", r["layers"], "--head-dim", 64,
-            "--steps", r["steps"], "--extension-steps", 0, "--initial-batch-rows", 512, "--micro-batch", 16,
-            "--lr-scale", r.get("lr", 1), "--seed", r["seed"], "--eval-every", 10**7,
-            "--checkpoint-every", 128, "--keep-checkpoints", 2, "--val-rows", 1024,
-            "--max-seconds", max(600, left - int(time.monotonic() - started) - 1500), "--deterministic",
-            "--data", dx.DATA, "--mix", r["policy"], "--mix-pool-frac", r["pool_frac"],
-            "--mix-stores", ",".join(r["stores"]), "--mix-months", ",".join(r["months"]),
-            "--wsd-schedule", json.dumps(r["schedule"], sort_keys=True),
-            "--wsd-end-step", r["steps"], "--wsd-decay-start", r["decay_start"],
-        ]  # fmt: skip
-        if r.get("history"):
-            cmd += ["--mix-history", study / "history-counts.json"]
-        for k, flag in DATA_FLAGS.items():
-            if r.get(k) is True:
-                cmd += [flag]
-            elif r.get(k):
-                cmd += [flag, r[k]]
-        cmd += ["--no-value-embeds"] * (not r.get("value_embeds", True))
-        cmd += ["--no-skips"] * (not r.get("skips", True))
-        cmd += ["--no-smear"] * (not r.get("smear", True))
-        cmd += ["--doc-rope"] * bool(r.get("doc_rope"))
-        cmd += ["--rope-fp32"] * bool(r.get("rope_fp32"))
-        if r.get("wd", 1) != 1:
-            cmd += ["--wd-scale", r["wd"]]
+        cmd = [py, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1"]
+        cmd += [src / "modded_train.py", *train_args(study, r)]
+        cmd += [
+            "--max-seconds",
+            max(600, left - int(time.monotonic() - started) - 1500),
+        ]
         if leg:
             cmd += ["--stop-after", leg]
         if (out / "last.pt").exists():
@@ -533,7 +801,7 @@ def status(key):
         print(f"{r['name']:42} step {steps[-1] if steps else 0}/{r['steps']}")
 
 
-def table(*keys):
+def table(*keys, controls=()):
     """Golden loss and CM vs the same-wave B_2 controls ('base') on the fixed control scaling curve."""
     import dmix_fit
     from isoflop_fit import best_loss
@@ -549,6 +817,14 @@ def table(*keys):
         ]
     for r in rows:  # lane-split waves share controls
         r["study"] = r.get("group", r["study"])
+    pooled = {}  # data-track controls, once per group
+    for key in keys:
+        g = WAVES[key]["group"]
+        if controls and g not in pooled:
+            pooled[g] = pooled_controls(
+                ROOT / "results/recipe10x" / WAVES[key]["study"], controls
+            )
+    rows += [r for group_rows in pooled.values() for r in group_rows]
     out = {}
     for metric, field in (("strat_macro", "macro"), ("strat_expert", "expert_macro")):
         law = dmix_fit.law(metric)
@@ -561,8 +837,7 @@ def table(*keys):
             ctrl = [
                 r["strat"][field] for r in got if r["v"] == ref
             ]  # 1e17: the control model
-            if not ctrl:
-                continue
+            assert ctrl, f"no {ref} for {group}: nothing pooled (reasons above)"
             shift = float(np.mean(ctrl)) - best_loss(law, c)
             curve = lambda x, s=shift: best_loss(law, x) + s
             ctrl_flops = np.mean(
@@ -593,9 +868,18 @@ def table(*keys):
 
 
 if __name__ == "__main__":
-    cmd = sys.argv[1]
-    (
-        table(*sys.argv[2:])
-        if cmd == "table"
-        else dict(plan=plan, submit=submit, task=task, status=status)[cmd](sys.argv[2])
-    )
+    cmd, rest = sys.argv[1], sys.argv[2:]
+    if cmd == "table":  # table WAVE... [--controls DATA_STUDY,...]
+        ctl = (
+            rest[rest.index("--controls") + 1].split(",")
+            if "--controls" in rest
+            else ()
+        )
+        table(
+            *[k for k in rest if k != "--controls" and k.split(",")[0] not in ctl],
+            controls=ctl,
+        )
+    elif cmd == "plan":  # plan WAVE [COMMIT]
+        plan(*rest)
+    else:
+        dict(submit=submit, task=task, status=status)[cmd](rest[0])

@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import triton
+from modded_arch import extra_flops
 from modded_medium import (
     Config,
     TrainingManager,
@@ -90,6 +91,7 @@ def useful_flops(rows, cfg, short_window, long_window):
     long = len({round(i * (layers - 1) / 15) for i in (0, 4, 11, 15)})
     gates = layers + 2 * min(5, layers // 2)
     per_token = 24 * layers * d * d + 2 * d * 2432 + 2 * (gates * heads * 16 + 64)
+    per_token += extra_flops(cfg.arch, d, layers)  # model-track branches (0 by default)
     pairs = (layers - long) * short_pairs + long * long_pairs
     return 3 * (x.size * per_token + 4 * d * pairs)
 
@@ -153,6 +155,9 @@ def main():
     )
     p.add_argument(
         "--rope-fp32", action="store_true", help="FP32 rotary cos/sin tables"
+    )
+    p.add_argument(
+        "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
     )
     p.add_argument(
         "--clock-feats",
@@ -223,6 +228,7 @@ def main():
     cfg.clock, cfg.elo, cfg.input_lr_mul = a.clock, a.elo, a.input_lr_mul
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
+    cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,
         not a.no_skips,
@@ -321,6 +327,7 @@ def main():
             "wd_scale",
             "doc_rope",
             "rope_fp32",
+            "arch",
         ):
             assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
                 f"Resume changes {key}"
@@ -519,7 +526,9 @@ def main():
             )
             data = torch.from_numpy(rows).pin_memory().to("cuda", non_blocking=True)
             x, y = data[:, :-1], data[:, 1:]
-            context = make_context(x, manager.ws_short * 128, manager.ws_long * 128)
+            context = make_context(
+                x, manager.ws_short * 128, manager.ws_long * 128, host=rows[:, :-1]
+            )
             if micro == accum - 1:
                 manager.activate_hooks(index)
             last = getattr(train, "last", {})

@@ -1,6 +1,6 @@
 """Chess data/attention/recovery adapter around the pinned medium implementation."""
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from types import SimpleNamespace
 import copy
 import os
@@ -13,6 +13,8 @@ import torch
 import torch.distributed as dist
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+import modded_arch
+import modded_board
 import modded_medium_core as core
 from modded_runtime import prime_source_key
 
@@ -25,6 +27,7 @@ TIME_START, WDL_START = (
 )  # padded logits: 63 think-time bins, then W/D/L
 COMMIT = "ecbb586296d3dac36fd206211f25d63bad4a6b35"
 flex_kernel = torch.compile(flex_attention, dynamic=False)
+BOARD = False  # set by create_model when the model has a board branch; make_context then encodes
 
 
 @dataclass
@@ -51,6 +54,9 @@ class Config:
     smear: bool = True  # previous-token smear gate
     doc_rope: bool = False  # rotary positions relative to each game's start
     rope_fp32: bool = False  # FP32 rotary cos/sin tables
+    arch: dict = field(
+        default_factory=dict
+    )  # model-track switches (modded_arch.DEFAULTS)
 
 
 @dataclass
@@ -63,10 +69,14 @@ class Context:
     long_mask: object
     backend: str
     positions: torch.Tensor = None  # index of each token within its game
+    board: torch.Tensor = (
+        None  # (T, 68) board states, only for models with a board branch
+    )
 
 
-def make_context(inputs, short_window, long_window, backend="flex"):
-    """Inputs are complete original rows (or shorter rows for correctness tests)."""
+def make_context(inputs, short_window, long_window, backend="flex", host=None):
+    """Inputs are complete original rows (or shorter rows for correctness tests); host is the
+    same rows as a numpy array, if at hand, so board models encode without a device sync."""
     assert inputs.ndim == 2 and backend in ("flex", "dense")
     flat = inputs.flatten()
     starts = flat == BOS
@@ -105,8 +115,17 @@ def make_context(inputs, short_window, long_window, backend="flex"):
     long = short if short_window == long_window else make(long_window)
     idx = torch.arange(length, device=flat.device)
     positions = idx - torch.where(starts, idx, 0).cummax(0).values
+    board = (
+        torch.from_numpy(
+            modded_board.encode(inputs.cpu().numpy() if host is None else host)
+        )
+        .to(flat.device)
+        .flatten(0, 1)
+        if BOARD
+        else None
+    )
     return Context(
-        docs, same, short_window, long_window, short, long, backend, positions
+        docs, same, short_window, long_window, short, long, backend, positions, board
     )
 
 
@@ -160,6 +179,11 @@ def create_model(cfg, device="cuda"):
         # Upstream initializes autograd on the device before model/collectives.
         # Keep that warmup out of module import so CPU inspection still works.
         torch.empty(1, device=device, requires_grad=True).backward()
+    arch = modded_arch.resolve(cfg.arch)
+    global BOARD
+    BOARD = bool(
+        arch["board"]
+    )  # per construction: no leak across models built in one process
     model = core.GPT(
         VOCAB,
         cfg.layers,
@@ -167,13 +191,44 @@ def create_model(cfg, device="cuda"):
         cfg.head_dim,
         cfg.width,
         cfg.max_tokens,
+        mlp=arch["mlp"],
+        untie_ve=arch["untie_ve"],
     ).to(device)
     model.use_clock, model.use_elo = cfg.clock, cfg.elo
     model.use_feats = cfg.feats
     model.doc_rope = cfg.doc_rope
-    if cfg.rope_fp32:
-        model.yarn.fp32 = True
+    if cfg.rope_fp32 or arch["full_rope"] or arch["plain_init"]:
+        model.yarn.fp32, model.yarn.full = cfg.rope_fp32, arch["full_rope"]
+        if arch["plain_init"]:
+            model.yarn.base_scale = cfg.head_dim**-0.5
         model.yarn.reset()
+    model.use_x0, model.use_embed2 = arch["x0"], arch["embed2"]
+    model.softcap, model.use_key_offset = arch["softcap"], arch["key_offset"]
+    for block in model.blocks:
+        block.attn.qk_norm, block.attn.gates = arch["qk_norm"], arch["gates"]
+    core.CAUTIOUS_WD, core.NORMUON = arch["cautious_wd"], arch["normuon"]
+    if arch["plain_init"]:
+        with torch.no_grad():
+            model.scalars[: cfg.layers] = 1.0  # residual lambdas (default 1.05)
+    if arch["matrix_adam"]:
+        model.matrix_adam, model.matrix_wd = arch["matrix_adam"], arch["matrix_wd"]
+        for block in model.blocks:
+            block.mlp.c_proj.lr_mul = 1.0
+            for p in (block.attn.qkvo_w, block.mlp.c_fc, block.mlp.c_proj):
+                p.fp32_state = True
+    if arch["uniform_mults"]:
+        model.embed2.weight.lr_mul = model.embed2.weight.wd_mul = 1.0
+        model.embed.weight.wd_mul = model.lm_head.weight.wd_mul = 1.0
+    model.fp32_embed = arch["fp32_embed"]
+    fp32 = (
+        {model.embed, model.embed2, model.lm_head, *model.value_embeds}
+        if arch["fp32_embed"]
+        else set()
+    )
+    for m in fp32:
+        m.weight.fp32_state = True
+    if arch["board"]:
+        model.board = modded_board.build(arch["board"], cfg.width).to(device)
     model.use_value_embeds, model.use_skips, model.use_smear = (
         cfg.value_embeds,
         cfg.skips,
@@ -183,7 +238,7 @@ def create_model(cfg, device="cuda"):
         table.weight.lr_mul = cfg.input_lr_mul
     # Follow upstream: BF16 embeddings/gates/head, FP32 attention/MLP matrices.
     for m in model.modules():
-        if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)):
+        if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)) and m not in fp32:
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
         dist.broadcast(p.detach(), 0)
@@ -285,6 +340,8 @@ class TrainingManager(core.TrainingManager):
         # warmup, so inactive Adam steps must start with communication disabled.
         self.adam_opt.should_sync = False
         self.scalar_opt.should_sync = False
+        if modded_arch.resolve(cfg.arch)["adam_every"]:
+            self.adam_opt.odd_step_only = self.scalar_opt.odd_step_only = False
         for opt in self.optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] *= cfg.lr_scale
