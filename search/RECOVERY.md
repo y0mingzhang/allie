@@ -1,3 +1,56 @@
+## Update: 2026-09-19 11:42 UTC
+
+Own 10x macro AND expert CM goal remains ACTIVE and unmet. New code through
+cc951c5 was committed; header/action/layer studies and this update need a commit.
+One GPU job10498670, babel-t5-32, engine1713252 remains resident. Ends12:52UTC.
+All requests through077 are DONE. No new Slurm jobs or shared main edits.
+Observer accounts reserved time, including idle time. STOP absent at last check.
+
+New experiments:
+- 073 header smoke failed at import from a shell-quoting syntax error. No inference.
+  Failed source archived at header-adaptation-smoke-v1/failed-source-073.py.
+  074 corrected smoke PASSED:155 past-loglik comparisons to independently truncated
+  prefixes, max drift4.63e-7. Own-move parity and unchanged opponent header checked.
+- 075 aug-header-adaptation-v1 DONE: five own-Elo offsets -400,-200,0,200,400,
+  opponent unchanged; up to32 past own moves.16384 positions,9.177s warm collection.
+  Bayesian posterior uses ONLY prior own moves, never query target/future. Static
+  mixtures are equal-prefill controls. Fit-CV both select width400/power1/last8;
+  confirmation1.444646/1.314992 vsparent1.445115/1.315885. Incremental CIs cross0,
+  including adaptive vsstatic400. Not promoted. Analysis9.124s. Posterior entropy,
+  per-cell metrics and <10/10–30/>30 own-move strata reported. Five prefills charged.
+- aug-action-calibration-v1 DONE CPU18.2s, features0.249s. Rule-only moving piece,
+  capture/check/castle/promotion/forced reply, optional richer geometry/mobility.
+  Native features match python-chess on180 positions/5218 legal moves. CV macro
+  basic_shared0.1 confirms1.444195/1.314534 but both CIs cross0. ExpertCV selects
+  basic_elo0.1, no improvement. Not promoted. No external value evaluator.
+- 076 layer-lens smoke PASSED: independent single-document vsbatch max logit.1875,
+  SGLang vs eager.21875 (BF16/backend difference); cross-document perturbation0.
+- 077 aug-layer-lens-v1 DONE: eager batched SDPA on resident immutable weights,
+  root readouts after layers2/4/6 and actual final hidden (includes backout).
+  DoLa-inspired calibration, all legal moves retain support. Same frozen parent
+  always used; ratio features from paired eager outputs, so no serving-backend
+  change credited. Both CV metrics select mature-only calibration; no layer gain.
+  No golden promotion. Sources/worker/analysis reports all preserved.
+
+Peer review: Claude aux_detach core review DONE. Stop-gradient wiring okay;
+identified uncharged extra82-row matmul. Claude committed959879a: conservative
+x3 extra matmul charge,2270 vs2274 steps; pilot10501138 checks base identity and
+auxsg0 vsauxsg through optimizer/resume/split. No outstanding review request.
+
+Next hypothesis NOT implemented/queued yet: gradient-informed activation correction
+from strictly prior own moves. Compute CE gradient wrt final hidden with frozen
+output head; transfer via hidden inner product to current hidden, then reread same
+head. No parameter mutation, no persistent/trunk/head training, no external data.
+This differs from already failed direct same-token history residual: output-embedding
+gradients transfer across related moves. Fit only scalar strength on August folds,
+include exact zero correction, charge extra full-prefix work. Claude second opinion
+requested. Do not silently turn this into offline or neural-weight training.
+
+Best golden points unchanged:970nodes CE1.444599/1.338855,CM3.035x/5.167x;
+501-node adaptive CE1.445629/1.340769,CM2.984x/5.019x. Order audit127 registry
+entries; original-order result authoritative. Fresh disjoint final confirmation
+still needed before claiming success; test/test_expert unopened.
+---
 ## Update: 2026-09-19 11:27 UTC
 
 072 order audit is DONE. Same-order repeat is bit-exact (policy, budgets, CE).
