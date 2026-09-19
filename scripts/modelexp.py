@@ -711,6 +711,18 @@ wave(
     "general4",
 )
 
+# round 2 (1e17 slope point): the sparsity winners of round 1 on the fused dropless kernels (capacity 2
+# matched 1.25, so drops cost nothing), 4 fast preempt GPUs each; dense control is moe2d
+MOE2 = {k: MOE(e, 6, moe_kernel="scatter") for k, e in (("moe128k6", 128), ("moe384k6", 384))}
+wave(
+    "moe2",
+    "moe-v1-round2",
+    "mo2",
+    variants("1e17", b, MOE2),
+    "moe-v1 round 2 at 1e17: moe128k6 (best CM per chip-hour at 3e16) and moe384k6 (best CM), scatter kernel",
+    "preempt4",
+)
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
