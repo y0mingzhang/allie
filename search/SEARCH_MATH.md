@@ -115,3 +115,17 @@ the original tree at equal total evaluated nodes; then distinguish (a) changing
 allocation, (b) changing the unvisited output fallback, and (c) shrinking noisy
 visit means toward their first critic. Do not attribute a more expensive prepass
 to an algorithmic gain without charging its nodes.
+
+Another next candidate (not implemented): learn a budget rule from root features
+using the cached 16/64/256/1000 ladder. Predict per-position loss reductions from
+policy entropy, rating/format, root WDL, predicted time and history length; choose
+the budget maximizing predicted gain minus a fixed node-cost penalty. The human
+target is used only to fit this small calibration rule on August, never at search
+time. Use nested game cross-validation: calibrate node-budget output policies
+inside each router-training fold, so held-out labels do not affect its targets.
+Compare to fixed budgets, time-only allocation and a shuffled-time control at the
+same realized average node cost. Actual adaptive batching needs a numerical/cost
+check against the cached stopping-policy simulation before claiming a deployment
+speedup. The present budget snapshots use a constant selection cpuct, so their
+prefixes are valid fixed-budget trees; a budget-dependent cpuct would invalidate
+that reuse.

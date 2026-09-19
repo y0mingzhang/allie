@@ -32,6 +32,7 @@ def main():
 
     def append(name, values, cost):
         records.append(dict(method=name, average_search_nodes=cost['nodes'],
+                            expert_average_search_nodes=cost.get('expert_nodes'),
                             average_simulations=cost.get('simulations'),
                             warm_seconds=cost['seconds'],
                             macro_ce=values['macro'], expert_ce=values['expert_macro'],
@@ -46,6 +47,15 @@ def main():
         for name in ['mcts_forward', 'mcts_reverse', 'mcts_elo']:
             append(name, d['methods'][name], dict(nodes=d['evaluated_leaves']/d['positions'],
                 seconds=d['scoring_seconds'], simulations=1000))
+    newest=ROOT/'golden-augcal-v1/results.json'
+    if newest.exists():
+        d=json.loads(newest.read_text())
+        plan=json.loads((newest.parent/'plan.json').read_text())
+        for name in plan['methods']:
+            if name=='old_mcts_reverse':continue
+            x=d['methods'][name]
+            append('aug_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],
+                seconds=None,simulations=plan['methods'][name]['budget']))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
@@ -57,7 +67,8 @@ def main():
         population='512 positions in each of 16 golden cells: the sample average equals the equal-cell macro average. A population estimate, not all 1.55M moves.',
         caveats=['Dominance flags compare point estimates; they do not establish statistically supported dominance.',
                  'MCTS50 seconds measure traversal; MCTS1000/four-ply include root evaluation. Two-ply standalone golden wall time was not measured.',
-                 'Original blocks lack per-root node counts, so expert-only node cost cannot yet be recovered.',
+                 'Original blocks lack per-root counts; August-selected curves include expert node costs in frontier.json and their source report.',
+                 'August-selected snapshot timings include earlier backup extraction, not standalone method benchmarks; node counts determine this frontier.',
                  'CM intervals and law-shape sensitivity remain in the source reports.'])
     path = ROOT / 'frontier.json'
     tmp = path.with_suffix('.partial'); tmp.write_text(json.dumps(result, indent=2)+'\n'); tmp.replace(path)

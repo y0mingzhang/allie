@@ -120,3 +120,10 @@ requires an incremental win over the best cheap control with a paired game-level
 uncertainty estimate supporting improvement. If only masking/calibration helps,
 report it as such. Preserve complete experiment and cost reports, including failures;
 preliminary development results do not establish completion.
+
+Follow-up (Yiming, 2026-09-19): after achieving this fixed-checkpoint goal, obtain
+Claude's B_2 model and reproduce the winning method on it. Do not swap the current
+checkpoint or move the current targets in the meantime. First evaluate the frozen
+method without retuning; distinguish any later B_2-specific tuning. Establish
+B_2's own raw/legal baselines, held-out CE gains and node/quality frontier, and
+label any training-equivalent CM with its own reference and law assumptions.

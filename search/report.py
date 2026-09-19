@@ -20,7 +20,8 @@ def main():
             lines.append(f'| {name} | {ce:.5f} | {ex:.5f} | {fmt(cm)} | {fmt(ecm)} |')
         tables.append('\n'.join(lines))
     for path,title in [('aug-search-v1/results.json','August balanced tuning: may be training-seen; confirmation is game-disjoint from parameter fitting, not from model training.'),
-                       ('aug-search-v1/distributional-results.json','August same-node outcome-distribution experiments: no golden CM conversion.')]:
+                       ('aug-search-v1/distributional-results.json','August same-node outcome-distribution experiments: no golden CM conversion.'),
+                       ('aug-search-v1/unvisited-results.json','August unvisited-action fallback and visit shrinkage: no additional model nodes.')]:
         d=read(path)
         if d:
             rows=[]
@@ -154,6 +155,17 @@ def main():
     if d:
         table('Frozen 1000-simulation MCTS confirmation: existing balanced golden sample, 512 positions/cell. All dev-frozen arms reported; training-law-conditional CM.',
               [(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
+    d=read('golden-augcal-v1/results.json')
+    if d:
+        table('August-fit-CV-selected golden budget frontier: unchanged July sample, all frozen arms reported. Conditional training-equivalent CM.',
+              [(k,x['macro'],x['expert_macro'],x['macro_training_eq_cm'],x['expert_macro_training_eq_cm']) for k,x in d['methods'].items()])
+        lines=['| Method | Avg nodes | Expert avg nodes | Macro CE delta vs four-ply (95% CI) | Expert CE delta vs four-ply (95% CI) |',
+               '|---|---:|---:|---:|---:|']
+        for k,x in d['methods'].items():
+            fmt=lambda key:' to '.join(f'{v:+.4f}' for v in x[key])
+            ec='unavailable' if x['expert_mean_nodes'] is None else f'{x["expert_mean_nodes"]:.1f}'
+            lines.append(f'| {k} | {x["mean_nodes"]:.1f} | {ec} | {fmt("macro_delta_vs_previous_four_ply_ci95")} | {fmt("expert_macro_delta_vs_previous_four_ply_ci95")} |')
+        tables.append('\n'.join(lines))
     text='# Inference research results\n\nTarget: both ≥10× macro and ≥10× expert training-equivalent CM, with an improved average-search-nodes versus quality frontier. Not achieved.\n\n'
     text+='CM is computed only from matching golden metrics, using a frozen training-law shape anchored to the official raw checkpoint. Development-only rows stay pending. Search reports additionally separate gains beyond legal normalization.\n\n'
     text+='\n\n'.join(tables)+'\n\nOne persistent GPU allocation at a time; previous preempt RTX6000Ada usage and its general L40S replacement remain charged in status.json, including idle time. Serving implementation changes and the original MCTS audit are documented in search/PLAN.md and search/ALLIE_REVIEW.md.\n'

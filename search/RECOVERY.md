@@ -12,6 +12,9 @@ Active goal: BOTH >=10x golden macro and expert-macro training-equivalent CM,
 plus improved mean search-node / CM frontier. NOT achieved. Fixed checkpoint
 and law snapshots remain unchanged. User wants sustained creative research,
 fast iterations, a table after each experiment, and images only when requested.
+Latest follow-up: AFTER this goal succeeds, reproduce the frozen winner on
+Claude's B_2 model; direct transfer first, later tuning separately. Current
+checkpoint/targets stay fixed until then.
 
 Resource: one general/normal L40S job10498670 on babel-t5-32, running from
 04:52UTC with8h limit. Tmux socket search-v1-10498670, session oracle; resident
@@ -27,6 +30,37 @@ PYTHONPATH only for Parquet builders. Do not restart a ready resident engine.
 The original cold-NFS startup cost is charged, not erased by local staging.
 
 ## Immediate task
+
+LATEST: August023 and both CPU analyses are DONE. Worker289.63s; main calibration
+39.67s, distributional13.32s. Fit-CV selects MCTS1000 reverse/Elo for macro and
+softtau.1/1000 forward/Elo for expert; combined Q+softtau.5/Elo in the second
+family. Confirmation CE: legal1.52313/1.50320;4ply1.48301/1.40864;
+MCTS1000reverse/Elo1.47013/1.37818;soft1000/Elo1.46508/1.37369;
+combo1.46834/1.38287. Draw/outcome-consistency not selected. All reported.
+Most promising cost point: soft256/Elo1.47530/1.39715 at250.5nodes vs4ply835.7.
+
+CPU unvisited-action fallback experiment DONE (34.34s), unvisited-results.json.
+No clear both-metric win: ordinaryMCTS1.47006/1.37773 vsrootcriticpseudo1
+1.46846/1.38251. Reported. Its MCTS-root prior has a tiny BF16 batching shift
+relative to the shared32-root prior used by the initial August analysis:
+root-batch-audit.json mean raw CEdelta -0.00009694, KL0.00002925. Not algorithm gain.
+
+NEXT/RUNNING: frozen July study golden-augcal-v1, 11methods selected solely by
+August fitCV, budgets16/64/256/1000 on one shared tree. Queue024 failed reading
+a briefly empty NON-ATOMIC request BEFORE any scoring. Error retained. Retry
+025-golden-august.request.json published atomically, identical spec/frozen plan.
+ALWAYS publish queue requests by temp+rename, never apply_patch directly.
+Watch025 and golden-augcal-v1/results.json. Routine watcher watch_search_queue
+has the task, polls60s. The worker automatically runs analyze_augcal after scoring.
+Raw compact root/Q/soft/visits/WDL caches retained this time for future CPU-only
+calibration tests. Golden methods and coefficients are frozen in plan.json;
+do not edit its hashed inference/analysis sources while running.
+New scorer uses vocabulary-order tie breaking to match the canonical evaluator;
+also regresses old raw/legal/MCTS reverse scores against021 on every block.
+
+After025: report CE/CM/node table and paired CIs vs4ply, updateREPORT/FRONTIER,
+commit current own code. Do not declare 10x success without actually meeting it.
+August raw outcome experiments are model-training-overlap development only.
 
 User chose AUGUST tuning, even if training-seen, instead of insisting on another
 held-out development set. July golden remains unchanged. Existing dev/dev_expert
