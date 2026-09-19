@@ -82,7 +82,7 @@ def main():
               'fixed_repairs_reverse','released_time_repairs_reverse','decoupled_time_reverse',
               'time_repairs_reverse','shuffled_time_reverse','entropy_reverse')
         table('Adaptive-MCTS repair pilot: same 1,050-position development confirmation; calibration fit on fixed-tree fold0, then shared across allocations.',
-              [(k,d['results'][k]['metrics']['confirmation']['ce'],d['results'][k]['metrics']['confirmation']['expert_ce']) for k in keep])
+              [(k,d['results'][k]['metrics']['confirmation']['ce'],d['results'][k]['metrics']['confirmation']['expert_ce'],None,None) for k in keep])
     d=read('fast-deeper-pilot/results.json')
     if d:
         table('Cached engine verification on the same small development check; coefficients frozen before the port.',
