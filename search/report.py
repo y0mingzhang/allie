@@ -33,6 +33,12 @@ def main():
                        ('aug-coverage-v1/results.json','August root coverage quotas, with ordinary PUCT below root.'),
                        ('aug-coverage-v1/behavior.json','August expected outcome under the value-tilted continuation policy; unchanged soft backup selected.'),
                        ('aug-coverage-v1/format-calibration.json','August format-by-rating calibration, partially pooled toward Elo-only coefficients; no confirmation gain.'),
+                       ('aug-player-search-v1/results.json','August Bayesian search-strength mixture from past same-player choices, versus cheaper static-mixture controls.'),
+                       ('aug-adaptive-deep-v1/results.json','August depth transfer of the count-dependent backup: matched trees at256/1000/4000 simulations.'),
+                       ('aug-diff-backup-v2/results.json','August differentiated backup calibration: native gradients checked against independent torch autograd; fit-CV selects unchanged control.'),
+                       ('aug-adaptive-temperature-v1/results.json','August count-dependent soft backup on identical cached trees; subtree count is an exploration proxy, not independent samples.'),
+                       ('aug-moment-tail-v1/results.json','August critic-moment correction for unvisited actions; no confirmation win.'),
+                       ('aug-history-residual-v1/results.json','August within-game residual correction from past moves only; frozen model, no parameter updates.'),
                        ('aug-clock-calibration-v1/results.json','August pre-move remaining-clock calibration, direct and search; added legal information, no future thinking time.'),
                        ('aug-outcome-consistency-v1/results.json','August root/child outcome-consistency projection, all model predictions; no true outcomes used.'),
                        ('aug-rollout-v1/results.json','August human-policy Monte Carlo leaf values at1/4/8/16ply, four trajectories per action.'),
@@ -199,6 +205,8 @@ def main():
                        ('golden-coverage-v1/results.json','August-selected root-coverage golden check. Routed variant is cached stopping, not yet an actual mixed-budget runtime measurement.'),
                        ('golden-dynamic-coverage-v1/results.json','Actual mixed-budget root-coverage search, with cached versus live numerical differences reported separately.'),
                        ('golden-fast-coverage-v1/results.json','Faster root-coverage search: actual4000 simulations and logical1000 prefix, frozen August coefficients; higher cost alone is not dominance.'),
+                       ('golden-player-search-v1/results.json','Frozen static and past-choice-adapted search-strength mixtures; existing root trees plus new past-only queries. Total node cost includes both; reused golden.'),
+                       ('golden-adaptive-temperature-v1/results.json','August-selected subtree-dependent soft backup, identical live1000 trees and nodes as its constant control; reused golden sample.'),
                        ('golden-utilities-v1/results.json','August-selected utility normalization on identical golden trees; zero additional model queries.'),
                        ('golden-permutation-v1/results.json','Numerical sensitivity audit: same frozen router, different fixed position order. Neither order is selected by quality.')]:
         d=read(path)

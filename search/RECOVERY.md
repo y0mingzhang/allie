@@ -1,3 +1,110 @@
+## Latest continuation: mixtures and larger development sample (2026-09-19)
+
+All requests through064 completed; engine idle, no Slurm changes. 10498670 still
+running on babel-t5-32 until12:52UTC. Goal10x/10x NOTachieved.
+064 golden-player-search-v1: fixed search-strength mixture sigma.5:
+CE1.45055442/1.351203637,CM2.755694/4.302838 at969.8158nodes.
+sigma1:1.4502528/1.35121634,CM2.769040/4.302048 samecost.
+History-adapted.5:1.45041094/1.35103752,CM2.762032/4.313178,1183.8427nodes.
+History-adapted1:1.45017454/1.35281716,CM2.772517/4.204040,sameextra cost.
+Mostly static-mixture benefit. All4 preregistered arms plusmatchedconstant
+reported. Reusedgolden; no corrected significance/finalconfirmationclaim.
+Current-root1000trees arecached060; newhistoricalqueries areactual. Totalstandalone
+runtime NOTequalhistory-onlyruntime. Charge historical roots/children/prefill
+perquery evenifphysicallyshared. AllparametersfitAugustonly.
+Results include pairedCIs andCM. Best4000point stillCM2.899512/4.989236.
+
+062 aug-adaptive-deep-v1 complete andanalyzed: adaptive4000 macroregresses,
+expertnearlyflat; no promotion. Sameconstant4000 Aug1.446684/1.343797 vs
+subtree4000 1.449047/1.343005. Allbudgets256/1000/4000 inresults.json.
+
+063 aug-player-search-v1 complete, inference17.51s for27,412 pastpositions,
+819,973 childqueries,4096currentqueries. CVselectedadapt_s1.0_e1.0 macro
+andadapt_s0.5_e0.25 expert. Control+staticpriorsalsoenteredgolden064.
+
+CPU aug-diff-backup-v2 complete: differentiationofoutputbackup only; node
+selectionneverusesfittedtau. tau=exp(a)*(1+(desc-1)/16)^b.
+Independentfloat64torch/autograd+finite-differences+zero-tailtestsPASS.
+BothfitCVselectconstantcontrol, despiteconfirmationfixed2scalar
+1.449715/1.346246 andjoint10scalar1.449203/1.344298 vscontrol1.452666/1.357460.
+JointHessiancondition461 inoptimizercoordinates. No goldenpromotion.
+v1 hadlatent0*exp(overflow)zero-unvisited-mass edgecase; originalsourcespreserved
+inaug-diff-backup-v1/executed-source. Fixedguard andfullyexpandedmass exactly0;
+v2 fullrerun changesCE<3e-12. Failededitscript alsoaccidentallyreranv1 CPU,
+recordedSUPERSEDED.json/logs; no GPUsubmission/reset.
+Sourcefilesdiff_backup.cpp/native.py/analyze_diff_backup.py nowv2.
+
+Next: expandAugust sample4x (512positions/cell/fold=16384), SAME existing
+aug-tune-v1 inventory andsamegamefolds, nested original128+384uniformremaining.
+No newcorpus/goldendata. Fit/CV rankingsunstable at2048fitmoves; improveprecision
+beforemoregolden. Not yetbuilt/queued atthisnote. Use newoutputdir andhashes.
+Then collect1000-sim compacttrees withmatchedconstant/subtree snapshots at256/1000,
+andcomparestaticmixtures/calibratedbackup onexpandedfit-CV/confirmation.
+No needrepeat expensivehistoryadaptation yet; tinygain+22%nodecost.
+
+All newresultsareinREPORT/FRONTIER/GOLDEN_METHODS afterregeneration.
+No outstanding peerreview. Claude agrees differentiatedbackups sound, requested
+identifiabilitycheck andindependentautograd; bothprovided. Clarifiedtopeer
+that output-onlytau doesn't affecttreeexpansion.
+
+## Current continuation: adaptive backup and within-game adaptation (2026-09-19 ~10:00 UTC)
+
+Goal remains active: fixed-checkpoint 10x macro AND10x expert CM plus node frontier.
+Not achieved; do not reset UI goal or main files. Own Slurm10498670 on babel-t5-32
+runs through12:52UTC. Engine PID1713252 (1.5M cache), socketsearch-v1-10498670.
+Both STOP files absent. No new allocation or shared mutation. Use SSH node for I/O.
+
+060 golden-adaptive-temperature-v1 finished: constant vs subtree on identical
+actual1000 trees,969.8158 NNnodes/position. Constant macro1.4529637225/expert1.3565202547,
+CM2.651997/3.988074. Subtree1.4520683107/1.3530486294,CM2.689940/4.190107.
+Expert deltaCI[-.006803,-.000359],macro[-.002036,+.000235]. Treat as candidate:
+many golden tests, no multiple-testing-corrected win or fresh confirmation yet.
+Best expensive point remains static4000 CM2.899512/4.989236,3854.934nodes.
+
+CPU aug-adaptive-temperature-v1: both fitCV choose subtree tau=.2sqrt(16/(16+desc-1));
+August1.450230/1.347842 vsconstant.1 1.452666/1.357460. Count is exploration
+proxy, not independent samples. Other depth/action-scale/constant temps reported.
+CPU aug-moment-tail-v1: all moment-constrained unvisited fallback arms fail; no promotion.
+
+061 aug-history-residual-v1 finished inference8.26s and CPUanalysis:
+same-player past-move onehot-minus-own-model residual, no weightupdates.
+Searchcontrol1.4527775/1.3583490; last8hidden1.4515642/1.3584818.
+MacroCVselected unchangedzero-strength,expertCVlast8; no expert confirmation gain.
+No golden promotion. All variants inresults.json; user received table.
+
+062-adaptive-deep is currently running on residentengine:
+module search.engine.adaptive_deep, outputaug-adaptive-deep-v1.
+4000sim,320rootbatch,2threads, forcedskip. Save compacttrees plus constant/subtree
+backup at256/1000/4000 logicalprefix budgets. Afterworker done run:
+  OMP_NUM_THREADS=1 <runtime>/python -m search.engine.analyze_adaptive_deep
+It fits separate Elo alpha/beta inside fitgameCV and reports all6arms, pairedCIs.
+No golden promotion until results/freeze.
+
+063-player-search is queued after062:
+module search.engine.player_search, outputaug-player-search-v1.
+For each Augustquery evaluate oneply alllegalactions at up to8previous OWN moves,
+strictprefix only. Heads preservecondition; exactterminalvalues. Pastprefix+pasttarget
+is key (sameprefix canhave different actual historicalchoices).
+Codehistory tests passed; no querytarget supplied to histories().
+Afterworker done run:
+  OMP_NUM_THREADS=1 <runtime>/python -m search.engine.analyze_player_search
+CPUanalyzer written and math tests passed. Bayesianlatent searchstrength factors
+[.25,.5,1,2,4], priorlogwidth .25/.5/1, evidencepower .25/1.
+Fitpast oneply alpha/beta on fitqueryhistories only, refit insidegameCV; currentroot
+1000q fromexistingstaticcache. No currenttarget entersposterior. Compare cheaper
+staticpriormixtures; chargeALL historical roots/children/prefill perquery even if
+shared physically. Reportcostinflation. No golden until fittedselection.
+
+Reports/frontier source updated toinclude060+CPUadaptive/moment/history; regenerate.
+Uncommitted newfiles adaptive_temperature*, analyze_adaptive_temperature,
+moment_tail*,analyze_moment_tail,golden_adaptive_temperature,history_residual,
+analyze_history_residual,adaptive_deep,analyze_adaptive_deep,player_search,
+analyze_player_search. Commit afterreports/resultsreview.
+Lastcommit8a36d0a. No peerreviewpending. Claude suggestedactualclock (failedAug)
+andlikelihood of searched vsraw onpastmoves (063). Peer warnedmultipletesting;
+agreedcandidate-only. Modelweights/testsplitunscored unchanged.
+
+
 # Search worktree recovery
 
 Codex owns this worktree (`codex/search-v1`), GOAL.md, search/ and private

@@ -94,6 +94,18 @@ def main():
         for name in ('fast1000','fast4000'):
             x=d['methods'][name]
             append(name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=d['scoring_seconds'] if name=='fast4000' else None))
+    adaptive=ROOT/'golden-adaptive-temperature-v1/results.json'
+    if adaptive.exists():
+        d=json.loads(adaptive.read_text())
+        for name in ('constant','subtree'):
+            x=d['methods'][name]
+            append('adaptive_temperature_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
+    mixtures=ROOT/'golden-player-search-v1/results.json'
+    if mixtures.exists():
+        d=json.loads(mixtures.read_text())
+        for name in ('constant','prior_s05','prior_s10','adaptive_s05','adaptive_s10'):
+            x=d['methods'][name]
+            append('player_mixture_'+name,x,dict(nodes=x['mean_nodes'],expert_nodes=x['expert_mean_nodes'],seconds=None))
     for r in records:
         r['point_dominated_by'] = [s['method'] for s in records if s is not r
             and s['average_search_nodes'] <= r['average_search_nodes']
