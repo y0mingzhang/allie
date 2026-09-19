@@ -49,11 +49,12 @@ class AddLoss(torch.autograd.Function):
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
-        gamma=1e-3, seq=0.0, update="sign", capacity=1.25,
+        gamma=1e-3, seq=0.0, update="sign", capacity=1.25, kind="relu2",
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop")
-        self.experts, self.topk, self.capacity = experts, topk, capacity
+        self.experts, self.topk, self.capacity, self.kind = experts, topk, capacity, kind
+        up = 2 if kind == "swiglu" else 1  # SwiGLU experts: gate and value rows
         # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
         # clamp((mean - load) / mean, -1, 1) x the rebalance() scale, which settles instead of
         # cycling at +-gamma once balanced), sequence-wise balance loss weight
@@ -61,26 +62,35 @@ class MoE(nn.Module):
         bound = 3**0.5 * 0.5 * dim**-0.5  # the dense MLP's c_fc init
         self.router = nn.Parameter(torch.randn(experts, dim) * init)
         self.up = nn.ParameterList(
-            nn.Parameter(torch.empty(expert_hidden, dim).uniform_(-bound, bound))
+            nn.Parameter(torch.empty(up * expert_hidden, dim).uniform_(-bound, bound))
             for _ in range(experts)
         )
         self.down = nn.ParameterList(
             nn.Parameter(torch.zeros(expert_hidden, dim)) for _ in range(experts)
         )
-        self.shared_up = nn.Parameter(
-            torch.empty(shared_hidden, dim).uniform_(-bound, bound)
-        )
-        self.shared_down = nn.Parameter(torch.zeros(shared_hidden, dim))
+        self.shared = shared_hidden > 0
+        if self.shared:
+            self.shared_up = nn.Parameter(
+                torch.empty(up * shared_hidden, dim).uniform_(-bound, bound)
+            )
+            self.shared_down = nn.Parameter(torch.zeros(shared_hidden, dim))
+        shared = (self.shared_up, self.shared_down) if self.shared else ()
         self.router.label, self.router.lr_mul, self.router.wd_mul = (
             "router",
             router_lr_mul,
             0.0,
         )
+        # NorMuon stacks a label's params, so differently shaped SwiGLU ups get their own labels
         for p in (*self.up, *self.down):
             p.label = "moe"
-        for p in (self.shared_up, self.shared_down):
+        for p in shared:
             p.label = "mlp_shared"
-        for p in (*self.down, self.shared_down):
+        if up == 2:
+            for p in self.up:
+                p.label = "moe_up"
+            if self.shared:
+                self.shared_up.label = "mlp_shared_up"
+        for p in (*self.down, *shared[1:]):
             p.lr_mul = 2.0  # the dense MLP's c_proj multiplier
         self.register_buffer(
             "bias", torch.zeros(experts)
@@ -122,18 +132,17 @@ class MoE(nn.Module):
             0, slot, h[:, None].expand(t, k, d).reshape(n, d)
         )
         buf = buf[: e * cap].view(e, cap, d)
-        y = F.relu(
-            torch.bmm(buf, torch.stack(list(self.up)).type_as(h).transpose(1, 2))
-        )
-        y = torch.bmm(y.square(), torch.stack(list(self.down)).type_as(h))
+        y = self.act(torch.bmm(buf, torch.stack(list(self.up)).type_as(h).transpose(1, 2)))
+        y = torch.bmm(y, torch.stack(list(self.down)).type_as(h))
         # back to assignments by the inverse map (free rows to spare rows): a gather both ways
         back = torch.arange(n, n + rows, device=h.device).index_copy(0, slot, arange)
         y = torch.cat((y.reshape(e * cap, d), y.new_zeros(n, d)))
         y = y.new_zeros(n + rows, d).index_copy(0, back, y)[:n].view(t, k, d)
         routed = (y * w.type_as(y)[..., None]).sum(1)
-        shared = F.relu(F.linear(h, self.shared_up.type_as(h))).square()
-        shared = F.linear(shared, self.shared_down.T.type_as(h))
-        out = (routed + shared).view(shape)
+        if self.shared:
+            shared = self.act(F.linear(h, self.shared_up.type_as(h)))
+            routed = routed + F.linear(shared, self.shared_down.T.type_as(h))
+        out = routed.view(shape)
         if self.training and self.seq:
             # DeepSeek-V3's sequence-wise balance loss, one 1024-token row = one sequence: per row
             # sum_i f_i P_i with f_i = e / k * share of the row's routes to expert i and P_i = its
@@ -148,6 +157,12 @@ class MoE(nn.Module):
             loss = self.seq * scale * 1024 * (sel * e / k * prob).sum()
             out = AddLoss.apply(out, loss)
         return out
+
+    def act(self, x):
+        if self.kind == "swiglu":
+            a, b = x.chunk(2, dim=-1)
+            return F.silu(a) * b
+        return F.relu(x).square()
 
     @torch.no_grad()
     def rebalance(self, scale=1.0):

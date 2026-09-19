@@ -31,6 +31,8 @@ DEFAULTS = dict(
     moe_gamma=1e-3,
     moe_seq=0.0,
     moe_update="sign",
+    moe_capacity=1.25,  # training capacity factor (eval is dropless)
+    moe_shared=True,  # shared expert (half the active width); off: routed experts take all of it
     diff_attn=False,  # differential attention (modded_diffattn)
     aux_detach=False,  # think-time / W-D-L head rows read stop-gradient features (trunk unaffected)
 )
@@ -49,25 +51,30 @@ def resolve(arch):
     assert not (out["full_rope"] and out["key_offset"]), (
         "full_rope needs key_offset=False"
     )
-    assert not out["moe"] or (out["mlp"] == "relu2" and not out["matrix_adam"])
+    assert not out["moe"] or (out["mlp"] in ("relu2", "swiglu") and not out["matrix_adam"])
     return out
 
 
 def moe_dims(width, arch):
-    """MoE constructor arguments: a 2d shared expert plus k routed experts of 2d / k each (active
-    hidden width = the dense MLP's 4d), then the routing settings."""
+    """MoE constructor arguments: the dense MLP's active hidden width (4d, or swiglu_hidden) split
+    into a shared expert of half of it plus k routed experts sharing the rest (all routed without
+    the shared expert), then the routing settings, training capacity and expert kind."""
     a = resolve(arch)
     if not a["moe"]:
         return None
     experts, topk = a["moe"]
-    assert 2 * width % topk == 0
-    hidden = (2 * width // topk, 2 * width)
+    active = swiglu_hidden(width) if a["mlp"] == "swiglu" else 4 * width
+    shared = active // 2 if a["moe_shared"] else 0
+    assert (active - shared) % topk == 0, (active, shared, topk)
     return (
         experts,
         topk,
-        *hidden,
+        (active - shared) // topk,
+        shared,
         *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
         a["moe_update"],
+        a["moe_capacity"],
+        a["mlp"],
     )
 
 
@@ -111,8 +118,13 @@ def extra_flops(arch, width, layers):
         extra += (
             2 * width * AUX_ROWS
         )  # matmul, though it has no input gradient (+0.1% at 8 x 512)
+    dense = layers
     if a["moe"]:  # nominal: k experts per token; dropped routes (logged) do no MLP work
+        _, k, routed, shared, *_ = moe_dims(width, arch)
+        per = 3 if a["mlp"] == "swiglu" else 2
         extra += 2 * (layers - 1) * width * a["moe"][0]  # routers
+        extra += 2 * (layers - 1) * (per * width * (shared + k * routed) - 8 * width * width)
+        dense = 1
     if a["mlp"] == "swiglu":
-        extra += 2 * layers * (3 * width * swiglu_hidden(width) - 8 * width * width)
+        extra += 2 * dense * (3 * width * swiglu_hidden(width) - 8 * width * width)
     return extra

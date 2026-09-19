@@ -1781,7 +1781,7 @@ class TrainingManager:
         ]
         scalar_labels = ["scalars"]
         muon_labels = ["attn_gate", "value_embed_gate", "attn", "mlp", "mlp_proj"]
-        muon_labels += ["moe", "mlp_shared"]
+        muon_labels += ["moe", "moe_up", "mlp_shared", "mlp_shared_up"]
         self.moe = [m for m in model.modules() if isinstance(m, MoE)]
         # model track: AdamW (base lr model.matrix_adam) for the attention / MLP matrices
         matrix_labels = (
