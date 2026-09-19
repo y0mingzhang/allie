@@ -23,6 +23,16 @@ DEFAULTS = dict(
     cautious_wd=True,  # cautious (sign-gated) decoupled weight decay
     normuon=True,  # NorMuon second-moment variance reduction on the Muon update
     board=None,  # None | direct | conv: board-state input at every position (modded_board)
+    moe=None,  # [experts, top-k]: DeepSeek MoE MLPs after the first layer (modded_moe)
+    # MoE routing: router init std, router Adam lr multiplier, bias update speed, sequence-wise balance
+    # loss weight (pilot2's defaults collapsed; tier 2b tunes them)
+    moe_init=0.02,
+    moe_router_lr_mul=0.1,
+    moe_gamma=1e-3,
+    moe_seq=0.0,
+    moe_update="sign",
+    diff_attn=False,  # differential attention (modded_diffattn)
+    aux_detach=False,  # think-time / W-D-L head rows read stop-gradient features (trunk unaffected)
 )
 
 
@@ -39,7 +49,31 @@ def resolve(arch):
     assert not (out["full_rope"] and out["key_offset"]), (
         "full_rope needs key_offset=False"
     )
+    assert not out["moe"] or (out["mlp"] == "relu2" and not out["matrix_adam"])
     return out
+
+
+def moe_dims(width, arch):
+    """MoE constructor arguments: a 2d shared expert plus k routed experts of 2d / k each (active
+    hidden width = the dense MLP's 4d), then the routing settings."""
+    a = resolve(arch)
+    if not a["moe"]:
+        return None
+    experts, topk = a["moe"]
+    assert 2 * width % topk == 0
+    hidden = (2 * width // topk, 2 * width)
+    return (
+        experts,
+        topk,
+        *hidden,
+        *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
+        a["moe_update"],
+    )
+
+
+def attn_factor(arch):
+    """Attention score / value FLOPs relative to standard attention."""
+    return 2 if resolve(arch)["diff_attn"] else 1
 
 
 def swiglu_hidden(width):
@@ -47,6 +81,9 @@ def swiglu_hidden(width):
     return round(8 * width / 3 / 16) * 16
 
 
+AUX_ROWS = (
+    2432 - 2350
+)  # padded head rows from the first think-time bin (modded_medium.VOCAB)
 BOARD_FEATURES = (
     64 * 13 + 2 + 16 + 9
 )  # pieces one-hot, side, castling rights, en-passant file
@@ -68,6 +105,14 @@ def extra_flops(arch, width, layers):
     no input gradient: +0.5% FLOPs for boarddirect, against the board arms."""
     a = resolve(arch)
     extra = 2 * board_macs(a["board"], width)
+    if a[
+        "aux_detach"
+    ]:  # the aux head rows' second (detached) matmul: forward, x3 like every
+        extra += (
+            2 * width * AUX_ROWS
+        )  # matmul, though it has no input gradient (+0.1% at 8 x 512)
+    if a["moe"]:  # nominal: k experts per token; dropped routes (logged) do no MLP work
+        extra += 2 * (layers - 1) * width * a["moe"][0]  # routers
     if a["mlp"] == "swiglu":
         extra += 2 * layers * (3 * width * swiglu_hidden(width) - 8 * width * width)
     return extra
