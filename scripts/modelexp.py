@@ -25,7 +25,8 @@ import dataexp as dx
 from modded_arch import extra_flops
 
 ROOT = dx.ROOT
-B2 = ROOT / "results/recipe10x/data-v1-B2.json"
+# the pinned data baseline this branch screens on: B_3 (B_2 + OTB x4; main, 2026-09-19 ~10:00)
+B2 = ROOT / "results/recipe10x/data-v1-B3.json"
 B2_META = (
     "source_study",
     "source_run",
@@ -396,6 +397,27 @@ wave(
     "model-v1-smoke's base step for step (default-off identity)",
 )
 
+# B_4 = B_3 + boardcnn (user, ~10:00: confirmed model-track wins join the baseline). (1) the 1e17
+# check against B_3's 1e17 pair (control's absolute schedule, FLOP-matched), s42 / s43, on general;
+# (2) B_4 x 4 seeds at 3e16 as the next screens' pooled controls, on the faster sampler (7e8d2a2)
+BOARD = dict(arch=dict(board="conv"))
+wave(
+    "b4check",
+    "model-v1-b4check",
+    "mb4c",
+    variants("1e17", b, {"b4": BOARD | dict(abs_sched=True)}, seeds=(42, 43)),
+    "B_4 (B_3 + boardcnn) at 1e17, control schedule, s42 / s43, vs B_3's 1e17 pair",
+    "general",
+)
+wave(
+    "b4ctl",
+    "model-v1-b4ctl",
+    "mb4",
+    variants("3e16", b, {"b4": BOARD}, seeds=(42, 43, 44, 45)),
+    "B_4 x 4 seeds at 3e16: pooled controls for the next screens on B_4",
+    "preempt",
+)
+
 
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
@@ -635,7 +657,10 @@ def pooled_controls(study, controls):
     w = WAVES[plan["wave"]]
     rows = []
     for budget in sorted({r["budget"] for r in plan["runs"]}):
-        base = planned(w, variants(budget, b, {"base": {}})[0])
+        # the run a control must equal: base at 3e16, the absolute-schedule control model above
+        ref = "base" if budget == "3e16" else "control"
+        spec = {} if ref == "base" else dict(abs_sched=True)
+        base = planned(w, variants(budget, b, {ref: spec})[0])
         assert base["b2"] == plan["hashes"]["b2"], (
             "the loaded B_2 is not the one this study froze"
         )
@@ -671,7 +696,7 @@ def pooled_controls(study, controls):
                 rows.append(
                     res
                     | dict(
-                        v="base",
+                        v=ref,
                         study=plan["runs"][0]["group"],
                         b2=plan["hashes"]["b2"],
                         useful_training_flops=train[-1]["useful_training_flops"],
@@ -824,6 +849,8 @@ def table(*keys, controls=()):
             pooled[g] = pooled_controls(
                 ROOT / "results/recipe10x" / WAVES[key]["study"], controls
             )
+    for g, group_rows in pooled.items():
+        print(f"pooled for {g}:", ", ".join(r["name"] for r in group_rows))
     rows += [r for group_rows in pooled.values() for r in group_rows]
     out = {}
     for metric, field in (("strat_macro", "macro"), ("strat_expert", "expert_macro")):
