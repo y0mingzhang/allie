@@ -115,8 +115,11 @@ class MoE(nn.Module):
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
         flat = idx.flatten()
-        onehot = F.one_hot(flat, e)
-        pos = (onehot.cumsum(0) * onehot).sum(-1) - 1  # rank within its expert
+        arange = torch.arange(n, device=h.device)
+        count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
+        order = flat.argsort(stable=True)  # rank within its expert, in assignment order
+        start = count.cumsum(0) - count
+        pos = torch.empty_like(flat).index_copy_(0, order, arange - start[flat[order]])
         cap = math.ceil(self.capacity * n / e) if self.training else t
         if self.training:
             with torch.no_grad():
@@ -125,21 +128,21 @@ class MoE(nn.Module):
                 moved = (own.gather(1, idx) < 1).any(-1).sum()
                 margin = (top.values[:, k - 1] - top.values[:, k]).sum()
                 extra = [(pos >= cap).sum(), moved, torch.full_like(moved, t), margin]
-            self.load[:e] += onehot.sum(0).float()
+            self.load[:e] += count.float()
             self.load[e:] += torch.stack([v.float() for v in extra])
-        rows = e * cap + n  # expert slots, then one spill row per assignment
-        arange = torch.arange(n, device=h.device)
-        slot = torch.where(pos < cap, flat * cap + pos, e * cap + arange)
-        buf = h.new_zeros(rows, d).index_copy(
+        rows = e * cap  # expert slots, then one dummy row for every dropped assignment
+        slot = torch.where(pos < cap, flat * cap + pos, rows)
+        buf = h.new_zeros(rows + 1, d).index_copy(
             0, slot, h[:, None].expand(t, k, d).reshape(n, d)
         )
-        buf = buf[: e * cap].view(e, cap, d)
+        buf = buf[:rows].view(e, cap, d)
         y = self.act(torch.bmm(buf, torch.stack(list(self.up)).type_as(h).transpose(1, 2)))
         y = torch.bmm(y, torch.stack(list(self.down)).type_as(h))
-        # back to assignments by the inverse map (free rows to spare rows): a gather both ways
-        back = torch.arange(n, n + rows, device=h.device).index_copy(0, slot, arange)
-        y = torch.cat((y.reshape(e * cap, d), y.new_zeros(n, d)))
-        y = y.new_zeros(n + rows, d).index_copy(0, back, y)[:n].view(t, k, d)
+        # back to assignments by the inverse map (free slots to spare rows; the zero dummy row to
+        # a dropped assignment, whose output stays zero): a gather both ways
+        back = torch.arange(n, n + rows + 1, device=h.device).index_copy(0, slot, arange)
+        y = torch.cat((y.reshape(rows, d), y.new_zeros(1, d)))
+        y = y.new_zeros(n + rows + 1, d).index_copy(0, back, y)[:n].view(t, k, d)
         routed = (y * w.type_as(y)[..., None]).sum(1)
         if self.shared:
             shared = self.act(F.linear(h, self.shared_up.type_as(h)))
