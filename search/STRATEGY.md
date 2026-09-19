@@ -36,15 +36,10 @@ thinking time. These are separate ablation axes, not one indivisible method.
   depth is a candidate cost improvement, not yet established dominance.
 - Identical-order repeats on the current A100 agree exactly across 4,096
   development positions. Permuting fixed-search batches shifts macro/expert
-  CE by about -0.00013/-0.00032. Adaptive order checks are still underway.
-- The next quality ablation changes both ratings inside the entire imagined
-  continuation while retaining the actual root prior. Earlier one-ply value
-  probes did not test the resulting change in internal exploration. Controls:
-  actual, common +200, common +400, equal2400. All pay 1,000 nominal
-  simulations; actual NN counts, extra prefills and wall time are reported.
-- A small separate diagnostic tests whether recomputing only the W/D/L output
-  rows in FP32 reduces batch-sensitive critic rounding. It is a numerical
-  test, not a demonstrated quality improvement.
+  CE by about -0.00013/-0.00032. Adaptive permutation deltas were -0.000052/-0.000041; individual policies can vary more.
+- Entire-continuation rating interventions actual/+200/+400/equal2400 are complete. No resolved checking gain; no promotion.
+- FP32 WDL-only readout reduces critic numerical tails but gave no resolved CE gain on the full paired development study. Default unchanged.
+- Next: complementary two500-search portfolios versus one1000 control. Mild and strong exploration pairs, same-c numerical-ensemble control, fixed Q averaging, all queries/prefills charged and output calibration fit within game folds.
 
 Prioritize a clear intervention over a large parameter sweep. A null result
 rules out promoting that tested variant, not its entire algorithm family.

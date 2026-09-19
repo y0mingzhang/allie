@@ -12,8 +12,9 @@ Read controller/STOP and results/search-v1/STOP before work. Neither existed at 
 
 - ONE job10504460 search-engine RUNNING on A10080G/babel-y9-24; restarted2026-09-19 19:56:19UTC. Previous Ada allocation was preempted. Keep both charges. Attempted pending Features update was rejected after restart; no change took effect.
 - Current enginePID2530027; ready_unix1789848043. Cold stage161.9s plus process startup98.1s. Logs engine-10504460.log. No other search GPU submitted. General/dei belong to Claude.
--101 numerical audit DONE.102 conditioned-search smoke DONE, exact same-hardware actual-control reproduction.103 critic precision diagnostic DONE.104 full conditioned-search is RUNNING, atomic256-root blocks, fourarms. No new golden queued. Do not duplicate requests.
-- Python gate(session94700) queued104 only after102 passed and exited. Progress-only observer(session83706) may time out independently of GPU work; never infer job failure from observer exit. Existing search.advance --watch preserves cumulative sacct charges.
+-101 numerical audit,102/104 header intervention,103/105/106 critic precision all DONE. No new golden queued.
+-107 portfolio smoke PASSED all7 components, fresh single1000 Q/root/counts exact versus same-A100104 control.108 full portfolio RUNNING/queued. Atomic256-root blocks; inspect queue result/error before any new work. Never duplicate.
+-Existing search.advance --watch preserves every allocation charge. Previous Python gate/observer sessions are finished; do not restart them.
 
 ## Current findings and next action
 
@@ -23,7 +24,9 @@ Read controller/STOP and results/search-v1/STOP before work. Neither existed at 
 -103 fixed-prefix precision diagnostic: only3WDL readout rows recomputedFP32, other logits bit-identical and hook restored in finally.99th-percentile batch-size value differences~.038→.0097, maximum~.059→.013. One target-selected debugging tree, not representative quality evidence. No new inference default adopted.
 -104 aug-conditioned-search-v1: actual root policy/quotas fixed. Entire imagined continuation uses actual/common+200/common+400/equal2400. Shift preserves rating gap; separate hypothetical-header prefill prevents mismatched KV.1000simulations, all NN calls and additional root/prefill work charged. Fourarms,4096August positions, modern output fit inside gameCV. Inspect result/error and per-cell deltas; no automatic golden promotion.
 
-After104: verify all actual-control Q/root/node blocks equal101 fixed1000-repeat on same A100(after103 hook restoration). Report all4arms, quality intervals and costs; choose from fitCV only. If the header intervention wins, isolate continuation prior versus critic mechanisms. If not, consider a paired FP32-critic search test (same nodes, tiny extra head work) or complementary search portfolios; no new neural weights/external memory. Each is a hypothesis, not a demonstrated win.
+104 is complete: all actual-control Q/root/counts equal101; no resolved header win.106 full FP32 critic search complete: macro1.408817/expert1.229608 vs BF16 1.408829/1.228056, ~972nodes,109vs105seconds for4096. Both checking intervals include0; no default change.
+
+108 aug-portfolio-search-v1: fresh single1000, half500 c2.5, half500 c2.5 globally permuted, c.5/5 and c1/4 components. Fixed equal-Q portfolios, both inherited scale16 and count-normalized8 variants. Identical root quotas for unpermuted500 arms make visit-weighted and plain means identical; assertions check this. Refit each output inside the same gameCV. All duplicate NN calls and both prefills charged. Same-c permutation is a numerical-ensemble control. No union cache infrastructure yet. Report ALL arms and per-cell/game CIs, no golden CM on August. Inspect results before deciding next algorithm.
 
 All development is reused August, potentially training-seen. Current goal10x/10x remains unmet. Keep July raw anchors/laws fixed, fresh disjoint golden confirmation required for final claim. Do not turn stability probes into a new quality claim.
 

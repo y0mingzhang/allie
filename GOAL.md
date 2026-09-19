@@ -15,7 +15,7 @@ Ablate components before dismissing an entire idea; prioritize the strongest
 available research direction over exhaustive weak variants.
 
 Current work: inference infrastructure is operational. Resume the existing10x/10x
-search goal with batched experiment execution and reporting. One preempt GPU (workbench10504460,RTX6000Ada onbabel-x5-20) while general is reserved for Claude. Its8h allocation began2026-09-19at19:29:41UTC.10503933timedout; the dependency prevented overlap. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
+search goal with batched experiment execution and reporting. One preempt GPU (workbench10504460,A10080G on babel-y9-24) while general is reserved for Claude. It was preempted and restarted at2026-09-19 19:56:19UTC; preserve both allocation charges.10503933timedout; the dependency prevented overlap. Allocation boundaries are not research stop conditions. The previous pause is superseded by the explicit user instruction.
 All prior compute charges and fixed-checkpoint targets remain unchanged.
 
 Infrastructure milestone completed: fast hackable SGLang inference port.
