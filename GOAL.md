@@ -88,7 +88,7 @@ and its baseline anchor explicitly instead of silently treating a changed frame 
 the identical full-population control-variate estimate. Preserve current goal targets.
 
 Resources: ONE reasonably fast persistent preempt GPU while general is reserved
-for Claude's training/benchmark. Current workbench 10503933 replaces timed-out 10503413. Keep all prior charges. User permits infrastructure work and a faster
+for Claude's training/benchmark. Current workbench10504460 replaces timed-out10503933; no overlap occurred. Keep all prior charges. User permits infrastructure work and a faster
 available accelerator; compare end-to-end cost before migrating. Never exceed
 one GPU or displace peers. Coordinate the shared preempt cap with Claude.
 Latest user instruction: maintain one long-running GPU session for fast iteration.
