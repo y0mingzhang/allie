@@ -27,16 +27,39 @@ No Slurm or shared main mutations this turn; no outstanding peer reviews.
 
 ## Immediate work
 
-038-soft-selection is running on SAME GPU. New isolated soft_selection.cpp /
-soft_selection_native.py / soft_selection_pilot.py select branches with current
-soft Bellman values (tau.1), while preserving the same audited output backups.
-Two variants soft_cp25/soft_cp5,4096August roots,1000sims,512batch. Disabled mode
-matches old FPU path exactly. Independent CPU recomputation of EVERY node value,
-terminal signs and root output/PUCT choice passes. Live first512 baseline identity
-must pass before arms. First CPU test had a reference-test mass double count;
-fixed reference, rerun passed; keep both logs. After completion run:
-OMP_NUM_THREADS=1 <local-runtime>/bin/python -m search.engine.analyze_selection aug-soft-selection-v1
-Current analyzer supports its standard64/256/1000 snapshots. No golden use yet.
+039-deep-selection is running on SAMEGPU: aug-deep-v1, ordinarycp2.5 zeroFPU,
+4000sim with64/256/1000/4000snapshots,160roots/batch. Conservative KVbound max
+650012<786432 checked before queue. Driver repeats512-root1000 identity then
+uses160-root actual batches. Own1000snapshot is matched-numerics control.
+After completion: OMP_NUM_THREADS=1 <runtime>/bin/python -m
+search.engine.analyze_deep_selection aug-deep-v1. This analyzer uses each
+variant's own logits and reports root drift vsold512batch; no silent baseline
+replacement. Current worker may take10min. Routine watcher assigned039.
+
+038-soft-selection DONE; soft_cp25 and soft_cp5 output in aug-soft-selection-v1.
+FitCV pickssoft_cp5 for both; confirmation1.456085/1.358828 at976.63nodes.
+OrdinaryzeroFPUcp5 was1.456614/1.357294; difference tiny/mixed and FPUconfounded.
+At matchedbootstrapFPUcp2.5, newsoft CE1.459466/1.365697 is WORSE than ordinary
+bootstrapcp2.5 CE1.456975/1.359714. No established benefit; do not promote.
+Incremental softbackup exact CPUreference and livebaselineidentity passed.
+First unit-test failure was reference-test mass double count, fixed and rerun;
+keep both logs. Current code committedf7eeae0.
+
+040-coverage is QUEUED behind039 on SAMEGPU:
+coverage.cpp/coverage_native.py/coverage_pilot.py. Root quotas maximize
+prior**eta/(1+n), weights sqrt(p),p,sqrt(p*(1-p)), with ordinaryPUCTcp2.5 zeroFPU belowroot. Existing
+nodecounter and outputbackups unchanged; no terminal skipping. CPUunit tests PASS: disabled-mode exactbaseline,FPU sign, independentrootquota
+choice at every64step for all3modes. Logs/coverage-test-v2.log. Queue040 exists:
+DO NOT duplicate. Expected~7min after039. Analyzer is standard
+analyze_selection aug-coverage-v1. All3arms share samecp2.5/zeroFPU interior.
+
+
+CPUinnovation check DONE38.9s including dataread. Puredeep-minus-oneplyfailed:
+CE1.48037/1.42440 vsbaseline1.457688/1.359266. Learneddeep+one selected onCV
+butconfirmation1.458048/1.362592 givesnoheld-outwin. Dropped. aug-selection-v1/
+innovation.json; report all5arms. First CPUanalysis wasterminated before result
+because its innerloop repeatedlydecompressednpzarrays; fixed toloadonce and
+vectorize rootchildselection. Bothlogs retained, noGPUwork lost.
 
 035-selection-wide DONE414.34s. FitCV selects zero_cp10_1000_elo for macro and
 bootstrap_cp25_1000_elo for expert. Confirmation1.456151/1.359711 and

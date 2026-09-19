@@ -27,6 +27,7 @@ def main():
                        ('aug-search-v1/budget-router.json','August budget allocation by known Elo group, selected on fit CV under a node cap.'),
                        ('aug-selection-v1/results.json','August first-play urgency and exploration-strength selection ablations.'),
                        ('aug-selection-wide-v1/results.json','August broader exploration and FPU combination.'),
+                       ('aug-selection-v1/innovation.json','August search-innovation and shallow/deep value combination; no confirmation win.'),
                        ('aug-selection-v1/state-calibration.json','August state-dependent search correction; fit-game CV selection, fixed cached trees and node cost.'),
                        ('aug-soft-selection-v1/results.json','August soft Bellman values used for branch selection as well as final output; matched simulation budget.'),
                        ('aug-search-v1/latent-budget.json','August mixtures of latent search budgets, with nested game CV. Existing fixed budget selected; no promotion.')]:

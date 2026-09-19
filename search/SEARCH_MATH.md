@@ -152,3 +152,18 @@ groups and regularized; all feature normalization and fits stay inside game CV.
 No observed human thinking time or future outcome is an input. The unrestricted
 linear beta may become negative in rare states, so this variant is a predictive
 logit calibration, not a claim of a universally positive rationality coefficient.
+
+
+## Coverage rather than best-move identification
+
+For an idealized unbiased independent action-value estimate with variance
+sigma_a^2/n_a, a local softmax-policy KL expansion gives error proportional to
+sum_a p_a(1-p_a) sigma_a^2/n_a, times a common beta^2/2 factor.
+Minimizing that surrogate under sum n_a=B yields n_a proportional to
+sqrt(p_a(1-p_a) sigma_a^2). Search values are biased and correlated, so this is a
+heuristic motivation, not a guarantee. The test uses sqrt(prior*(1-prior)),
+prior^0.5 (dropping the1-p factor) or prior (proportional coverage) as root quotas,
+implemented by choosing max weight/(1+visits). It keeps ordinary PUCT below
+root. This separates estimating the plausible-action distribution from the
+best-arm focus of playing-strength search. All likelihood calibration stays
+on August fit games, and node cost includes terminal visits separately.
