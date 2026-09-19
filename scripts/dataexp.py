@@ -661,6 +661,35 @@ WAVES["round5p"] = WAVES["round4"] | dict(
     "at 1e17): up8 (5-seed z +2.2 / -2.8) and engine x4 (1-seed pass, 2-seed macro fail); vs B_3 s42 / s43",
 )
 
+GPU4 = dict(gpus=4, run_gpus=4, pack=1, throttle=1)
+WAVES["round6"] = WAVES["round4"] | GPU4 | dict(
+    study="data-v1-round6",
+    prefix="r6",
+    sbatch="""#SBATCH --account=dippolit
+#SBATCH --partition=general
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:L40S:4
+#SBATCH --exclude=babel-q9-32,babel-x9-32
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=200G
+#SBATCH --time=12:00:00""",
+    runs=r3(b2("3e17", B3C), "3e17", **X),
+    purpose="data recipe B_3 at 3e17 on 4 GPUs: the data track's CM at the rung nearest the final run, against "
+    "round6c's matched control",
+)
+
+WAVES["round6c"] = WAVES["round3p"] | GPU4 | dict(
+    b2=False,
+    study="data-v1-round6c",
+    prefix="r6c",
+    sbatch=WAVES["wave2"]["sbatch"].replace("--gres=gpu:1", "--gres=gpu:4")
+    .replace("--cpus-per-task=6", "--cpus-per-task=24")
+    .replace("--mem=64G", "--mem=200G")
+    + f"\n#SBATCH --constraint={FAST}",
+    runs=r3(b2("3e17", "control"), "3e17"),
+    purpose="matched control (control mix + cf3 + aux, B_2 stores/months/history) at 3e17 on 4 GPUs, for round6",
+)
+
 def name(w, r):
     tag = f"-{r['tag']}" if "tag" in r else ""
     clk = (
