@@ -3,6 +3,17 @@
 Owner: Codex. Worktree: `codex/search-v1`, independent of Claude's main worktree.
 Status: active, explicitly resumed by Yiming on 2026-09-19 after the usage reset.
 
+Latest constraint (Yiming,2026-09-19): NO EXTERNAL MEMORY. Human-game retrieval,
+nearest-neighbor datastores, opening books of other games, cross-game player
+profiles and episodic memories are excluded from further inference research.
+Allowed inference information: fixed model, current game prefix/header/pre-move
+context, chess rules, and the current query's search/KV state. Cached model
+outputs may support controlled research comparisons; they must not introduce
+information from other games into a prediction. Preserve historical retrieval
+reports as rejected/out-of-scope evidence; do not restart retrieval work.
+Ablate components before dismissing an entire idea; prioritize the strongest
+available research direction over exhaustive weak variants.
+
 Current work: inference infrastructure is operational. Resume the existing10x/10x
 search goal with batched experiment execution and reporting. One preempt GPU
 (workbench10503413) while general is reserved for Claude; actual54min backfill

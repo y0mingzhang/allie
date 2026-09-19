@@ -1,6 +1,11 @@
 # Search recovery — 2026-09-19 17:51 UTC
 
 ## Authority and goal
+Latest user constraint: NO EXTERNAL MEMORY. No human-game retrieval/books/kNN,
+cross-game player profiles or episodic datastore. Fixed model + current game
+context + rules + query-local tree/KV only. Historical reports stay for audit;
+no retrieval work running or to restart. Carefully ablate ideas, prioritize
+promising directions. Next equal-budget tactical-vs-normal search check.
 Yiming explicitly resumed this goal after the usage reset:10x macro AND10x expert
 training-equivalent CM, fixed checkpoint/laws, improved NN-node/quality frontier.
 Do not reset/complete the goal. Goal UI returnednull at18:02UTC; restoredthe
