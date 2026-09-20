@@ -68,13 +68,10 @@ class MoE(nn.Module):
         self.gamma, self.update, self.seq = gamma, update, seq
         bound = 3**0.5 * 0.5 * dim**-0.5  # the dense MLP's c_fc init
         self.router = nn.Parameter(torch.randn(experts, dim) * init)
-        self.up = nn.ParameterList(
-            nn.Parameter(torch.empty(up * expert_hidden, dim).uniform_(-bound, bound))
-            for _ in range(experts)
-        )
-        self.down = nn.ParameterList(
-            nn.Parameter(torch.zeros(expert_hidden, dim)) for _ in range(experts)
-        )
+        # one 3D tensor per layer for all experts (per-expert tensors cost a kernel each per step)
+        self.up = nn.Parameter(torch.empty(experts, up * expert_hidden, dim))
+        self.up.data.uniform_(-bound, bound)
+        self.down = nn.Parameter(torch.zeros(experts, expert_hidden, dim))
         self.shared = shared_hidden > 0
         if self.shared:
             self.shared_up = nn.Parameter(
@@ -87,17 +84,14 @@ class MoE(nn.Module):
             router_lr_mul,
             0.0,
         )
-        # NorMuon stacks a label's params, so differently shaped SwiGLU ups get their own labels
-        for p in (*self.up, *self.down):
-            p.label = "moe"
+        # NorMuon stacks a label's params and orthogonalizes each expert matrix; differently shaped
+        # SwiGLU ups get their own label
+        self.up.label, self.down.label = "moe_up" if up == 2 else "moe", "moe"
         for p in shared:
             p.label = "mlp_shared"
-        if up == 2:
-            for p in self.up:
-                p.label = "moe_up"
-            if self.shared:
-                self.shared_up.label = "mlp_shared_up"
-        for p in (*self.down, *shared[1:]):
+        if up == 2 and self.shared:
+            self.shared_up.label = "mlp_shared_up"
+        for p in (self.down, *shared[1:]):
             p.lr_mul = 2.0  # the dense MLP's c_proj multiplier
         self.register_buffer(
             "bias", torch.zeros(experts)
@@ -123,8 +117,7 @@ class MoE(nn.Module):
         flat = idx.flatten()
         count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
         order = flat.argsort(stable=True)
-        up = torch.stack(list(self.up)).type_as(h)
-        down = torch.stack(list(self.down)).type_as(h)
+        up, down = self.up.type_as(h), self.down.type_as(h)
         if self.kernel == "scatter":  # dropless: fused gather-GEMM-scatter (ScatterMoE)
             offs = count.cumsum(0)
             se = flat[order]

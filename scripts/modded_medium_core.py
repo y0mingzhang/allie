@@ -816,9 +816,9 @@ class NorMuon(torch.optim.Optimizer):
             if num_params == 0:
                 v_chunk = updated_grads
             else:
-                v_chunk = polar_express(
-                    updated_grads, split_baddbmm=(ref_param.label == "mlp")
-                )
+                v_chunk = polar_express(  # 3D params (MoE experts): one matrix per leading index
+                    updated_grads.flatten(0, -3), split_baddbmm=(ref_param.label == "mlp")
+                ).view(updated_grads.shape)
 
             # Note that the head orientation in O is transposed relative to QKV, so red_dim
             # is 'incorrect' for O. However, correcting this showed no improvement. @chrisjmccormick
