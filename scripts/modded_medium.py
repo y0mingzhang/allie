@@ -22,6 +22,7 @@ import modded_board
 import modded_diffattn
 import modded_medium_core as core
 from modded_runtime import prime_source_key
+from modded_smoe_tuned import finish_direct_accum
 
 RUNTIME_SOURCE_KEY = prime_source_key()
 
@@ -35,7 +36,11 @@ MASTER_LABELS = (
     "attn",
     "mlp",
     "mlp_proj",
-)  # FP32 matrices that --bf16-weights stores in BF16
+    "moe",
+    "moe_up",
+    "mlp_shared",
+    "mlp_shared_up",
+)  # FP32 matrices that --bf16-weights stores in BF16 (MoE experts included; the router stays FP32)
 flex_kernel = torch.compile(flex_attention, dynamic=False)
 BOARD = False  # set by create_model when the model has a board branch; make_context then encodes
 
@@ -215,6 +220,7 @@ def create_model(cfg, device="cuda"):
         # Keep that warmup out of module import so CPU inspection still works.
         torch.empty(1, device=device, requires_grad=True).backward()
     arch = modded_arch.resolve(cfg.arch)
+    assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
     global BOARD
     BOARD = bool(
         arch["board"]
@@ -291,7 +297,8 @@ def create_model(cfg, device="cuda"):
                 True,
                 None,
             )
-            p.register_post_accumulate_grad_hook(core.accumulate_fp32)
+            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
+            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else core.accumulate_fp32)
     for p in model.parameters():
         dist.broadcast(p.detach(), 0)
         if hasattr(p, "fp32"):

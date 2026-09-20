@@ -625,6 +625,7 @@ class NorMuon(torch.optim.Optimizer):
             for k, p in enumerate(ps):
                 self._pflat[i][k].copy_(p.detach())
                 p.data, p.main_grad, p.fresh = self._pflat[i][k], self._flat[i][k], True
+                p.acc = (self._flat[i], k)
                 del p.fp32
         # by index: load_state_dict replaces the group dicts
         self._group_of = {
@@ -1624,7 +1625,15 @@ class GPT(nn.Module):
         if self.doc_rope:
             cos, sin = cos[seqlens.positions], sin[seqlens.positions]
         skip_idx = 0
+        direct_owners = set()
         for i in range(self.num_layers):
+            mlp = self.blocks[i].mlp
+            if getattr(mlp, "kernel", None) == "scatter-accum":
+                # First-microbatch overwrite is captured at forward time: tied
+                # expert parameters must not contribute twice in this forward.
+                for p in (mlp.up, mlp.down):
+                    assert id(p) not in direct_owners, "direct accumulation requires one use per expert parameter"
+                    direct_owners.add(id(p))
             attn_args = AttnArgs(
                 ve=ve[i],
                 sa_lambdas=sa_lambdas[i],

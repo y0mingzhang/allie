@@ -21,6 +21,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from modded_smoe import parallel_linear
+from modded_smoe_tuned import parallel_linear as tuned_linear
 
 # MoE.stats, per layer over the last step (modded_train logs them as moe_<name>)
 STATS = (
@@ -58,7 +59,7 @@ class MoE(nn.Module):
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
-        assert kernel in ("pad", "scatter")
+        assert kernel in ("pad", "scatter", "scatter-tuned", "scatter-accum")
         self.score, self.kernel = score, kernel
         self.experts, self.topk, self.capacity, self.kind = experts, topk, capacity, kind
         up = 2 if kind == "swiglu" else 1  # SwiGLU experts: gate and value rows
@@ -118,12 +119,21 @@ class MoE(nn.Module):
         count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
         order = flat.argsort(stable=True)
         up, down = self.up.type_as(h), self.down.type_as(h)
-        if self.kernel == "scatter":  # dropless: fused gather-GEMM-scatter (ScatterMoE)
+        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum"):  # both paths are dropless
             offs = count.cumsum(0)
             se = flat[order]
-            y = parallel_linear(h, up.transpose(1, 2), k, se, order, offs, grouped_out=True)
-            routed = parallel_linear(
-                self.act(y), down, 1, se, order, offs, grouped_in=True, gates=w.type_as(h)
+            linear = tuned_linear if self.kernel in ("scatter-tuned", "scatter-accum") else parallel_linear
+            direct = self.kernel == "scatter-accum" and self.training and torch.is_grad_enabled()
+            up_args, down_args = {}, {}
+            if direct:
+                assert self.up.dtype == self.down.dtype == torch.bfloat16
+                up_flat,up_row=self.up.acc
+                down_flat,down_row=self.down.acc
+                up_args = dict(main_grad=up_flat,main_grad_row=up_row,fresh=self.up.fresh,main_grad_transposed=True)
+                down_args = dict(main_grad=down_flat,main_grad_row=down_row,fresh=self.down.fresh)
+            y = self.act(linear(h, up.transpose(1, 2), k, se, order, offs, grouped_out=True, **up_args))
+            routed = linear(
+                y, down, 1, se, order, offs, grouped_in=True, gates=w.type_as(h), **down_args
             )
             dropped = torch.zeros((), dtype=torch.long, device=h.device)
         else:
