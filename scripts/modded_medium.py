@@ -39,6 +39,8 @@ MASTER_LABELS = (
     "moe_up",
     "mlp_shared",
     "mlp_shared_up",
+    "moe_sh",
+    "moe_up_sh",
 )  # FP32 matrices that --bf16-weights stores in BF16 (MoE experts included; the router stays FP32)
 flex_kernel = torch.compile(flex_attention, dynamic=False)
 BOARD = False  # set by create_model when the model has a board branch; make_context then encodes

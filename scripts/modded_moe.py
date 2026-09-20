@@ -18,6 +18,7 @@ import math
 import torch
 import torch.distributed as dist
 from torch import nn
+from torch.distributed import _functional_collectives as funcol
 from torch.nn import functional as F
 
 from modded_smoe import parallel_linear
@@ -50,11 +51,30 @@ class AddLoss(torch.autograd.Function):
         return grad, torch.ones((), dtype=torch.float32, device=grad.device)
 
 
+class Gather(torch.autograd.Function):
+    """Sharded experts (ZeRO-3 style): each rank's whole-expert shard, cast to the compute dtype, gathered
+    along the expert dim. The backward reduce-scatters the full gradient back to the shards in FP32,
+    averaged like the replicated grads, and returns it in the parameter's dtype."""
+
+    @staticmethod
+    def forward(ctx, shard, dtype):
+        ctx.dtype = shard.dtype
+        x = shard.to(dtype)
+        return funcol.wait_tensor(funcol.all_gather_tensor(x, 0, dist.group.WORLD))
+
+    @staticmethod
+    def backward(ctx, g):
+        g = funcol.reduce_scatter_tensor(
+            g.float().contiguous(), "avg", 0, dist.group.WORLD
+        )
+        return funcol.wait_tensor(g).to(ctx.dtype), None
+
+
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
         gamma=1e-3, seq=0.0, update="sign", capacity=1.25, kind="relu2", score="sigmoid",
-        kernel="pad",
+        kernel="pad", shard=False,
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
@@ -72,6 +92,14 @@ class MoE(nn.Module):
         self.up = nn.Parameter(torch.empty(experts, up * expert_hidden, dim))
         self.up.data.uniform_(-bound, bound)
         self.down = nn.Parameter(torch.zeros(experts, expert_hidden, dim))
+        # shard: each rank keeps experts // world whole experts (same init as unsharded, then sliced)
+        self.sharded = bool(shard) and dist.is_initialized() and dist.get_world_size() > 1
+        if self.sharded:
+            w, r = dist.get_world_size(), dist.get_rank()
+            assert experts % w == 0, f"{experts} experts over {w} ranks"
+            n = experts // w
+            self.up = nn.Parameter(self.up.data[r * n : (r + 1) * n].clone())
+            self.down = nn.Parameter(self.down.data[r * n : (r + 1) * n].clone())
         self.shared = shared_hidden > 0
         if self.shared:
             self.shared_up = nn.Parameter(
@@ -87,6 +115,8 @@ class MoE(nn.Module):
         # NorMuon stacks a label's params and orthogonalizes each expert matrix; differently shaped
         # SwiGLU ups get their own label
         self.up.label, self.down.label = "moe_up" if up == 2 else "moe", "moe"
+        if self.sharded:  # rank-local params: their own (local) NorMuon, no replica reduction
+            self.up.label, self.down.label = self.up.label + "_sh", "moe_sh"
         for p in shared:
             p.label = "mlp_shared"
         if up == 2 and self.shared:
@@ -117,7 +147,10 @@ class MoE(nn.Module):
         flat = idx.flatten()
         count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
         order = flat.argsort(stable=True)
-        up, down = self.up.type_as(h), self.down.type_as(h)
+        if self.sharded:
+            up, down = Gather.apply(self.up, h.dtype), Gather.apply(self.down, h.dtype)
+        else:
+            up, down = self.up.type_as(h), self.down.type_as(h)
         if self.kernel == "scatter":  # dropless: fused gather-GEMM-scatter (ScatterMoE)
             offs = count.cumsum(0)
             se = flat[order]

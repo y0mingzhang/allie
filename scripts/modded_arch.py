@@ -35,6 +35,7 @@ DEFAULTS = dict(
     moe_shared=True,  # shared expert (half the active width); off: routed experts take all of it
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     moe_kernel="pad",  # pad (capacity bmm) | scatter (ScatterMoE, dropless)
+    moe_shard=False,  # experts sharded over ranks (whole experts), gathered per layer
     diff_attn=False,  # differential attention (modded_diffattn)
     aux_detach=False,  # think-time / W-D-L head rows read stop-gradient features (trunk unaffected)
 )
@@ -78,6 +79,7 @@ def moe_dims(width, arch):
         a["mlp"],
         a["moe_score"],
         a["moe_kernel"],
+        a["moe_shard"],
     )
 
 

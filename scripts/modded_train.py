@@ -285,7 +285,9 @@ def main():
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    vrows = val.rows(val_idx) if rank == 0 else None
+    # sharded MoE experts make every forward a collective: all ranks validate, rank 0 records
+    sharded = any(getattr(m, "sharded", False) for m in model.modules())
+    vrows = val.rows(val_idx) if rank == 0 or sharded else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
     runtime = dict(
         torch=torch.__version__,
@@ -670,6 +672,8 @@ def main():
         ):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
+            if sharded and rank:
+                evaluate(net, manager, vrows, a.micro_batch)
             if rank == 0:
                 metrics = evaluate(net, manager, vrows, a.micro_batch)
                 best = min(best, metrics["move_ce"])

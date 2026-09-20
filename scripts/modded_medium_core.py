@@ -589,11 +589,14 @@ class NorMuon(torch.optim.Optimizer):
         momentum=0.95,
         beta2=0.95,
         custom_sizing=True,
+        group=None,
     ):
         defaults = dict(
             lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2
         )
-        self.world_size = dist.get_world_size() if dist.is_initialized() else 1
+        # group: a single-rank group for rank-local params (sharded MoE experts: whole experts per rank)
+        self.group = group
+        self.world_size = dist.get_world_size(group) if dist.is_initialized() else 1
         # custom sizing requires 8 GPUs and the upstream 16-layer matrices
         params = list(params)
         layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
@@ -609,7 +612,7 @@ class NorMuon(torch.optim.Optimizer):
         # BF16 weights (p.master): FP32 master of this rank's shard from the FP32 init, FP32 grads in one
         # padded stacked buffer per group (reduce-scattered in place) and the BF16 params as rows of
         # another (all-gathered in place)
-        rank = dist.get_rank() if dist.is_initialized() else 0
+        rank = dist.get_rank(group) if dist.is_initialized() else 0
         self._flat, self._pflat = {}, {}
         for i, group in enumerate(self.param_groups):
             ps, lo = group["params"], rank * group["chunk_size"]
@@ -684,7 +687,7 @@ class NorMuon(torch.optim.Optimizer):
     def step(self):
         # Efficient distributed step by @YouJiacheng, @KonstantinWilleke, @alexrgilbert,
         # @adricarda, @tuttyfrutyee, @vdlad, @ryanyang0, @vagrawal, @varunneal, @chrisjmccormick
-        rank = dist.get_rank()
+        rank = dist.get_rank(self.group)
         group_infos = []
         for group in self.param_groups:
             params: list[Tensor] = group["params"]
@@ -698,7 +701,8 @@ class NorMuon(torch.optim.Optimizer):
                     p.fresh = True  # the next accumulation overwrites, after this reduce-scatter
                 grad_chunk = torch.empty_like(flat[:chunk_size])
                 reduce_future = dist.reduce_scatter_tensor(
-                    grad_chunk, flat, op=dist.ReduceOp.AVG, async_op=True
+                    grad_chunk, flat, op=dist.ReduceOp.AVG, group=self.group,
+                    async_op=True,
                 )
                 group_infos.append(
                     dict(grad_chunk=grad_chunk, reduce_future=reduce_future)
@@ -719,7 +723,8 @@ class NorMuon(torch.optim.Optimizer):
             grad_chunk = torch.empty_like(stacked_grads[:chunk_size])
 
             reduce_future = dist.reduce_scatter_tensor(
-                grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, async_op=True
+                grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, group=self.group,
+                async_op=True,
             )
 
             group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
@@ -872,7 +877,7 @@ class NorMuon(torch.optim.Optimizer):
             )
 
             gather_future = dist.all_gather_into_tensor(
-                stacked_params, updated_params, async_op=True
+                stacked_params, updated_params, group=self.group, async_op=True
             )
 
             all_gather_infos.append(
@@ -1800,8 +1805,12 @@ class TrainingManager:
         muon_params = [
             p for p in model.parameters() if getattr(p, "label", None) in muon_labels
         ]
+        local_labels = ["moe_sh", "moe_up_sh"]  # sharded experts: rank-local NorMuon
+        local_params = [
+            p for p in model.parameters() if getattr(p, "label", None) in local_labels
+        ]
         assert set(getattr(p, "label", None) for p in model.parameters()) <= set(
-            adam_labels + scalar_labels + muon_labels + matrix_labels
+            adam_labels + scalar_labels + muon_labels + matrix_labels + local_labels
         ), "All params must have label"
 
         self.adam_opt = DistAdam(
@@ -1824,6 +1833,14 @@ class TrainingManager:
             muon_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2
         )
         self.optimizers = [self.adam_opt, self.scalar_opt, self.muon_opt]
+        if local_params:
+            world = dist.get_world_size()
+            groups = [dist.new_group([r]) for r in range(world)]  # collective: every rank makes all
+            self.local_opt = NorMuon(
+                local_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2,
+                group=groups[dist.get_rank()],
+            )  # fmt: skip
+            self.optimizers.append(self.local_opt)
         if matrix_params:
             self.matrix_opt = DistAdam(
                 matrix_params,
@@ -1911,8 +1928,9 @@ class TrainingManager:
     def step_optimizers(self, step: int):
         step_lr = get_lr(step)
         muon_momentum = get_muon_momentum(step)
-        for group in self.muon_opt.param_groups:
-            group["momentum"] = muon_momentum
+        for opt in (self.muon_opt, getattr(self, "local_opt", None)):
+            for group in opt.param_groups if opt else ():
+                group["momentum"] = muon_momentum
 
         for opt in self.optimizers:
             if opt.freeze_timer > 0:
@@ -1956,6 +1974,8 @@ class TrainingManager:
 
         # muon momentum buffers not in state dict
         self.muon_opt.reset()
+        if hasattr(self, "local_opt"):
+            self.local_opt.reset()
         self.model.split_embed = False
 
         self.ws_short, self.ws_long = get_ws(0)
