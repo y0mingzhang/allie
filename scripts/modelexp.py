@@ -755,6 +755,40 @@ wave(
     "preempt4",
 )
 
+# isoFLOPs (MoE-science fork, ~21:30): compute-optimal active size at sparsity 16.5 (E=128 top-4 + shared
+# half-width expert, scatter kernel) at the 1e17 and 3e17 budgets, with ship-recipe dense points at the
+# outer shapes (the rung shapes' dense controls exist: mo2d at 12x512, the ship run at 16x768). Expert
+# weights stay FP32 and replicated, so the largest shapes use smaller micro-batches
+S16 = MOE(128, 4, moe_kernel="scatter")
+SHAPES = {
+    "1e17": {"8x384": dict(depth=8 / 12, width_mul=0.75), "12x512": {}, "14x640": dict(depth=14 / 12, width_mul=1.25),
+             "16x768": dict(depth=16 / 12, width_mul=1.5, micro_batch=8)},
+    "3e17": {"10x512": dict(depth=10 / 16, width_mul=2 / 3), "12x640": dict(depth=0.75, width_mul=5 / 6),
+             "16x768": dict(micro_batch=8), "20x1024": dict(depth=1.25, width_mul=4 / 3, micro_batch=4)},
+}  # fmt: skip
+ISO_DENSE = {"1e17": ("8x384", "16x768"), "3e17": ("12x640", "20x1024")}
+iso = lambda budget: variants(
+    budget, b, {f"moe{k}": S16 | v for k, v in SHAPES[budget].items()}
+    | {f"dense{k}": dict(arch=SHIP) | SHAPES[budget][k] for k in ISO_DENSE[budget]},
+)
+for budget in SHAPES:
+    wave(
+        f"iso{budget}",
+        f"moe-v1-iso{budget}",
+        f"mi{budget[-2:]}",
+        iso(budget),
+        f"moe-v1 isoFLOPs at {budget}: 4 active sizes at sparsity 16.5 (E=128 top-4, scatter) + 2 dense ship shapes",
+        "preempt4",
+    )
+wave(
+    "isosmoke",
+    "moe-v1-isosmoke",
+    "mis",
+    [r | dict(stop_after=[12]) for r in iso("3e17") if r["v"] in ("moe20x1024", "moe16x768", "dense20x1024")],
+    "memory / speed smoke of the largest isoFLOP shapes on one A6000 (12 steps)",
+    "dei1",
+)
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
@@ -943,7 +977,8 @@ def train_args(study, r):
     """modded_train arguments of a planned run (all but --max-seconds / --stop-after / --resume)."""
     args = [
         "--name", r["name"], "--width", r["width"], "--layers", r["layers"], "--head-dim", 64,
-        "--steps", r["steps"], "--extension-steps", 0, "--initial-batch-rows", 512, "--micro-batch", 16,
+        "--steps", r["steps"], "--extension-steps", 0, "--initial-batch-rows", 512,
+        "--micro-batch", r.get("micro_batch", 16),
         "--lr-scale", r.get("lr", 1), "--seed", r["seed"], "--eval-every", 10**7,
         "--checkpoint-every", 128, "--keep-checkpoints", 2, "--val-rows", 1024, "--deterministic",
         "--data", dx.DATA, "--mix", r["policy"], "--mix-pool-frac", r["pool_frac"],
