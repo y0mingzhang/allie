@@ -159,6 +159,7 @@ if __name__ == "__main__":
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = tempfile.mkdtemp()
     round_like_triton()
     torch.set_num_threads(4)
+    torch._dynamo.config.recompile_limit = 64  # one _blend_fwd graph per tested shape; training compiles two
     import modded_medium as mm
 
     test_blend(mm.core, device)
