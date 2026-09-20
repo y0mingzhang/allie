@@ -232,6 +232,7 @@ def create_model(cfg, device="cuda"):
     modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
     assert not (arch["moe_kernel"] == "scatter-accum" and arch["moe_shard"]), "sharded experts reduce-scatter their grads"
+    assert not (arch["moe_kernel"] == "scatter-accum" and cfg.zero2), "--zero2 reduces grads before accumulating"
     global BOARD
     BOARD = bool(
         arch["board"]
