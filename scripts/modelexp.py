@@ -820,6 +820,32 @@ wave(
     "preempt4",
 )
 
+# router hyperparameter search at 3e16 (user 07:15: the fork finds the right router hypers). Round 1's moe128k6 was
+# bias-routed at 3e16 too (98.8% of tokens' top-k set by the bias, margin 0.0065 vs bias range 0.38), so search here
+# on single GPUs, then confirm at 1e17 and 3e17
+ROUTER16 = {"ref": R()} | {
+    k: R(**kw)
+    for k, kw in {
+        "rlr0.1": dict(moe_router_lr_mul=0.1),
+        "rlr1": dict(moe_router_lr_mul=1.0),
+        "init0.02": dict(moe_init=0.02),
+        "init0.05": dict(moe_init=0.05),
+        "g1e-3": dict(moe_gamma=1e-3),
+        "g3e-3": dict(moe_gamma=3e-3),
+        "rlr0.1g1e-3": dict(moe_router_lr_mul=0.1, moe_gamma=1e-3),
+        "rlr1g1e-3": dict(moe_router_lr_mul=1.0, moe_gamma=1e-3),
+        "rlr0.1init0.02": dict(moe_router_lr_mul=0.1, moe_init=0.02),
+    }.items()
+}
+wave(
+    "moer16",
+    "moe-v1-router3e16",
+    "mr16",
+    variants("3e16", b, ROUTER16),
+    "moe-v1 router search at 3e16 on moe128k6 (1 GPU each): router lr, init, bias gamma and pairs; ref = current",
+    "preempt",
+)
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
