@@ -188,6 +188,7 @@ def main():
         action="store_true",
         help="with --zero2: reduce the grads in BF16 (half the traffic; not bit-identical)",
     )
+    p.add_argument("--ckpt-blend", action="store_true", help="with --ckpt eager: recompute residual blends too")
     p.add_argument(
         "--ckpt-frac",
         type=float,
@@ -285,6 +286,7 @@ def main():
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
     cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
     cfg.zero2_bf16, cfg.ckpt_frac, cfg.fp8 = a.zero2_bf16, a.ckpt_frac, a.fp8
+    cfg.ckpt_blend = a.ckpt_blend
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,
@@ -393,6 +395,7 @@ def main():
             assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
                 f"Resume changes {key}"
             )
+        assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, "Resume changes ckpt_blend"
         if a.wsd_continue_from:
             from modded_continuation import prepare_continuation
 

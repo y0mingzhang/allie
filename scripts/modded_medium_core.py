@@ -514,6 +514,7 @@ def _flush():
 
 CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
 CKPT_LAYERS = 1 << 30  # only blocks with layer_idx < CKPT_LAYERS are checkpointed (--ckpt-frac)
+CKPT_BLEND = False  # put the eager residual blend inside the block checkpoint boundary
 ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
 ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
 _inflight = []  # (work, param, fp32 grad) reduces of the running backward
@@ -789,8 +790,10 @@ class NorMuon(torch.optim.Optimizer):
                 _drain()
                 for p in params:
                     p.fresh = True
-                grad_chunk = flat.clone()
-                group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=_Done()))
+                # No collective remains for these rows. Clone only when this
+                # group is processed, rather than retaining every group's copy
+                # across the largest polar-express scratch allocation.
+                group_infos.append(dict(grad_source=flat, reduce_future=_Done()))
                 continue
             if flat is not None:  # BF16 weights: FP32 grads already stacked
                 for p in params:
@@ -832,7 +835,10 @@ class NorMuon(torch.optim.Optimizer):
             info["reduce_future"].wait()
 
             params = group["params"]
-            grad_chunk = info["grad_chunk"]
+            grad_chunk = (
+                info.pop("grad_source").clone()
+                if "grad_source" in info else info["grad_chunk"]
+            )
             # BF16 weights: FP32 grads, momentum and update math on the FP32 master
             master = getattr(params[0], "master", False)
             chunk_size = group["chunk_size"]
@@ -960,6 +966,10 @@ class NorMuon(torch.optim.Optimizer):
             updated_params[:num_params].copy_(param_chunk)
             if num_params < chunk_size:
                 updated_params[num_params:].zero_()
+
+            # These workspaces are not inputs to the parameter collective.
+            # In ZeRO-2 no group_infos entry owns them after this point.
+            del grad_chunk, updated_grads, v_chunk
 
             flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
             if self._deferred is not None and group.get("zero2"):  # owners broadcast in launch()
@@ -1436,13 +1446,26 @@ class MLP(nn.Module):
 
 
 @torch.compiler.disable
-def _eager_block(module, *args, ckpt=True):
+def _eager_block(module, *args, ckpt=True, blend=None):
     # Create AND call the optimized bound method outside the outer Dynamo trace.
     # Passing module._compiled through that trace can unwrap it back to Python;
     # changing disable(recursive=...) alone does not preserve the compiled child.
     if not hasattr(module, "_compiled"):
         module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
     sync_params(module.layer_idx)
+    if blend is not None:
+        # Keep the arithmetic eager and the compiled block unchanged. Only move
+        # the save/recompute boundary: otherwise autograd retains both the
+        # unblended block output (for scalar gradients) and its blended copy.
+        def run(x, attn_args, x0, x02, resid, x0_weights):
+            if module.layer_idx == 0:
+                x = (resid + x0_weights[0]) * x + x0_weights[1] * x02
+            else:
+                x = resid * x + x0_weights[0] * x0 + x0_weights[1] * x02
+            return module._compiled(x, attn_args)
+        if not ckpt:
+            return run(*args, *blend)
+        return torch.utils.checkpoint.checkpoint(run, *args, *blend, use_reentrant=False)
     if not ckpt:
         return module._compiled(*args)
     return torch.utils.checkpoint.checkpoint(module._compiled, *args, use_reentrant=False)
@@ -1464,13 +1487,14 @@ class Block(nn.Module):
         # model track: MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
         self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
-    def forward(self, x: Tensor, attn_args: AttnArgs):
+    def forward(self, x: Tensor, attn_args: AttnArgs, blend=None):
         if CKPT == "eager" and self.training:
             # eager checkpoint around this block's own compiled graph: everything the graph saves
             # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
             # and recomputed in backward, keeping only the block input. Blocks past --ckpt-frac run
             # the same compiled graph without it (and wait for their deferred params the same way)
-            return _eager_block(self, x, attn_args, ckpt=self.layer_idx < CKPT_LAYERS)
+            return _eager_block(self, x, attn_args, ckpt=self.layer_idx < CKPT_LAYERS, blend=blend)
+        assert blend is None, "residual blend recompute requires training with eager checkpoints"
         if self.layer_idx >= CKPT_LAYERS:
             return self._forward(x, attn_args)
         if CKPT == "block" and self.training:
@@ -1795,15 +1819,18 @@ class GPT(nn.Module):
                 skip_idx += 1
                 skip = skip_connections.pop()
                 x = x + skip_gate_out * (skip if self.use_skips else skip * 0)
-            if i == 0:
+            if CKPT_BLEND and CKPT == "eager" and self.training:
+                x = self.blocks[i](x, attn_args, blend=(x0, x02, resid_lambdas[i], x0_lambdas[i]))
+            elif i == 0:
                 x = (resid_lambdas[0] + x0_lambdas[0, 0]) * x + x0_lambdas[0, 1] * x02
+                x = self.blocks[i](x, attn_args)
             else:
                 x = (
                     resid_lambdas[i] * x
                     + x0_lambdas[i, 0] * x0
                     + x0_lambdas[i, 1] * x02
                 )
-            x = self.blocks[i](x, attn_args)
+                x = self.blocks[i](x, attn_args)
             if i in skip_in:
                 skip_connections.append(x)
             if i == backout_layer:

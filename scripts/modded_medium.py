@@ -82,6 +82,7 @@ class Config:
     zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
     zero2_bf16: bool = False  # that reduce in BF16 (half the traffic, not bit-identical)
     ckpt_frac: float = 1.0  # checkpoint only the first ceil(frac * layers) blocks (selective recompute)
+    ckpt_blend: bool = False  # include the eager residual blend in each block checkpoint
     fp8: str = ""  # "dense": FP8 forwards of attention/MLP/shared-expert matmuls in training (modded_fp8)
     arch: dict = field(
         default_factory=dict
@@ -234,6 +235,8 @@ def create_model(cfg, device="cuda"):
     assert cfg.ckpt in ("", "mlp", "block", "eager")
     core.CKPT = cfg.ckpt
     core.CKPT_LAYERS = math.ceil(cfg.ckpt_frac * cfg.layers)
+    assert not cfg.ckpt_blend or cfg.ckpt == "eager"
+    core.CKPT_BLEND = cfg.ckpt_blend
     assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
     core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
     assert cfg.fp8 in ("", "dense")
