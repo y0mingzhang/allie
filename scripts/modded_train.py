@@ -206,9 +206,10 @@ def main():
     )
     p.add_argument(
         "--fp8",
-        choices=("", "dense"),
+        choices=("", "dense", "dense-dgrad", "dense-all"),
         default="",
-        help="dense: FP8 e4m3 forwards (dynamic tensorwise scales) of attention/MLP/shared-expert matmuls in training",
+        help="dense: FP8 e4m3 forwards (dynamic tensorwise scales) of attention/MLP/shared-expert matmuls in training;"
+        " dense-dgrad adds FP8 input gradients, dense-all FP8 weight gradients too",
     )
     p.add_argument(
         "--ckpt",

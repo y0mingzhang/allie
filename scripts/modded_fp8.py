@@ -1,9 +1,11 @@
 """--fp8 dense: training forwards of the dense matmuls (attention, MLP, shared experts) in FP8 e4m3 with dynamic
-tensorwise scales and FP32 accumulation; the backward is the BF16 matmul's (straight-through)."""
+tensorwise scales and FP32 accumulation; the backward is the BF16 matmul's (straight-through). dense-dgrad also runs
+the input gradient in FP8, dense-all the weight gradient too."""
 import torch
 from torch.nn import functional as F
 
 DENSE = False
+BWD = ()
 E4M3 = torch.finfo(torch.float8_e4m3fn).max
 
 
@@ -29,18 +31,25 @@ def quantize(t):
     return round_e4m3(v).to(torch.float8_e4m3fn).contiguous(), s  # _scaled_mm: row-major x, column-major w.T
 
 
+def mm(a, b):
+    """a @ b.T for 2D a, b in FP8."""
+    (aq, sa), (bq, sb) = quantize(a), quantize(b)
+    return torch._scaled_mm(aq, bq.T, scale_a=sa, scale_b=sb, out_dtype=a.dtype)
+
+
 class Linear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, w):
         ctx.save_for_backward(x, w)
-        (xq, sx), (wq, sw) = quantize(x.flatten(0, -2)), quantize(w)
-        y = torch._scaled_mm(xq, wq.T, scale_a=sx, scale_b=sw, out_dtype=x.dtype)
-        return y.view(*x.shape[:-1], w.shape[0])
+        return mm(x.flatten(0, -2), w).view(*x.shape[:-1], w.shape[0])
 
     @staticmethod
     def backward(ctx, g):
         x, w = ctx.saved_tensors
-        return g @ w, g.flatten(0, -2).T @ x.flatten(0, -2)
+        g2, x2 = g.flatten(0, -2), x.flatten(0, -2)
+        dx = mm(g2, w.T).view_as(x) if "dgrad" in BWD else g @ w
+        dw = mm(g2.T, x2.T) if "wgrad" in BWD else g2.T @ x2
+        return dx, dw
 
 
 def linear(x, w, training):

@@ -239,8 +239,9 @@ def create_model(cfg, device="cuda"):
     core.CKPT_BLEND = cfg.ckpt_blend
     assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
     core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
-    assert cfg.fp8 in ("", "dense")
-    modded_fp8.DENSE = cfg.fp8 == "dense"
+    assert cfg.fp8 in ("", "dense", "dense-dgrad", "dense-all")
+    modded_fp8.DENSE = bool(cfg.fp8)
+    modded_fp8.BWD = {"dense-dgrad": ("dgrad",), "dense-all": ("dgrad", "wgrad")}.get(cfg.fp8, ())
     assert not cfg.zero2_bf16 or cfg.zero2
     modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
