@@ -801,6 +801,25 @@ wave(
     "dei1",
 )
 
+# router ablation (science fork, 2026-09-20 ~07:30): the 3e17 gap test tied dense with 98-99% of top-k set by the
+# balancing bias (affinity margin ~0.007 vs bias range ~0.48): is the router under-trained? 1e17, moe128k6 base
+# (mo2's run is the reference arm), scatter-accum + bf16 weights (bit-identical to mo2's scatter)
+R = lambda **kw: MOE(128, 6, moe_kernel="scatter-accum", **kw) | dict(bf16_weights=True)
+ROUTER = {
+    "rlr0.1": R(moe_router_lr_mul=0.1),
+    "rlr1": R(moe_router_lr_mul=1.0),
+    "g1e-3": R(moe_gamma=1e-3),
+    "init0.02": R(moe_init=0.02),
+}
+wave(
+    "moer",
+    "moe-v1-router",
+    "mor",
+    variants("1e17", b, ROUTER),
+    "moe-v1 router ablation at 1e17 on moe128k6: router lr x0.1 / x1, bias gamma 1e-3, init 0.02",
+    "preempt4",
+)
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
