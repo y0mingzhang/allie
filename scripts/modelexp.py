@@ -882,6 +882,20 @@ wave("moer16s", "moe-v1-router3e16s", "mr16s",
      variants("3e16", b, {"ref": R(), "rlr0.1": R(moe_router_lr_mul=0.1)}, seeds=(43,)),
      "moe-v1 router lr x0.1 vs ref at 3e16, seed 43 (pairs moer16's s42)", "preempt")
 
+# fixed-router isoFLOPs (router lr x0.1, the 3e16 win) at 1e17, single GPUs: 6 MoE shapes spanning 15x in active N
+# (the old-router curve was still falling at 12x512 -> smaller shapes bracket the minimum), plus dense 10x448 /
+# 14x640 filling the dense curve (8x384 / 12x512 / 16x768 dense exist). Checks: the MoE minimum must not sit at an
+# endpoint (else add the next shape); the MoE - dense gap vs D/N at the same shapes separates D/N from router speed
+S16F = MOE(128, 4, moe_kernel="scatter-accum", moe_router_lr_mul=0.1) | dict(bf16_weights=True)
+ISO17 = {"6x320": dict(depth=0.5, width_mul=0.625), "8x384": dict(depth=8 / 12, width_mul=0.75),
+         "10x448": dict(depth=10 / 12, width_mul=0.875), "12x512": {}, "14x640": dict(depth=14 / 12, width_mul=1.25),
+         "16x768": dict(depth=16 / 12, width_mul=1.5, micro_batch=8)}  # fmt: skip
+wave("isof1e17", "moe-v1-isofix1e17", "mf17",
+     variants("1e17", b, {f"moe{k}": S16F | v for k, v in ISO17.items()}
+              | {f"dense{k}": dict(arch=SHIP, bf16_weights=True) | ISO17[k] for k in ("10x448", "14x640")}),
+     "moe-v1 fixed-router isoFLOPs at 1e17: 6 MoE shapes (E128 top-4, router lr x0.1) + dense 10x448 / 14x640",
+     "preempt")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
