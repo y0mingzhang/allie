@@ -22,6 +22,9 @@ import modded_medium as mm
 from modded_medium import Config, TrainingManager, create_model, core
 from modded_wsd import Schedule, install
 
+ARCH = {}  # MOE=1: SwiGLU MoE experts (3D params) and shared experts join the masters
+if os.environ.get("MOE"):
+    ARCH = dict(mlp="swiglu", moe=[8, 2], moe_kernel="pad", moe_seq=1e-3, moe_update="prop")
 LAYERS, STEPS, SPLIT = (
     10,
     8,
@@ -90,7 +93,7 @@ def build(bf16):
     torch.manual_seed(0)
     cfg = Config(
         width=64, head_dim=16, layers=LAYERS, max_tokens=1024, scheduled_steps=STEPS,
-        extension_steps=0, initial_batch_rows=8, bf16_weights=bf16,
+        extension_steps=0, initial_batch_rows=8, bf16_weights=bf16, arch=ARCH,
     )  # fmt: skip
     model = create_model(cfg, device="cpu")
     manager = TrainingManager(model, cfg)
@@ -162,7 +165,12 @@ def test_reference(accum):
         train(ref, ref_mgr, [step], accum)
         train(bf, bf_mgr, [step], accum)
         found = shards(bf_mgr)
-        assert len(found) == 2, found  # attn and mlp masters
+        owned = [
+            g for g in bf_mgr.muon_opt.param_groups
+            if getattr(g["params"][0], "master", False)
+            and dist.get_rank() * g["chunk_size"] < len(g["params"])
+        ]
+        assert len(found) == len(owned)  # every master group this rank owns a shard of
         for master, params, lo in found:
             assert master.dtype == torch.float32 and params[0].dtype == torch.bfloat16
             for i, m in enumerate(master):
