@@ -925,6 +925,16 @@ wave("axes", "moe-v1-axes3e16", "mx16", variants("3e16", b, AXES),
      "moe-v1 design axes at 3e16 (fixed router): shared fraction 0 / 0.2 / 0.25 / 0.5, top-4 / 8 / 16, 64-rounded widths, E64 / 128 / 256",
      "preempt")
 
+# low-repetition MoE vs dense at 3e17 (main's proposal, pending user approval; the seen-vs-unseen probe showed the
+# 3e17 MoE edge is all on seen rows). Mix mover_rule+up2+noengine (no otb_x4): at one pass expert2600 is seen ~1.45x,
+# expert2400 ~0.72x, OTB ~1.3x (vs 2.95x / 1.46x / 10.6x under B_3); pool_frac for a final run of one pass (~36B)
+LOWREP = dict(policy="mover_rule+up2+noengine", final_tokens=36e9)
+wave("lowrep3e17", "moe-v1-lowrep3e17", "mlr",
+     variants("3e17", b, {"moe16x768": S16D | LOWREP | dict(micro_batch=8),
+                          "dense16x768": dict(arch=SHIP, bf16_weights=True) | LOWREP}),
+     "moe-v1 low-repetition MoE vs dense at 3e17 (16x768, E128 top-4 fixed router vs dense; mix capped at ~1.5x repetition)",
+     "preempt4")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
