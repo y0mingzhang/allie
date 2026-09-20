@@ -179,7 +179,7 @@ def main():
     p.add_argument(
         "--ckpt",
         default="",
-        choices=("", "mlp", "block"),
+        choices=("", "mlp", "block", "eager"),
         help="activation checkpointing (recompute in backward) of each block's MLP or whole block",
     )
     p.add_argument(
@@ -269,7 +269,10 @@ def main():
         for opt in manager.optimizers:
             for group in opt.param_groups:
                 group["weight_decay"] *= a.wd_scale
-    net = torch.compile(model, dynamic=False, fullgraph=True)
+    # sharded MoE experts make every forward a collective (all ranks validate) and run their expert
+    # block as an eager checkpoint, which needs graph breaks
+    sharded = any(getattr(m, "sharded", False) for m in model.modules())
+    net = torch.compile(model, dynamic=False, fullgraph=not sharded and a.ckpt != "eager")
     if a.mix:
         from chessmix import Prefetch, Sampler
 
@@ -291,8 +294,6 @@ def main():
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    # sharded MoE experts make every forward a collective: all ranks validate, rank 0 records
-    sharded = any(getattr(m, "sharded", False) for m in model.modules())
     vrows = val.rows(val_idx) if rank == 0 or sharded else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
     runtime = dict(

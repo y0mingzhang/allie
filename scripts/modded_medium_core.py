@@ -510,7 +510,7 @@ def _flush():
     _pending.clear()
 
 
-CKPT = ""  # "mlp" | "block": recompute those activations in backward (training)
+CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
 
 
 def accumulate_fp32(p):
@@ -1347,6 +1347,11 @@ class MLP(nn.Module):
         return x
 
 
+@torch.compiler.disable
+def _eager_checkpoint(fn, *args):
+    return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False)
+
+
 class Block(nn.Module):
     def __init__(
         self,
@@ -1367,6 +1372,13 @@ class Block(nn.Module):
             return torch.utils.checkpoint.checkpoint(
                 self._forward, x, attn_args, use_reentrant=False
             )
+        if CKPT == "eager" and self.training:
+            # eager checkpoint around this block's own compiled graph: everything the graph saves
+            # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
+            # and recomputed in backward, keeping only the block input
+            if not hasattr(self, "_compiled"):
+                self._compiled = torch.compile(self._forward, dynamic=False, fullgraph=True)
+            return _eager_checkpoint(self._compiled, x, attn_args)
         return self._forward(x, attn_args)
 
     def _forward(self, x: Tensor, attn_args: AttnArgs):

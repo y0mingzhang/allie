@@ -17,6 +17,7 @@ import math
 
 import torch
 import torch.distributed as dist
+import torch.utils.checkpoint
 from torch import nn
 from torch.distributed import _functional_collectives as funcol
 from torch.nn import functional as F
@@ -50,6 +51,14 @@ class AddLoss(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad):
         return grad, torch.ones((), dtype=torch.float32, device=grad.device)
+
+
+BLOCK_RECOMPUTE = False  # set by create_model under --ckpt eager (whole blocks recomputed eagerly)
+
+
+@torch.compiler.disable
+def _recompute(fn, *args):
+    return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False)
 
 
 class Gather(torch.autograd.Function):
@@ -148,29 +157,12 @@ class MoE(nn.Module):
         flat = idx.flatten()
         count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
         order = flat.argsort(stable=True)
-        if self.sharded:
-            up, down = Gather.apply(self.up, h.dtype), Gather.apply(self.down, h.dtype)
+        if self.sharded and self.training and torch.is_grad_enabled() and not BLOCK_RECOMPUTE:
+            # eager checkpoint: the compiled partitioner keeps opaque autograd Functions' saved tensors
+            # (gathered experts, expert activations) for every layer; eager recompute re-gathers them
+            routed, dropped = _recompute(self.experts_out, h, w, flat, count, order)
         else:
-            up, down = self.up.type_as(h), self.down.type_as(h)
-        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum"):  # both paths are dropless
-            offs = count.cumsum(0)
-            se = flat[order]
-            linear = tuned_linear if self.kernel in ("scatter-tuned", "scatter-accum") else parallel_linear
-            direct = self.kernel == "scatter-accum" and self.training and torch.is_grad_enabled()
-            up_args, down_args = {}, {}
-            if direct:
-                assert self.up.dtype == self.down.dtype == torch.bfloat16
-                up_flat,up_row=self.up.acc
-                down_flat,down_row=self.down.acc
-                up_args = dict(main_grad=up_flat,main_grad_row=up_row,fresh=self.up.fresh,main_grad_transposed=True)
-                down_args = dict(main_grad=down_flat,main_grad_row=down_row,fresh=self.down.fresh)
-            y = self.act(linear(h, up.transpose(1, 2), k, se, order, offs, grouped_out=True, **up_args))
-            routed = linear(
-                y, down, 1, se, order, offs, grouped_in=True, gates=w.type_as(h), **down_args
-            )
-            dropped = torch.zeros((), dtype=torch.long, device=h.device)
-        else:
-            routed, dropped = self.padded(h, w, flat, count, order, up, down)
+            routed, dropped = self.experts_out(h, w, flat, count, order)
         if self.training:
             with torch.no_grad():
                 top = torch.topk(s, k + 1, dim=-1)
@@ -198,6 +190,34 @@ class MoE(nn.Module):
             loss = self.seq * scale * 1024 * (sel * e / k * prob).sum()
             out = AddLoss.apply(out, loss)
         return out
+
+    def experts_out(self, h, w, flat, count, order):
+        """Routed experts' weighted output for assignments flat (sorted by order, count per expert)."""
+        k = self.topk
+        if self.sharded:
+            up, down = Gather.apply(self.up, h.dtype), Gather.apply(self.down, h.dtype)
+        else:
+            up, down = self.up.type_as(h), self.down.type_as(h)
+        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum"):  # both paths are dropless
+            offs = count.cumsum(0)
+            se = flat[order]
+            linear = tuned_linear if self.kernel in ("scatter-tuned", "scatter-accum") else parallel_linear
+            direct = self.kernel == "scatter-accum" and self.training and torch.is_grad_enabled()
+            up_args, down_args = {}, {}
+            if direct:
+                assert self.up.dtype == self.down.dtype == torch.bfloat16
+                up_flat,up_row=self.up.acc
+                down_flat,down_row=self.down.acc
+                up_args = dict(main_grad=up_flat,main_grad_row=up_row,fresh=self.up.fresh,main_grad_transposed=True)
+                down_args = dict(main_grad=down_flat,main_grad_row=down_row,fresh=self.down.fresh)
+            y = self.act(linear(h, up.transpose(1, 2), k, se, order, offs, grouped_out=True, **up_args))
+            routed = linear(
+                y, down, 1, se, order, offs, grouped_in=True, gates=w.type_as(h), **down_args
+            )
+            dropped = torch.zeros((), dtype=torch.long, device=h.device)
+        else:
+            routed, dropped = self.padded(h, w, flat, count, order, up, down)
+        return routed, dropped
 
     def padded(self, h, w, flat, count, order, up, down):
         """Capacity-padded dispatch: a unique slot per kept assignment, so both directions are

@@ -20,6 +20,7 @@ from torch.nn.attention.flex_attention import (
 import modded_arch
 import modded_board
 import modded_diffattn
+import modded_moe
 import modded_medium_core as core
 from modded_runtime import prime_source_key
 from modded_smoe_tuned import finish_direct_accum
@@ -223,8 +224,9 @@ def create_model(cfg, device="cuda"):
         # Keep that warmup out of module import so CPU inspection still works.
         torch.empty(1, device=device, requires_grad=True).backward()
     arch = modded_arch.resolve(cfg.arch)
-    assert cfg.ckpt in ("", "mlp", "block")
+    assert cfg.ckpt in ("", "mlp", "block", "eager")
     core.CKPT = cfg.ckpt
+    modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
     assert not (arch["moe_kernel"] == "scatter-accum" and arch["moe_shard"]), "sharded experts reduce-scatter their grads"
     global BOARD
