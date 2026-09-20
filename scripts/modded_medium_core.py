@@ -27,6 +27,8 @@ import torch.nn.functional as F
 # torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
 import triton
 import triton.language as tl
+
+import modded_fp8 as fp8
 from torch import Tensor, nn
 
 from modded_arch import swiglu_hidden
@@ -1339,7 +1341,7 @@ class CausalSelfAttention(nn.Module):
         )
 
         q, k, v = (
-            F.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x))
+            fp8.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x), self.training)
             .view(B, T, 3 * self.num_heads, self.head_dim)
             .chunk(3, dim=-2)
         )
@@ -1392,8 +1394,8 @@ class CausalSelfAttention(nn.Module):
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side
-        y = F.linear(
-            y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y)
+        y = fp8.linear(
+            y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y), self.training
         )  # sa_lambdas[1] pre-multiplied to O @shenberg
         return y
 
@@ -1421,7 +1423,7 @@ class MLP(nn.Module):
             self.c_proj.zero_()  # zero init suggested by @Grad62304977
 
     def forward(self, x: Tensor):
-        x = F.linear(x, self.c_fc.type_as(x))
+        x = fp8.linear(x, self.c_fc.type_as(x), self.training)
         if self.kind == "swiglu":
             a, b = x.chunk(2, dim=-1)
             x = F.silu(a) * b
@@ -1431,7 +1433,7 @@ class MLP(nn.Module):
             x = F.relu(
                 x
             ).square()  # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
-        x = F.linear(x, self.c_proj.T.type_as(x))
+        x = fp8.linear(x, self.c_proj.T.type_as(x), self.training)
         return x
 
 

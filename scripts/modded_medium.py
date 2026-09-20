@@ -22,6 +22,7 @@ from torch.nn.attention.flex_attention import (
 import modded_arch
 import modded_board
 import modded_diffattn
+import modded_fp8
 import modded_moe
 import modded_medium_core as core
 from modded_runtime import prime_source_key
@@ -81,6 +82,7 @@ class Config:
     zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
     zero2_bf16: bool = False  # that reduce in BF16 (half the traffic, not bit-identical)
     ckpt_frac: float = 1.0  # checkpoint only the first ceil(frac * layers) blocks (selective recompute)
+    fp8: str = ""  # "dense": FP8 forwards of attention/MLP/shared-expert matmuls in training (modded_fp8)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -234,6 +236,8 @@ def create_model(cfg, device="cuda"):
     core.CKPT_LAYERS = math.ceil(cfg.ckpt_frac * cfg.layers)
     assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
     core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
+    assert cfg.fp8 in ("", "dense")
+    modded_fp8.DENSE = cfg.fp8 == "dense"
     assert not cfg.zero2_bf16 or cfg.zero2
     modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
@@ -533,5 +537,5 @@ def config_dict(cfg):
         upstream_commit=COMMIT,
         output_support=[MOVE_START, MOVE_END],
         attention_backend="flex",
-        fp8=False,
+        fp8=cfg.fp8 or False,
     )

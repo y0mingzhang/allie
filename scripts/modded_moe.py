@@ -22,6 +22,7 @@ from torch import nn
 from torch.distributed import _functional_collectives as funcol
 from torch.nn import functional as F
 
+import modded_fp8 as fp8
 from modded_smoe import parallel_linear
 from modded_smoe_tuned import parallel_linear as tuned_linear
 from modded_smoe_aligned_linear import parallel_linear as gather_linear
@@ -204,8 +205,8 @@ class MoE(nn.Module):
             self.load[:e] += count.float()
             self.load[e:] += torch.stack([v.float() for v in extra])
         if self.shared:
-            shared = self.act(F.linear(h, self.shared_up.type_as(h)))
-            routed = routed + F.linear(shared, self.shared_down.T.type_as(h))
+            shared = self.act(fp8.linear(h, self.shared_up.type_as(h), self.training))
+            routed = routed + fp8.linear(shared, self.shared_down.T.type_as(h), self.training)
         out = routed.view(shape)
         if self.training and self.seq:
             # DeepSeek-V3's sequence-wise balance loss, one 1024-token row = one sequence: per row
