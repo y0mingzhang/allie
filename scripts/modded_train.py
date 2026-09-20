@@ -177,6 +177,12 @@ def main():
         help="BF16 attention/MLP matrices; FP32 grads and master shards in the optimizers",
     )
     p.add_argument(
+        "--ckpt",
+        default="",
+        choices=("", "mlp", "block"),
+        help="activation checkpointing (recompute in backward) of each block's MLP or whole block",
+    )
+    p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
     )
     p.add_argument(
@@ -248,7 +254,7 @@ def main():
     cfg.clock, cfg.elo, cfg.input_lr_mul = a.clock, a.elo, a.input_lr_mul
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
-    cfg.bf16_weights = a.bf16_weights
+    cfg.bf16_weights, cfg.ckpt = a.bf16_weights, a.ckpt
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,

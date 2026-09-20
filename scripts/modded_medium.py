@@ -73,6 +73,7 @@ class Config:
     bf16_weights: bool = (
         False  # BF16 attention/MLP matrices, FP32 grads and master shards
     )
+    ckpt: str = ""  # activation checkpointing: "mlp" | "block" (training only)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -221,6 +222,8 @@ def create_model(cfg, device="cuda"):
         # Keep that warmup out of module import so CPU inspection still works.
         torch.empty(1, device=device, requires_grad=True).backward()
     arch = modded_arch.resolve(cfg.arch)
+    assert cfg.ckpt in ("", "mlp", "block")
+    core.CKPT = cfg.ckpt
     global BOARD
     BOARD = bool(
         arch["board"]

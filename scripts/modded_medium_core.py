@@ -20,6 +20,7 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
 import torch._dynamo as dynamo
+import torch.utils.checkpoint
 import torch.distributed as dist
 import torch.nn.functional as F
 
@@ -507,6 +508,9 @@ def _flush():
     for p in _pending:
         p.grad, p.fresh = None, False
     _pending.clear()
+
+
+CKPT = ""  # "mlp" | "block": recompute those activations in backward (training)
 
 
 def accumulate_fp32(p):
@@ -1353,9 +1357,19 @@ class Block(nn.Module):
         self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
     def forward(self, x: Tensor, attn_args: AttnArgs):
+        if CKPT == "block" and self.training:
+            return torch.utils.checkpoint.checkpoint(
+                self._forward, x, attn_args, use_reentrant=False
+            )
+        return self._forward(x, attn_args)
+
+    def _forward(self, x: Tensor, attn_args: AttnArgs):
         x = x + self.attn(norm(x), attn_args)
-        x = x + self.mlp(norm(x))
-        return x
+        if CKPT == "mlp" and self.training:
+            return x + torch.utils.checkpoint.checkpoint(
+                lambda h: self.mlp(norm(h)), x, use_reentrant=False
+            )
+        return x + self.mlp(norm(x))
 
 
 # -----------------------------------------------------------------------------
