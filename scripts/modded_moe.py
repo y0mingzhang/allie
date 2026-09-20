@@ -68,7 +68,8 @@ def full_state(model, state):
         if getattr(p, "label", "").endswith("_sh"):
             parts = [torch.empty_like(p) for _ in range(dist.get_world_size())]
             dist.all_gather(parts, p.detach().contiguous())
-            state[name] = torch.cat(parts)
+            # one layer on GPU at a time; only rank 0 keeps the full tensor (it writes model.pt)
+            state[name] = torch.cat([t.cpu() for t in parts]) if dist.get_rank() == 0 else p
     return state
 
 
@@ -129,7 +130,8 @@ class MoE(nn.Module):
             w, r = dist.get_world_size(), dist.get_rank()
             assert experts % w == 0, f"{experts} experts over {w} ranks"
             n = experts // w
-            full = [self.up.data.cuda(), self.down.data.cuda()]
+            dev = "cuda" if dist.get_backend() == "nccl" else "cpu"
+            full = [self.up.data.to(dev), self.down.data.to(dev)]
             for t in full:  # rank 0's init for every shard, whatever each rank's seed
                 dist.broadcast(t, 0)
             self.up = nn.Parameter(full[0][r * n : (r + 1) * n].to(self.up.device).clone())

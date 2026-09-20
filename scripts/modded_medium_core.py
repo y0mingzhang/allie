@@ -511,6 +511,44 @@ def _flush():
 
 
 CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
+ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
+_inflight = []  # (work, param, fp32 grad) reduces of the running backward
+
+
+@torch.no_grad()
+def _finish(item):
+    work, p, g = item
+    work.wait()
+    if p.main_grad is not None:  # this rank owns p: accumulate the averaged grad into its FP32 row
+        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g)
+    p.fresh = False
+
+
+@torch.no_grad()
+def _drain():
+    while _inflight:
+        _finish(_inflight.pop(0))
+
+
+def zero2_hook(p):
+    """--zero2 post-accumulate hook: NorMuon-owned replicated params reduce to their owner; the rest
+    (DistAdam masters, rank-local sharded experts) accumulate as usual."""
+    return reduce_to_owner(p) if hasattr(p, "owner") else accumulate_fp32(p)
+
+
+@torch.no_grad()
+def reduce_to_owner(p):
+    """ZeRO-2: average this micro-batch's grad over ranks straight into its owner's FP32 row, then
+    drop it (a few reduces in flight overlap the rest of the backward)."""
+    if not _inflight:
+        torch.autograd.Variable._execution_engine.queue_callback(_drain)
+    g = p.grad.float()
+    p.grad = None
+    _inflight.append((dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True), p, g))
+    while len(_inflight) > 4:
+        _finish(_inflight.pop(0))
+
+
 
 
 def accumulate_fp32(p):
@@ -545,6 +583,11 @@ def apply_normuon_variance_reduction(v_chunk, second_momentum_buffer, beta2, red
 
 # -----------------------------------------------------------------------------
 # NorMuon optimizer
+
+
+class _Done:
+    def wait(self):
+        pass
 
 
 class NorMuon(torch.optim.Optimizer):
@@ -627,12 +670,22 @@ class NorMuon(torch.optim.Optimizer):
                     [p.fp32 for p in ps[lo : lo + group["chunk_size"]]]
                 )
             shape = (group["chunk_size"] * self.world_size, *ps[0].shape)
-            self._flat[i] = torch.zeros(shape, dtype=torch.float32, device=ps[0].device)
+            zero2 = ZERO2 and self.world_size > 1
+            group["zero2"] = zero2  # grads arrive reduced into this rank's rows (reduce_to_owner)
+            rows = (group["chunk_size"], *ps[0].shape) if zero2 else shape
+            self._flat[i] = torch.zeros(rows, dtype=torch.float32, device=ps[0].device)
             self._pflat[i] = torch.zeros(shape, dtype=ps[0].dtype, device=ps[0].device)
             for k, p in enumerate(ps):
                 self._pflat[i][k].copy_(p.detach())
-                p.data, p.main_grad, p.fresh = self._pflat[i][k], self._flat[i][k], True
-                p.acc = (self._flat[i], k)
+                p.data, p.fresh = self._pflat[i][k], True
+                if zero2:
+                    own = lo <= k < lo + group["chunk_size"]
+                    p.main_grad = self._flat[i][k - lo] if own else None
+                    r = k // group["chunk_size"]
+                    p.owner = dist.get_global_rank(self.group, r) if self.group else r
+                else:
+                    p.main_grad = self._flat[i][k]
+                    p.acc = (self._flat[i], k)
                 del p.fp32
         # by index: load_state_dict replaces the group dicts
         self._group_of = {
@@ -706,6 +759,13 @@ class NorMuon(torch.optim.Optimizer):
 
             chunk_size = group["chunk_size"]
             flat = self._flat.get(self._group_of[params[0]])
+            if flat is not None and group.get("zero2"):  # already averaged into this rank's rows
+                _drain()
+                for p in params:
+                    p.fresh = True
+                grad_chunk = flat.clone()
+                group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=_Done()))
+                continue
             if flat is not None:  # BF16 weights: FP32 grads already stacked
                 for p in params:
                     p.fresh = True  # the next accumulation overwrites, after this reduce-scatter

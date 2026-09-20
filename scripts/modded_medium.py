@@ -75,7 +75,8 @@ class Config:
     bf16_weights: bool = (
         False  # BF16 attention/MLP matrices, FP32 grads and master shards
     )
-    ckpt: str = ""  # activation checkpointing: "mlp" | "block" (training only)
+    ckpt: str = ""  # activation checkpointing: "mlp" | "block" | "eager" (training only)
+    zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -226,6 +227,8 @@ def create_model(cfg, device="cuda"):
     arch = modded_arch.resolve(cfg.arch)
     assert cfg.ckpt in ("", "mlp", "block", "eager")
     core.CKPT = cfg.ckpt
+    assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
+    core.ZERO2 = cfg.zero2
     modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
     assert not (arch["moe_kernel"] == "scatter-accum" and arch["moe_shard"]), "sharded experts reduce-scatter their grads"
@@ -306,7 +309,8 @@ def create_model(cfg, device="cuda"):
                 None,
             )
             direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
-            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else core.accumulate_fp32)
+            hook = core.zero2_hook if cfg.zero2 else core.accumulate_fp32
+            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else hook)
     for p in model.parameters():
         if getattr(p, "label", "").endswith("_sh"):
             continue  # sharded experts: each rank holds its own rows (broadcast before slicing)

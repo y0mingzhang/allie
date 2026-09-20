@@ -178,6 +178,11 @@ def main():
         help="BF16 attention/MLP matrices; FP32 grads and master shards in the optimizers",
     )
     p.add_argument(
+        "--zero2",
+        action="store_true",
+        help="with --bf16-weights: grads reduced to their NorMuon owner during backward (ZeRO-2)",
+    )
+    p.add_argument(
         "--ckpt",
         default="",
         choices=("", "mlp", "block", "eager"),
@@ -255,7 +260,7 @@ def main():
     cfg.clock, cfg.elo, cfg.input_lr_mul = a.clock, a.elo, a.input_lr_mul
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
-    cfg.bf16_weights, cfg.ckpt = a.bf16_weights, a.ckpt
+    cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,

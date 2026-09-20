@@ -22,6 +22,7 @@ import modded_medium as mm
 from modded_medium import Config, TrainingManager, create_model, core
 from modded_wsd import Schedule, install
 
+ZERO2 = bool(os.environ.get("ZERO2"))  # ZERO2=1: the BF16 path also reduces grads to owners in backward
 ARCH = {}  # MOE=1: SwiGLU MoE experts (3D params) and shared experts join the masters
 if os.environ.get("MOE"):
     ARCH = dict(mlp="swiglu", moe=[8, 2], moe_kernel="pad", moe_seq=1e-3, moe_update="prop")
@@ -60,6 +61,13 @@ def patch():
         out.copy_(mean)
         return Done() if async_op else None
 
+    def reduce_to(t, dst, op=dist.ReduceOp.SUM, group=None, async_op=False):
+        buf = t.float().clone()
+        all_reduce(buf, op)
+        if dist.get_rank() == dst:
+            t.copy_(buf)
+        return Done() if async_op else None
+
     def all_gather_into_tensor(out, inp, group=None, async_op=False):
         bits = inp.contiguous().view(torch.uint8)  # bit-exact transport, any dtype
         parts = [torch.empty_like(bits) for _ in range(dist.get_world_size())]
@@ -80,6 +88,7 @@ def patch():
 
     dist.all_reduce, dist.reduce_scatter_tensor = all_reduce, reduce_scatter_tensor
     dist.all_gather_into_tensor = all_gather_into_tensor
+    dist.reduce = reduce_to
     core.polar_express = polar_express
 
 
@@ -94,6 +103,7 @@ def build(bf16):
     cfg = Config(
         width=64, head_dim=16, layers=LAYERS, max_tokens=1024, scheduled_steps=STEPS,
         extension_steps=0, initial_batch_rows=8, bf16_weights=bf16, arch=ARCH,
+        zero2=bf16 and ZERO2,
     )  # fmt: skip
     model = create_model(cfg, device="cpu")
     manager = TrainingManager(model, cfg)
@@ -130,6 +140,15 @@ def shards(manager):
 
 def rel(a, b):
     return ((a.float() - b.float()).norm() / b.float().norm().clamp_min(1e-30)).item()
+
+
+def same(a, b, accum):
+    """Bit-equal, except ZeRO-2 with several micro-batches or > 2 ranks: it averages each micro-batch
+    over ranks before summing and reduces one param at a time (the reference sums, then reduce-scatters
+    the stacked group), a different FP32 summation order (~1e-11 here)."""
+    if ZERO2 and (accum > 1 or dist.get_world_size() > 2):
+        return torch.allclose(a.float(), b.float(), rtol=1e-5, atol=1e-7)
+    return torch.equal(a, b)
 
 
 def test_reference(accum):
@@ -175,12 +194,15 @@ def test_reference(accum):
             assert master.dtype == torch.float32 and params[0].dtype == torch.bfloat16
             for i, m in enumerate(master):
                 r = ref_of[id(params[lo + i])].detach()
-                assert torch.equal(m, r), f"step {step}: master != FP32 param"
+                assert same(m, r, accum), f"step {step}: master != FP32 param"
         for p, q in zip(bf.parameters(), ref.parameters()):
-            assert torch.equal(p, q.to(p.dtype)), f"step {step}: {p.label}"
+            assert same(p, q.to(p.dtype), accum), f"step {step}: {p.label}"
         for g, h in zip(bf_mgr.muon_opt.param_groups, ref_mgr.muon_opt.param_groups):
             for k in ("momentum_buffer", "second_momentum_buffer"):
-                assert g[k].dtype == h[k].dtype and torch.equal(g[k], h[k]), k
+                assert g[k].dtype == h[k].dtype and same(g[k], h[k], accum), (
+                    k, g["params"][0].label, dist.get_rank(), (g[k].float() - h[k].float()).abs().max().item(),
+                    g[k].shape, h[k].shape,
+                )
     for p in bf.parameters():
         every = [torch.empty_like(p) for _ in range(dist.get_world_size())]
         dist.all_gather(every, p.detach().contiguous())
@@ -283,6 +305,8 @@ def worker(rank, world, port):
         STEPS,
     )
     for accum in (1, 3):
+        if rank == 0:
+            print(f"world {world} accum {accum}", flush=True)
         test_reference(accum)
     test_resume()
     test_resume(bf16=False, old=True)
