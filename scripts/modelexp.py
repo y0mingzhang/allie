@@ -746,6 +746,16 @@ wave(
     "moe-v1 round 3 at 3e17: moe128k6 on 8 dei A6000s vs the ship run as its dense control",
     "dei8",
 )
+# the same 3e17 gap test on the 3D-expert code (9b05b7e: bit-identical, faster) on 4 fast preempt GPUs;
+# moe3 (pre-3D, 4 A6000s) ran at 60K tok/s, ~12 h (science fork, ~22:30)
+wave(
+    "moe3f",
+    "moe-v1-round3f",
+    "mo3f",
+    variants("3e17", b, {"moe128k6": MOE2["moe128k6"]}),
+    "moe-v1 round 3 (fast lane) at 3e17: moe128k6 on 4 fast preempt GPUs vs the ship run",
+    "preempt4",
+)
 wave(
     "moe2b",
     "moe-v1-round2b",
