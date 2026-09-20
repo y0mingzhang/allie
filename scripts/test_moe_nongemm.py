@@ -12,13 +12,20 @@ orders (CUDA): which FP32 add order over the top-k (any of the 15 add trees for 
 cuBLAS's gates @ expanded on 64K x 4 x 1536 BF16 inputs of wide dynamic range, eagerly and
 compiled with the shared-expert add and residual as the layer fuses them.
 
+topk: modded_moe_topk's router top-ks against torch.topk (CUDA; CPU: aten_topk, an emulation of
+ATen's kernels, under TRITON_INTERPRET=1) on live, tie-heavy and special (+-0, +-inf, NaN,
+subnormal) scores, and their times.
+
     inhold.sh scripts/test_moe_nongemm.py layer [--eager] [--no-ckpt] [--set ...]
     inhold.sh scripts/test_moe_nongemm.py orders
     inhold.sh scripts/test_moe_nongemm.py layer --set 'modded_smoe_aligned_linear.COMBINE=(0,1,2,3)'
+    inhold.sh scripts/test_moe_nongemm.py topk
+    inhold.sh scripts/test_moe_nongemm.py layer --set modded_moe.TOPK_KERNEL=True
 """
 
 import argparse
 import ast
+import functools
 import importlib
 import itertools
 import os
@@ -30,6 +37,7 @@ import tempfile
 from pathlib import Path
 
 import torch
+import triton.testing
 
 BASE = "a522ee6"
 HERE = Path(__file__).resolve().parent
@@ -256,9 +264,104 @@ def orders(a):
     return ok
 
 
+def aten_row(row, key, k):
+    """One row of torch.topk(x, k) as ATen's CUDA kernels compute it: gatherTopK in the radix
+    order (key), then SortUtils.cuh's 32-slot bitonicSortKVInPlace (16 threads) with GTOp."""
+    kth = sorted(key, reverse=True)[k - 1]
+    above = [i for i, v in enumerate(key) if v > kth]
+    slot = above + [i for i, v in enumerate(key) if v == kth][: k - len(above)]
+    slot += [None] * (32 - k)
+    size = 2
+    while size <= 32:
+        stride = size // 2
+        while stride:
+            for t in range(16):
+                p, up = 2 * t - (t & (stride - 1)), size < 32 and t & (size // 2) != 0
+                a, b = slot[p], slot[p + stride]
+                swap = (
+                    b is None
+                    or a is not None
+                    and (row[a] != row[a] and row[b] == row[b] or row[a] > row[b])
+                )
+                if swap == up:
+                    slot[p], slot[p + stride] = b, a
+            stride //= 2
+        size *= 2
+    return slot[:k]
+
+
+def aten_topk(x, k):
+    bits = x.view(torch.int32)
+    radix = torch.where(bits >= 0, bits, bits ^ 0x7FFFFFFF)
+    radix = torch.where(x.isnan(), 2**31 - 1, radix)
+    rows = [aten_row(r, key, k) for r, key in zip(x.tolist(), radix.tolist())]
+    idx = torch.tensor(rows, dtype=torch.long)
+    return x.gather(1, idx), idx
+
+
+def topk(a):
+    """Router top-ks (modded_moe_topk.route) against torch.topk (CUDA) or aten_topk (CPU, under
+    TRITON_INTERPRET=1): routing indices of s + bias for k, values and indices of s for k + 1."""
+    import modded_moe_topk
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    t, e, k = (a.tokens, 96, a.topk) if dev == "cuda" else (256, 96, a.topk)
+    gen = torch.Generator(dev).manual_seed(4)
+    ref = (lambda x, k: tuple(torch.topk(x, k, dim=-1))) if dev == "cuda" else aten_topk
+
+    def rand(*shape):
+        return torch.rand(*shape, device=dev, generator=gen)
+
+    live = torch.sigmoid(8 * rand(t, e) - 4), 0.02 * rand(e) - 0.01
+    grid = (torch.randint(0, 6, (t, e), device=dev, generator=gen) / 8).float()
+    ties = grid, torch.randint(-2, 3, (e,), device=dev, generator=gen) / 8
+    odd = torch.tensor(
+        [0.0, -0.0, float("inf"), -float("inf"), float("nan"), 0.5, 2**-149]
+    )
+    pick = torch.randint(0, len(odd), (t, e), device=dev, generator=gen)
+    special = (
+        torch.where(rand(t, e) < 0.3, odd.to(dev)[pick], grid),
+        torch.zeros(e, device=dev),
+    )
+    ok = True
+    for name, (s, bias) in {"live": live, "ties": ties, "special": special}.items():
+        s, bias = s.contiguous(), bias.float()
+        idx, val, top = modded_moe_topk.route(s, bias, k, True)
+        want = ref(s + bias, k)[1], *ref(s, k + 1)
+        got = (idx, val, top)
+        diff = [bitdiff(w.cpu(), g.cpu()) for w, g in zip(want, got)]
+        zeros = modded_moe_topk.route(s, bias, k, False)
+        diff.append(bitdiff(want[0].cpu(), zeros[0].cpu()))
+        diff.append(max(z.abs().max().item() for z in zeros[1:]))
+        print(
+            f"  {name}: routing idx, stats values, stats idx, no-stats idx, no-stats zeros: {diff}"
+        )
+        ok &= not any(diff)
+    if dev == "cuda":
+        s, bias = live
+        bench = triton.testing.do_bench
+        routing = bench(lambda: torch.topk(s + bias, k))
+        both = bench(lambda: (torch.topk(s + bias, k), torch.topk(s, k + 1)))
+        print(f"  torch.topk ms: routing {routing:.3f}, both {both:.3f}")
+        for rows, warps in ((8, 4), (16, 4), (16, 8), (32, 8)):
+            run = functools.partial(modded_moe_topk.route, s, bias, k)
+            ms = [
+                bench(functools.partial(run, st, rows, warps)) for st in (False, True)
+            ]
+            print(
+                f"  route ms, {rows} rows {warps} warps: routing {ms[0]:.3f}, both {ms[1]:.3f}"
+            )
+    verdict = "PASS" if ok else "FAIL"
+    print(
+        f"{verdict} router top-k at {t} x {e}, k {k}: bitwise torch.topk incl. ties",
+        flush=True,
+    )
+    return ok
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=("layer", "orders", "run"))
+    p.add_argument("cmd", choices=("layer", "orders", "topk", "run"))
     p.add_argument("--impl")
     p.add_argument("--dump")
     p.add_argument("--kernel")
@@ -270,7 +373,9 @@ def main():
     a = p.parse_args()
     if a.cmd == "run":
         return run(a)
-    raise SystemExit(0 if {"layer": layer, "orders": orders}[a.cmd](a) else 1)
+    raise SystemExit(
+        0 if {"layer": layer, "orders": orders, "topk": topk}[a.cmd](a) else 1
+    )
 
 
 if __name__ == "__main__":
