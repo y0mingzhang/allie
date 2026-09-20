@@ -816,6 +816,24 @@ wave(
     "a6000p",
 )
 
+# fp8 quality gate (science fork's recipe, 2026-09-20): 1e17 dense ship 12x512, identical data/seed/steps, +/- --fp8
+PERF = ["--zero2", "--ckpt", "eager"]
+wave(
+    "fp8gate",
+    "moe-v1-fp8gate",
+    "f8g",
+    [
+        r | dict(bf16_weights=True, extra_args=PERF + extra)
+        for r, extra in zip(
+            variants("1e17", b, {"base": dict(arch=SHIP), "fp8": dict(arch=SHIP)}), ([], ["--fp8", "dense"])
+        )
+    ],
+    "fp8 quality gate at 1e17: dense ship recipe 12x512, identical data/seed/steps, +/- --fp8 dense; pass |d macro|"
+    " <= 0.0015 and |d expert| <= 0.002 (~1 sigma), fail if d macro > +0.003",
+    "general8",
+)
+
+
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
     return f"{w['prefix']}-{r['budget']}-{v}-{r['tag']}-s{r['seed']}"
