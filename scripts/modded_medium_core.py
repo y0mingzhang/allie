@@ -515,6 +515,15 @@ CKPT_LAYERS = 1 << 30  # only blocks with layer_idx < CKPT_LAYERS are checkpoint
 ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
 ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
 _inflight = []  # (work, param, fp32 grad) reduces of the running backward
+DEFER = False  # ZeRO-2 + eager checkpoints: NorMuon's param broadcasts finish under the next forward
+_bcast = {}  # block index (-1: outside blocks) -> the param broadcasts it waits on
+
+
+def sync_params(*blocks):
+    """Wait for the deferred param broadcasts of these blocks (all if none given)."""
+    for b in blocks or list(_bcast):
+        for w in _bcast.pop(b, ()):
+            w.wait()
 
 
 @torch.no_grad()
@@ -646,6 +655,9 @@ class NorMuon(torch.optim.Optimizer):
         # group: a single-rank group for rank-local params (sharded MoE experts: whole experts per rank)
         self.group = group
         self.world_size = dist.get_world_size(group) if dist.is_initialized() else 1
+        # deferred param broadcasts on their own communicator (NCCL stream): the step's later
+        # collectives (router load all-reduce, stop flag) must not queue behind them
+        self._bgroup = dist.new_group() if DEFER and group is None and self.world_size > 1 else None
         # custom sizing requires 8 GPUs and the upstream 16-layer matrices
         params = list(params)
         layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
@@ -752,6 +764,7 @@ class NorMuon(torch.optim.Optimizer):
     def step(self):
         # Efficient distributed step by @YouJiacheng, @KonstantinWilleke, @alexrgilbert,
         # @adricarda, @tuttyfrutyee, @vdlad, @ryanyang0, @vagrawal, @varunneal, @chrisjmccormick
+        sync_params()
         rank = dist.get_rank(self.group)
         group_infos = []
         for group in self.param_groups:
@@ -801,7 +814,7 @@ class NorMuon(torch.optim.Optimizer):
 
             group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
 
-        all_gather_infos = []
+        all_gather_infos, deferred = [], []
         # Second pass: wait for gradients, compute updates for the local shard of parameters,
         # and launch all async all_gather operations.
         for group, info in zip(self.param_groups, group_infos):
@@ -938,6 +951,10 @@ class NorMuon(torch.optim.Optimizer):
                 updated_params[num_params:].zero_()
 
             flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
+            if DEFER and group.get("zero2"):  # owners broadcast in layer order after all updates
+                flat[start_idx : start_idx + chunk_size].copy_(updated_params)
+                deferred += params
+                continue
             stacked_params = (
                 torch.empty(
                     (padded_num_params, *param_shape),
@@ -959,6 +976,11 @@ class NorMuon(torch.optim.Optimizer):
                     "orig_params": params,
                 }
             )
+
+        for p in sorted(deferred, key=lambda p: getattr(p, "block", -1)):
+            work = dist.broadcast(p.data, p.owner, group=self._bgroup, async_op=True)
+            _bcast.setdefault(getattr(p, "block", -1), []).append(work)
+        sync_params(-1)
 
         # Final pass: wait for all_gather to complete and copy results back into original parameter tensors.
         for info in all_gather_infos:
@@ -1416,6 +1438,7 @@ def _eager_checkpoint(module, *args):
     # changing disable(recursive=...) alone does not preserve the compiled child.
     if not hasattr(module, "_compiled"):
         module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
+    sync_params(module.layer_idx)
     return torch.utils.checkpoint.checkpoint(module._compiled, *args, use_reentrant=False)
 
 
@@ -1622,6 +1645,10 @@ class GPT(nn.Module):
         )
         self.fp32_embed = False  # FP32 embedding/head state: cast lookups to BF16
         self.board = None  # modded_board branch, added at every position when set
+
+    def train(self, mode=True):  # eval forwards skip the eager checkpoints that wait per block
+        sync_params()
+        return super().train(mode)
 
     def forward(
         self,

@@ -23,6 +23,7 @@ from modded_medium import Config, TrainingManager, create_model, core
 from modded_wsd import Schedule, install
 
 ZERO2 = bool(os.environ.get("ZERO2"))  # ZERO2=1: the BF16 path also reduces grads to owners in backward
+DEFER = bool(os.environ.get("DEFER"))  # DEFER=1 (with ZERO2): owners broadcast updated params, synced after
 ARCH = {}  # MOE=1: SwiGLU MoE experts (3D params) and shared experts join the masters
 if os.environ.get("MOE"):
     ARCH = dict(mlp="swiglu", moe=[8, 2], moe_kernel="pad", moe_seq=1e-3, moe_update="prop")
@@ -88,6 +89,8 @@ def patch():
 
     dist.all_reduce, dist.reduce_scatter_tensor = all_reduce, reduce_scatter_tensor
     dist.all_gather_into_tensor = all_gather_into_tensor
+    bcast = dist.broadcast
+    dist.broadcast = lambda t, src, group=None, async_op=False: bcast(t.view(torch.uint8), src) or Done()
     dist.reduce = reduce_to
     core.polar_express = polar_express
 
@@ -106,6 +109,7 @@ def build(bf16):
         zero2=bf16 and ZERO2,
     )  # fmt: skip
     model = create_model(cfg, device="cpu")
+    core.DEFER = DEFER
     manager = TrainingManager(model, cfg)
     manager.split_step = SPLIT
     return model, manager
@@ -127,6 +131,7 @@ def train(model, manager, steps, accum):
                 loss = loss + (p * x.to(p.dtype)).sum()
             loss.backward()
         manager.step_optimizers(step)
+        core.sync_params()
 
 
 def shards(manager):

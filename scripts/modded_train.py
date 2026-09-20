@@ -18,6 +18,7 @@ import triton
 from modded_arch import attn_factor, extra_flops
 from modded_moe import STATS
 from modded_moe import full_state, local_state
+from modded_medium_core import sync_params
 from modded_medium import (
     Config,
     TrainingManager,
@@ -496,6 +497,7 @@ def main():
             ),
             directory / f"rank{rank}.pt",
         )
+        sync_params()
         state = full_state(model, model.state_dict())  # collective when experts are sharded
         if rank == 0:
             atomic_save(
