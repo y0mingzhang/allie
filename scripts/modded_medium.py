@@ -308,6 +308,8 @@ def create_model(cfg, device="cuda"):
             direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
             p.register_post_accumulate_grad_hook(finish_direct_accum if direct else core.accumulate_fp32)
     for p in model.parameters():
+        if getattr(p, "label", "").endswith("_sh"):
+            continue  # sharded experts: each rank holds its own rows (broadcast before slicing)
         dist.broadcast(p.detach(), 0)
         if hasattr(p, "fp32"):
             dist.broadcast(p.fp32, 0)

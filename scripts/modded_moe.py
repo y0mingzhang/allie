@@ -61,6 +61,27 @@ def _recompute(fn, *args):
     return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False)
 
 
+def full_state(model, state):
+    """state_dict with every sharded expert param (whole-expert rows per rank) all-gathered to the
+    full tensor; collective, all ranks must call it."""
+    for name, p in model.named_parameters():
+        if getattr(p, "label", "").endswith("_sh"):
+            parts = [torch.empty_like(p) for _ in range(dist.get_world_size())]
+            dist.all_gather(parts, p.detach().contiguous())
+            state[name] = torch.cat(parts)
+    return state
+
+
+def local_state(model, state):
+    """Inverse of full_state for this rank: full sharded expert tensors sliced to its rows."""
+    state = dict(state)
+    for name, p in model.named_parameters():
+        if getattr(p, "label", "").endswith("_sh") and state[name].shape[0] != p.shape[0]:
+            n = p.shape[0]
+            state[name] = state[name][dist.get_rank() * n : (dist.get_rank() + 1) * n]
+    return state
+
+
 class Gather(torch.autograd.Function):
     """Sharded experts (ZeRO-3 style): each rank's whole-expert shard, cast to the compute dtype, gathered
     along the expert dim. The backward reduce-scatters the full gradient back to the shards in FP32,
@@ -108,8 +129,11 @@ class MoE(nn.Module):
             w, r = dist.get_world_size(), dist.get_rank()
             assert experts % w == 0, f"{experts} experts over {w} ranks"
             n = experts // w
-            self.up = nn.Parameter(self.up.data[r * n : (r + 1) * n].clone())
-            self.down = nn.Parameter(self.down.data[r * n : (r + 1) * n].clone())
+            full = [self.up.data.cuda(), self.down.data.cuda()]
+            for t in full:  # rank 0's init for every shard, whatever each rank's seed
+                dist.broadcast(t, 0)
+            self.up = nn.Parameter(full[0][r * n : (r + 1) * n].to(self.up.device).clone())
+            self.down = nn.Parameter(full[1][r * n : (r + 1) * n].to(self.down.device).clone())
         self.shared = shared_hidden > 0
         if self.shared:
             self.shared_up = nn.Parameter(

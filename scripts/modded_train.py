@@ -17,6 +17,7 @@ import torch.distributed as dist
 import triton
 from modded_arch import attn_factor, extra_flops
 from modded_moe import STATS
+from modded_moe import full_state, local_state
 from modded_medium import (
     Config,
     TrainingManager,
@@ -404,7 +405,7 @@ def main():
             assert shared["runtime"] == runtime, (
                 "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
             )
-        model.load_state_dict(shared["model"])
+        model.load_state_dict(local_state(model, shared["model"]))  # sharded experts: own rows
         manager.load_rank_state_dict(local["manager"])
         train.load_state_dict(local["data"])
         restore_rng(local["rng"])
@@ -478,10 +479,11 @@ def main():
             ),
             directory / f"rank{rank}.pt",
         )
+        state = full_state(model, model.state_dict())  # collective when experts are sharded
         if rank == 0:
             atomic_save(
                 dict(
-                    model=cpu_copy(model.state_dict()),
+                    model=cpu_copy(state),
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=source_hashes,
