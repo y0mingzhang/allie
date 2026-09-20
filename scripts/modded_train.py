@@ -244,6 +244,7 @@ def main():
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     dist.init_process_group("nccl")
+    cpu = dist.new_group(backend="gloo")  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -699,9 +700,9 @@ def main():
                     or (a.stop_after and step >= a.stop_after)
                 )
             )
-            flag = torch.tensor(stop_code, device="cuda")
-            dist.all_reduce(flag, op=dist.ReduceOp.MAX)
-            stop_code = int(flag.item())
+            flag = torch.tensor(stop_code, device="cpu")
+            dist.all_reduce(flag, op=dist.ReduceOp.MAX, group=cpu)
+            stop_code = int(flag)
         metrics = None
         if stop_code != 2 and (
             step % a.eval_every == 0 or step == total_steps or stop_code

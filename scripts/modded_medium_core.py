@@ -655,9 +655,8 @@ class NorMuon(torch.optim.Optimizer):
         # group: a single-rank group for rank-local params (sharded MoE experts: whole experts per rank)
         self.group = group
         self.world_size = dist.get_world_size(group) if dist.is_initialized() else 1
-        # deferred param broadcasts on their own communicator (NCCL stream): the step's later
-        # collectives (router load all-reduce, stop flag) must not queue behind them
-        self._bgroup = dist.new_group() if DEFER and group is None and self.world_size > 1 else None
+        # ZeRO-2 params whose broadcast from their owner waits for launch(), after the step's collectives
+        self._deferred = [] if DEFER and group is None and self.world_size > 1 else None
         # custom sizing requires 8 GPUs and the upstream 16-layer matrices
         params = list(params)
         layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
@@ -705,6 +704,15 @@ class NorMuon(torch.optim.Optimizer):
         self._group_of = {
             p: i for i, g in enumerate(self.param_groups) for p in g["params"]
         }
+
+    def launch(self):
+        """Broadcast the updated ZeRO-2 rows from their owners in block order. Call after the step's
+        last collective: later ones on this communicator would queue behind the broadcasts."""
+        for p in sorted(self._deferred, key=lambda p: getattr(p, "block", -1)):
+            work = dist.broadcast(p.data, p.owner, group=self.group, async_op=True)
+            _bcast.setdefault(getattr(p, "block", -1), []).append(work)
+        self._deferred.clear()
+        sync_params(-1)
 
     def reset(self):
         # expose a reset for clearing buffers
@@ -764,7 +772,8 @@ class NorMuon(torch.optim.Optimizer):
     def step(self):
         # Efficient distributed step by @YouJiacheng, @KonstantinWilleke, @alexrgilbert,
         # @adricarda, @tuttyfrutyee, @vdlad, @ryanyang0, @vagrawal, @varunneal, @chrisjmccormick
-        sync_params()
+        if self._deferred is not None:  # the last step's broadcasts (no-op once every block ran forward)
+            sync_params()
         rank = dist.get_rank(self.group)
         group_infos = []
         for group in self.param_groups:
@@ -814,7 +823,7 @@ class NorMuon(torch.optim.Optimizer):
 
             group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
 
-        all_gather_infos, deferred = [], []
+        all_gather_infos = []
         # Second pass: wait for gradients, compute updates for the local shard of parameters,
         # and launch all async all_gather operations.
         for group, info in zip(self.param_groups, group_infos):
@@ -951,9 +960,9 @@ class NorMuon(torch.optim.Optimizer):
                 updated_params[num_params:].zero_()
 
             flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
-            if DEFER and group.get("zero2"):  # owners broadcast in layer order after all updates
+            if self._deferred is not None and group.get("zero2"):  # owners broadcast in launch()
                 flat[start_idx : start_idx + chunk_size].copy_(updated_params)
-                deferred += params
+                self._deferred += params
                 continue
             stacked_params = (
                 torch.empty(
@@ -976,11 +985,6 @@ class NorMuon(torch.optim.Optimizer):
                     "orig_params": params,
                 }
             )
-
-        for p in sorted(deferred, key=lambda p: getattr(p, "block", -1)):
-            work = dist.broadcast(p.data, p.owner, group=self._bgroup, async_op=True)
-            _bcast.setdefault(getattr(p, "block", -1), []).append(work)
-        sync_params(-1)
 
         # Final pass: wait for all_gather to complete and copy results back into original parameter tensors.
         for info in all_gather_infos:
@@ -2091,6 +2095,9 @@ class TrainingManager:
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()
             self.model.split_embed = True
+
+        if self.muon_opt._deferred:
+            self.muon_opt.launch()
 
     def start_transition(self, freeze_count=40):
         # freeze scalar weights during transition
