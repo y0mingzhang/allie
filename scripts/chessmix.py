@@ -337,6 +337,16 @@ def balanced_nobullet(cap):
     return fn
 
 
+def relaxed(r):
+    """control with the down-sampling of sub-expert games relaxed r times (keep ratio min(1, r x keep)): fresh
+    abundant tokens instead of repeating a pass; >= 2400 games keep control's weight."""
+    def fn(g, p):
+        w = control(g, p)[0]
+        return np.where(np.maximum(g.welo, g.belo) < 2400, np.minimum(1.0, r * w), w), True, True
+
+    return fn
+
+
 def cooldown(policy, start, before=control):
     return lambda g, p: before(g, p) if p < start else policy(g, p)
 
@@ -355,6 +365,7 @@ POLICIES = dict(
         True,
     ),
 )
+POLICIES.update({f"relax{r}": relaxed(r) for r in (2, 3, 4, 8)})
 POLICIES.update(
     cooldown20_up8=cooldown(upsampled(8), 0.8),
     cooldown40=cooldown(upsampled(4), 0.6),

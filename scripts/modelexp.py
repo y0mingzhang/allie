@@ -846,6 +846,26 @@ wave(
     "preempt",
 )
 
+# fresh-vs-repeat mix ablation (user 08:35: fill D beyond a policy pass with fresh abundant tokens, never repeat
+# experts / OTB past ~4x). Per-pass supply of B_3 over the current stores ~43B (bucket counts x KEEP); relax3 (3x
+# the down-sampling keep ratio below 2400, capped at 1) makes a pass ~82B at expert share 0.20 vs 0.38. pool_frac
+# = run tokens / final_tokens emulates a final run of that many tokens: 43B = 1 pass, 86B = 2 passes of B_3
+# (experts 8x) or ~1 pass of relax3 (experts ~4x)
+MIX = {
+    "b3p1": dict(final_tokens=43.3e9),
+    "b3p2": dict(final_tokens=86.6e9),
+    "relax3p2": dict(final_tokens=86.6e9, policy=b["policy"].replace("mover_rule", "mover_rule+relax3")),
+}
+wave(
+    "mixfresh",
+    "moe-v1-mixfresh",
+    "mxf",
+    variants("3e16", b, {k: v | dict(arch=SHIP) for k, v in MIX.items()}, seeds=(42, 43))
+    + variants("3e16", b, {f"moe{k}": v | dict(arch=R()["arch"], bf16_weights=True) for k, v in MIX.items()}),
+    "fresh vs repeated tokens at 3e16: B_3 at 1 / 2 emulated passes vs relax3 at 2 (fresh abundant), dense x2 seeds + moe128k6",
+    "preempt",
+)
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
@@ -913,7 +933,7 @@ def planned(w, r):
     layers, width, steps = shape(r)
     s, decay = schedule(r, steps)
     return r | dict(
-        pool_frac=steps * 512 * 1024 / dx.FINAL_TOKENS,
+        pool_frac=steps * 512 * 1024 / r.get("final_tokens", dx.FINAL_TOKENS),
         b2=B2_HASH,
         group=w["group"],
         name=name(w, r),
