@@ -512,6 +512,7 @@ def _flush():
 
 CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
 ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
+ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
 _inflight = []  # (work, param, fp32 grad) reduces of the running backward
 
 
@@ -520,7 +521,7 @@ def _finish(item):
     work, p, g = item
     work.wait()
     if p.main_grad is not None:  # this rank owns p: accumulate the averaged grad into its FP32 row
-        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g)
+        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g.float())
     p.fresh = False
 
 
@@ -542,7 +543,7 @@ def reduce_to_owner(p):
     drop it (a few reduces in flight overlap the rest of the backward)."""
     if not _inflight:
         torch.autograd.Variable._execution_engine.queue_callback(_drain)
-    g = p.grad.float()
+    g = p.grad if ZERO2_BF16 else p.grad.float()
     p.grad = None
     _inflight.append((dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True), p, g))
     while len(_inflight) > 4:

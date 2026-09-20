@@ -183,6 +183,11 @@ def main():
         help="with --bf16-weights: grads reduced to their NorMuon owner during backward (ZeRO-2)",
     )
     p.add_argument(
+        "--zero2-bf16",
+        action="store_true",
+        help="with --zero2: reduce the grads in BF16 (half the traffic; not bit-identical)",
+    )
+    p.add_argument(
         "--ckpt",
         default="",
         choices=("", "mlp", "block", "eager"),
@@ -261,6 +266,7 @@ def main():
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
     cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
+    cfg.zero2_bf16 = a.zero2_bf16
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,

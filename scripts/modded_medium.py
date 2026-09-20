@@ -77,6 +77,7 @@ class Config:
     )
     ckpt: str = ""  # activation checkpointing: "mlp" | "block" | "eager" (training only)
     zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
+    zero2_bf16: bool = False  # that reduce in BF16 (half the traffic, not bit-identical)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -228,7 +229,8 @@ def create_model(cfg, device="cuda"):
     assert cfg.ckpt in ("", "mlp", "block", "eager")
     core.CKPT = cfg.ckpt
     assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
-    core.ZERO2 = cfg.zero2
+    core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
+    assert not cfg.zero2_bf16 or cfg.zero2
     modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
     assert not (arch["moe_kernel"] == "scatter-accum" and arch["moe_shard"]), "sharded experts reduce-scatter their grads"
