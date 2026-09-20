@@ -24,6 +24,7 @@ from torch.nn import functional as F
 
 from modded_smoe import parallel_linear
 from modded_smoe_tuned import parallel_linear as tuned_linear
+from modded_smoe_aligned_linear import parallel_linear as gather_linear
 
 # MoE.stats, per layer over the last step (modded_train logs them as moe_<name>)
 STATS = (
@@ -114,7 +115,7 @@ class MoE(nn.Module):
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
-        assert kernel in ("pad", "scatter", "scatter-tuned", "scatter-accum")
+        assert kernel in ("pad", "scatter", "scatter-tuned", "scatter-accum", "scatter-gather")
         self.score, self.kernel = score, kernel
         self.experts, self.topk, self.capacity, self.kind = experts, topk, capacity, kind
         up = 2 if kind == "swiglu" else 1  # SwiGLU experts: gate and value rows
@@ -228,12 +229,15 @@ class MoE(nn.Module):
             up, down = Gather.apply(self.up, h.dtype), Gather.apply(self.down, h.dtype)
         else:
             up, down = self.up.type_as(h), self.down.type_as(h)
-        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum"):  # both paths are dropless
+        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum", "scatter-gather"):  # dropless
             offs = count.cumsum(0)
             se = flat[order]
-            linear = tuned_linear if self.kernel in ("scatter-tuned", "scatter-accum") else parallel_linear
+            linear = (gather_linear if self.kernel == "scatter-gather" else
+                      tuned_linear if self.kernel in ("scatter-tuned", "scatter-accum") else parallel_linear)
             direct = self.kernel == "scatter-accum" and self.training and torch.is_grad_enabled()
             up_args, down_args = {}, {}
+            if self.kernel == "scatter-gather":
+                up_args = dict(gather=True)
             if direct:
                 assert self.up.dtype == self.down.dtype == torch.bfloat16
                 up_flat,up_row=self.up.acc
