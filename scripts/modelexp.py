@@ -896,6 +896,11 @@ wave("isof1e17", "moe-v1-isofix1e17", "mf17",
      "moe-v1 fixed-router isoFLOPs at 1e17: 6 MoE shapes (E128 top-4, router lr x0.1) + dense 10x448 / 14x640",
      "preempt")
 
+# 6x320 violates the trainer's >= 8 layers; the small end of the fixed-router 1e17 grid is 8x256 instead
+wave("isof1e17b", "moe-v1-isofix1e17b", "mf17b",
+     variants("1e17", b, {"moe8x256": S16F | dict(depth=8 / 12, width_mul=0.5)}),
+     "moe-v1 fixed-router isoFLOPs at 1e17, small end: 8x256 (replaces the invalid 6x320)", "preempt")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
