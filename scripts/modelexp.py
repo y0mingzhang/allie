@@ -937,10 +937,21 @@ def plan(key, commit=None):
         hashes["identity.json"] = sha(study / "identity.json")
     runs = [planned(w, r) for r in w["runs"]]
     for r in runs:
-        if r["v"] == "base":
+        if r["v"] == "base" and key != "fp8gate":
             assert abs(r["pool_frac"] - b["pool_frac"][r["budget"]]) < 1e-9, r[
                 "pool_frac"
             ]
+    if key == "fp8gate":
+        # Ship FLOPs differ from the original B_3 shape's FLOPs. Both gate
+        # arms must use the ship-derived tokens/pool, not B_3's old step count.
+        assert len(runs) == 2
+        left, right = (dict(r) for r in runs)
+        for r in (left, right):
+            r.pop("name")
+            r.pop("v")
+        assert right["extra_args"] == left["extra_args"] + ["--fp8", "dense"]
+        right["extra_args"] = left["extra_args"]
+        assert left == right, "FP8 quality arms differ beyond quantization"
     (study / "plan.json").write_text(
         json.dumps(
             dict(
