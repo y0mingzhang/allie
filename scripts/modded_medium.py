@@ -22,6 +22,7 @@ import modded_board
 import modded_diffattn
 import modded_medium_core as core
 from modded_runtime import prime_source_key
+from modded_smoe_tuned import finish_direct_accum
 
 RUNTIME_SOURCE_KEY = prime_source_key()
 
@@ -224,6 +225,8 @@ def create_model(cfg, device="cuda"):
     arch = modded_arch.resolve(cfg.arch)
     assert cfg.ckpt in ("", "mlp", "block")
     core.CKPT = cfg.ckpt
+    assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
+    assert not (arch["moe_kernel"] == "scatter-accum" and arch["moe_shard"]), "sharded experts reduce-scatter their grads"
     global BOARD
     BOARD = bool(
         arch["board"]
@@ -300,7 +303,8 @@ def create_model(cfg, device="cuda"):
                 True,
                 None,
             )
-            p.register_post_accumulate_grad_hook(core.accumulate_fp32)
+            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
+            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else core.accumulate_fp32)
     for p in model.parameters():
         dist.broadcast(p.detach(), 0)
         if hasattr(p, "fp32"):
