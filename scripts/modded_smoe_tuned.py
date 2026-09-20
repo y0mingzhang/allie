@@ -100,6 +100,13 @@ def _direct_wgrad(DY,X,OFF,OUT,
 def direct_wgrad(dy:torch.Tensor,x:torch.Tensor,offsets:torch.Tensor,out:torch.Tensor,fresh:bool)->None:
     assert dy.dtype==torch.bfloat16 and out.dtype==torch.float32
     cfg=weight_config(dy,x,out.shape[0]) or (32,128,128,4,4)
+    # FP32 read/add/write needs different tiles from materialized BF16 dW.
+    # Selected offline, including the actual physical optimizer-buffer layout.
+    if out.shape[0]==192 and dy.shape[0]==98304:
+        cfg={
+            (2048,910,1,2048):(64,256,64,8,3),
+            (455,2048,2048,1):(32,128,256,8,3),
+        }.get((x.shape[1],dy.shape[1],out.stride(1),out.stride(2)),cfg)
     bm,bn,bk,nw,ns=cfg
     grid=(out.shape[0]*triton.cdiv(x.shape[1],bk),triton.cdiv(dy.shape[1],bn))
     _direct_wgrad[grid](dy,x,offsets,out,*dy.stride(),*x.stride(),*out.stride(),
