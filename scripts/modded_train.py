@@ -139,7 +139,12 @@ def main():
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
-    p.add_argument("--profile", type=int, default=0, help="profile this step (CUDA kernels) into the log")
+    p.add_argument(
+        "--profile",
+        type=int,
+        default=0,
+        help="profile this step (CUDA kernels) into the log",
+    )
     p.add_argument("--resume")
     p.add_argument("--data", default="/scratch/yimingz3/allie/lichess_tokens_v2")
     p.add_argument(
@@ -188,7 +193,11 @@ def main():
         action="store_true",
         help="with --zero2: reduce the grads in BF16 (half the traffic; not bit-identical)",
     )
-    p.add_argument("--ckpt-blend", action="store_true", help="with --ckpt eager: recompute residual blends too")
+    p.add_argument(
+        "--ckpt-blend",
+        action="store_true",
+        help="with --ckpt eager: recompute residual blends too",
+    )
     p.add_argument(
         "--ckpt-frac",
         type=float,
@@ -253,9 +262,12 @@ def main():
     snap = os.environ.get("MEMSNAP")
     if snap:
         from modded_memsnap import start as start_memory_trace
+
         start_memory_trace(snap, rank)
     dist.init_process_group("nccl")
-    cpu = dist.new_group(backend="gloo")  # host-side flags: never queue behind in-flight NCCL work
+    cpu = dist.new_group(
+        backend="gloo"
+    )  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -304,7 +316,9 @@ def main():
     # sharded MoE experts make every forward a collective (all ranks validate) and run their expert
     # block as an eager checkpoint, which needs graph breaks
     sharded = any(getattr(m, "sharded", False) for m in model.modules())
-    net = torch.compile(model, dynamic=False, fullgraph=not sharded and a.ckpt != "eager")
+    net = torch.compile(
+        model, dynamic=False, fullgraph=not sharded and a.ckpt != "eager"
+    )
     if a.mix:
         from chessmix import Prefetch, Sampler
 
@@ -395,7 +409,9 @@ def main():
             assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
                 f"Resume changes {key}"
             )
-        assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, "Resume changes ckpt_blend"
+        assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, (
+            "Resume changes ckpt_blend"
+        )
         if a.wsd_continue_from:
             from modded_continuation import prepare_continuation
 
@@ -437,7 +453,9 @@ def main():
             assert shared["runtime"] == runtime, (
                 "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
             )
-        model.load_state_dict(local_state(model, shared["model"]))  # sharded experts: own rows
+        model.load_state_dict(
+            local_state(model, shared["model"])
+        )  # sharded experts: own rows
         manager.load_rank_state_dict(local["manager"])
         train.load_state_dict(local["data"])
         restore_rng(local["rng"])
@@ -512,7 +530,9 @@ def main():
             directory / f"rank{rank}.pt",
         )
         sync_params()
-        state = full_state(model, model.state_dict())  # collective when experts are sharded
+        state = full_state(
+            model, model.state_dict()
+        )  # collective when experts are sharded
         if rank == 0:
             atomic_save(
                 dict(
@@ -588,7 +608,9 @@ def main():
             dist.barrier()
             os._exit(0)
         if a.profile and index + 1 == a.profile:
-            prof = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA])
+            prof = torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA]
+            )
             prof.__enter__()
         manager.advance_schedule(index)
         accum = manager.batch_size // (world * a.micro_batch * 1024)
@@ -652,7 +674,14 @@ def main():
             torch.cuda.synchronize()
             prof.__exit__(None, None, None)
             if rank == 0:
-                print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=40), flush=True)
+                print(
+                    prof.key_averages().table(
+                        sort_by="self_cuda_time_total", row_limit=40
+                    ),
+                    flush=True,
+                )
+                if os.environ.get("ALLIE_TRACE"):
+                    prof.export_chrome_trace(os.environ["ALLIE_TRACE"])
         if step % 25 == 0 or step == total_steps:
             stats = torch.cat(
                 (
@@ -780,5 +809,6 @@ if __name__ == "__main__":
     except BaseException:
         if os.environ.get("MEMSNAP"):
             from modded_memsnap import dump_on_error
+
             dump_on_error()
         raise
