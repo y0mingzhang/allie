@@ -33,6 +33,8 @@ DEFAULTS = dict(
     moe_update="sign",
     moe_capacity=1.25,  # training capacity factor (eval is dropless)
     moe_shared=True,  # shared expert (half the active width); off: routed experts take all of it
+    moe_shared_frac=0.5,  # the shared expert's share of the active width (1 / (k + 1) = DeepSeek's uniform)
+    moe_round=0,  # round shared and routed widths to multiples of this (0: exact split)
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     moe_kernel="pad",  # pad (capacity bmm) | scatter (ScatterMoE, dropless)
     moe_shard=False,  # experts sharded over ranks (whole experts), gathered per layer
@@ -67,11 +69,12 @@ def moe_dims(width, arch):
         return None
     experts, topk = a["moe"]
     active = swiglu_hidden(width) if a["mlp"] == "swiglu" else 4 * width
-    shared = active // 2 if a["moe_shared"] else 0
+    frac, m = (a["moe_shared_frac"] if a["moe_shared"] else 0), a["moe_round"] or 1
+    shared = active // 2 if frac == 0.5 and m == 1 else round(active * frac / m) * m
     return (
         experts,
         topk,
-        round((active - shared) / topk),  # extra_flops counts the rounding
+        round((active - shared) / topk / m) * m,  # extra_flops counts the rounding
         shared,
         *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
         a["moe_update"],

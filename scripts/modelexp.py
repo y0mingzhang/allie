@@ -913,6 +913,18 @@ wave("isof3e17", "moe-v1-isofix3e17", "mf37",
               | {"dense10x512": dict(arch=SHIP, bf16_weights=True) | ISO37["10x512"]}),
      "moe-v1 fixed-router isoFLOPs at 3e17: 5 MoE shapes (E128 top-4, router lr x0.1) + dense 10x512", "preempt4")
 
+# MoE design axes beyond sparsity (user 15:40), fixed router (lr x0.1), dualgather, bf16 weights, 3e16 on single GPUs;
+# base = E128 top-4 with the shared expert at half the active width. Winners go to 1e17
+DA = lambda **kw: S16D | dict(arch=S16D["arch"] | kw)
+AXES = {
+    "base": DA(), "shared0": DA(moe_shared=False), "shareduni": DA(moe_shared_frac=0.2),
+    "shared0.25": DA(moe_shared_frac=0.25), "k8": DA(moe=[128, 8]), "k16": DA(moe=[128, 16]),
+    "round64": DA(moe_round=64), "E64": DA(moe=[64, 4]), "E256": DA(moe=[256, 4]),
+}
+wave("axes", "moe-v1-axes3e16", "mx16", variants("3e16", b, AXES),
+     "moe-v1 design axes at 3e16 (fixed router): shared fraction 0 / 0.2 / 0.25 / 0.5, top-4 / 8 / 16, 64-rounded widths, E64 / 128 / 256",
+     "preempt")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
