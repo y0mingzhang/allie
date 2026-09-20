@@ -781,12 +781,14 @@ iso = lambda budget: variants(
     budget, b, {f"moe{k}": S16 | v for k, v in SHAPES[budget].items()}
     | {f"dense{k}": dict(arch=SHIP) | SHAPES[budget][k] for k in ISO_DENSE[budget]},
 )
+# the 3e17 shapes on BF16 weights (bit-identical to FP32 weights, 09dec11; moe20x1024 OOMs without it)
+iso_bf16 = lambda budget: [r | dict(bf16_weights=True) for r in iso(budget)]
 for budget in SHAPES:
     wave(
         f"iso{budget}",
         f"moe-v1-iso{budget}",
         f"mi{budget[-2:]}",
-        iso(budget),
+        iso_bf16(budget) if budget == "3e17" else iso(budget),
         f"moe-v1 isoFLOPs at {budget}: 4 active sizes at sparsity 16.5 (E=128 top-4, scatter) + 2 dense ship shapes",
         "preempt4",
     )
@@ -1012,6 +1014,7 @@ def train_args(study, r):
         args += ["--arch", json.dumps(r["arch"], sort_keys=True)]
     if r.get("wd", 1) != 1:
         args += ["--wd-scale", r["wd"]]
+    args += ["--bf16-weights"] * bool(r.get("bf16_weights"))
     return args
 
 
