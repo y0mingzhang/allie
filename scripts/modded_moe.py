@@ -89,6 +89,13 @@ def local_state(model, state):
     return state
 
 
+def counts(keys, e):
+    """Occurrences of 0..e-1 in sorted integer keys. Exact and atomic-free: scatter_add_ runs as a
+    sorting index_put under torch.use_deterministic_algorithms."""
+    ends = torch.searchsorted(keys, torch.arange(e, device=keys.device), right=True)
+    return ends.diff(prepend=ends.new_zeros(1))
+
+
 class Gather(torch.autograd.Function):
     """Sharded experts (ZeRO-3 style): each rank's whole-expert shard, cast to the compute dtype, gathered
     along the expert dim. The backward reduce-scatters the full gradient back to the shards in FP32,
@@ -187,8 +194,8 @@ class MoE(nn.Module):
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
         flat = idx.flatten()
-        count = flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
         order = flat.argsort(stable=True)
+        count = counts(flat[order], e)
         if self.sharded and self.training and torch.is_grad_enabled() and not BLOCK_RECOMPUTE:
             # eager checkpoint: the compiled partitioner keeps opaque autograd Functions' saved tensors
             # (gathered experts, expert activations) for every layer; eager recompute re-gathers them
