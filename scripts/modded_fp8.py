@@ -7,9 +7,26 @@ DENSE = False
 E4M3 = torch.finfo(torch.float8_e4m3fn).max
 
 
+def round_e4m3(t):
+    """FP32 RNE onto the finite E4M3 grid before the hardware cast.
+
+    Triton on sm89 can double-round FP32 through BF16, even with rtne.
+    Grid values cast exactly. The caller supplies finite values in [-448,448].
+    Normal values use the same integer rounding as the expert quantizer;
+    subnormals round to multiples of 2^-9, retaining signed zero.
+    """
+    bits = t.view(torch.int32)
+    sign = bits & -0x80000000
+    magnitude = bits & 0x7fffffff
+    normal = ((magnitude + 0x7ffff + ((magnitude >> 20) & 1)) & -0x100000) | sign
+    sub = (torch.round(t.abs() * 512.0) / 512.0).view(torch.int32) | sign
+    return torch.where(t.abs() < 0.015625, sub, normal).view(torch.float32)
+
+
 def quantize(t):
     s = t.abs().amax().float().clamp(min=1e-12) / E4M3
-    return (t.float() / s).to(torch.float8_e4m3fn).contiguous(), s  # _scaled_mm: row-major x, column-major w.T
+    v = (t.float() / s).clamp(-E4M3, E4M3)
+    return round_e4m3(v).to(torch.float8_e4m3fn).contiguous(), s  # _scaled_mm: row-major x, column-major w.T
 
 
 class Linear(torch.autograd.Function):
