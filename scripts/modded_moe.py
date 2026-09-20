@@ -57,8 +57,12 @@ BLOCK_RECOMPUTE = False  # set by create_model under --ckpt eager (whole blocks 
 
 
 @torch.compiler.disable
-def _recompute(fn, *args):
-    return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False)
+def _recompute(module, *args):
+    # Keep the optimized callable wholly outside the outer Dynamo trace, which
+    # otherwise unwraps a compiled bound method passed across this boundary.
+    if not hasattr(module, "_compiled_experts_out"):
+        module._compiled_experts_out = torch.compile(module.experts_out, dynamic=False, fullgraph=True)
+    return torch.utils.checkpoint.checkpoint(module._compiled_experts_out, *args, use_reentrant=False)
 
 
 def full_state(model, state):
@@ -186,7 +190,7 @@ class MoE(nn.Module):
         if self.sharded and self.training and torch.is_grad_enabled() and not BLOCK_RECOMPUTE:
             # eager checkpoint: the compiled partitioner keeps opaque autograd Functions' saved tensors
             # (gathered experts, expert activations) for every layer; eager recompute re-gathers them
-            routed, dropped = _recompute(self.experts_out, h, w, flat, count, order)
+            routed, dropped = _recompute(self, h, w, flat, count, order)
         else:
             routed, dropped = self.experts_out(h, w, flat, count, order)
         if self.training:

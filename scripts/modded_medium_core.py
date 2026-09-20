@@ -1408,8 +1408,13 @@ class MLP(nn.Module):
 
 
 @torch.compiler.disable
-def _eager_checkpoint(fn, *args):
-    return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False)
+def _eager_checkpoint(module, *args):
+    # Create AND call the optimized bound method outside the outer Dynamo trace.
+    # Passing module._compiled through that trace can unwrap it back to Python;
+    # changing disable(recursive=...) alone does not preserve the compiled child.
+    if not hasattr(module, "_compiled"):
+        module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
+    return torch.utils.checkpoint.checkpoint(module._compiled, *args, use_reentrant=False)
 
 
 class Block(nn.Module):
@@ -1436,9 +1441,7 @@ class Block(nn.Module):
             # eager checkpoint around this block's own compiled graph: everything the graph saves
             # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
             # and recomputed in backward, keeping only the block input
-            if not hasattr(self, "_compiled"):
-                self._compiled = torch.compile(self._forward, dynamic=False, fullgraph=True)
-            return _eager_checkpoint(self._compiled, x, attn_args)
+            return _eager_checkpoint(self, x, attn_args)
         return self._forward(x, attn_args)
 
     def _forward(self, x: Tensor, attn_args: AttnArgs):
