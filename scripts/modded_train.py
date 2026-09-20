@@ -545,9 +545,11 @@ def main():
             model, model.state_dict()
         )  # collective when experts are sharded
         if rank == 0:
+            # its only CPU tensors are full_state's fresh gathers of sharded experts
+            state = saver.snapshot(state, owned=True) if saver else cpu_copy(state)
             write(
                 dict(
-                    model=host(state),
+                    model=state,
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=source_hashes,
@@ -594,6 +596,7 @@ def main():
                         "seconds": seconds,
                         "wait_seconds": waited,
                         "durable_seconds": time.monotonic() - checkpoint_start,
+                        "host_bytes": saver.nbytes,
                         "directory": str(directory.relative_to(out)),
                         "removed": removed,
                     },

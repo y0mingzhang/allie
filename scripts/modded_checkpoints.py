@@ -2,12 +2,14 @@
 
 import copy
 import json
+import mmap
 import re
 import shutil
 import signal
 import sys
 import threading
 import time
+import weakref
 
 import torch
 import torch.distributed as dist
@@ -78,6 +80,25 @@ def durable_save(state, path, tries=4):
             time.sleep(2**i)
 
 
+def pinned(like):
+    """Page-locked host tensor laid out as torch.empty_like(like) with exactly its bytes, in its
+    own pages. pin_memory=True would pin each block rounded up to a power of two (x1.5 for the
+    E96 expert weights), for the whole run."""
+    meta = torch.empty_like(like, device="meta")
+    n = meta.untyped_storage().nbytes()
+    if n == 0:
+        return torch.empty_like(like, device="cpu")
+    pages = mmap.mmap(-1, n, mmap.MAP_PRIVATE)
+    storage = torch.frombuffer(pages, dtype=torch.uint8).untyped_storage()
+    buffer = torch.empty(0, dtype=like.dtype).set_(
+        storage, 0, meta.shape, meta.stride()
+    )
+    cudart = torch.cuda.cudart()
+    torch.cuda.check_error(cudart.cudaHostRegister(storage.data_ptr(), n, 0))
+    weakref.finalize(buffer, cudart.cudaHostUnregister, storage.data_ptr())
+    return buffer
+
+
 class AsyncSaver:
     """--async-checkpoint, at most one save in flight. Each rank snapshots its state into host
     buffers reused across saves and a thread writes it; commit (rank 0: pointers, prune) runs on
@@ -89,25 +110,32 @@ class AsyncSaver:
         self.thread = self.commit = None
         self.pending = self.written = False
 
-    def snapshot(self, value):
-        """cpu_copy into reused buffers; CUDA tensors are copied asynchronously into pinned
-        memory, so the snapshot is complete after torch.cuda.synchronize()."""
-        self.roots += 1
-        return self._copy(value, (self.roots,))
+    @property
+    def nbytes(self):
+        return sum(b.untyped_storage().nbytes() for _, b in self.buffers.values())
 
-    def _copy(self, value, path):
+    def snapshot(self, value, owned=False):
+        """cpu_copy into reused buffers; CUDA tensors are copied asynchronously into pinned
+        memory, so the snapshot is complete after torch.cuda.synchronize(). owned: value's CPU
+        tensors are fresh and referenced nowhere else, so they are written as they are."""
+        self.roots += 1
+        return self._copy(value, (self.roots,), owned)
+
+    def _copy(self, value, path, owned):
         if isinstance(value, torch.Tensor):
+            if owned and not value.is_cuda:
+                return value.detach()
             meta = value.dtype, value.shape, value.stride(), value.device
             if path not in self.buffers or self.buffers[path][0] != meta:
-                buffer = torch.empty_like(value, device="cpu", pin_memory=value.is_cuda)
+                buffer = pinned(value) if value.is_cuda else torch.empty_like(value)
                 self.buffers[path] = meta, buffer
             return self.buffers[path][1].copy_(value.detach(), non_blocking=True)
         if isinstance(value, dict):
-            return {k: self._copy(v, (*path, k)) for k, v in value.items()}
+            return {k: self._copy(v, (*path, k), owned) for k, v in value.items()}
         if isinstance(value, list):
-            return [self._copy(v, (*path, i)) for i, v in enumerate(value)]
+            return [self._copy(v, (*path, i), owned) for i, v in enumerate(value)]
         if isinstance(value, tuple):
-            return tuple(self._copy(v, (*path, i)) for i, v in enumerate(value))
+            return tuple(self._copy(v, (*path, i), owned) for i, v in enumerate(value))
         return copy.deepcopy(value)
 
     def add(self, state, path):
