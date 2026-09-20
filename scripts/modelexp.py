@@ -866,6 +866,17 @@ wave(
     "preempt",
 )
 
+# router lr x0.1 won at 3e16 (1.4511 / 1.3606 vs ref 1.4655 / 1.3779: -0.014 / -0.017, doubling the gap to dense):
+# refine the lr around it at 3e16, and confirm at 3e17 (16x768 vs the ship run); 1e17 is moer task 0
+ROUTER16B = {k: R(**kw) for k, kw in {
+    "rlr0.03": dict(moe_router_lr_mul=0.03), "rlr0.2": dict(moe_router_lr_mul=0.2),
+    "rlr0.3": dict(moe_router_lr_mul=0.3), "rlr0.1g3e-3": dict(moe_router_lr_mul=0.1, moe_gamma=3e-3),
+}.items()}
+wave("moer16b", "moe-v1-router3e16b", "mr16b", variants("3e16", b, ROUTER16B),
+     "moe-v1 router lr refinement at 3e16 on moe128k6 around x0.1", "preempt")
+wave("moer3", "moe-v1-router3e17", "mor3", variants("3e17", b, {"rlr0.1": R(moe_router_lr_mul=0.1)}),
+     "moe-v1 router lr x0.1 at 3e17: moe128k6 16x768 vs the ship run (the 3e17 gap test with the fixed router)", "preempt4")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
