@@ -907,8 +907,9 @@ wave("isof1e17b", "moe-v1-isofix1e17b", "mf17b",
 ISO37 = {"10x512": dict(depth=10 / 16, width_mul=2 / 3), "12x640": dict(depth=0.75, width_mul=5 / 6),
          "16x768": dict(micro_batch=8), "18x896": dict(depth=18 / 16, width_mul=7 / 6, micro_batch=8),
          "20x1024": dict(depth=1.25, width_mul=4 / 3, micro_batch=4)}  # fmt: skip
+S16D = S16F | dict(arch=S16F["arch"] | dict(moe_kernel="scatter-dualgather"))  # bit-identical, 1.15-1.24x (main)
 wave("isof3e17", "moe-v1-isofix3e17", "mf37",
-     variants("3e17", b, {f"moe{k}": S16F | v for k, v in ISO37.items()}
+     variants("3e17", b, {f"moe{k}": S16D | v for k, v in ISO37.items()}
               | {"dense10x512": dict(arch=SHIP, bf16_weights=True) | ISO37["10x512"]}),
      "moe-v1 fixed-router isoFLOPs at 3e17: 5 MoE shapes (E128 top-4, router lr x0.1) + dense 10x512", "preempt4")
 
