@@ -90,7 +90,15 @@ submit() {
 	if [ -n "${PREEMPT_BUILDS:-}" ] && squeue -h -u "$USER" -p dei-group -o %j | grep -q '^data-v1-build-'; then
 		where="-p preempt -q preempt_cpu_qos"
 	fi
-	sbatch --parsable $where ${BUILD_RES:-} --export=ALL,STORE="$ROOT",SCRIPTS="$SCRIPTS" --job-name="data-v1-build-$1" \
+	# resources by the month's published game count (finalize holds the month in memory: ~3-5 GB per M games)
+	local n res
+	n=$(awk -v f="lichess_db_standard_rated_$1.pgn.zst" '$1==f {print $2}' <<<"$COUNTS")
+	if [ -n "${BUILD_RES:-}" ]; then res=$BUILD_RES
+	elif [ "${n:-0}" -lt 12000000 ]; then res="--cpus-per-task=16 --mem=96G --time=06:00:00"
+	elif [ "${n:-0}" -lt 40000000 ]; then res="--cpus-per-task=32 --mem=200G --time=12:00:00"
+	else res="--cpus-per-task=32 --mem=300G --time=12:00:00"
+	fi
+	sbatch --parsable $where $res --export=ALL,STORE="$ROOT",SCRIPTS="$SCRIPTS" --job-name="data-v1-build-$1" \
 		--output="$ROOT/%x-%j.log" "$BUILD" "$1" >"$D/build-job" &&
 		log "$1 build submitted $(cat "$D/build-job")"
 }
