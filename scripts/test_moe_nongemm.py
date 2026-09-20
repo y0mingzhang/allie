@@ -1,4 +1,4 @@
-"""Gate of the MoE layer's non-GEMM speedups against perf-int (a522ee6), bit for bit.
+"""Gates of the MoE layer's non-GEMM speedups against perf-int (a522ee6), bit for bit.
 
 layer: one MoE layer as --ckpt eager runs it (x + moe(norm(x)) compiled whole by _eager_block,
 checkpointed, deterministic), 2 steps x 3 micro-batches plus a no-grad training forward, the
@@ -8,12 +8,19 @@ the logged stats must match perf-int's bitwise. --set MOD.NAME=VALUE switches (n
 CUDA: the candidate layer (d1536 SwiGLU, E96 top-4, 64K tokens, BF16 weights), fwd+bwd ms and
 the kernels whose time changed. CPU: 2048 tokens of a d64 E16 top-4 layer (pad kernel).
 
+orders (CUDA): which FP32 add order over the top-k (any of the 15 add trees for k = 4) equals
+cuBLAS's gates @ expanded on 64K x 4 x 1536 BF16 inputs of wide dynamic range, eagerly and
+compiled with the shared-expert add and residual as the layer fuses them.
+
     inhold.sh scripts/test_moe_nongemm.py layer [--eager] [--no-ckpt] [--set ...]
+    inhold.sh scripts/test_moe_nongemm.py orders
+    inhold.sh scripts/test_moe_nongemm.py layer --set 'modded_smoe_aligned_linear.COMBINE=(0,1,2,3)'
 """
 
 import argparse
 import ast
 import importlib
+import itertools
 import os
 import re
 import statistics
@@ -192,19 +199,78 @@ def layer(a):
     return not bad
 
 
+def trees(leaves):
+    """Every add tree over leaves up to commutativity (FP adds commute but do not associate)."""
+    if len(leaves) == 1:
+        yield leaves[0]
+        return
+    first, rest = leaves[0], leaves[1:]
+    for r in range(len(rest)):
+        for left in itertools.combinations(rest, r):
+            right = tuple(x for x in rest if x not in left)
+            yield from itertools.product(trees((first, *left)), trees(right))
+
+
+def orders(a):
+    from modded_smoe_aligned_linear import combine
+
+    t, k, d, dev = a.tokens, a.topk, 1536, "cuda"
+    torch.use_deterministic_algorithms(True)
+    gen = torch.Generator(dev).manual_seed(3)
+
+    def normal(*shape):
+        return torch.randn(*shape, device=dev, generator=gen)
+
+    # expert outputs over 2^-20..2^20: the top-k sums round, so add orders differ
+    scale = 2.0 ** torch.randint(-20, 21, (t, k, d), device=dev, generator=gen)
+    e = (normal(t, k, d) * scale).bfloat16()
+    w = torch.sigmoid(normal(t, k))
+    # FP32, cast to BF16 as MoE.experts_out does
+    w = w * (k**0.5 / w.sum(-1, keepdim=True))
+    s, x = (normal(t, d) * 0.1).bfloat16(), normal(t, d).bfloat16()
+    ref = (w.bfloat16().unsqueeze(1) @ e).squeeze(1)
+    found = []
+    for tree in trees(tuple(range(k))):
+        got = combine(e, w.bfloat16(), tree)
+        n = (got.view(torch.int16) != ref.view(torch.int16)).sum().item()
+        print(
+            f"  {tree}: {n} of {ref.numel()} differ, max bit diff {bitdiff(ref, got)}"
+        )
+        found += [tree] * (n == 0)
+    ok = bool(found)
+    for tree in found:  # compiled as the layer fuses it: + shared expert, + residual
+        old = torch.compile(
+            lambda e, w, s, x: x + ((w.bfloat16().unsqueeze(1) @ e).squeeze(1) + s)
+        )
+        new = torch.compile(
+            lambda e, w, s, x, tree=tree: x + (combine(e, w.bfloat16(), tree) + s)
+        )
+        n = bitdiff(old(e, w, s, x), new(e, w, s, x))
+        print(f"  {tree} compiled with the shared add and residual: max bit diff {n}")
+        ok &= n == 0
+    verdict = "PASS" if ok else "FAIL"
+    print(
+        f"{verdict} orders equal to cuBLAS at {t} x {k} x {d}: {found or 'none'}",
+        flush=True,
+    )
+    return ok
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=("layer", "run"))
+    p.add_argument("cmd", choices=("layer", "orders", "run"))
     p.add_argument("--impl")
     p.add_argument("--dump")
     p.add_argument("--kernel")
     p.add_argument("--eager", action="store_true")
     p.add_argument("--no-ckpt", dest="ckpt", action="store_false")
     p.add_argument("--set", action="append", default=[])
+    p.add_argument("--tokens", type=int, default=65536)
+    p.add_argument("--topk", type=int, default=4)
     a = p.parse_args()
     if a.cmd == "run":
         return run(a)
-    raise SystemExit(0 if layer(a) else 1)
+    raise SystemExit(0 if {"layer": layer, "orders": orders}[a.cmd](a) else 1)
 
 
 if __name__ == "__main__":

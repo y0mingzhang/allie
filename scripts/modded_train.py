@@ -1,6 +1,7 @@
 """Recoverable training of the pinned medium recipe on original chess rows."""
 
 import argparse
+import ast
 from dataclasses import asdict
 import hashlib
 import json
@@ -18,6 +19,7 @@ import triton
 from modded_arch import attn_factor, extra_flops
 from modded_moe import STATS
 from modded_moe import full_state, local_state
+import modded_smoe_aligned_linear
 from modded_medium_core import sync_params
 from modded_medium import (
     Config,
@@ -210,6 +212,12 @@ def main():
         help="with --ckpt eager: residual blends as fused kernels, bitwise equal to eager",
     )
     p.add_argument(
+        "--moe-combine",
+        default="",
+        help="scatter-(dual)gather MoE combine as FP32 adds in this top-k order, e.g. '(0,1,2,3)'"
+        " (bitwise the cuBLAS bmm for the order test_moe_nongemm.py orders reports); default the bmm",
+    )
+    p.add_argument(
         "--ckpt-frac",
         type=float,
         default=1.0,
@@ -282,6 +290,7 @@ def main():
     )  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
+    modded_smoe_aligned_linear.COMBINE = ast.literal_eval(a.moe_combine or "None")
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
