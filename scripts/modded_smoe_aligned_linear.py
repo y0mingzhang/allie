@@ -9,6 +9,7 @@ import torch
 import modded_smoe_tuned as tuned
 import modded_smoe_aligned as aligned
 import modded_smoe_gather_wgrad as gather_wgrad
+import modded_smoe_gated as gated_backward
 from modded_smoe import group
 
 
@@ -41,7 +42,7 @@ def matmul(x,w,se,order,offsets,k,xg,yg,out=None):
 
 class AlignedLinear(torch.autograd.Function):
     @staticmethod
-    def forward(ctx,x,weights,k,se,order,offsets,gates,grouped_in,grouped_out,gather):
+    def forward(ctx,x,weights,k,se,order,offsets,gates,grouped_in,grouped_out,gather,gated):
         output=matmul(x,weights,se,order,offsets,k,grouped_in,grouped_out)
         if gates is not None:
             expanded=output.view(gates.size(0),gates.size(1),output.size(-1))
@@ -51,6 +52,7 @@ class AlignedLinear(torch.autograd.Function):
         ctx.save_for_backward(x,weights,se,order,offsets,gates,expanded)
         ctx.k=k;ctx.grouped_in=grouped_in;ctx.grouped_out=grouped_out
         ctx.gather=gather
+        ctx.gated=gated
         return output
 
     @staticmethod
@@ -58,6 +60,11 @@ class AlignedLinear(torch.autograd.Function):
         x,weights,se,order,offsets,gates,expanded=ctx.saved_tensors
         if gates is not None:
             d_gates=(expanded @ grad_out.unsqueeze(-1)).squeeze(-1)
+            if ctx.gated:
+                assert ctx.grouped_in and not ctx.grouped_out and ctx.k==1
+                dw=gated_backward.weight_grad(grad_out,x,gates,order,offsets)
+                dx=gated_backward.input_grad(grad_out,weights.permute(0,2,1),gates,order,offsets)
+                return dx,dw,None,None,None,None,d_gates,None,None,None,None
             gates_flat=gates.flatten();fan=gates.size(1)
             # Reusing a saved activation here makes AOTAutograd emit a full
             # 1.6GB clone/self-copy at64K before the overwrite. A fresh output
@@ -82,16 +89,16 @@ class AlignedLinear(torch.autograd.Function):
                   1,True,ctx.grouped_in,out=dx)
         if ctx.k!=1:
             dx=dx.view(x.size(0),ctx.k,dx.size(-1)).sum(-2)
-        return dx,dw,None,None,None,None,d_gates,None,None,None
+        return dx,dw,None,None,None,None,d_gates,None,None,None,None
 
 
 def parallel_linear(inputs,expert_weights,k,sorted_expert_idxs,sorted_scattered_idxs,
                     expert_offsets,expert_biases=None,gates=None,
-                    grouped_in=False,grouped_out=False,gather=False):
+                    grouped_in=False,grouped_out=False,gather=False,gated=False):
     if expert_biases is not None:
         return tuned.parallel_linear(inputs,expert_weights,k,sorted_expert_idxs,
                                      sorted_scattered_idxs,expert_offsets,expert_biases,
                                      gates,grouped_in,grouped_out)
     return AlignedLinear.apply(inputs,expert_weights,k,sorted_expert_idxs,
                                sorted_scattered_idxs,expert_offsets,gates,
-                               grouped_in,grouped_out,gather)
+                               grouped_in,grouped_out,gather,gated)

@@ -115,7 +115,7 @@ class MoE(nn.Module):
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
-        assert kernel in ("pad", "scatter", "scatter-tuned", "scatter-accum", "scatter-gather")
+        assert kernel in ("pad", "scatter", "scatter-tuned", "scatter-accum", "scatter-gather", "scatter-dualgather")
         self.score, self.kernel = score, kernel
         self.experts, self.topk, self.capacity, self.kind = experts, topk, capacity, kind
         up = 2 if kind == "swiglu" else 1  # SwiGLU experts: gate and value rows
@@ -229,15 +229,17 @@ class MoE(nn.Module):
             up, down = Gather.apply(self.up, h.dtype), Gather.apply(self.down, h.dtype)
         else:
             up, down = self.up.type_as(h), self.down.type_as(h)
-        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum", "scatter-gather"):  # dropless
+        if self.kernel in ("scatter", "scatter-tuned", "scatter-accum", "scatter-gather", "scatter-dualgather"):  # dropless
             offs = count.cumsum(0)
             se = flat[order]
-            linear = (gather_linear if self.kernel == "scatter-gather" else
+            linear = (gather_linear if self.kernel in ("scatter-gather", "scatter-dualgather") else
                       tuned_linear if self.kernel in ("scatter-tuned", "scatter-accum") else parallel_linear)
             direct = self.kernel == "scatter-accum" and self.training and torch.is_grad_enabled()
             up_args, down_args = {}, {}
-            if self.kernel == "scatter-gather":
+            if self.kernel in ("scatter-gather", "scatter-dualgather"):
                 up_args = dict(gather=True)
+            if self.kernel == "scatter-dualgather":
+                down_args = dict(gated=True)
             if direct:
                 assert self.up.dtype == self.down.dtype == torch.bfloat16
                 up_flat,up_row=self.up.acc

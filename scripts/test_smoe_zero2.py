@@ -19,6 +19,9 @@ from modded_medium import Config, TrainingManager, create_model, core, make_cont
 from modded_wsd import Schedule, install
 
 
+CANDIDATE = os.environ.get('CANDIDATE', 'scatter-gather')
+
+
 def build(kernel):
     torch.manual_seed(701)
     cfg = Config(width=128, head_dim=64, layers=8, max_tokens=1024,
@@ -89,7 +92,7 @@ def main():
     expected = [advance(m, mgr, net, step) for step in range(8)]
     del m, mgr, net
     gc.collect(); torch.cuda.empty_cache()
-    m, mgr, net = build('scatter-gather')
+    m, mgr, net = build(CANDIDATE)
     counts = []
     saved = None
     for step in range(8):
@@ -101,7 +104,7 @@ def main():
     assert m.split_embed
     del m, mgr, net
     gc.collect(); torch.cuda.empty_cache()
-    m, mgr, net = build('scatter-gather')
+    m, mgr, net = build(CANDIDATE)
     saved.seek(0)
     state = torch.load(saved, weights_only=False)
     m.load_state_dict(state['model']); mgr.load_rank_state_dict(state['manager'])
