@@ -315,23 +315,17 @@ def create_model(cfg, device="cuda"):
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)) and m not in fp32:
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
-        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
-            # the FP32 init seeds the optimizers' master shards (they drop it); grads summed in FP32
-            p.fp32, p.data, p.master, p.main_grad = (
-                p.data,
-                p.data.bfloat16(),
-                True,
-                None,
-            )
-            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
-            hook = core.zero2_hook if cfg.zero2 else core.accumulate_fp32
-            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else hook)
-    for p in model.parameters():
         if getattr(p, "label", "").endswith("_sh"):
             continue  # sharded experts: each rank holds its own rows (broadcast before slicing)
         dist.broadcast(p.detach(), 0)
-        if hasattr(p, "fp32"):
-            dist.broadcast(p.fp32, 0)
+    for p in model.parameters():
+        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
+            # the FP32 init seeds the optimizers' master shards (they drop it) from host memory, so the
+            # GPU never holds the FP32 model next to the BF16 one; grads summed in FP32
+            p.fp32, p.data, p.master, p.main_grad = p.data.cpu(), p.data.bfloat16(), True, None
+            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
+            hook = core.zero2_hook if cfg.zero2 else core.accumulate_fp32
+            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else hook)
     if torch.device(device).type == "cuda":
         torch.cuda.synchronize()
     return model

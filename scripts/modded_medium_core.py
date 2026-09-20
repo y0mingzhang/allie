@@ -683,7 +683,7 @@ class NorMuon(torch.optim.Optimizer):
             if lo < len(ps):
                 group["master"] = torch.stack(
                     [p.fp32 for p in ps[lo : lo + group["chunk_size"]]]
-                )
+                ).to(ps[0].device)
             shape = (group["chunk_size"] * self.world_size, *ps[0].shape)
             zero2 = ZERO2 and self.world_size > 1
             group["zero2"] = zero2  # grads arrive reduced into this rank's rows (reduce_to_owner)
@@ -1039,10 +1039,8 @@ class DistAdam(torch.optim.Optimizer):
             if getattr(p, "master", False):
                 n, w = len(chunk), getattr(p, "fp32", p)
                 self.state[p]["master"] = (
-                    (w if p.numel() < 1024 else w[rank * n : (rank + 1) * n])
-                    .float()
-                    .clone()
-                )
+                    w if p.numel() < 1024 else w[rank * n : (rank + 1) * n]
+                ).to(p.device, torch.float32, copy=True)
                 if hasattr(p, "fp32"):
                     del p.fp32
         # DistributedAdam implementation by @vagrawal, @akash5474
