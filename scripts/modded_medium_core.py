@@ -656,6 +656,11 @@ class NorMuon(torch.optim.Optimizer):
 
         param_groups = []
         for module_name, group_params in groups.items():
+            if self.group is not None and self.world_size == 1:
+                # rank-local params (sharded experts): one group per matrix stack, so the step's
+                # stacked grads, updates and Newton-Schulz buffers stay one layer's size
+                param_groups += [dict(params=[p], chunk_size=1) for p in group_params]
+                continue
             chunk_size = (len(group_params) + self.world_size - 1) // self.world_size
             param_groups.append(dict(params=group_params, chunk_size=chunk_size))
 

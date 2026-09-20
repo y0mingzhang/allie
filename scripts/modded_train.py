@@ -544,7 +544,15 @@ def main():
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
     stop_reason = "steps"
     step = first
+    snap = os.environ.get("MEMSNAP")  # CUDA memory snapshot path: dumped at the start of step 3, then exit
+    if snap:
+        torch.cuda.memory._record_memory_history(max_entries=500000)
     for index in range(first, total_steps):
+        if snap and index == first + 2:
+            if rank == 0:
+                torch.cuda.memory._dump_snapshot(snap)
+            dist.barrier()
+            os._exit(0)
         if a.profile and index + 1 == a.profile:
             prof = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA])
             prof.__enter__()
