@@ -877,6 +877,11 @@ wave("moer16b", "moe-v1-router3e16b", "mr16b", variants("3e16", b, ROUTER16B),
 wave("moer3", "moe-v1-router3e17", "mor3", variants("3e17", b, {"rlr0.1": R(moe_router_lr_mul=0.1)}),
      "moe-v1 router lr x0.1 at 3e17: moe128k6 16x768 vs the ship run (the 3e17 gap test with the fixed router)", "preempt4")
 
+# second seed for the headline (user 09:15): rlr0.1 and ref at s43, paired with moer16's s42
+wave("moer16s", "moe-v1-router3e16s", "mr16s",
+     variants("3e16", b, {"ref": R(), "rlr0.1": R(moe_router_lr_mul=0.1)}, seeds=(43,)),
+     "moe-v1 router lr x0.1 vs ref at 3e16, seed 43 (pairs moer16's s42)", "preempt")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
