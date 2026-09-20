@@ -22,6 +22,9 @@ def main():
  text+=['','The two cell-cost diagnostics keep each format × Elo cell at its Elo-router reference cost. They test allocation within cells rather than the benefit of transferring nodes between cells. Detailed clock buckets and all 16 cell values are in `live-results.json`.','', '## Fixed-budget reference curves','', 'These use the cached common-prefix grids; the adaptive table above uses live reruns. Each fixed point has its own predeclared output calibration.','', '| Method | Nodes | Macro CE | Expert CE | Macro CM | Expert CM |','|---|---:|---:|---:|---:|---:|']
  for name,a in cached['methods'].items():
   if '-fixed' in name:text.append(f"| {name} | {a['mean_nodes']:.1f} | {a['macro']:.4f} | {a['expert_macro']:.4f} | {a['macro_cm_vs_legal']:.2f}× | {a['expert_macro_cm_vs_legal']:.2f}× |")
+ text+=['','## Allie development sweep','', 'For each cpuct, the Elo-router ridge is chosen by fit-game CV. Confirmation is reported without selecting on it. These August CE values have no golden CM conversion.','', '| cpuct | Fit-game CV macro | Confirmation macro | Confirmation expert |','|---|---:|---:|---:|']
+ for cp in [.5,1.25,2.5]:
+  dev=json.loads((OUT/f'allie-{cp}-development.json').read_text());a=min((v for v in dev['candidates'].values() if v['parameters']['kind']=='elo'),key=lambda v:v['cv_macro']);cc=a['confirmation_cells'];text.append(f"| {cp} | {a['cv_macro']:.4f} | {sum(cc)/16:.4f} | {sum(cc[3::4])/4:.4f} |")
  text+=['','## Runtime and numerical check','', '| Live method | Evaluation seconds | Live−cached macro | Live−cached expert | Max policy change |','|---|---:|---:|---:|---:|']
  for name,a in p['cached_vs_live'].items():text.append(f"| {LABELS[name]} | {p['timing'][name]['seconds']:.1f} | {a['macro_delta']:+.5f} | {a['expert_delta']:+.5f} | {a['max_policy_diff']:.4f} |")
  jobs=[j for j in state['jobs'] if j['id'] in ['10506788',json.loads((OUT/'live-job.json').read_text())['id']]]

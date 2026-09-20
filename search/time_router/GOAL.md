@@ -1,6 +1,8 @@
 # Time-aware routing and matched-cost Allie
 
-ACTIVE, user-authorized 2026-09-19. The completed transfer study remains closed.
+PARKED by user 2026-09-19 ~21:15 EDT: commit/merge inference and move to MoE. No further inference runs authorized by this goal.
+
+Originally user-authorized 2026-09-19. The completed transfer study remains closed.
 
 Test whether adding time control and pre-move clocks to Elo improves search
 allocation at equal mean actual NN evaluations. Give repaired Allie a separately
@@ -27,3 +29,5 @@ stays intact. Global controller STOP always applies. No duplicate jobs.
 
 Finish after the frozen matched-cost evaluation and concise results report;
 do not reopen the old10×/10× search goal.
+
+At park: all development grids and both July grids complete; live coverage Elo/format/time complete; live Allie and per-cell checks unfinished. Allie cached results are provisional. The previous completed transfer report remains the validated recommendation. See REPORT.md and RECOVERY.md.

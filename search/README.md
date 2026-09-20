@@ -42,3 +42,5 @@ staged to node-local storage. See [transfer recovery](transfer/RECOVERY.md) and
 
 The merged code preserves the evaluated algorithms. The original 10×/10× target
 was not achieved; completing this finite transfer report does not change that.
+
+Time-aware budget follow-up (parked by user): [results and limits](time_router/REPORT.md). The earlier validated Elo-adaptive coverage method remains the recommendation.

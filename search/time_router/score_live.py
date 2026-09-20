@@ -1,5 +1,5 @@
 """Authoritative live scores and the numerical gap to cached stops."""
-import json
+import json,sys
 import numpy as np
 from .analysis import *
 from .evaluate import report
@@ -25,7 +25,9 @@ def main():
   for name in ['port-raw','legal']:
    i=list(f['names']).index(name);scores[name]=f['loss'][i];nodes[name]=f['nodes'][i]
  for name,choice in alloc['choice'].items():
-  r=frozen['methods'][name.replace('-within-cell','')];folder=OUT/('live-'+name);root=np.zeros((n,2432));q=np.zeros(d['ids'].shape);count=np.zeros(n);times=[]
+  r=frozen['methods'][name.replace('-within-cell','')];folder=OUT/('live-'+name)
+  if '--completed-only' in sys.argv and not (folder/f'{n-256:06d}.npz').exists():continue
+  root=np.zeros((n,2432));q=np.zeros(d['ids'].shape);count=np.zeros(n);times=[]
   for lo in range(0,n,256):
    with np.load(folder/f'{lo:06d}.npz') as f:
     nr=len(f['game']);hi=lo+nr;k=f['ids'].shape[1];np.testing.assert_array_equal(f['game'],d['games'][lo:hi]);np.testing.assert_array_equal(f['ids'],d['ids'][lo:hi,:k]);q[lo:hi,:k]=f['q'];root[lo:hi]=f['root'];count[lo:hi]=f['nodes'];times.append(json.loads(str(f['stats'])))
@@ -37,7 +39,8 @@ def main():
   difference[name]=dict(max_policy_diff=float(np.abs(p-cp).max()),max_kl=float(kl.max()),macro_delta=float(cm.mean()),expert_delta=float(cm[3::4].mean()),macro_ci95=np.quantile(boot.mean(1),[.025,.975]).tolist(),expert_ci95=np.quantile(boot[:,3::4].mean(1),[.025,.975]).tolist(),nodes_delta=float(cellmean(count-cached['nodes'][choice+1,np.arange(n)],d['cells']).mean()))
   timing[name]=dict(seconds=sum(t['seconds'] for t in times),forward_seconds=sum(t['forward_seconds'] for t in times),prefill_tokens=sum(t['prefill_tokens'] for t in times),host=times[0]['host'],job=times[0]['job'])
   print('LIVE CHECK',name,difference[name],flush=True)
- np.savez_compressed(OUT/'live-scores.npz',names=list(scores),loss=np.stack(list(scores.values())),nodes=np.stack(list(nodes.values())),cells=d['cells'],games=d['games'])
- report(scores,nodes,d,'live',dict(frozen_sha256=sha(OUT/'frozen.json'),allocation_sha256=sha(OUT/'gold-allocations.json'),cached_vs_live=difference,timing=timing,authoritative='Actual mixed-budget reruns; cached-stop estimates are diagnostic only.'))
+ tag='live-partial' if '--completed-only' in sys.argv else 'live'
+ np.savez_compressed(OUT/(tag+'-scores.npz'),names=list(scores),loss=np.stack(list(scores.values())),nodes=np.stack(list(nodes.values())),cells=d['cells'],games=d['games'])
+ report(scores,nodes,d,tag,dict(status='PARKED by user; only completed arms scored' if '--completed-only' in sys.argv else 'complete',frozen_sha256=sha(OUT/'frozen.json'),allocation_sha256=sha(OUT/'gold-allocations.json'),cached_vs_live=difference,timing=timing,authoritative='Actual mixed-budget reruns; cached-stop estimates are diagnostic only.'))
 
 if __name__=='__main__':main()

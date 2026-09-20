@@ -1,3 +1,5 @@
+USER PARKED2026-09-19~21:15EDT. Do not execute the continuation instructions below without new user direction. Inference stops here; next work is MoE kernels.
+
 # Recovery
 
 Owner: Codex, branch `codex/time-router-v1`, durable worktree
