@@ -35,6 +35,7 @@ from modded_medium import (
 )
 from lm_data import Packed
 from lm_checkpoint import atomic_save, rng_state, restore_rng
+from modded_checkpoints import AsyncSaver, durable_save, publish
 from modded_checkpoints import prune as prune_checkpoints
 
 ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[1]))
@@ -135,6 +136,11 @@ def main():
         type=int,
         default=0,
         help="0 keeps all; otherwise retain latest N>=2 plus best",
+    )
+    p.add_argument(
+        "--async-checkpoint",
+        action="store_true",
+        help="write checkpoints from a thread; pointers move once every rank's files are durable",
     )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
@@ -517,8 +523,11 @@ def main():
         )
         print(json.dumps(metadata | {"val_indices": len(val_idx)}), flush=True)
 
+    saver = AsyncSaver(cpu) if a.async_checkpoint else None
+
     def save(step, metrics):
         checkpoint_start = time.monotonic()
+        waited = saver.flush() if saver else 0.0
         total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
         dist.all_reduce(total_flops)
         identifier = [f"step-{step:08d}-{uuid.uuid4().hex[:8]}" if rank == 0 else None]
@@ -527,11 +536,12 @@ def main():
         if rank == 0:
             directory.mkdir(parents=True)
         dist.barrier()
+        host, write = (saver.snapshot, saver.add) if saver else (cpu_copy, atomic_save)
         # Save each rank independently: its sharded moments and pending grads
         # cannot be reconstructed from rank0's optimizer state.
-        atomic_save(
+        write(
             dict(
-                manager=manager.rank_state_dict(),
+                manager=manager.rank_state_dict(host),
                 rng=rng_state(),
                 data=train.state_dict(),
                 useful_training_flops=flops_local,
@@ -543,9 +553,9 @@ def main():
             model, model.state_dict()
         )  # collective when experts are sharded
         if rank == 0:
-            atomic_save(
+            write(
                 dict(
-                    model=cpu_copy(state),
+                    model=host(state),
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=source_hashes,
@@ -555,7 +565,7 @@ def main():
                     metrics=metrics,
                     tokens=train.seen * 1024,
                     useful_training_flops=total_flops.item(),
-                    inference=cpu_copy(
+                    inference=host(
                         dict(
                             split_embed=model.split_embed,
                             ws_short=manager.ws_short,
@@ -573,19 +583,35 @@ def main():
                 ),
                 directory / "model.pt",
             )
+        names = ["last.pt"]
+        if step in fork_steps:
+            names.append(f"fork-{step}.pt")
+        if metrics is not None and metrics["move_ce"] <= best:
+            names.append("best.pt")
+        if saver:
+            torch.cuda.synchronize()  # completes the snapshot's pinned copies
+            seconds = time.monotonic() - checkpoint_start
+
+            def commit():
+                publish(out, directory, step, world, names, durable_save)
+                removed = prune_checkpoints(out, a.keep_checkpoints, directory)
+                append(
+                    "checkpoints.jsonl",
+                    {
+                        "step": step,
+                        "seconds": seconds,
+                        "wait_seconds": waited,
+                        "durable_seconds": time.monotonic() - checkpoint_start,
+                        "directory": str(directory.relative_to(out)),
+                        "removed": removed,
+                    },
+                )
+
+            saver.start(commit if rank == 0 else None)
+            return
         dist.barrier()
         if rank == 0:
-            pointer = dict(
-                format="allie-modded-medium-1",
-                directory=str(directory.relative_to(out)),
-                step=step,
-                world_size=world,
-            )
-            atomic_save(pointer, out / "last.pt")
-            if step in fork_steps:
-                atomic_save(pointer, out / f"fork-{step}.pt")
-            if metrics is not None and metrics["move_ce"] <= best:
-                atomic_save(pointer, out / "best.pt")
+            publish(out, directory, step, world, names)
         dist.barrier()
         removed = (
             prune_checkpoints(out, a.keep_checkpoints, directory) if rank == 0 else []
@@ -679,6 +705,8 @@ def main():
             window_tokens += rows.shape[0] * world * 1024
         manager.step_optimizers(index)
         step = index + 1
+        if saver:
+            saver.poll()
         if a.profile and step == a.profile:
             torch.cuda.synchronize()
             prof.__exit__(None, None, None)
@@ -795,6 +823,8 @@ def main():
                 else "wall_clock_cap"
             )
             break
+    if saver:
+        saver.flush()
     if rank == 0:
         (out / "done.json").write_text(
             json.dumps(

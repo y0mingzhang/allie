@@ -172,7 +172,8 @@ def make_context(inputs, short_window, long_window, backend="flex", host=None):
         torch.from_numpy(
             modded_board.encode(inputs.cpu().numpy() if host is None else host)
         )
-        .to(flat.device)
+        .pin_memory()
+        .to(flat.device, non_blocking=True)
         .flatten(0, 1)
         if BOARD
         else None
@@ -443,14 +444,14 @@ class TrainingManager(core.TrainingManager):
         self.schedule_step = step
         self.batch_size = core.get_bs(step)
 
-    def rank_state_dict(self):
+    def rank_state_dict(self, snapshot=cpu_copy):
         # Checkpoint only at completed optimizer boundaries. Even boundaries
         # may legitimately retain gradients for the next odd Adam update.
         for opt in (self.adam_opt, self.scalar_opt):
             assert not opt._reduce_scatter_futures, (
                 "Checkpoint before optimizer collectives completed"
             )
-        return cpu_copy(
+        return snapshot(
             dict(
                 config=asdict(self.cfg),
                 rank=dist.get_rank(),
