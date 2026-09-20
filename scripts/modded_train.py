@@ -199,6 +199,11 @@ def main():
         help="with --ckpt eager: recompute residual blends too",
     )
     p.add_argument(
+        "--fused-blend",
+        action="store_true",
+        help="with --ckpt eager: residual blends as fused kernels, bitwise equal to eager",
+    )
+    p.add_argument(
         "--ckpt-frac",
         type=float,
         default=1.0,
@@ -299,7 +304,7 @@ def main():
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
     cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
     cfg.zero2_bf16, cfg.ckpt_frac, cfg.fp8 = a.zero2_bf16, a.ckpt_frac, a.fp8
-    cfg.ckpt_blend = a.ckpt_blend
+    cfg.ckpt_blend, cfg.fused_blend = a.ckpt_blend, a.fused_blend
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,
@@ -412,6 +417,9 @@ def main():
             )
         assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, (
             "Resume changes ckpt_blend"
+        )
+        assert shared["args"].get("fused_blend", False) == a.fused_blend, (
+            "Resume changes fused_blend"
         )
         if a.wsd_continue_from:
             from modded_continuation import prepare_continuation

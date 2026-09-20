@@ -515,6 +515,7 @@ def _flush():
 CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
 CKPT_LAYERS = 1 << 30  # only blocks with layer_idx < CKPT_LAYERS are checkpointed (--ckpt-frac)
 CKPT_BLEND = False  # put the eager residual blend inside the block checkpoint boundary
+FUSED_BLEND = False  # --fused-blend: eager-checkpoint residual blends as fused kernels, bitwise eager
 ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
 ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
 _inflight = []  # (work, param, fp32 grad) reduces of the running backward
@@ -1445,6 +1446,45 @@ class MLP(nn.Module):
         return x
 
 
+@torch.compile(dynamic=False, fullgraph=True, options={"emulate_precision_casts": True})
+def _blend_fwd(*args):
+    y = args[0] * args[1]
+    for i in range(2, len(args), 2):
+        y = y + args[i] * args[i + 1]
+    return y
+
+
+@torch.compile(dynamic=False, fullgraph=True)
+def _blend_bwd(g, scales, ts):
+    return [(g.float() * s).to(g.dtype) for s in scales], [g * t for t in ts]
+
+
+class _Blend(torch.autograd.Function):
+    """Eager's l0 * t0 + l1 * t1 + ... (FP32 0-dim l, BF16 t) bit for bit in one kernel that rounds
+    each step as eager does (emulate_precision_casts, in these graphs only). One backward kernel
+    writes the tensor grads and the products whose eager sums are the scalar grads (autograd's
+    sum_to). Eager g * l keeps a CPU scalar's FP32 value but casts a CUDA 0-dim l to BF16 first."""
+
+    @staticmethod
+    def forward(ctx, *args):
+        ctx.save_for_backward(*args)
+        return _blend_fwd(*args)
+
+    @staticmethod
+    def backward(ctx, g):
+        args = ctx.saved_tensors
+        scales = [lam if lam.is_cpu else lam.to(g.dtype) for lam in args[::2]]
+        grads, prods = _blend_bwd(g, scales, args[1::2])
+        return tuple(v for p, gt in zip(prods, grads) for v in (p.sum(), gt))
+
+
+@torch.compiler.disable
+def _fused_blend(first, x, x0, x02, resid, w):
+    if first:
+        return _Blend.apply(resid + w[0], x, w[1], x02)
+    return _Blend.apply(resid, x, w[0], x0, w[1], x02)
+
+
 @torch.compiler.disable
 def _eager_block(module, *args, ckpt=True, blend=None):
     # Create AND call the optimized bound method outside the outer Dynamo trace.
@@ -1458,7 +1498,9 @@ def _eager_block(module, *args, ckpt=True, blend=None):
         # the save/recompute boundary: otherwise autograd retains both the
         # unblended block output (for scalar gradients) and its blended copy.
         def run(x, attn_args, x0, x02, resid, x0_weights):
-            if module.layer_idx == 0:
+            if FUSED_BLEND:
+                x = _fused_blend(module.layer_idx == 0, x, x0, x02, resid, x0_weights)
+            elif module.layer_idx == 0:
                 x = (resid + x0_weights[0]) * x + x0_weights[1] * x02
             else:
                 x = resid * x + x0_weights[0] * x0 + x0_weights[1] * x02
@@ -1821,6 +1863,9 @@ class GPT(nn.Module):
                 x = x + skip_gate_out * (skip if self.use_skips else skip * 0)
             if CKPT_BLEND and CKPT == "eager" and self.training:
                 x = self.blocks[i](x, attn_args, blend=(x0, x02, resid_lambdas[i], x0_lambdas[i]))
+            elif FUSED_BLEND and CKPT == "eager" and self.training:
+                x = _fused_blend(i == 0, x, x0, x02, resid_lambdas[i], x0_lambdas[i])
+                x = self.blocks[i](x, attn_args)
             elif i == 0:
                 x = (resid_lambdas[0] + x0_lambdas[0, 0]) * x + x0_lambdas[0, 1] * x02
                 x = self.blocks[i](x, attn_args)

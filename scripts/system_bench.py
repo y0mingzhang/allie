@@ -19,6 +19,7 @@ p.add_argument('--rows', type=int, default=512)
 p.add_argument('--steps', type=int, default=100)
 p.add_argument('--ckpt-frac', type=float, default=1.)
 p.add_argument('--ckpt-blend', action='store_true')
+p.add_argument('--fused-blend', action='store_true')
 p.add_argument('--fp8', choices=('', 'dense'), default='')
 p.add_argument('--snapshot', action='store_true')
 p.add_argument('--dry-run', action='store_true')
@@ -41,6 +42,7 @@ args += ['--bf16-weights', '--zero2', '--ckpt', 'eager', '--ckpt-frac', str(a.ck
          '--stop-after', str(a.steps), '--max-seconds', '3600']
 if a.fp8: args += ['--fp8', a.fp8]
 if a.ckpt_blend: args += ['--ckpt-blend']
+if a.fused_blend: args += ['--fused-blend']
 out = root/'results/pretrain'/a.name
 reports = root/'results/recipe10x/moe-perf/codex-systems'
 log, receipt = reports/(a.name+'.log'), reports/(a.name+'.json')
