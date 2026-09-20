@@ -13,6 +13,7 @@ replaces the padded dispatch with ScatterMoE's fused gather-GEMM-scatter kernels
 dropless in training too, no padding, capacity unused.
 """
 
+import contextlib
 import math
 
 import torch
@@ -23,6 +24,7 @@ from torch.distributed import _functional_collectives as funcol
 from torch.nn import functional as F
 
 import modded_fp8 as fp8
+import modded_moe_topk
 from modded_smoe import parallel_linear
 from modded_smoe_tuned import parallel_linear as tuned_linear
 from modded_smoe_aligned_linear import parallel_linear as gather_linear
@@ -56,6 +58,64 @@ class AddLoss(torch.autograd.Function):
 
 
 BLOCK_RECOMPUTE = False  # set by create_model under --ckpt eager (whole blocks recomputed eagerly)
+STATS_REPS = 1  # times a training forward adds its loads and stats (replay_context: 2, then 0)
+TOPK_KERNEL = False  # both router top-ks in one Triton pass (modded_moe_topk), bitwise torch.topk
+
+
+@contextlib.contextmanager
+def _reps(n):
+    global STATS_REPS
+    STATS_REPS = n
+    try:
+        yield
+    finally:
+        STATS_REPS = 1
+
+
+def replay_context():
+    """checkpoint context_fn: the forward adds its loads and stats twice, the recompute skips them.
+    The recompute used to add them again, identically (a deterministic replay). Doubling alone keeps
+    the counts and every rebalance ratio and sign but not a margin sum over micro-batches
+    (fl(fl(2a + b) + b) != 2 fl(a + b)); two in-order adds keep the buffer bitwise."""
+    return _reps(2 if torch.is_grad_enabled() else 1), _reps(0)
+
+
+# Opaque ops read STATS_REPS when they run, so forward and recompute share one compiled graph: a
+# replay must save the same tensors, which a graph compiled without the stats need not.
+@torch.library.custom_op("allie_moe::stats_topk", mutates_args=())
+def stats_topk(s: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """torch.topk(s, k); zeros, uncomputed, while STATS_REPS is 0."""
+    if STATS_REPS:
+        return tuple(torch.topk(s, k, dim=-1))
+    return s.new_zeros(len(s), k), s.new_zeros(len(s), k, dtype=torch.long)
+
+
+@stats_topk.register_fake
+def _(s, k):
+    return s.new_empty(len(s), k), s.new_empty(len(s), k, dtype=torch.long)
+
+
+@torch.library.custom_op("allie_moe::route_topk", mutates_args=())
+def route_topk(
+    s: torch.Tensor, bias: torch.Tensor, k: int, stats: bool
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """torch.topk(s + bias, k).indices and, as stats_topk, torch.topk(s, k + 1) or zeros."""
+    return modded_moe_topk.route(s, bias, k, stats and STATS_REPS > 0)
+
+
+@route_topk.register_fake
+def _(s, bias, k, stats):
+    t = len(s)
+    return (
+        s.new_empty(t, k, dtype=torch.long), s.new_empty(t, k + 1),
+        s.new_empty(t, k + 1, dtype=torch.long),
+    )  # fmt: skip
+
+
+@torch.library.custom_op("allie_moe::book", mutates_args={"load"})
+def book(load: torch.Tensor, u: torch.Tensor) -> None:
+    for _ in range(STATS_REPS):
+        load.add_(u)
 
 
 @torch.compiler.disable
@@ -190,7 +250,10 @@ class MoE(nn.Module):
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
         s = F.linear(h.to(g), self.router.to(g))
         s = torch.sigmoid(s) if self.score == "sigmoid" else F.softplus(s).clamp_min(1e-12).sqrt()
-        idx = torch.topk(s + self.bias, k, dim=-1).indices
+        if TOPK_KERNEL:
+            idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
+        else:
+            idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
         flat = idx.flatten()
@@ -204,13 +267,12 @@ class MoE(nn.Module):
             routed, dropped = self.experts_out(h, w, flat, count, order)
         if self.training:
             with torch.no_grad():
-                top = torch.topk(s, k + 1, dim=-1)
-                own = torch.zeros_like(s).scatter_(1, top.indices[:, :k], 1.0)
+                val, top = stats or stats_topk(s, k + 1)
+                own = torch.zeros_like(s).scatter_(1, top[:, :k], 1.0)
                 moved = (own.gather(1, idx) < 1).any(-1).sum()
-                margin = (top.values[:, k - 1] - top.values[:, k]).sum()
+                margin = (val[:, k - 1] - val[:, k]).sum()
                 extra = [dropped, moved, torch.full_like(moved, t), margin]
-            self.load[:e] += count.float()
-            self.load[e:] += torch.stack([v.float() for v in extra])
+                book(self.load, torch.cat((count.float(), torch.stack([v.float() for v in extra]))))
         if self.shared:
             shared = self.act(fp8.linear(h, self.shared_up.type_as(h), self.training))
             routed = routed + fp8.linear(shared, self.shared_down.T.type_as(h), self.training)

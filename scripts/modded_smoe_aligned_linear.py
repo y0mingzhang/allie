@@ -5,12 +5,40 @@ No direct optimizer-buffer mutation. Tile selections are offline and shape
 specific; unsupported shapes retain the tuned reference. Gates and weight
 gradients use exactly the tuned path's operations and rounding boundaries.
 """
+import functools
+import operator
+
 import torch
 import modded_smoe_tuned as tuned
 import modded_smoe_aligned as aligned
 import modded_smoe_gather_wgrad as gather_wgrad
 import modded_smoe_gated as gated_backward
 from modded_smoe import group
+
+# Gated combine's FP32 add order over the top-k slots (nested tuples, each a left fold: (0, 1, 2, 3)
+# is ((p0 + p1) + p2) + p3), a pointwise sum inductor fuses with the shared-expert add and the
+# residual; None: the cuBLAS bmm. test_moe_nongemm.py orders finds the one equal to cuBLAS.
+COMBINE = None
+
+
+def bf16_round(x):
+    """FP32 x rounded to BF16 (nearest, ties to even) but kept FP32, in bit arithmetic: inductor
+    drops a cast to BF16 and back inside a fused kernel. Finite x."""
+    b = x.view(torch.int32)
+    return ((b + 0x7FFF + (b >> 16 & 1)) & -65536).view(torch.float32)
+
+
+def combine(expanded, gates, order):
+    """(gates.unsqueeze(1) @ expanded).squeeze(1) as FP32 adds in order, rounded to BF16 once, as
+    a gemv epilogue does: BF16 products are exact in FP32, so the add order fixes every bit."""
+    g = bf16_round(gates.float())
+
+    def term(o):
+        if isinstance(o, int):
+            return expanded[:, o].float() * g[:, o, None]
+        return functools.reduce(operator.add, map(term, o))
+
+    return bf16_round(term(order)).to(expanded.dtype)
 
 
 def config(x,w,order,k,xg,yg):
@@ -51,7 +79,8 @@ class AlignedLinear(torch.autograd.Function):
         output=matmul(x,weights,se,order,offsets,k,grouped_in,grouped_out)
         if gates is not None:
             expanded=output.view(gates.size(0),gates.size(1),output.size(-1))
-            output=(gates.unsqueeze(1) @ expanded).squeeze(1)
+            output=((gates.unsqueeze(1) @ expanded).squeeze(1) if COMBINE is None else
+                    combine(expanded,gates,COMBINE))
         else:
             expanded=None
         ctx.save_for_backward(x,weights,se,order,offsets,gates,expanded)

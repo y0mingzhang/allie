@@ -33,7 +33,7 @@ from torch import Tensor, nn
 
 from modded_arch import swiglu_hidden
 from modded_diffattn import diff_attention
-from modded_moe import MoE
+from modded_moe import MoE, replay_context
 
 dynamo.config.recompile_limit = 64
 
@@ -1507,10 +1507,14 @@ def _eager_block(module, *args, ckpt=True, blend=None):
             return module._compiled(x, attn_args)
         if not ckpt:
             return run(*args, *blend)
-        return torch.utils.checkpoint.checkpoint(run, *args, *blend, use_reentrant=False)
+        return torch.utils.checkpoint.checkpoint(
+            run, *args, *blend, use_reentrant=False, context_fn=replay_context
+        )
     if not ckpt:
         return module._compiled(*args)
-    return torch.utils.checkpoint.checkpoint(module._compiled, *args, use_reentrant=False)
+    return torch.utils.checkpoint.checkpoint(
+        module._compiled, *args, use_reentrant=False, context_fn=replay_context
+    )
 
 
 class Block(nn.Module):
