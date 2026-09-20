@@ -643,8 +643,11 @@ def main():
             dist.barrier()
             os._exit(0)
         if a.profile and index + 1 == a.profile:
+            shapes = bool(os.environ.get("ALLIE_SHAPES"))
             prof = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CUDA]
+                + [torch.profiler.ProfilerActivity.CPU] * shapes,
+                record_shapes=shapes,
             )
             prof.__enter__()
         manager.advance_schedule(index)
@@ -719,6 +722,15 @@ def main():
                 )
                 if os.environ.get("ALLIE_TRACE"):
                     prof.export_chrome_trace(os.environ["ALLIE_TRACE"])
+                if shapes:
+                    print(
+                        prof.key_averages(group_by_input_shape=True).table(
+                            sort_by="cuda_time_total",
+                            row_limit=60,
+                            max_name_column_width=40,
+                        ),
+                        flush=True,
+                    )
         if step % 25 == 0 or step == total_steps:
             stats = torch.cat(
                 (
