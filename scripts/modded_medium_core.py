@@ -511,6 +511,7 @@ def _flush():
 
 
 CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
+CKPT_LAYERS = 1 << 30  # only blocks with layer_idx < CKPT_LAYERS are checkpointed (--ckpt-frac)
 ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
 ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
 _inflight = []  # (work, param, fp32 grad) reduces of the running backward
@@ -1430,10 +1431,13 @@ class Block(nn.Module):
     ):
         super().__init__()
         self.attn = CausalSelfAttention(dim, head_dim, num_heads, layer_idx)
+        self.layer_idx = layer_idx
         # model track: MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
         self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
     def forward(self, x: Tensor, attn_args: AttnArgs):
+        if self.layer_idx >= CKPT_LAYERS:
+            return self._forward(x, attn_args)
         if CKPT == "block" and self.training:
             return torch.utils.checkpoint.checkpoint(
                 self._forward, x, attn_args, use_reentrant=False

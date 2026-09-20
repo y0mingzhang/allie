@@ -9,6 +9,8 @@ import numpy as np
 
 os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "4")
 os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+import math
+
 import torch
 import torch.distributed as dist
 from torch.nn import functional as F
@@ -78,6 +80,7 @@ class Config:
     ckpt: str = ""  # activation checkpointing: "mlp" | "block" | "eager" (training only)
     zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
     zero2_bf16: bool = False  # that reduce in BF16 (half the traffic, not bit-identical)
+    ckpt_frac: float = 1.0  # checkpoint only the first ceil(frac * layers) blocks (selective recompute)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -228,6 +231,7 @@ def create_model(cfg, device="cuda"):
     arch = modded_arch.resolve(cfg.arch)
     assert cfg.ckpt in ("", "mlp", "block", "eager")
     core.CKPT = cfg.ckpt
+    core.CKPT_LAYERS = math.ceil(cfg.ckpt_frac * cfg.layers)
     assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
     core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
     assert not cfg.zero2_bf16 or cfg.zero2
