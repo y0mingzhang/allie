@@ -13,20 +13,19 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 from modded_medium import Config, TrainingManager, create_model, core, make_context
+
+ORIGINAL = core._eager_block
 from modded_wsd import Schedule, install
 
 
 @torch.compiler.disable
-def retain(module, *args):
-    if not hasattr(module, '_compiled'):
-        module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
-    return module._compiled(*args)
+def retain(module, *args, ckpt=True):
+    return ORIGINAL(module, *args, ckpt=False)
 
 
 def run(checkpointed, root):
-    original = core._eager_checkpoint
     if not checkpointed:
-        core._eager_checkpoint = retain
+        core._eager_block = retain
     torch.manual_seed(701)
     cfg = Config(width=128, head_dim=64, layers=8, max_tokens=1024,
                  scheduled_steps=8, extension_steps=0, initial_batch_rows=8,
@@ -68,7 +67,7 @@ def run(checkpointed, root):
     prof.export_chrome_trace(str(root / f'checkpoint-{checkpointed}-rank{dist.get_rank()}.json'))
     print(json.dumps(dict(checkpointed=checkpointed, rank=dist.get_rank(),
                           compiled_autograd_calls=region_count)), flush=True)
-    core._eager_checkpoint = original
+    core._eager_block = ORIGINAL
     del net, m, mgr, out
     gc.collect()
     torch.cuda.empty_cache()

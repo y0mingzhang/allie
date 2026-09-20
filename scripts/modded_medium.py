@@ -261,7 +261,7 @@ def create_model(cfg, device="cuda"):
     for i, block in enumerate(model.blocks):
         for p in block.parameters():
             p.block = i
-    core.DEFER = cfg.zero2 and cfg.ckpt == "eager" and core.CKPT_LAYERS >= cfg.layers
+    core.DEFER = cfg.zero2 and cfg.ckpt == "eager"
     model.use_clock, model.use_elo = cfg.clock, cfg.elo
     model.use_feats = cfg.feats
     model.doc_rope = cfg.doc_rope

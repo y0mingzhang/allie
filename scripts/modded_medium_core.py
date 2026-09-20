@@ -1438,13 +1438,15 @@ class MLP(nn.Module):
 
 
 @torch.compiler.disable
-def _eager_checkpoint(module, *args):
+def _eager_block(module, *args, ckpt=True):
     # Create AND call the optimized bound method outside the outer Dynamo trace.
     # Passing module._compiled through that trace can unwrap it back to Python;
     # changing disable(recursive=...) alone does not preserve the compiled child.
     if not hasattr(module, "_compiled"):
         module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
     sync_params(module.layer_idx)
+    if not ckpt:
+        return module._compiled(*args)
     return torch.utils.checkpoint.checkpoint(module._compiled, *args, use_reentrant=False)
 
 
@@ -1465,17 +1467,18 @@ class Block(nn.Module):
         self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
     def forward(self, x: Tensor, attn_args: AttnArgs):
+        if CKPT == "eager" and self.training:
+            # eager checkpoint around this block's own compiled graph: everything the graph saves
+            # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
+            # and recomputed in backward, keeping only the block input. Blocks past --ckpt-frac run
+            # the same compiled graph without it (and wait for their deferred params the same way)
+            return _eager_block(self, x, attn_args, ckpt=self.layer_idx < CKPT_LAYERS)
         if self.layer_idx >= CKPT_LAYERS:
             return self._forward(x, attn_args)
         if CKPT == "block" and self.training:
             return torch.utils.checkpoint.checkpoint(
                 self._forward, x, attn_args, use_reentrant=False
             )
-        if CKPT == "eager" and self.training:
-            # eager checkpoint around this block's own compiled graph: everything the graph saves
-            # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
-            # and recomputed in backward, keeping only the block input
-            return _eager_checkpoint(self, x, attn_args)
         return self._forward(x, attn_args)
 
     def _forward(self, x: Tensor, attn_args: AttnArgs):
