@@ -6,11 +6,17 @@ pointer and log row equals its synchronous twin byte for byte although the sourc
 right after each snapshot; buffers are reused and reallocated on a shape change; the writer thread
 blocks the trainer's signals; an OSError(512) on the first fsync is retried; pointers move only once
 every rank's files are durable, the next save waits for the in-flight one, and a failed or killed
-write never moves them. Not covered: CUDA pinned copies and modded_train's own call sites.
+write never moves them. owned (full_state's gathered experts) is written without a copy. pinned()
+buffers equal cpu_copy's in bytes and strides, each registered once at its exact size and page
+aligned, and unregistered when freed (cudaHostRegister stubbed). Not covered: real registration,
+CUDA copies and modded_train's own call sites.
 Run: python test_async_checkpoint.py
 """
 
+import gc
+import io
 import json
+import mmap
 import os
 import random
 import signal
@@ -22,6 +28,7 @@ import time
 from collections import OrderedDict
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def worker(mode, tmp, rank):
@@ -104,7 +111,8 @@ def worker(mode, tmp, rank):
             "seen": 1000 * k,
             "pool_ids": list(range(50 * k)),
         }
-        return manager, model, data, rng_state()
+        experts = {"blocks.1.mlp.up": r(2, n, 4, dtype=torch.bfloat16)}  # fresh gathers
+        return manager, model, experts, data, rng_state()
 
     def tensors(x):
         if isinstance(x, torch.Tensor):
@@ -119,15 +127,19 @@ def worker(mode, tmp, rank):
         if rank == 0:
             directory.mkdir(parents=True)
         dist.barrier()
-        manager, model, data, rng = content(k)
+        manager, model, experts, data, rng = content(k)
         host, write = (saver.snapshot, saver.add) if saver else (cpu_copy, atomic_save)
         write(
             {"manager": host(manager), "rng": rng, "data": data, "flops": step},
             directory / f"rank{rank}.pt",
         )
         if rank == 0:
+            own = saver.snapshot(experts, owned=True) if saver else cpu_copy(experts)
+            assert not saver or all(
+                own[n].data_ptr() == t.data_ptr() for n, t in experts.items()
+            )
             state = {
-                "model": host(model),
+                "model": host(model) | own,
                 "step": step,
                 "metrics": {"move_ce": 1 / k},
                 "inference": host({"yarn": manager["yarn"]}),
@@ -158,6 +170,45 @@ def worker(mode, tmp, rank):
         rows = (out / "checkpoints.jsonl").read_text().splitlines()
         return [json.loads(x)["step"] for x in rows]
 
+    def dump(value):
+        f = io.BytesIO()
+        torch.save(value, f)
+        return f.getvalue()
+
+    def pinned():
+        pins = {}
+
+        def register(ptr, n, flags):
+            assert ptr % mmap.PAGESIZE == 0 and ptr not in pins
+            pins[ptr] = n
+            return 0
+
+        cudart, check = torch.cuda.cudart, torch.cuda.check_error
+        torch.cuda.cudart = lambda: SimpleNamespace(
+            cudaHostRegister=register, cudaHostUnregister=pins.pop
+        )
+        torch.cuda.check_error = lambda res: None
+        base = torch.randn(6, 8)
+        layouts = [
+            base.bfloat16(),
+            base.t(),
+            base[1:, ::2],
+            torch.randn(8).expand(3, 8),
+            torch.tensor(2.0, dtype=torch.float64),
+            torch.randn(2, 3, 4, 10).to(memory_format=torch.channels_last)[..., ::2],
+            torch.rand(5) > 0.5,
+            torch.empty(0, 3),
+        ]
+        buffers = [mc.pinned(x).copy_(x) for x in layouts]
+        for x, b in zip(layouts, buffers):
+            assert dump(b) == dump(cpu_copy(x)) and b.stride() == cpu_copy(x).stride()
+        sizes = [cpu_copy(x).untyped_storage().nbytes() for x in layouts]
+        assert sorted(pins.values()) == sorted(n for n in sizes if n)
+        del buffers, b
+        gc.collect()
+        assert not pins, pins
+        torch.cuda.cudart, torch.cuda.check_error = cudart, check
+
     if mode == "crash":
         out = Path(tmp) / "crash"
         saver = mc.AsyncSaver(group)
@@ -174,6 +225,7 @@ def worker(mode, tmp, rank):
         assert rank == 1 or pointer(out) == 128
         os._exit(0)  # the job dies with rank 1's files unwritten
 
+    pinned()
     if rank == 0:
         out = Path(tmp) / "crash"
         assert pointer(out) == 128
