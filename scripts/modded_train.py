@@ -249,6 +249,10 @@ def main():
     start = time.monotonic()
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+    snap = os.environ.get("MEMSNAP")
+    if snap:
+        from modded_memsnap import start as start_memory_trace
+        start_memory_trace(snap, rank)
     dist.init_process_group("nccl")
     cpu = dist.new_group(backend="gloo")  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
@@ -573,9 +577,7 @@ def main():
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
     stop_reason = "steps"
     step = first
-    snap = os.environ.get("MEMSNAP")  # CUDA memory snapshot path: dumped at the start of step 3, then exit
-    if snap:
-        torch.cuda.memory._record_memory_history(max_entries=500000)
+    # MEMSNAP also dumps early OOMs; successful diagnostics stop before step3.
     for index in range(first, total_steps):
         if snap and index == first + 2:
             if rank == 0:
@@ -770,4 +772,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        if os.environ.get("MEMSNAP"):
+            from modded_memsnap import dump_on_error
+            dump_on_error()
+        raise
