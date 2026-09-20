@@ -27,6 +27,8 @@ import torch.nn.functional as F
 # torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
 import triton
 import triton.language as tl
+
+import modded_fp8 as fp8
 from torch import Tensor, nn
 
 from modded_arch import swiglu_hidden
@@ -512,9 +514,19 @@ def _flush():
 
 CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
 CKPT_LAYERS = 1 << 30  # only blocks with layer_idx < CKPT_LAYERS are checkpointed (--ckpt-frac)
+CKPT_BLEND = False  # put the eager residual blend inside the block checkpoint boundary
 ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
 ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
 _inflight = []  # (work, param, fp32 grad) reduces of the running backward
+DEFER = False  # ZeRO-2 + eager checkpoints: NorMuon's param broadcasts finish under the next forward
+_bcast = {}  # block index (-1: outside blocks) -> the param broadcasts it waits on
+
+
+def sync_params(*blocks):
+    """Wait for the deferred param broadcasts of these blocks (all if none given)."""
+    for b in blocks or list(_bcast):
+        for w in _bcast.pop(b, ()):
+            w.wait()
 
 
 @torch.no_grad()
@@ -646,6 +658,8 @@ class NorMuon(torch.optim.Optimizer):
         # group: a single-rank group for rank-local params (sharded MoE experts: whole experts per rank)
         self.group = group
         self.world_size = dist.get_world_size(group) if dist.is_initialized() else 1
+        # ZeRO-2 params whose broadcast from their owner waits for launch(), after the step's collectives
+        self._deferred = [] if DEFER and group is None and self.world_size > 1 else None
         # custom sizing requires 8 GPUs and the upstream 16-layer matrices
         params = list(params)
         layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
@@ -670,7 +684,7 @@ class NorMuon(torch.optim.Optimizer):
             if lo < len(ps):
                 group["master"] = torch.stack(
                     [p.fp32 for p in ps[lo : lo + group["chunk_size"]]]
-                )
+                ).to(ps[0].device)
             shape = (group["chunk_size"] * self.world_size, *ps[0].shape)
             zero2 = ZERO2 and self.world_size > 1
             group["zero2"] = zero2  # grads arrive reduced into this rank's rows (reduce_to_owner)
@@ -693,6 +707,15 @@ class NorMuon(torch.optim.Optimizer):
         self._group_of = {
             p: i for i, g in enumerate(self.param_groups) for p in g["params"]
         }
+
+    def launch(self):
+        """Broadcast the updated ZeRO-2 rows from their owners in block order. Call after the step's
+        last collective: later ones on this communicator would queue behind the broadcasts."""
+        for p in sorted(self._deferred, key=lambda p: getattr(p, "block", -1)):
+            work = dist.broadcast(p.data, p.owner, group=self.group, async_op=True)
+            _bcast.setdefault(getattr(p, "block", -1), []).append(work)
+        self._deferred.clear()
+        sync_params(-1)
 
     def reset(self):
         # expose a reset for clearing buffers
@@ -752,6 +775,8 @@ class NorMuon(torch.optim.Optimizer):
     def step(self):
         # Efficient distributed step by @YouJiacheng, @KonstantinWilleke, @alexrgilbert,
         # @adricarda, @tuttyfrutyee, @vdlad, @ryanyang0, @vagrawal, @varunneal, @chrisjmccormick
+        if self._deferred is not None:  # the last step's broadcasts (no-op once every block ran forward)
+            sync_params()
         rank = dist.get_rank(self.group)
         group_infos = []
         for group in self.param_groups:
@@ -765,8 +790,10 @@ class NorMuon(torch.optim.Optimizer):
                 _drain()
                 for p in params:
                     p.fresh = True
-                grad_chunk = flat.clone()
-                group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=_Done()))
+                # No collective remains for these rows. Clone only when this
+                # group is processed, rather than retaining every group's copy
+                # across the largest polar-express scratch allocation.
+                group_infos.append(dict(grad_source=flat, reduce_future=_Done()))
                 continue
             if flat is not None:  # BF16 weights: FP32 grads already stacked
                 for p in params:
@@ -808,7 +835,10 @@ class NorMuon(torch.optim.Optimizer):
             info["reduce_future"].wait()
 
             params = group["params"]
-            grad_chunk = info["grad_chunk"]
+            grad_chunk = (
+                info.pop("grad_source").clone()
+                if "grad_source" in info else info["grad_chunk"]
+            )
             # BF16 weights: FP32 grads, momentum and update math on the FP32 master
             master = getattr(params[0], "master", False)
             chunk_size = group["chunk_size"]
@@ -937,7 +967,15 @@ class NorMuon(torch.optim.Optimizer):
             if num_params < chunk_size:
                 updated_params[num_params:].zero_()
 
+            # These workspaces are not inputs to the parameter collective.
+            # In ZeRO-2 no group_infos entry owns them after this point.
+            del grad_chunk, updated_grads, v_chunk
+
             flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
+            if self._deferred is not None and group.get("zero2"):  # owners broadcast in launch()
+                flat[start_idx : start_idx + chunk_size].copy_(updated_params)
+                self._deferred += params
+                continue
             stacked_params = (
                 torch.empty(
                     (padded_num_params, *param_shape),
@@ -1011,10 +1049,8 @@ class DistAdam(torch.optim.Optimizer):
             if getattr(p, "master", False):
                 n, w = len(chunk), getattr(p, "fp32", p)
                 self.state[p]["master"] = (
-                    (w if p.numel() < 1024 else w[rank * n : (rank + 1) * n])
-                    .float()
-                    .clone()
-                )
+                    w if p.numel() < 1024 else w[rank * n : (rank + 1) * n]
+                ).to(p.device, torch.float32, copy=True)
                 if hasattr(p, "fp32"):
                     del p.fp32
         # DistributedAdam implementation by @vagrawal, @akash5474
@@ -1313,7 +1349,7 @@ class CausalSelfAttention(nn.Module):
         )
 
         q, k, v = (
-            F.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x))
+            fp8.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x), self.training)
             .view(B, T, 3 * self.num_heads, self.head_dim)
             .chunk(3, dim=-2)
         )
@@ -1366,8 +1402,8 @@ class CausalSelfAttention(nn.Module):
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side
-        y = F.linear(
-            y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y)
+        y = fp8.linear(
+            y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y), self.training
         )  # sa_lambdas[1] pre-multiplied to O @shenberg
         return y
 
@@ -1395,7 +1431,7 @@ class MLP(nn.Module):
             self.c_proj.zero_()  # zero init suggested by @Grad62304977
 
     def forward(self, x: Tensor):
-        x = F.linear(x, self.c_fc.type_as(x))
+        x = fp8.linear(x, self.c_fc.type_as(x), self.training)
         if self.kind == "swiglu":
             a, b = x.chunk(2, dim=-1)
             x = F.silu(a) * b
@@ -1405,17 +1441,33 @@ class MLP(nn.Module):
             x = F.relu(
                 x
             ).square()  # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
-        x = F.linear(x, self.c_proj.T.type_as(x))
+        x = fp8.linear(x, self.c_proj.T.type_as(x), self.training)
         return x
 
 
 @torch.compiler.disable
-def _eager_checkpoint(module, *args):
+def _eager_block(module, *args, ckpt=True, blend=None):
     # Create AND call the optimized bound method outside the outer Dynamo trace.
     # Passing module._compiled through that trace can unwrap it back to Python;
     # changing disable(recursive=...) alone does not preserve the compiled child.
     if not hasattr(module, "_compiled"):
         module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
+    sync_params(module.layer_idx)
+    if blend is not None:
+        # Keep the arithmetic eager and the compiled block unchanged. Only move
+        # the save/recompute boundary: otherwise autograd retains both the
+        # unblended block output (for scalar gradients) and its blended copy.
+        def run(x, attn_args, x0, x02, resid, x0_weights):
+            if module.layer_idx == 0:
+                x = (resid + x0_weights[0]) * x + x0_weights[1] * x02
+            else:
+                x = resid * x + x0_weights[0] * x0 + x0_weights[1] * x02
+            return module._compiled(x, attn_args)
+        if not ckpt:
+            return run(*args, *blend)
+        return torch.utils.checkpoint.checkpoint(run, *args, *blend, use_reentrant=False)
+    if not ckpt:
+        return module._compiled(*args)
     return torch.utils.checkpoint.checkpoint(module._compiled, *args, use_reentrant=False)
 
 
@@ -1435,18 +1487,20 @@ class Block(nn.Module):
         # model track: MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
         self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
-    def forward(self, x: Tensor, attn_args: AttnArgs):
+    def forward(self, x: Tensor, attn_args: AttnArgs, blend=None):
+        if CKPT == "eager" and self.training:
+            # eager checkpoint around this block's own compiled graph: everything the graph saves
+            # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
+            # and recomputed in backward, keeping only the block input. Blocks past --ckpt-frac run
+            # the same compiled graph without it (and wait for their deferred params the same way)
+            return _eager_block(self, x, attn_args, ckpt=self.layer_idx < CKPT_LAYERS, blend=blend)
+        assert blend is None, "residual blend recompute requires training with eager checkpoints"
         if self.layer_idx >= CKPT_LAYERS:
             return self._forward(x, attn_args)
         if CKPT == "block" and self.training:
             return torch.utils.checkpoint.checkpoint(
                 self._forward, x, attn_args, use_reentrant=False
             )
-        if CKPT == "eager" and self.training:
-            # eager checkpoint around this block's own compiled graph: everything the graph saves
-            # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
-            # and recomputed in backward, keeping only the block input
-            return _eager_checkpoint(self, x, attn_args)
         return self._forward(x, attn_args)
 
     def _forward(self, x: Tensor, attn_args: AttnArgs):
@@ -1623,6 +1677,10 @@ class GPT(nn.Module):
         self.fp32_embed = False  # FP32 embedding/head state: cast lookups to BF16
         self.board = None  # modded_board branch, added at every position when set
 
+    def train(self, mode=True):  # eval forwards skip the eager checkpoints that wait per block
+        sync_params()
+        return super().train(mode)
+
     def forward(
         self,
         input_seq: Tensor,
@@ -1761,15 +1819,18 @@ class GPT(nn.Module):
                 skip_idx += 1
                 skip = skip_connections.pop()
                 x = x + skip_gate_out * (skip if self.use_skips else skip * 0)
-            if i == 0:
+            if CKPT_BLEND and CKPT == "eager" and self.training:
+                x = self.blocks[i](x, attn_args, blend=(x0, x02, resid_lambdas[i], x0_lambdas[i]))
+            elif i == 0:
                 x = (resid_lambdas[0] + x0_lambdas[0, 0]) * x + x0_lambdas[0, 1] * x02
+                x = self.blocks[i](x, attn_args)
             else:
                 x = (
                     resid_lambdas[i] * x
                     + x0_lambdas[i, 0] * x0
                     + x0_lambdas[i, 1] * x02
                 )
-            x = self.blocks[i](x, attn_args)
+                x = self.blocks[i](x, attn_args)
             if i in skip_in:
                 skip_connections.append(x)
             if i == backout_layer:
@@ -2064,6 +2125,9 @@ class TrainingManager:
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()
             self.model.split_embed = True
+
+        if self.muon_opt._deferred:
+            self.muon_opt.launch()
 
     def start_transition(self, freeze_count=40):
         # freeze scalar weights during transition

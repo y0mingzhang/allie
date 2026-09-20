@@ -927,6 +927,24 @@ wave(
     "a6000p",
 )
 
+# fp8 quality gate (science fork's recipe, 2026-09-20): 1e17 dense ship 12x512, identical data/seed/steps, +/- --fp8
+PERF = ["--zero2", "--ckpt", "eager"]
+wave(
+    "fp8gate",
+    "moe-v1-fp8gate",
+    "f8g",
+    [
+        r | dict(bf16_weights=True, extra_args=PERF + extra)
+        for r, extra in zip(
+            variants("1e17", b, {"base": dict(arch=SHIP), "fp8": dict(arch=SHIP)}), ([], ["--fp8", "dense"])
+        )
+    ],
+    "fp8 quality gate at 1e17: dense ship recipe 12x512, identical data/seed/steps, +/- --fp8 dense; pass |d macro|"
+    " <= 0.0015 and |d expert| <= 0.002 (~1 sigma), fail if d macro > +0.003",
+    "general8",
+)
+
+
 def name(w, r):
     v = r["v"].replace(".", "p")  # modded_train accepts only [A-Za-z0-9_-] in run names
     return f"{w['prefix']}-{r['budget']}-{v}-{r['tag']}-s{r['seed']}"
@@ -1030,10 +1048,21 @@ def plan(key, commit=None):
         hashes["identity.json"] = sha(study / "identity.json")
     runs = [planned(w, r) for r in w["runs"]]
     for r in runs:
-        if r["v"] == "base":
+        if r["v"] == "base" and key != "fp8gate":
             assert abs(r["pool_frac"] - b["pool_frac"][r["budget"]]) < 1e-9, r[
                 "pool_frac"
             ]
+    if key == "fp8gate":
+        # Ship FLOPs differ from the original B_3 shape's FLOPs. Both gate
+        # arms must use the ship-derived tokens/pool, not B_3's old step count.
+        assert len(runs) == 2
+        left, right = (dict(r) for r in runs)
+        for r in (left, right):
+            r.pop("name")
+            r.pop("v")
+        assert right["extra_args"] == left["extra_args"] + ["--fp8", "dense"]
+        right["extra_args"] = left["extra_args"]
+        assert left == right, "FP8 quality arms differ beyond quantization"
     (study / "plan.json").write_text(
         json.dumps(
             dict(

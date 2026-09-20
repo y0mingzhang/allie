@@ -1,8 +1,6 @@
-"""Real compiled GPT checkpoint vs retain-activation gradient/provenance gate.
-
-Run using torchrun (one or two GPUs). No optimizer or mocked attention/expert
-kernels. The reference keeps the SAME per-block compiled graphs without
-checkpointing; this isolates recomputation from eager/compiled rounding changes.
+"""Compiled GPT: moving the eager residual blend inside checkpoints preserves
+outputs and all gradients. The compiled block remains present in both paths.
+Run with torchrun on one GPU; this gate does not exercise optimizer recovery.
 """
 import argparse
 import gc
@@ -13,23 +11,13 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 from modded_medium import Config, TrainingManager, create_model, core, make_context
-
-ORIGINAL = core._eager_block
 from modded_wsd import Schedule, install
 
-
-@torch.compiler.disable
-def retain(module, *args, ckpt=True):
-    return ORIGINAL(module, *args, ckpt=False)
-
-
 def run(checkpointed, root):
-    if not checkpointed:
-        core._eager_block = retain
     torch.manual_seed(701)
     cfg = Config(width=128, head_dim=64, layers=8, max_tokens=1024,
                  scheduled_steps=8, extension_steps=0, initial_batch_rows=8,
-                 bf16_weights=True, ckpt='eager',
+                 bf16_weights=True, ckpt='eager', ckpt_blend=checkpointed,
                  arch=dict(mlp='swiglu', moe=[16, 2], moe_seq=.001, moe_kernel='scatter'))
     m = create_model(cfg, device=torch.device('cuda', int(os.environ['LOCAL_RANK'])))
     with torch.no_grad():
@@ -64,10 +52,9 @@ def run(checkpointed, root):
             proof[name] = grad.detach().cpu().clone()
     region_count = sum(e.count for e in prof.key_averages() if e.key == 'CompiledFunction')
     assert region_count > 0, 'no compiled autograd child observed'
-    prof.export_chrome_trace(str(root / f'checkpoint-{checkpointed}-rank{dist.get_rank()}.json'))
+    prof.export_chrome_trace(str(root / f'blend-{checkpointed}-rank{dist.get_rank()}.json'))
     print(json.dumps(dict(checkpointed=checkpointed, rank=dist.get_rank(),
                           compiled_autograd_calls=region_count)), flush=True)
-    core._eager_block = ORIGINAL
     del net, m, mgr, out
     gc.collect()
     torch.cuda.empty_cache()
@@ -93,7 +80,7 @@ def main():
     (root / f'proof-rank{dist.get_rank()}.json').write_text(json.dumps(exact, indent=2) + '\n')
     assert all(exact.values()), {k: v for k, v in exact.items() if not v}
     dist.destroy_process_group()
-    print('PASS compiled GPT checkpoint vs retained activations: outputs/all gradients exact', flush=True)
+    print('PASS compiled GPT residual-blend checkpoint: outputs/all gradients exact', flush=True)
 
 
 if __name__ == '__main__':

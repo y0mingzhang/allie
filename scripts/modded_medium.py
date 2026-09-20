@@ -22,6 +22,7 @@ from torch.nn.attention.flex_attention import (
 import modded_arch
 import modded_board
 import modded_diffattn
+import modded_fp8
 import modded_moe
 import modded_medium_core as core
 from modded_runtime import prime_source_key
@@ -81,6 +82,8 @@ class Config:
     zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
     zero2_bf16: bool = False  # that reduce in BF16 (half the traffic, not bit-identical)
     ckpt_frac: float = 1.0  # checkpoint only the first ceil(frac * layers) blocks (selective recompute)
+    ckpt_blend: bool = False  # include the eager residual blend in each block checkpoint
+    fp8: str = ""  # "dense": FP8 forwards of attention/MLP/shared-expert matmuls in training (modded_fp8)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -232,8 +235,12 @@ def create_model(cfg, device="cuda"):
     assert cfg.ckpt in ("", "mlp", "block", "eager")
     core.CKPT = cfg.ckpt
     core.CKPT_LAYERS = math.ceil(cfg.ckpt_frac * cfg.layers)
+    assert not cfg.ckpt_blend or cfg.ckpt == "eager"
+    core.CKPT_BLEND = cfg.ckpt_blend
     assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
     core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
+    assert cfg.fp8 in ("", "dense")
+    modded_fp8.DENSE = cfg.fp8 == "dense"
     assert not cfg.zero2_bf16 or cfg.zero2
     modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
     assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
@@ -254,6 +261,10 @@ def create_model(cfg, device="cuda"):
         untie_ve=arch["untie_ve"],
         moe=modded_arch.moe_dims(cfg.width, arch),
     ).to(device)
+    for i, block in enumerate(model.blocks):
+        for p in block.parameters():
+            p.block = i
+    core.DEFER = cfg.zero2 and cfg.ckpt == "eager"
     model.use_clock, model.use_elo = cfg.clock, cfg.elo
     model.use_feats = cfg.feats
     model.doc_rope = cfg.doc_rope
@@ -307,23 +318,17 @@ def create_model(cfg, device="cuda"):
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)) and m not in fp32:
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
-        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
-            # the FP32 init seeds the optimizers' master shards (they drop it); grads summed in FP32
-            p.fp32, p.data, p.master, p.main_grad = (
-                p.data,
-                p.data.bfloat16(),
-                True,
-                None,
-            )
-            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
-            hook = core.zero2_hook if cfg.zero2 else core.accumulate_fp32
-            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else hook)
-    for p in model.parameters():
         if getattr(p, "label", "").endswith("_sh"):
             continue  # sharded experts: each rank holds its own rows (broadcast before slicing)
         dist.broadcast(p.detach(), 0)
-        if hasattr(p, "fp32"):
-            dist.broadcast(p.fp32, 0)
+    for p in model.parameters():
+        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
+            # the FP32 init seeds the optimizers' master shards (they drop it) from host memory, so the
+            # GPU never holds the FP32 model next to the BF16 one; grads summed in FP32
+            p.fp32, p.data, p.master, p.main_grad = p.data.cpu(), p.data.bfloat16(), True, None
+            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
+            hook = core.zero2_hook if cfg.zero2 else core.accumulate_fp32
+            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else hook)
     if torch.device(device).type == "cuda":
         torch.cuda.synchronize()
     return model
@@ -529,5 +534,5 @@ def config_dict(cfg):
         upstream_commit=COMMIT,
         output_support=[MOVE_START, MOVE_END],
         attention_backend="flex",
-        fp8=False,
+        fp8=cfg.fp8 or False,
     )

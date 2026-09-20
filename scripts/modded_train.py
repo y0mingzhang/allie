@@ -18,6 +18,7 @@ import triton
 from modded_arch import attn_factor, extra_flops
 from modded_moe import STATS
 from modded_moe import full_state, local_state
+from modded_medium_core import sync_params
 from modded_medium import (
     Config,
     TrainingManager,
@@ -187,11 +188,18 @@ def main():
         action="store_true",
         help="with --zero2: reduce the grads in BF16 (half the traffic; not bit-identical)",
     )
+    p.add_argument("--ckpt-blend", action="store_true", help="with --ckpt eager: recompute residual blends too")
     p.add_argument(
         "--ckpt-frac",
         type=float,
         default=1.0,
         help="with --ckpt: checkpoint only the first ceil(frac * layers) blocks (selective recompute)",
+    )
+    p.add_argument(
+        "--fp8",
+        choices=("", "dense"),
+        default="",
+        help="dense: FP8 e4m3 forwards (dynamic tensorwise scales) of attention/MLP/shared-expert matmuls in training",
     )
     p.add_argument(
         "--ckpt",
@@ -242,7 +250,12 @@ def main():
     start = time.monotonic()
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+    snap = os.environ.get("MEMSNAP")
+    if snap:
+        from modded_memsnap import start as start_memory_trace
+        start_memory_trace(snap, rank)
     dist.init_process_group("nccl")
+    cpu = dist.new_group(backend="gloo")  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -272,7 +285,8 @@ def main():
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
     cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
-    cfg.zero2_bf16, cfg.ckpt_frac = a.zero2_bf16, a.ckpt_frac
+    cfg.zero2_bf16, cfg.ckpt_frac, cfg.fp8 = a.zero2_bf16, a.ckpt_frac, a.fp8
+    cfg.ckpt_blend = a.ckpt_blend
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,
@@ -381,6 +395,7 @@ def main():
             assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
                 f"Resume changes {key}"
             )
+        assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, "Resume changes ckpt_blend"
         if a.wsd_continue_from:
             from modded_continuation import prepare_continuation
 
@@ -496,6 +511,7 @@ def main():
             ),
             directory / f"rank{rank}.pt",
         )
+        sync_params()
         state = full_state(model, model.state_dict())  # collective when experts are sharded
         if rank == 0:
             atomic_save(
@@ -564,9 +580,7 @@ def main():
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
     stop_reason = "steps"
     step = first
-    snap = os.environ.get("MEMSNAP")  # CUDA memory snapshot path: dumped at the start of step 3, then exit
-    if snap:
-        torch.cuda.memory._record_memory_history(max_entries=500000)
+    # MEMSNAP also dumps early OOMs; successful diagnostics stop before step3.
     for index in range(first, total_steps):
         if snap and index == first + 2:
             if rank == 0:
@@ -697,9 +711,9 @@ def main():
                     or (a.stop_after and step >= a.stop_after)
                 )
             )
-            flag = torch.tensor(stop_code, device="cuda")
-            dist.all_reduce(flag, op=dist.ReduceOp.MAX)
-            stop_code = int(flag.item())
+            flag = torch.tensor(stop_code, device="cpu")
+            dist.all_reduce(flag, op=dist.ReduceOp.MAX, group=cpu)
+            stop_code = int(flag)
         metrics = None
         if stop_code != 2 and (
             step % a.eval_every == 0 or step == total_steps or stop_code
@@ -761,4 +775,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        if os.environ.get("MEMSNAP"):
+            from modded_memsnap import dump_on_error
+            dump_on_error()
+        raise

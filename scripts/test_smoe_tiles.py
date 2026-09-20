@@ -55,15 +55,18 @@ def main():
     p.add_argument('--tokens', type=int, required=True)
     p.add_argument('--skew', action='store_true')
     p.add_argument('--out', required=True)
+    p.add_argument('--reference', default='scatter')
+    p.add_argument('--candidate', default='scatter-tuned')
     a = p.parse_args()
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(True)
     torch.backends.cuda.matmul.allow_tf32 = True
     modded_moe.BLOCK_RECOMPUTE = True
-    ref = run('scatter', a.experts, a.tokens, a.skew)
-    got = run('scatter-tuned', a.experts, a.tokens, a.skew)
+    ref = run(a.reference, a.experts, a.tokens, a.skew)
+    got = run(a.candidate, a.experts, a.tokens, a.skew)
     equal = {k: torch.equal(ref[k], got[k]) for k in ref}
     report = dict(experts=a.experts, tokens=a.tokens, skew=a.skew,
+                  reference=a.reference, candidate=a.candidate,
                   compiled_fullgraph=True, microbatches=2, equal=equal)
     Path(a.out).write_text(json.dumps(report, indent=2) + '\n')
     assert all(equal.values()), equal
