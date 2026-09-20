@@ -140,7 +140,7 @@ class Conv3(torch.autograd.Function):
         gw = torch.stack(
             [
                 torch.bmm(gm, xp[10 * i + j : 10 * i + j + rows].view(split, -1, c + c8))
-                .float()
+                .to(torch.promote_types(x.dtype, torch.float32))
                 .sum(0)
                 for i in range(3)
                 for j in range(3)

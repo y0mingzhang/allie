@@ -165,7 +165,8 @@ class MoE(nn.Module):
 
     def padded(self, h, w, flat, count, order, up, down):
         """Capacity-padded dispatch: a unique slot per kept assignment, so both directions are
-        index_copy / gathers without atomics and shapes are static."""
+        index_copy / gathers without atomics and shapes are static. Dropped assignments all write
+        the one dummy row (a benign duplicate-index race: that row is discarded)."""
         (t, k), (e, d), n = w.shape, (self.experts, h.shape[1]), flat.numel()
         arange = torch.arange(n, device=h.device)
         start = count.cumsum(0) - count
