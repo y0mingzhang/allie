@@ -119,6 +119,19 @@ LANES = dict(
 #SBATCH --time=12:00:00""",
         1,
     ),
+    # one run on the whole 8 x A6000 dei node (moe-v1 round 3's 3e17 gap test)
+    dei8=(
+        1,
+        8,
+        """#SBATCH --account=dippolit
+#SBATCH --partition=dei-group
+#SBATCH --qos=dei_group_qos
+#SBATCH --gres=gpu:A6000:8
+#SBATCH --cpus-per-task=48
+#SBATCH --mem=400G
+#SBATCH --time=12:00:00""",
+        1,
+    ),
     # one run on 4 L40S (the 3e17 ladder, as the data track's round6)
     general4=(
         1,
@@ -720,6 +733,25 @@ wave(
     "mo2",
     variants("1e17", b, MOE2),
     "moe-v1 round 2 at 1e17: moe128k6 (best CM per chip-hour at 3e16) and moe384k6 (best CM), scatter kernel",
+    "preempt4",
+)
+
+# round 3 (user, ~20:50): the 3e17 gap test of moe128k6 against the ship run (msh-3e17-model, same shape and
+# budget), and moe256k6 (round 1's best) at 1e17 beside moe2's arms; both on the scatter kernel
+wave(
+    "moe3",
+    "moe-v1-round3",
+    "mo3",
+    variants("3e17", b, {"moe128k6": MOE2["moe128k6"]}),
+    "moe-v1 round 3 at 3e17: moe128k6 on 8 dei A6000s vs the ship run as its dense control",
+    "dei8",
+)
+wave(
+    "moe2b",
+    "moe-v1-round2b",
+    "mo2b",
+    variants("1e17", b, {"moe256k6": MOE(256, 6, moe_kernel="scatter")}),
+    "moe-v1 round 2b at 1e17: moe256k6 (round 1's best CM), scatter kernel, 4 fast preempt GPUs",
     "preempt4",
 )
 
