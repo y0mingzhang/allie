@@ -914,10 +914,10 @@ wave("isof3e17", "moe-v1-isofix3e17", "mf37",
      "moe-v1 fixed-router isoFLOPs at 3e17: 5 MoE shapes (E128 top-4, router lr x0.1) + dense 10x512", "preempt4")
 
 # MoE design axes beyond sparsity (user 15:40), fixed router (lr x0.1), dualgather, bf16 weights, 3e16 on single GPUs;
-# base = E128 top-4 with the shared expert at half the active width. Winners go to 1e17
+# ref = E128 top-4 with the shared expert at half the active width. Winners go to 1e17
 DA = lambda **kw: S16D | dict(arch=S16D["arch"] | kw)
 AXES = {
-    "base": DA(), "shared0": DA(moe_shared=False), "shareduni": DA(moe_shared_frac=0.2),
+    "ref": DA(), "shared0": DA(moe_shared=False), "shareduni": DA(moe_shared_frac=0.2),
     "shared0.25": DA(moe_shared_frac=0.25), "k8": DA(moe=[128, 8]), "k16": DA(moe=[128, 16]),
     "round64": DA(moe_round=64), "E64": DA(moe=[64, 4]), "E256": DA(moe=[256, 4]),
 }
