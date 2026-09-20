@@ -1015,6 +1015,7 @@ def train_args(study, r):
     if r.get("wd", 1) != 1:
         args += ["--wd-scale", r["wd"]]
     args += ["--bf16-weights"] * bool(r.get("bf16_weights"))
+    args += r.get("extra_args", [])  # perf flags under test (e.g. --zero2, --ckpt eager, --fp8)
     return args
 
 
