@@ -11,9 +11,14 @@ import triton
 import triton.language as tl
 import modded_smoe as ref
 from modded_smoe import group
+from modded_smoe_tiles import SCATTER, WEIGHT
 
 
 def scatter_config(x,w,order,k,xg,yg):
+    if x.dtype == torch.bfloat16:
+        selected = SCATTER.get((w.shape[0], order.numel(), x.shape[1], w.shape[-1], k, xg, yg))
+        if selected is not None:
+            return selected
     # Measured on L40S, 16K tokens, E192/k6/h455. Other shapes use the reference.
     if x.dtype==torch.bfloat16 and w.shape[0]==192 and order.numel()==98304:
         key=(x.shape[1],w.shape[-1],k,xg,yg)
@@ -25,10 +30,18 @@ def scatter_config(x,w,order,k,xg,yg):
     return None
 
 
-def weight_config(dy,x,experts):
+def legacy_weight_config(dy,x,experts):
     if dy.dtype==torch.bfloat16 and experts==192 and dy.shape[0]==98304:
         return {(2048,910):(64,128,128,8,3),(455,2048):(64,64,256,8,3)}.get((x.shape[1],dy.shape[1]))
     return None
+
+
+def weight_config(dy,x,experts):
+    if dy.dtype == torch.bfloat16:
+        selected = WEIGHT.get((experts, dy.shape[0], x.shape[1], dy.shape[1]))
+        if selected is not None:
+            return selected
+    return legacy_weight_config(dy,x,experts)
 
 
 @torch.library.custom_op('allie_tuned::scatter',mutates_args={'out'})
@@ -99,7 +112,7 @@ def _direct_wgrad(DY,X,OFF,OUT,
 @torch.library.custom_op('allie_tuned::direct_wgrad',mutates_args={'out'})
 def direct_wgrad(dy:torch.Tensor,x:torch.Tensor,offsets:torch.Tensor,out:torch.Tensor,fresh:bool)->None:
     assert dy.dtype==torch.bfloat16 and out.dtype==torch.float32
-    cfg=weight_config(dy,x,out.shape[0]) or (32,128,128,4,4)
+    cfg=legacy_weight_config(dy,x,out.shape[0]) or (32,128,128,4,4)
     # FP32 read/add/write needs different tiles from materialized BF16 dW.
     # Selected offline, including the actual physical optimizer-buffer layout.
     if out.shape[0]==192 and dy.shape[0]==98304:
