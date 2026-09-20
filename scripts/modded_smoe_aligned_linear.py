@@ -19,11 +19,11 @@ def config(x,w,order,k,xg,yg):
     rows=order.numel()
     key=(x.shape[1],w.shape[-1],k,xg,yg)
     if rows==98304:
+        # Down/up-input-grad use the tuned fallback: the exploratory aligned
+        # sweep used the wrong weight strides for those two operators.
         return {
             (2048,910,6,False,True):(128,256,64,8,3),
-            (455,2048,1,True,False):(128,64,64,4,3),
             (2048,455,1,True,True):(128,256,64,8,3),
-            (910,2048,1,True,False):(128,256,32,8,3),
         }.get(key)
     if rows==393216:
         return {
