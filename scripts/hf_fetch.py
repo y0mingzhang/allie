@@ -15,6 +15,8 @@ from pathlib import Path
 REPO = "datasets/Lichess/standard-chess-games"
 API = f"https://huggingface.co/api/{REPO}/tree/main/data/year={{}}/month={{}}"
 URL = f"https://huggingface.co/{REPO}/resolve/main/{{}}"
+TOKEN = Path.home() / ".cache/huggingface/token"  # authenticated requests get a higher rate limit
+AUTH = ["-H", f"Authorization: Bearer {TOKEN.read_text().strip()}"] if TOKEN.exists() else []
 
 
 def sha256(path):
@@ -44,6 +46,7 @@ def fetch(entry, out):
                 "5",
                 "--max-time",
                 "3600",
+                *AUTH,
                 "-o",
                 str(tmp),
                 URL.format(entry["path"]),
@@ -58,7 +61,8 @@ def main(month, out, workers=16):
     year, mo = month.split("-")
     files = [
         f
-        for f in json.load(urllib.request.urlopen(API.format(year, mo)))
+        for f in json.load(urllib.request.urlopen(urllib.request.Request(
+            API.format(year, mo), headers=dict([AUTH[1].split(": ", 1)]) if AUTH else {})))
         if f["path"].endswith(".parquet")
     ]
     out = Path(out)
