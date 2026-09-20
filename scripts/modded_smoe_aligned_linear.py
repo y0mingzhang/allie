@@ -25,6 +25,11 @@ def config(x,w,order,k,xg,yg):
             (2048,910,6,False,True):(128,256,64,8,3),
             (2048,455,1,True,True):(128,256,64,8,3),
         }.get(key)
+    if rows==131072:  # d1536 E96 top-4 at 32K micro (tune_moe_shape, main-kernels/tune-d1536-*-partial.json)
+        return {
+            (1536,1024,4,False,True):(128,256,64,8,3),
+            (512,1536,1,True,False):(64,128,64,4,3),
+        }.get(key)
     if rows==393216:
         return {
             (2048,910,6,False,True):(128,256,64,8,3),
