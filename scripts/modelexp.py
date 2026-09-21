@@ -801,6 +801,153 @@ wave(
     "dei1",
 )
 
+# router ablation (science fork, 2026-09-20 ~07:30): the 3e17 gap test tied dense with 98-99% of top-k set by the
+# balancing bias (affinity margin ~0.007 vs bias range ~0.48): is the router under-trained? 1e17, moe128k6 base
+# (mo2's run is the reference arm), scatter-accum + bf16 weights (bit-identical to mo2's scatter)
+R = lambda **kw: MOE(128, 6, moe_kernel="scatter-accum", **kw) | dict(bf16_weights=True)
+ROUTER = {
+    "rlr0.1": R(moe_router_lr_mul=0.1),
+    "rlr1": R(moe_router_lr_mul=1.0),
+    "g1e-3": R(moe_gamma=1e-3),
+    "init0.02": R(moe_init=0.02),
+}
+wave(
+    "moer",
+    "moe-v1-router",
+    "mor",
+    variants("1e17", b, ROUTER),
+    "moe-v1 router ablation at 1e17 on moe128k6: router lr x0.1 / x1, bias gamma 1e-3, init 0.02",
+    "preempt4",
+)
+
+# router hyperparameter search at 3e16 (user 07:15: the fork finds the right router hypers). Round 1's moe128k6 was
+# bias-routed at 3e16 too (98.8% of tokens' top-k set by the bias, margin 0.0065 vs bias range 0.38), so search here
+# on single GPUs, then confirm at 1e17 and 3e17
+ROUTER16 = {"ref": R()} | {
+    k: R(**kw)
+    for k, kw in {
+        "rlr0.1": dict(moe_router_lr_mul=0.1),
+        "rlr1": dict(moe_router_lr_mul=1.0),
+        "init0.02": dict(moe_init=0.02),
+        "init0.05": dict(moe_init=0.05),
+        "g1e-3": dict(moe_gamma=1e-3),
+        "g3e-3": dict(moe_gamma=3e-3),
+        "rlr0.1g1e-3": dict(moe_router_lr_mul=0.1, moe_gamma=1e-3),
+        "rlr1g1e-3": dict(moe_router_lr_mul=1.0, moe_gamma=1e-3),
+        "rlr0.1init0.02": dict(moe_router_lr_mul=0.1, moe_init=0.02),
+    }.items()
+}
+wave(
+    "moer16",
+    "moe-v1-router3e16",
+    "mr16",
+    variants("3e16", b, ROUTER16),
+    "moe-v1 router search at 3e16 on moe128k6 (1 GPU each): router lr, init, bias gamma and pairs; ref = current",
+    "preempt",
+)
+
+# fresh-vs-repeat mix ablation (user 08:35: fill D beyond a policy pass with fresh abundant tokens, never repeat
+# experts / OTB past ~4x). Per-pass supply of B_3 over the current stores ~43B (bucket counts x KEEP); relax3 (3x
+# the down-sampling keep ratio below 2400, capped at 1) makes a pass ~82B at expert share 0.20 vs 0.38. pool_frac
+# = run tokens / final_tokens emulates a final run of that many tokens: 43B = 1 pass, 86B = 2 passes of B_3
+# (experts 8x) or ~1 pass of relax3 (experts ~4x)
+MIX = {
+    "b3p1": dict(final_tokens=43.3e9),
+    "b3p2": dict(final_tokens=86.6e9),
+    "relax3p2": dict(final_tokens=86.6e9, policy=b["policy"].replace("mover_rule", "mover_rule+relax3")),
+}
+wave(
+    "mixfresh",
+    "moe-v1-mixfresh",
+    "mxf",
+    variants("3e16", b, {k: v | dict(arch=SHIP) for k, v in MIX.items()}, seeds=(42, 43))
+    + variants("3e16", b, {f"moe{k}": v | dict(arch=R()["arch"], bf16_weights=True) for k, v in MIX.items()}),
+    "fresh vs repeated tokens at 3e16: B_3 at 1 / 2 emulated passes vs relax3 at 2 (fresh abundant), dense x2 seeds + moe128k6",
+    "preempt",
+)
+
+# router lr x0.1 won at 3e16 (1.4511 / 1.3606 vs ref 1.4655 / 1.3779: -0.014 / -0.017, doubling the gap to dense):
+# refine the lr around it at 3e16, and confirm at 3e17 (16x768 vs the ship run); 1e17 is moer task 0
+ROUTER16B = {k: R(**kw) for k, kw in {
+    "rlr0.03": dict(moe_router_lr_mul=0.03), "rlr0.2": dict(moe_router_lr_mul=0.2),
+    "rlr0.3": dict(moe_router_lr_mul=0.3), "rlr0.1g3e-3": dict(moe_router_lr_mul=0.1, moe_gamma=3e-3),
+}.items()}
+wave("moer16b", "moe-v1-router3e16b", "mr16b", variants("3e16", b, ROUTER16B),
+     "moe-v1 router lr refinement at 3e16 on moe128k6 around x0.1", "preempt")
+wave("moer3", "moe-v1-router3e17", "mor3", variants("3e17", b, {"rlr0.1": R(moe_router_lr_mul=0.1)}),
+     "moe-v1 router lr x0.1 at 3e17: moe128k6 16x768 vs the ship run (the 3e17 gap test with the fixed router)", "preempt4")
+
+# second seed for the headline (user 09:15): rlr0.1 and ref at s43, paired with moer16's s42
+wave("moer16s", "moe-v1-router3e16s", "mr16s",
+     variants("3e16", b, {"ref": R(), "rlr0.1": R(moe_router_lr_mul=0.1)}, seeds=(43,)),
+     "moe-v1 router lr x0.1 vs ref at 3e16, seed 43 (pairs moer16's s42)", "preempt")
+
+# fixed-router isoFLOPs (router lr x0.1, the 3e16 win) at 1e17, single GPUs: 6 MoE shapes spanning 15x in active N
+# (the old-router curve was still falling at 12x512 -> smaller shapes bracket the minimum), plus dense 10x448 /
+# 14x640 filling the dense curve (8x384 / 12x512 / 16x768 dense exist). Checks: the MoE minimum must not sit at an
+# endpoint (else add the next shape); the MoE - dense gap vs D/N at the same shapes separates D/N from router speed
+S16F = MOE(128, 4, moe_kernel="scatter-accum", moe_router_lr_mul=0.1) | dict(bf16_weights=True)
+ISO17 = {"6x320": dict(depth=0.5, width_mul=0.625), "8x384": dict(depth=8 / 12, width_mul=0.75),
+         "10x448": dict(depth=10 / 12, width_mul=0.875), "12x512": {}, "14x640": dict(depth=14 / 12, width_mul=1.25),
+         "16x768": dict(depth=16 / 12, width_mul=1.5, micro_batch=8)}  # fmt: skip
+wave("isof1e17", "moe-v1-isofix1e17", "mf17",
+     variants("1e17", b, {f"moe{k}": S16F | v for k, v in ISO17.items()}
+              | {f"dense{k}": dict(arch=SHIP, bf16_weights=True) | ISO17[k] for k in ("10x448", "14x640")}),
+     "moe-v1 fixed-router isoFLOPs at 1e17: 6 MoE shapes (E128 top-4, router lr x0.1) + dense 10x448 / 14x640",
+     "preempt")
+
+# 6x320 violates the trainer's >= 8 layers; the small end of the fixed-router 1e17 grid is 8x256 instead
+wave("isof1e17b", "moe-v1-isofix1e17b", "mf17b",
+     variants("1e17", b, {"moe8x256": S16F | dict(depth=8 / 12, width_mul=0.5)}),
+     "moe-v1 fixed-router isoFLOPs at 1e17, small end: 8x256 (replaces the invalid 6x320)", "preempt")
+
+# fixed-router isoFLOPs at 3e17 (router lr x0.1; the 3e17 gap test 10510543 trains -0.01..-0.04 below the old router at
+# step 500): 5 MoE shapes spanning 8x in active N around dense's 16x768 optimum, bf16 weights, 4 GPUs each; dense
+# 10x512 pairs the small end (dense 12x640 / 16x768 / 20x1024 exist)
+ISO37 = {"10x512": dict(depth=10 / 16, width_mul=2 / 3), "12x640": dict(depth=0.75, width_mul=5 / 6),
+         "16x768": dict(micro_batch=8), "18x896": dict(depth=18 / 16, width_mul=7 / 6, micro_batch=8),
+         "20x1024": dict(depth=1.25, width_mul=4 / 3, micro_batch=4)}  # fmt: skip
+S16D = S16F | dict(arch=S16F["arch"] | dict(moe_kernel="scatter-dualgather"))  # bit-identical, 1.15-1.24x (main)
+wave("isof3e17", "moe-v1-isofix3e17", "mf37",
+     variants("3e17", b, {f"moe{k}": S16D | v for k, v in ISO37.items()}
+              | {"dense10x512": dict(arch=SHIP, bf16_weights=True) | ISO37["10x512"]}),
+     "moe-v1 fixed-router isoFLOPs at 3e17: 5 MoE shapes (E128 top-4, router lr x0.1) + dense 10x512", "preempt4")
+
+# MoE design axes beyond sparsity (user 15:40), fixed router (lr x0.1), dualgather, bf16 weights, 3e16 on single GPUs;
+# ref = E128 top-4 with the shared expert at half the active width. Winners go to 1e17
+DA = lambda **kw: S16D | dict(arch=S16D["arch"] | kw)
+AXES = {
+    "ref": DA(), "shared0": DA(moe_shared=False), "shareduni": DA(moe_shared_frac=0.2),
+    "shared0.25": DA(moe_shared_frac=0.25), "k8": DA(moe=[128, 8]), "k16": DA(moe=[128, 16]),
+    "round64": DA(moe_round=64), "E64": DA(moe=[64, 4]), "E256": DA(moe=[256, 4]),
+}
+wave("axes", "moe-v1-axes3e16", "mx16", variants("3e16", b, AXES),
+     "moe-v1 design axes at 3e16 (fixed router): shared fraction 0 / 0.2 / 0.25 / 0.5, top-4 / 8 / 16, 64-rounded widths, E64 / 128 / 256",
+     "preempt")
+
+# low-repetition MoE vs dense at 3e17 (main's proposal, pending user approval; the seen-vs-unseen probe showed the
+# 3e17 MoE edge is all on seen rows). Mix mover_rule+up2+noengine (no otb_x4): at one pass expert2600 is seen ~1.45x,
+# expert2400 ~0.72x, OTB ~1.3x (vs 2.95x / 1.46x / 10.6x under B_3); pool_frac for a final run of one pass (~36B)
+LOWREP = dict(policy="mover_rule+up2+noengine", final_tokens=36e9)
+wave("lowrep3e17", "moe-v1-lowrep3e17", "mlr",
+     variants("3e17", b, {"moe16x768": S16D | LOWREP | dict(micro_batch=8),
+                          "dense16x768": dict(arch=SHIP, bf16_weights=True) | LOWREP}),
+     "moe-v1 low-repetition MoE vs dense at 3e17 (16x768, E128 top-4 fixed router vs dense; mix capped at ~1.5x repetition)",
+     "preempt4")
+
+# repetition test v2 (Codex review: v1 was not a clean test). Same buckets, same B_3 policy, same months, no history:
+# bucket weights use the disk counts at every pool_frac, so the two levels differ ONLY in pool size, i.e. repetition
+# scales exactly 1/pool_frac. low = pool_frac 1.0 (sampler accounting: share-weighted repetition 0.28, max bucket with
+# share >= 0.1% 1.5x, OTB), high = 0.125 (2.24, i.e. 8x). final_tokens is set per arm so pool_frac is exactly 1 / 0.125
+REP = lambda steps, f: dict(history=False, final_tokens=steps * 512 * 1024 / f)
+wave("rep3e17", "moe-v1-rep3e17", "mrp",
+     variants("3e17", b, {f"{m}{lev}": arm | REP(steps, f)
+                          for lev, f in (("low", 1.0), ("high", 0.125))
+                          for m, arm, steps in (("moe", S16D | dict(micro_batch=8), 4912),
+                                                ("dense", dict(arch=SHIP, bf16_weights=True), 4974))}),
+     "moe-v1 repetition test at 3e17: MoE (1.2B / 0.13B, E128 top-4, fixed router) and dense 16x768 at pool_frac 1 and 1/8",
+     "preempt4")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
@@ -886,7 +1033,7 @@ def planned(w, r):
     layers, width, steps = shape(r)
     s, decay = schedule(r, steps)
     return r | dict(
-        pool_frac=steps * 512 * 1024 / dx.FINAL_TOKENS,
+        pool_frac=steps * 512 * 1024 / r.get("final_tokens", dx.FINAL_TOKENS),
         b2=B2_HASH,
         group=w["group"],
         name=name(w, r),
