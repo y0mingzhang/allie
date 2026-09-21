@@ -1,23 +1,29 @@
 """Pool inventory and recipe tables.
 
 inventory PIN OUT_DIR [TOKEN_MONTH ...]
-    Per bucket code of a datapin selection: pinned games (disk), the full-pool estimate (games: every clocked
-    Lichess month >= the pin's first but its held-out month, unbuilt months spread by the bucket shares interpolated
-    between the pinned months around them; ext stores exact), and chessmix tokens per game (12 + plies, cut at the
-    row) from one shard per bucket of the token months (default: all pinned) and every ext store. Writes OUT_DIR/inventory.json and
-    OUT_DIR/history-counts.json (the full-pool estimate as the sampler's --mix-history file).
+    Per bucket code of a datapin selection: pinned games (disk); the full-pool estimate
+    (games): every clocked Lichess month >= the pin's first but its held-out one, unbuilt
+    months spread by the bucket shares interpolated between the pinned months around them,
+    ext stores exact; chessmix tokens per game (12 + plies, cut at the row) from one shard
+    per bucket of the token months (default: all pinned) and of every ext store. Writes
+    OUT_DIR/inventory.json and OUT_DIR/history-counts.json (the full-pool estimate as the
+    sampler's --mix-history file).
 recipe INVENTORY {disk|full} TOKENS LABEL KIND [KEY=VALUE ...]
-    Per-code weights = expected passes over the disk or full pool of a run of TOKENS training tokens (packing
-    overshoot included), written content-addressed to chessmix.RECIPES/LABEL-<sha12>.json, trained as
-    --mix table:LABEL-<sha12>. Kinds:
-      norepeat                     equal draws over {bullet, blitz, rapid, classical} x 200-Elo cells, capped by
-                                   supply (<= 1 pass); ultrabullet and correspondence at the pool-average rate
-      elo s= f= engine= cap=8      within a format a game is seen 2x as often every +s Elo (s=inf: flat), capped;
-                                   format slices ~ supply^(1-f); ultrabullet / correspondence at the pool-average
-                                   rate; engine a fixed share of the tokens
-      hand cells= otb= engine=     relative weights per format x Elo band (cells = fmt:w,w,w,w/... over <1400,
-                                   1400-2000, 2000-2400, >=2400), OTB x otb, engine a fixed share
-    Elo is the stronger player's (bucket max-Elo bin centre); OTB games fall in their format's cells.
+    Per-code weights = expected passes over the disk or full pool of a run of TOKENS
+    training tokens (packing overshoot included), written content-addressed to
+    chessmix.RECIPES/LABEL-<sha12>.json and trained as --mix table:LABEL-<sha12>. Kinds:
+      passcap cap=1           expected-pass-capped: equal game draws over {bullet, blitz,
+                              rapid, classical} x 200-Elo cells, each at most cap passes of
+                              its supply; ultrabullet, correspondence at the pool-average rate
+      elo s= f= engine= cap=8 within a format a game is seen 2x as often every +s Elo
+                              (s=inf: flat), capped; format slices ~ supply^(1-f);
+                              ultrabullet, correspondence at the pool-average rate; engine a
+                              fixed share of the tokens
+      hand cells= otb= engine= relative weights per format x Elo band (cells =
+                              fmt:w,w,w,w/... over <1400, 1400-2000, 2000-2400, >=2400),
+                              OTB x otb, engine a fixed share
+    Elo is the stronger player's (bucket max-Elo bin centre); OTB games fall in their
+    format's cells.
 """
 
 import hashlib
@@ -180,9 +186,11 @@ def bisect(f, target, lo, hi, n=200):
     return (lo + hi) / 2
 
 
-def norepeat(pool, total):
+def passcap(pool, total, cap=1.0):
+    """Equal game draws per {bullet..classical} x 200-Elo cell, each at most cap x its supply."""
+    cap = float(cap)
     cell = np.isin(pool.fmt, EVAL) & ~pool.engine
-    key = pool.fmt * 100 + np.minimum(pool.code // 100 % 100, 99) // 2
+    key = pool.fmt * 100 + pool.code // 100 % 100 // 2
     other = np.isin(pool.fmt, OTHER) & ~pool.engine
     human = pool.supply[~pool.engine].sum()
     keys = np.unique(key[cell])
@@ -191,16 +199,15 @@ def norepeat(pool, total):
     w = np.zeros(len(pool.code))
     for _ in range(5):  # the overshoot depends on the mix
         T = pool.drawn(total, w) if w.any() else total
-        r = T / human
-        assert (g * t).sum() >= T * (1 - pool.supply[other].sum() / human), "short"
+        want = T * (1 - pool.supply[other].sum() / human)
+        assert cap * (g * t).sum() >= want, "the cells cannot supply the tokens"
         lam = bisect(
-            lambda x: (np.minimum(g, x) * t).sum(),
-            T * (1 - pool.supply[other].sum() / human),
-            0,
-            g.max(),
+            lambda x: (np.minimum(cap * g, x) * t).sum(), want, 0, cap * g.max()
         )
-        per = dict(zip(keys, np.minimum(1, lam / g)))
-        w = np.where(cell, [per.get(k, 0) for k in key], 0) + np.where(other, r, 0)
+        per = dict(zip(keys, np.minimum(cap * g, lam) / g))
+        w = np.where(cell, [per.get(k, 0) for k in key], 0) + np.where(
+            other, T / human, 0
+        )
     return w
 
 
@@ -290,7 +297,7 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
     raw = Path(inv_path).read_bytes()
     pool, total = Pool(json.loads(raw), basis), float(tokens)
     args = dict(x.split("=", 1) for x in kv)
-    w = dict(norepeat=norepeat, elo=elo, hand=hand)[kind](pool, total, **args)
+    w = dict(passcap=passcap, elo=elo, hand=hand)[kind](pool, total, **args)
     keep = pool.games > 0
     body = dict(
         label=label,
@@ -299,6 +306,7 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
         basis=basis,
         training_tokens=total,
         inventory_sha256=hashlib.sha256(raw).hexdigest(),
+        pin_digest=json.loads(raw)["pin_digest"],
         summary=summary(pool, w, total),
         weights={str(c): float(x) for c, x in zip(pool.code[keep], w[keep])},
     )

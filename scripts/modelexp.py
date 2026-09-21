@@ -274,12 +274,26 @@ def frozen_files(commit=None):
     return out | {f: read(f"scripts/{f}") for f in DRIVER}
 
 
-def tables(runs):
-    """Recipe tables (chessmix table:NAME policies) the runs train on."""
-    names = {k for r in runs for k in r["policy"].split("+") if k.startswith("table:")}
-    return {
-        f"recipes/{k[6:]}.json": (RECIPES / f"{k[6:]}.json").read_bytes() for k in names
-    }
+def tables(w, runs):
+    """Recipe tables (chessmix table:NAME policies) the runs train on, checked against the
+    wave: the table's pin is the wave's and covers it, its basis matches the run's history
+    mode (disk: no history; full: history counts of the same pin) and final_tokens is the
+    table's token count, so the run's passes per bucket are the table's weights."""
+    out = {}
+    for r in runs:
+        for k in r["policy"].split("+"):
+            if not k.startswith("table:"):
+                continue
+            raw = (RECIPES / f"{k[6:]}.json").read_bytes()
+            t, pin = json.loads(raw), json.loads(w["pin"].read_text())
+            assert t["pin_digest"] == pin["sha256"], f"{k} is not on the wave's pin"
+            assert set(pin["inventory"]) <= set(t["weights"]), f"{k} misses buckets"
+            assert r["final_tokens"] == t["training_tokens"], f"{k}: final_tokens"
+            hist = json.loads(w["history"].read_text()).get("pin_digest")
+            assert (t["basis"] == "full") == bool(r.get("history")), f"{k}: history"
+            assert t["basis"] == "disk" or hist == pin["sha256"], f"{k}: history pin"
+            out[f"recipes/{k[6:]}.json"] = raw
+    return out
 
 
 def plan(key, commit=None):
@@ -290,7 +304,7 @@ def plan(key, commit=None):
         rev = ["git", "-C", Path(__file__).parent, "rev-parse", f"{commit}^{{commit}}"]
         commit = subprocess.check_output(rev, text=True).strip()
     runs = [planned(w, r) for r in w["runs"]]
-    files = frozen_files(commit) | tables(runs)
+    files = frozen_files(commit) | tables(w, runs)
     files |= {"round.py": w["round"].read_bytes()}
     files |= {"history-counts.json": w["history"].read_bytes()}
     files |= {"data-pin.json": w["pin"].read_bytes()} if w["pin"] else {}
@@ -308,7 +322,8 @@ def plan(key, commit=None):
         if (study / rel).resolve() != w["round"]:
             (study / rel).write_bytes(data)
     tasks = -(-len(runs) // w["pack"])
-    (study / "run.sbatch").write_text(f"""#!/bin/bash
+    (study / "run.sbatch").write_text(
+        f"""#!/bin/bash
 #SBATCH --job-name={w["prefix"]}
 {w["sbatch"]}
 #SBATCH --nodes=1
@@ -318,20 +333,54 @@ def plan(key, commit=None):
 #SBATCH --open-mode=append
 #SBATCH --output={study}/logs/%x-%A_%a.out
 exec {ROOT}/.venv/bin/python {study}/modelexp.py task {study}/round.py {key}
-""")
+"""
+    )
     p = dict(wave=key, purpose=w["purpose"], commit=commit, hashes=hashes, runs=runs)
     (study / "plan.json").write_text(json.dumps(p, indent=2) + "\n")  # the commit point
 
 
+def write(path, text):
+    """Publish a file whole: readers see the old version or the new, never a torn one."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def submitted(study, since):
+    """Slurm jobs submitted from this study's run.sbatch since a time."""
+    cmd = ["sacct", "-X", "-n", "-P", "-S", time.strftime("%Y-%m-%dT%H:%M:%S", since)]
+    rows = subprocess.check_output([*cmd, "--format=JobID,SubmitLine"], text=True)
+    sb = str(study / "run.sbatch")
+    return [
+        j for j, _, line in (x.partition("|") for x in rows.split("\n")) if sb in line
+    ]
+
+
 def submit(key):
+    """sbatch the study's array once. An intent file written before sbatch lets a retry
+    after a crash find the job Slurm may already have (sacct), instead of submitting twice."""
     study = STUDIES / WAVES[key]["study"]
-    assert not (study / "submitted.json").exists(), "already submitted"
-    cmd = ["sbatch", "--parsable", str(study / "run.sbatch")]
-    job = subprocess.check_output(cmd, text=True).strip()
-    (study / "submitted.json").write_text(
-        json.dumps(dict(at=time.time(), job=job)) + "\n"
-    )
-    print(job)
+    with open(study / ".submit.lock", "w") as lock:
+        fcntl.flock(
+            lock, fcntl.LOCK_EX | fcntl.LOCK_NB
+        )  # raises if another submit runs
+        assert not (study / "submitted.json").exists(), "already submitted"
+        intent = study / "submitting.json"
+        if intent.exists():
+            at = json.loads(intent.read_text())["at"]
+            jobs = submitted(study, time.localtime(at - 60))
+            assert len(jobs) <= 1, f"several jobs from one submit: {jobs}"
+        else:
+            write(intent, json.dumps(dict(at=time.time())) + "\n")
+            jobs = []
+        if not jobs:
+            cmd = ["sbatch", "--parsable", str(study / "run.sbatch")]
+            jobs = [subprocess.check_output(cmd, text=True).strip()]
+        write(
+            study / "submitted.json",
+            json.dumps(dict(at=time.time(), job=jobs[0])) + "\n",
+        )
+    print(jobs[0])
 
 
 def task_id():
@@ -386,15 +435,29 @@ def reap(p, grace=60):
             break
 
 
-def run(cmd, env, log):
+def run(cmd, env, log, watch=None, limit=None):
+    """A child in its own session, its tree reaped however this ends. watch: a file that
+    must grow, first within 1800 s (compile, sampler warm-up) and then within
+    max(1800, 20 x its median growth interval so far); limit: seconds of wall time.
+    A stalled or overdue child is killed and raises TimeoutError."""
     cmd = [str(x) for x in cmd]
     with open(log, "a") as f:
         p = subprocess.Popen(
             cmd, env=env, stdout=f, stderr=subprocess.STDOUT, start_new_session=True
         )
     CHILDREN.add(p)
+    start = last = time.monotonic()
+    size = lambda: watch.stat().st_size if watch and watch.exists() else 0
+    seen, gaps = size(), []
     try:
-        p.wait()
+        while p.poll() is None:
+            time.sleep(10)
+            now = time.monotonic()
+            if size() != seen:
+                seen, gaps, last = size(), gaps + [now - last], now
+            stall = max(1800, 20 * sorted(gaps)[len(gaps) // 2]) if gaps else 1800
+            if watch and now - last > stall or limit and now - start > limit:
+                raise TimeoutError(f"{cmd[:4]}... no progress in {now - last:.0f} s")
     finally:
         if p.poll() is None:
             reap(p)
@@ -426,9 +489,33 @@ def task(key):
     rg = w["gpus"] // w["pack"]  # GPUs per run (one torchrun each)
     gpus = lambda j: ",".join(visible[j * rg : (j + 1) * rg])
     with ThreadPoolExecutor(len(mine)) as ex:
-        ok = list(ex.map(lambda j: run_one(study, mine[j], gpus(j)), range(len(mine))))
-    if not all(ok):
+        ok = list(ex.map(lambda j: arm(study, mine[j], gpus(j)), range(len(mine))))
+    failed = [r for r, o in zip(mine, ok) if not o]
+    if failed and all(len(failures(study, r)) < TRIES for r in failed):
         subprocess.run(["scontrol", "requeue", task_id()], check=True)
+    sys.exit(1 if failed else 0)
+
+
+TRIES = 3  # failed attempts of a run before its task stops requeueing
+
+
+def failures(study, r):
+    f = study / "logs" / f"{r['name']}.failed.json"
+    return json.loads(f.read_text()) if f.exists() else []
+
+
+def arm(study, r, gpu):
+    """run_one, with a failure receipt instead of an exception; the other arms of the
+    task keep their GPUs."""
+    try:
+        return run_one(study, r, gpu)
+    except BaseException as e:
+        f = study / "logs" / f"{r['name']}.failed.json"
+        rec = dict(at=time.time(), job=os.environ.get("SLURM_JOB_ID"), reason=repr(e))
+        write(f, json.dumps([*failures(study, r), rec], indent=1) + "\n")
+        if not isinstance(e, Exception):
+            raise
+        return False
 
 
 def train_args(study, r):
@@ -530,14 +617,31 @@ def pooled_controls(study, controls):
     return rows
 
 
+def complete(study, r):
+    """The run's result is published and describes this planned run, trained to the end."""
+    res, done = study / "results" / f"{r['name']}.json", pretrained(r) / "done.json"
+    if not res.exists():
+        return False
+    got = json.loads(res.read_text())
+    same = all(got.get(k) == r[k] for k in ("name", "steps", "arch", "policy", "seed"))
+    assert same and "strat" in got, f"{res} is not this run's result"
+    return json.loads(done.read_text())["stop_reason"] == "steps"
+
+
+def pretrained(r):
+    return ROOT / "results/pretrain" / r["name"]
+
+
 def run_one(study, r, gpu):
     """Train, then score one run on original validation and the golden eval."""
     n = r["name"]
-    result = study / "results" / f"{n}.json"
-    if result.exists():
+    if complete(study, r):
         return True
     lock = open(study / "logs" / f"{n}.lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if another task runs n
+    if complete(study, r):
+        return True
+    result = study / "results" / f"{n}.json"
     started, left = time.monotonic(), seconds_left()
     env = os.environ | dict(
         ALLIE_PROJECT_ROOT=str(ROOT),
@@ -555,9 +659,10 @@ def run_one(study, r, gpu):
         PYTHONPATH="/data/group_data/dei-group/yimingz3/allie/envs/chessmix-overlay",
     )
     src = study / "source-ours"
-    stage = [sys.executable, src / "modded_runtime_stage.py"]
-    py = subprocess.check_output(stage, env=env, text=True).strip()
-    out, log = ROOT / "results/pretrain" / n, study / "logs" / n
+    out, log = pretrained(r), study / "logs" / n
+    stage = Path(f"{log}.stage.log")
+    run([sys.executable, src / "modded_runtime_stage.py"], env, stage, limit=3600)
+    py = stage.read_text().split()[-1]
     done = out / "done.json"
     for leg in r.get("stop_after", [None]):
         d = json.loads(done.read_text()) if done.exists() else {}
@@ -574,7 +679,7 @@ def run_one(study, r, gpu):
         ]
         cmd += ["--stop-after", leg] * bool(leg)
         cmd += ["--resume", out / "last.pt"] * (out / "last.pt").exists()
-        run(cmd, env, f"{log}.train.log")
+        run(cmd, env, f"{log}.train.log", watch=out / "train.jsonl")
         if json.loads(done.read_text())["stop_reason"] != (
             "stop_after" if leg else "steps"
         ):
@@ -591,7 +696,8 @@ def run_one(study, r, gpu):
                 "--nproc_per_node=1",
             ]
             cmd += [ev, "--checkpoint", out / "last.pt", "--source", src]
-            run([*cmd, "--split", split, "--batch", 16], env, f"{log}.{split}.log")
+            args = [*cmd, "--split", split, "--batch", 16]
+            run(args, env, f"{log}.{split}.log", limit=7200)
     ov = json.loads((scores / "original-val.json").read_text())
     sv = json.loads((scores / "strat-v1.json").read_text())
     last = json.loads((out / "train.jsonl").read_text().splitlines()[-1])
@@ -606,7 +712,7 @@ def run_one(study, r, gpu):
         gpu_name=gpu_name,
         task_seconds=time.monotonic() - started,
     )
-    result.write_text(json.dumps(r, indent=2) + "\n")
+    write(result, json.dumps(r, indent=2) + "\n")
     return True
 
 
