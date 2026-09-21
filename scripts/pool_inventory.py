@@ -23,6 +23,9 @@ recipe INVENTORY {disk|full} TOKENS LABEL KIND [KEY=VALUE ...]
       hand cells= otb= engine= relative weights per format x Elo band (cells =
                               fmt:w,w,w,w/... over <1400, 1400-2000, 2000-2400, >=2400),
                               OTB x otb, engine a fixed share
+      topup base= p=          control (base: a replay of control on this pool, its realized
+                              passes per bucket) with every human game whose stronger player
+                              is >= 2400 raised to p passes; p=0: control as a table
     Elo is the stronger player's (bucket max-Elo bin centre); OTB games fall in their
     format's cells.
 """
@@ -276,6 +279,32 @@ def hand(pool, total, cells, otb=1.0, engine=0.0):
     return w
 
 
+def topup(pool, total, base, p, minpool=200, base_sha256=None):
+    """Control with every human game whose stronger player is >= 2400 raised to p expected passes, never
+    below control's own; the rest, engine included, keeps control's weights, scaled to fit the run.
+    Buckets retaining fewer than minpool games in the replay take the supply-weighted passes of their
+    source x format x 200-Elo cell."""
+    raw = Path(base).read_bytes()
+    assert base_sha256 in (None, hashlib.sha256(raw).hexdigest()), "base replay changed"
+    rep, p = json.loads(raw)["buckets"], float(p)
+    get = lambda k, d: np.array(
+        [rep.get(str(c), {}).get(k, d) for c in pool.code], float
+    )
+    seen, ok = get("passes", np.nan), get("pool", 0) >= int(minpool)
+    cell = pool.src * 10000 + pool.fmt * 100 + pool.code // 100 % 100 // 2
+    for k in np.unique(cell[~ok]):
+        m = (cell == k) & ok
+        fill = (
+            np.average(seen[m], weights=pool.supply[m]) if pool.supply[m].sum() else 0.0
+        )
+        seen[(cell == k) & ~ok] = fill
+    top = (pool.code // 100 % 100 >= 24) & ~pool.engine & (p > 0)
+    w = lambda c: np.where(top, np.maximum(p, seen), c * seen)
+    return w(
+        bisect(lambda c: pool.supply @ w(c) / pool.drawn(total, w(c)), 1.0, 0.0, 5.0)
+    )
+
+
 def summary(pool, w, total):
     n = pool.games * w * pool.tok
     T = n.sum()
@@ -308,7 +337,9 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
     raw = Path(inv_path).read_bytes()
     pool, total = Pool(json.loads(raw), basis), float(tokens)
     args = dict(x.split("=", 1) for x in kv)
-    w = dict(passcap=passcap, elo=elo, hand=hand)[kind](pool, total, **args)
+    w = dict(passcap=passcap, elo=elo, hand=hand, topup=topup)[kind](
+        pool, total, **args
+    )
     keep = pool.games > 0
     assert np.isfinite(w).all() and (w >= 0).all()
     got = pool.supply @ w / pool.drawn(total, w)
