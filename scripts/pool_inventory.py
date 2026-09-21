@@ -5,7 +5,8 @@ inventory PIN OUT_DIR [TOKEN_MONTH ...]
     (games): every clocked Lichess month >= the pin's first but its held-out one, unbuilt
     months spread by the bucket shares interpolated between the pinned months around them,
     ext stores exact; chessmix tokens per game (12 + plies, cut at the row) from one shard
-    per bucket of the token months (default: all pinned) and of every ext store. Writes
+    per bucket of the token months (default: all pinned) and of every ext store, weighted
+    by games (unbuilt months are assumed to share the pinned per-bucket moments). Writes
     OUT_DIR/inventory.json and OUT_DIR/history-counts.json (the full-pool estimate as the
     sampler's --mix-history file).
 recipe INVENTORY {disk|full} TOKENS LABEL KIND [KEY=VALUE ...]
@@ -62,15 +63,17 @@ def estimate(month, have):
 
 
 def sample(d, b):
-    """(code, games, sum of tokens, sum of squared tokens) of the smallest shard holding >= min(5000, games) games
-    (shards are pre-shuffled)."""
+    """(code, N, N x mean tokens, N x mean squared tokens) of a month's bucket of N games, the
+    means from its smallest shard holding >= min(5000, N) games (shards are pre-shuffled), so
+    sums over months weight each by its population."""
     last = b["games"] - cm.SHARD_GAMES * (len(b["shards"]) - 1)
     rel = b["shards"][-1] if last >= min(5000, b["games"]) else b["shards"][0]
     moves = cm.read(d / rel, ["moves"]).column("moves")
     t = np.minimum(pc.list_value_length(moves).to_numpy() + 12, cm.ROW).astype(
         np.float64
     )
-    return b["code"], len(t), t.sum(), (t * t).sum()
+    n = b["games"]
+    return b["code"], n, n * t.mean(), n * (t * t).mean()
 
 
 def inventory(pin, out, *token_months):
@@ -131,6 +134,7 @@ def inventory(pin, out, *token_months):
         pin_digest=p["sha256"],
         months=p["months"],
         unbuilt=unbuilt,
+        published={m: pub[m] for m in pool},
         unbuilt_published_games=sum(pub[m] for m in unbuilt),
         token_months=list(token_months),
         disk_games=sum(v["disk"] for v in codes.values()),
@@ -223,7 +227,7 @@ def slices(budget, supply, f, cap):
         if not full:
             return out | {k: left * share[k] / sum(share.values()) for k in free}
         out |= {k: cap * free.pop(k) for k in full}
-    return out
+    raise AssertionError(f"every format capped: {sum(out.values()):.4g} < {budget:.4g}")
 
 
 def elo(pool, total, s, f, engine, cap=8.0):
@@ -244,6 +248,7 @@ def elo(pool, total, s, f, engine, cap=8.0):
             if np.isinf(s):
                 w[m] = want / sup[k]
                 continue
+            assert cap * pool.supply[m].sum() >= want, f"format {k} short"
             e0 = bisect(
                 lambda e0: -(pool.supply[m] * rule(e0)).sum(), -want, -5000, 10000
             )
@@ -305,6 +310,10 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
     args = dict(x.split("=", 1) for x in kv)
     w = dict(passcap=passcap, elo=elo, hand=hand)[kind](pool, total, **args)
     keep = pool.games > 0
+    assert np.isfinite(w).all() and (w >= 0).all()
+    got = pool.supply @ w / pool.drawn(total, w)
+    assert abs(got - 1) < 1e-6, f"drawn tokens off by {got - 1:.2e}"
+    hist = Path(inv_path).with_name("history-counts.json")
     body = dict(
         label=label,
         kind=kind,
@@ -313,6 +322,9 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
         training_tokens=total,
         inventory_sha256=hashlib.sha256(raw).hexdigest(),
         pin_digest=json.loads(raw)["pin_digest"],
+        history_sha256=hashlib.sha256(hist.read_bytes()).hexdigest()
+        if basis == "full"
+        else None,
         summary=summary(pool, w, total),
         weights={str(c): float(x) for c, x in zip(pool.code[keep], w[keep])},
     )

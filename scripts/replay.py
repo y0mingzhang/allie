@@ -1,12 +1,14 @@
 """Exposure replay of a planned run: the chessmix Sampler's own draws, cursors, acceptance and
-permutation (Sampler._accepted, with each game kept as its length, bucket and take number instead
-of its tokens), then batch()'s pop / pack order: whole games until a 1025-token row is full, the
-last one cut. A bucket's k-th taken game is in cursor epoch k // pool (the cursor walks the whole
-pool once per epoch), so a seen game with k >= pool is a repeat.
+permutation (Sampler._accepted, with each game kept as its length, bucket and (shard, row)
+identity instead of its tokens), then batch()'s pop / pack order: whole games until a 1025-token
+row is full, the last one cut. A repeat is a game consumed into a row after an earlier
+consumption of the same (shard, row); a wrap is a bucket whose cursor took more candidates than
+its pool (a traversal restart, rejected candidates included).
 
-Usage: replay.py PLAN RUN_INDEX OUT.json [ROWS]. ROWS defaults to the whole run (steps x 512).
-Per bucket: pool games, taken draws, seen games (in completed rows), repeats, passes; totals and
-the format x Elo-band cells of pool_inventory's summaries.
+Usage: replay.py PLAN RUN_INDEX OUT.json [ROWS]. ROWS defaults to the whole run (steps x 512); a
+shorter replay scales seen / token rates to the run but reports repeats and wraps of the
+observed prefix only. Per bucket: pool games, taken candidates, seen games, repeats, passes;
+totals and the format x Elo-band (stronger player) cells.
 """
 
 import hashlib
@@ -61,10 +63,11 @@ s = cm.Sampler(
 )
 pool = {c: sum(n for _, n in s.units[c]) for c in s.codes}
 taken = dict.fromkeys(s.codes, 0)
+ids, used = {}, []  # shard path -> id; per id, which rows were consumed
 
 
 def accepted(p):
-    """Sampler._accepted, games as (length, code, take number)."""
+    """Sampler._accepted, games as (length, code, shard id, row)."""
     ph = s._weights(p)
     s._warm()
     got = []
@@ -75,7 +78,10 @@ def accepted(p):
             assert n <= shard.g.n, (path, n, shard.g.n)
             shard.policy(s.fn, ph)
             ok = idx[s.rng.random(len(idx)) * s.caps[k] < shard.w[idx]]
-            got += [(shard.g.len[i], code, taken[code] + i - idx[0]) for i in ok]
+            if path not in ids:
+                ids[path] = len(used)
+                used.append(np.zeros(n, bool))
+            got += [(shard.g.len[i], code, ids[path], i) for i in ok]
             taken[code] += len(idx)
     assert not s.preload, "warm-up replay diverged from the draws"
     got = [got[i] for i in s.rng.permutation(len(got))]
@@ -90,23 +96,29 @@ for r in range(rows):
     while size < cm.ROW:
         if not s.pool:
             s.pool = accepted(s.seen / s.total_rows)
-        n, code, k = s.pool.pop()
+        n, code, j, i = s.pool.pop()
         seen[code] += 1
-        repeats[code] += k >= pool[code]
+        repeats[code] += int(used[j][i])
+        used[j][i] = True
         tokens[code] += min(n, cm.ROW - size)
         size += n
     s.seen += 1
     if r % 100000 == 0:
         print(f"row {r}/{rows} {time.time() - started:.0f}s", flush=True)
 scale = target / rows
+table = {}
+for k in run["policy"].split("+"):
+    if k.startswith("table:"):
+        table = json.loads((cm.RECIPES / f"{k[6:]}.json").read_text())["weights"]
 buckets = {
     str(c): dict(
         pool=pool[c],
         taken=taken[c] * scale,
         seen=seen[c] * scale,
-        repeats=repeats[c] * scale,
+        repeats=repeats[c],
         tokens=tokens[c] * scale,
         passes=seen[c] * scale / max(1, pool[c]),
+        table=table.get(str(c)),
     )
     for c in s.codes
 }
@@ -129,6 +141,7 @@ res = dict(
     pool_frac=run["pool_frac"],
     target_rows=target,
     replayed_rows=rows,
+    repeats_observed_only=rows < target,
     replay_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     chessmix_sha256=hashlib.sha256(Path(cm.__file__).read_bytes()).hexdigest(),
     infeasible=len(s.infeasible),

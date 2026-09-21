@@ -292,6 +292,7 @@ def tables(w, runs):
             hist = json.loads(w["history"].read_text()).get("pin_digest")
             assert (t["basis"] == "full") == bool(r.get("history")), f"{k}: history"
             assert t["basis"] == "disk" or hist == pin["sha256"], f"{k}: history pin"
+            assert t.get("history_sha256") in (None, sha(w["history"])), f"{k}: history"
             out[f"recipes/{k[6:]}.json"] = raw
     return out
 
@@ -346,19 +347,24 @@ def write(path, text):
     os.replace(tmp, path)
 
 
-def submitted(study, since):
-    """Slurm jobs submitted from this study's run.sbatch since a time."""
-    cmd = ["sacct", "-X", "-n", "-P", "-S", time.strftime("%Y-%m-%dT%H:%M:%S", since)]
-    rows = subprocess.check_output([*cmd, "--format=JobID,SubmitLine"], text=True)
-    sb = str(study / "run.sbatch")
-    return [
-        j for j, _, line in (x.partition("|") for x in rows.split("\n")) if sb in line
+def submitted(token, since):
+    """Base ids of the Slurm jobs, live or in accounting, whose submit line carries token."""
+    t0 = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(since - 60))
+    acct = ["sacct", "-X", "-n", "-P", "-S", t0, "--format=JobID,SubmitLine"]
+    live = ["squeue", "--me", "-h", "-o", "%i|%k"]
+    rows = [
+        x
+        for c in (acct, live)
+        for x in subprocess.check_output(c, text=True).split("\n")
     ]
+    return sorted({x.split("|")[0].split("_")[0] for x in rows if token in x})
 
 
 def submit(key):
-    """sbatch the study's array once. An intent file written before sbatch lets a retry
-    after a crash find the job Slurm may already have (sacct), instead of submitting twice."""
+    """sbatch the study's array once, under a lock. The submission carries a token recorded
+    before sbatch; a retry that finds the intent but no receipt looks the token up in Slurm
+    and records that job, and fails closed if Slurm shows none (the first sbatch may be
+    in flight or unaccounted): check by hand, then delete submitting.json."""
     study = STUDIES / WAVES[key]["study"]
     with open(study / ".submit.lock", "w") as lock:
         fcntl.flock(
@@ -367,20 +373,28 @@ def submit(key):
         assert not (study / "submitted.json").exists(), "already submitted"
         intent = study / "submitting.json"
         if intent.exists():
-            at = json.loads(intent.read_text())["at"]
-            jobs = submitted(study, time.localtime(at - 60))
-            assert len(jobs) <= 1, f"several jobs from one submit: {jobs}"
+            i = json.loads(intent.read_text())
+            jobs = submitted(i["token"], i["at"])
+            assert len(jobs) == 1, f"unresolved submit {i['token']}: jobs {jobs}"
         else:
-            write(intent, json.dumps(dict(at=time.time())) + "\n")
-            jobs = []
-        if not jobs:
-            cmd = ["sbatch", "--parsable", str(study / "run.sbatch")]
-            jobs = [subprocess.check_output(cmd, text=True).strip()]
+            token = f"{w_token(study)}-{os.getpid()}-{time.time_ns()}"
+            write(intent, json.dumps(dict(at=time.time(), token=token)) + "\n")
+            cmd = [
+                "sbatch",
+                "--parsable",
+                f"--comment={token}",
+                str(study / "run.sbatch"),
+            ]
+            jobs = [subprocess.check_output(cmd, text=True).strip().split(";")[0]]
         write(
             study / "submitted.json",
             json.dumps(dict(at=time.time(), job=jobs[0])) + "\n",
         )
     print(jobs[0])
+
+
+def w_token(study):
+    return hashlib.sha256(str(study).encode()).hexdigest()[:12]
 
 
 def task_id():
@@ -396,13 +410,15 @@ def seconds_left():
     return seconds + 86400 * int(days or 0)
 
 
-CHILDREN = set()  # running children, each the root of its own session
+CHILDREN = {}  # running child -> {pid: start time} of its tree so far
 
 
 def tree(root):
     """root and its descendants, from /proc parent links (session changes don't break them)."""
     kids = {}
     for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
         try:
             ppid = int((d / "stat").read_text().rsplit(")", 1)[1].split()[1])
         except (OSError, IndexError, ValueError):
@@ -415,24 +431,40 @@ def tree(root):
     return out
 
 
-def reap(p, grace=60):
-    """TERM, then KILL, a live child's whole process tree (its members found before the
-    child dies, since orphans lose the parent link)."""
-    pids = set()
+def started(pid):
+    """A live process's start time (clock ticks since boot), telling a pid from its reuse;
+    None once it is gone or a zombie."""
+    try:
+        f = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except OSError:
+        return None
+    return None if f[0] in "ZX" else int(f[19])
+
+
+def kill(known, grace=60):
+    """TERM, then KILL, the known processes {pid: start time} still alive."""
     for sig in (signal.SIGTERM, signal.SIGKILL):
-        pids |= set(tree(p.pid)) if p.poll() is None else set()
-        for q in pids:
+        alive = [q for q, t in known.items() if started(q) == t]
+        for q in alive:
             try:
                 os.kill(q, sig)
             except ProcessLookupError:
                 pass
-        try:
-            p.wait(timeout=grace)
-        except subprocess.TimeoutExpired:
-            pass
-        pids = {q for q in pids if Path(f"/proc/{q}").exists()}
-        if not pids:
-            break
+        deadline = time.monotonic() + grace
+        while alive and time.monotonic() < deadline:
+            time.sleep(1)
+            alive = [q for q in alive if started(q) == known[q]]
+        if not alive:
+            return
+
+
+def reap(p, known=None, grace=60):
+    """Kill a child's tree: its live descendants plus every process seen in it earlier, so
+    workers orphaned by a dead wrapper go too."""
+    known = dict(known or {})
+    known |= {q: started(q) for q in tree(p.pid)} if p.poll() is None else {}
+    kill({q: t for q, t in known.items() if t is not None}, grace)
+    p.wait()
 
 
 def run(cmd, env, log, watch=None, limit=None):
@@ -445,13 +477,14 @@ def run(cmd, env, log, watch=None, limit=None):
         p = subprocess.Popen(
             cmd, env=env, stdout=f, stderr=subprocess.STDOUT, start_new_session=True
         )
-    CHILDREN.add(p)
+    CHILDREN[p] = known = {}
     start = last = time.monotonic()
     size = lambda: watch.stat().st_size if watch and watch.exists() else 0
     seen, gaps = size(), []
     try:
         while p.poll() is None:
-            time.sleep(10)
+            known |= {q: started(q) for q in tree(p.pid)}
+            time.sleep(2)
             now = time.monotonic()
             if size() != seen:
                 seen, gaps, last = size(), gaps + [now - last], now
@@ -459,17 +492,20 @@ def run(cmd, env, log, watch=None, limit=None):
             if watch and now - last > stall or limit and now - start > limit:
                 raise TimeoutError(f"{cmd[:4]}... no progress in {now - last:.0f} s")
     finally:
-        if p.poll() is None:
-            reap(p)
-        CHILDREN.discard(p)
+        reap(p, known)
+        CHILDREN.pop(p)
     if p.returncode:
         raise subprocess.CalledProcessError(p.returncode, cmd)
 
 
+STOPPING = []  # the signal that is stopping this task, if any
+
+
 def stop(signum, frame):
     """Preemption or cancel: take every child's tree down with this task."""
-    for p in list(CHILDREN):
-        reap(p, grace=30)
+    STOPPING.append(signum)
+    for p, known in list(CHILDREN.items()):
+        reap(p, known, grace=30)
     raise SystemExit(128 + signum)
 
 
@@ -510,6 +546,8 @@ def arm(study, r, gpu):
     try:
         return run_one(study, r, gpu)
     except BaseException as e:
+        if STOPPING:  # preempted or cancelled: not the run's failure
+            raise
         f = study / "logs" / f"{r['name']}.failed.json"
         rec = dict(at=time.time(), job=os.environ.get("SLURM_JOB_ID"), reason=repr(e))
         write(f, json.dumps([*failures(study, r), rec], indent=1) + "\n")
@@ -617,11 +655,34 @@ def pooled_controls(study, controls):
     return rows
 
 
+def owner(study, r):
+    """The manifest binding a run's global checkpoint and score directories to one planned
+    run of one study."""
+    body = json.dumps(r, sort_keys=True)
+    return dict(study=str(study), run=hashlib.sha256(body.encode()).hexdigest())
+
+
+def claim(study, r):
+    """Take the run's global directories for this study's run, or check that it owns them:
+    output of another study (or of no recorded owner) is never resumed, skipped or scored."""
+    out, scores = pretrained(r), ROOT / "results/lm-eval" / r["name"]
+    manifest = out / "owner.json"
+    if manifest.exists():
+        got = json.loads(manifest.read_text())
+        assert got == owner(study, r), f"{out} belongs to {got['study']}"
+        return
+    assert not out.exists() and not scores.exists(), f"{out}: output with no owner"
+    out.mkdir(parents=True)
+    write(manifest, json.dumps(owner(study, r), indent=1) + "\n")
+
+
 def complete(study, r):
-    """The run's result is published and describes this planned run, trained to the end."""
+    """The run's result is published and describes this planned run, trained to the end in
+    directories it owns."""
     res, done = study / "results" / f"{r['name']}.json", pretrained(r) / "done.json"
     if not res.exists():
         return False
+    claim(study, r)
     got = json.loads(res.read_text())
     same = all(got.get(k) == r[k] for k in ("name", "steps", "arch", "policy", "seed"))
     assert same and "strat" in got, f"{res} is not this run's result"
@@ -637,8 +698,11 @@ def run_one(study, r, gpu):
     n = r["name"]
     if complete(study, r):
         return True
-    lock = open(study / "logs" / f"{n}.lock", "w")
+    locks = ROOT / "results/pretrain/.locks"
+    locks.mkdir(exist_ok=True)
+    lock = open(locks / f"{n}.lock", "w")  # global: run names are global directories
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if another task runs n
+    claim(study, r)
     if complete(study, r):
         return True
     result = study / "results" / f"{n}.json"
