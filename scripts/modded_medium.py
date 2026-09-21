@@ -201,6 +201,14 @@ def attention(q, k, v, context, window, scale, gate=None):
     return y.transpose(1, 2)
 
 
+def attention_qkv(qkv, context, window, scale, cos, sin, gate, ve, vgate, norm):
+    """attention() of the raw projection qkv, with the model's q/k norm and rotary, value
+    embeddings and output gate inside the Triton kernels (modded_attn.attention_qkv)."""
+    assert context.backend == "triton"
+    mask = context.short_mask if window == context.short_window else context.long_mask
+    return modded_attn.attention_qkv(qkv, cos, sin, *mask, scale, gate, ve, vgate, norm)
+
+
 def configure(cfg, device):
     assert dist.is_initialized(), (
         "Upstream optimizer needs a process group even for one GPU"
@@ -230,6 +238,7 @@ def configure(cfg, device):
         ws_validate_post_yarn_ext=27,
     )
     core.medium_attention = attention
+    core.medium_attention_qkv = attention_qkv
     core.print0 = lambda s, console=False: (
         print(s, flush=True) if dist.get_rank() == 0 else None
     )
