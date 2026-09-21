@@ -110,13 +110,15 @@ def err(a, b):
     return f"{d.item():.2e}/{rel:.2e}{' bitwise' if torch.equal(a, b) else ''}"
 
 
-def bench(fn):
+def bench(fn, setup=lambda: None):
+    """Median ms of fn(setup()) over REPS, timing fn alone (a fresh forward per backward)."""
     ev = [[torch.cuda.Event(enable_timing=True) for _ in range(2)] for _ in range(REPS)]
     for _ in range(3):
-        fn()
+        fn(setup())
     for a, b in ev:
+        x = setup()
         a.record()
-        fn()
+        fn(x)
         b.record()
     torch.cuda.synchronize()
     return float(np.median([a.elapsed_time(b) for a, b in ev]))
@@ -163,21 +165,21 @@ def timing(rows, windows, timed):
     for w in timed:
         (*qkv, g), do = inputs(n * row, 1)
         out = [f"window {w} ms:"]
-        o = mm.attention(*qkv, flex, w, SCALE)
-        f = bench(lambda: mm.attention(*qkv, flex, w, SCALE))
-        b = bench(lambda: torch.autograd.grad(o, qkv, do, retain_graph=True))
+        run = lambda: mm.attention(*qkv, flex, w, SCALE)  # noqa: E731
+        f = bench(lambda _: run())
+        b = bench(lambda o: torch.autograd.grad(o, qkv, do), run)
         out.append(f"flex fwd {f:.3f} bwd {b:.3f} sum {f + b:.3f} |")
         lo, hi = tri.short_mask if w == windows[0] else tri.long_mask
-        o = mm.attention(*qkv, tri, w, SCALE)
-        eager = bench(lambda: torch.autograd.grad(o, qkv, do, retain_graph=True))
+        run = lambda: mm.attention(*qkv, tri, w, SCALE)  # noqa: E731
+        eager = bench(lambda o: torch.autograd.grad(o, qkv, do), run)
         with torch.no_grad():
             o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
             dl = delta(do, o)
-            f = bench(lambda: ma.fwd(*qkv, None, lo, hi, SCALE))
-            d = bench(lambda: delta(do, o))
-            b = bench(lambda: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
-            fg = bench(lambda: ma.fwd(*qkv, g, lo, hi, SCALE))
-            bg = bench(lambda: ma.bwd(*qkv, do, g, lse, dl, lo, hi, SCALE))
+            f = bench(lambda _: ma.fwd(*qkv, None, lo, hi, SCALE))
+            d = bench(lambda _: delta(do, o))
+            b = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
+            fg = bench(lambda _: ma.fwd(*qkv, g, lo, hi, SCALE))
+            bg = bench(lambda _: ma.bwd(*qkv, do, g, lse, dl, lo, hi, SCALE))
         out.append(
             f"triton fwd {f:.3f} bwd {b:.3f} + delta {d:.3f} sum {f + b + d:.3f}"
             f" (eager autograd bwd {eager:.3f}; gated fwd {fg:.3f} bwd {bg:.3f})"
@@ -186,16 +188,15 @@ def timing(rows, windows, timed):
             m64 = mask64(flex.documents, w, row)
             qt = [x.transpose(1, 2) for x in qkv]
             kw = dict(block_mask=m64, scale=SCALE, kernel_options=dict(fwd_BLOCK_M=64))
-            o = flex64(*qt, **kw)
-            f = bench(lambda: flex64(*qt, **kw))
+            f = bench(lambda _: flex64(*qt, **kw))
             dt = do.transpose(1, 2)
-            b = bench(lambda: torch.autograd.grad(o, qkv, dt, retain_graph=True))
+            b = bench(lambda o: torch.autograd.grad(o, qkv, dt), lambda: flex64(*qt, **kw))
             out.append(f"| flex64 fwd {f:.3f} bwd {b:.3f} sum {f + b:.3f}")
         except Exception as e:  # a data point only
             out.append(f"| flex64 failed: {type(e).__name__}: {str(e)[:200]}")
         print(*out, flush=True)
     for backend in ("flex", "triton"):
-        ms = bench(lambda: mm.make_context(rows, *windows, backend=backend))
+        ms = bench(lambda _: mm.make_context(rows, *windows, backend=backend))
         print(f"make_context {backend} {ms:.3f} ms", flush=True)
     return tri
 
@@ -238,12 +239,12 @@ def sweep(rows, tri):
         for cfg in fwds:
             ma.FWD = cfg
             print(
-                f"fwd {cfg}: {bench(lambda: ma.fwd(*qkv, None, lo, hi, SCALE)):.3f}",
+                f"fwd {cfg}: {bench(lambda _: ma.fwd(*qkv, None, lo, hi, SCALE)):.3f}",
                 flush=True,
             )
         for cfg in bwds:
             ma.BWD = cfg
-            ms = bench(lambda: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
+            ms = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
             print(f"bwd {cfg}: {ms:.3f}", flush=True)
 
 
