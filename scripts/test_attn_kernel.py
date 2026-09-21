@@ -190,7 +190,9 @@ def timing(rows, windows, timed):
             kw = dict(block_mask=m64, scale=SCALE, kernel_options=dict(fwd_BLOCK_M=64))
             f = bench(lambda _: flex64(*qt, **kw))
             dt = do.transpose(1, 2)
-            b = bench(lambda o: torch.autograd.grad(o, qkv, dt), lambda: flex64(*qt, **kw))
+            b = bench(
+                lambda o: torch.autograd.grad(o, qkv, dt), lambda: flex64(*qt, **kw)
+            )
             out.append(f"| flex64 fwd {f:.3f} bwd {b:.3f} sum {f + b:.3f}")
         except Exception as e:  # a data point only
             out.append(f"| flex64 failed: {type(e).__name__}: {str(e)[:200]}")
@@ -206,36 +208,38 @@ def sweep(rows, tri):
     (*qkv, _), do = inputs(n * row, 2)
     lo, hi = tri.short_mask
     fwds = [
-        (64, 32, 4, 2, False),
-        (64, 32, 4, 3, False),
-        (64, 64, 4, 2, False),
-        (64, 16, 4, 3, False),
-        (128, 32, 4, 2, False),
-        (128, 32, 8, 2, False),
-        (128, 64, 8, 2, False),
-        (32, 32, 2, 2, False),
-        (32, 16, 2, 3, False),
-        (32, 32, 4, 2, False),
-        (64, 32, 4, 2, True),
-        (64, 64, 4, 2, True),
+        (64, 32, 4, 2),
+        (64, 32, 4, 3),
+        (64, 64, 4, 2),
+        (64, 16, 4, 3),
+        (128, 32, 4, 2),
+        (128, 32, 8, 2),
+        (128, 64, 8, 2),
+        (32, 32, 2, 2),
+        (32, 16, 2, 3),
+        (32, 32, 4, 2),
     ]
     bwds = [
-        (64, 32, 4, 2, False),
-        (64, 32, 8, 2, False),
-        (64, 64, 4, 2, False),
-        (64, 64, 8, 2, False),
-        (64, 16, 4, 2, False),
-        (32, 32, 4, 2, False),
-        (32, 16, 2, 2, False),
-        (32, 32, 2, 2, False),
-        (128, 32, 8, 2, False),
-        (64, 32, 4, 3, False),
-        (64, 32, 4, 2, True),
-        (64, 64, 4, 2, True),
+        (64, 32, 4, 2),
+        (64, 32, 8, 2),
+        (64, 64, 4, 2),
+        (64, 64, 8, 2),
+        (64, 16, 4, 2),
+        (32, 32, 4, 2),
+        (32, 16, 2, 2),
+        (32, 32, 2, 2),
+        (128, 32, 8, 2),
+        (64, 32, 4, 3),
     ]
+    fwds, bwds = ([(*c, hf) for hf in (True, False) for c in cs] for cs in (fwds, bwds))  # fmt: skip
+    defaults = ma.FWD, ma.BWD
     with torch.no_grad():
         o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
         dl = (do.float() * o.float()).sum(-1)[0].t().contiguous()
+        q, k, v = qkv
+        vc = v.contiguous()
+        ms = bench(lambda _: ma.fwd(q, k, vc, None, lo, hi, SCALE))
+        print(f"fwd {ma.FWD} with contiguous v: {ms:.3f}", flush=True)
         for cfg in fwds:
             ma.FWD = cfg
             print(
@@ -246,6 +250,7 @@ def sweep(rows, tri):
             ma.BWD = cfg
             ms = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
             print(f"bwd {cfg}: {ms:.3f}", flush=True)
+    ma.FWD, ma.BWD = defaults
 
 
 def main():
@@ -258,16 +263,16 @@ def main():
         f"{H} heads of {D}; FWD {ma.FWD} BWD {ma.BWD}",
         flush=True,
     )
+    if "--sweep" in sys.argv:
+        sweep(rows, mm.make_context(rows, *WSD, backend="triton"))
     check(rows, WSD, "real")
-    tri = timing(rows, WSD, WSD[:1])
-    check(rows, WSD[:1], "real", gated=True)
+    timing(rows, WSD, WSD[:1])
+    check(rows, WSD, "real", gated=True)
     check(rows, SLIDING, "real")
     timing(rows, SLIDING, SLIDING)
     syn = torch.as_tensor(synthetic(np.random.default_rng(0), 16, 1024), device="cuda")
     for windows in (WSD, SLIDING, (1023, 64)):
         check(syn, windows, "synthetic")
-    if "--sweep" in sys.argv:
-        sweep(rows, tri)
 
 
 if __name__ == "__main__":
