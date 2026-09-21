@@ -71,6 +71,19 @@ def replay_context():
 
 # Opaque ops read STATS_REPS when they run, so forward and recompute share one compiled graph: a
 # replay must save the same tensors, which a graph compiled without the stats need not.
+@torch.library.custom_op("allie_moe::stats_topk", mutates_args=())
+def stats_topk(s: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """torch.topk(s, k); zeros, uncomputed, while STATS_REPS is 0."""
+    if STATS_REPS:
+        return tuple(torch.topk(s, k, dim=-1))
+    return s.new_zeros(len(s), k), s.new_zeros(len(s), k, dtype=torch.long)
+
+
+@stats_topk.register_fake
+def _(s, k):
+    return s.new_empty(len(s), k), s.new_empty(len(s), k, dtype=torch.long)
+
+
 @torch.library.custom_op("allie_moe::route_topk", mutates_args=())
 def route_topk(
     s: torch.Tensor, bias: torch.Tensor, k: int, stats: bool
@@ -108,7 +121,7 @@ class MoE(nn.Module):
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
-        assert topk < experts <= 128, "the router top-k kernel takes up to 128 experts"
+        assert topk < experts
         self.experts, self.topk, self.score = experts, topk, score
         # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
         # clamp((mean - load) / mean, -1, 1) x the rebalance() scale, which settles instead of
@@ -157,7 +170,10 @@ class MoE(nn.Module):
             if self.score == "sigmoid"
             else F.softplus(s).clamp_min(1e-12).sqrt()
         )
-        idx, val, top = route_topk(s.detach(), self.bias, k, self.training)
+        if e <= 128:  # the kernel holds a row of experts in registers
+            idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
+        else:  # trunk's path: torch.topk here, the stats top-k below
+            idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
         w = s.gather(1, idx)
         w = w * (k**0.5 / w.sum(-1, keepdim=True))
         flat = idx.flatten()
@@ -176,6 +192,7 @@ class MoE(nn.Module):
         )
         if self.training:
             with torch.no_grad():
+                val, top = stats or stats_topk(s, k + 1)
                 own = torch.zeros_like(s).scatter_(1, top[:, :k], 1.0)
                 moved = (own.gather(1, idx) < 1).any(-1).sum()
                 margin = (val[:, k - 1] - val[:, k]).sum()

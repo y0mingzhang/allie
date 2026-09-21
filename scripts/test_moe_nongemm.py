@@ -120,8 +120,9 @@ def run(a):
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.manual_seed(0)
     (e, d, t) = (96, 1536, 65536) if DEV == "cuda" else (16, 64, 2048)
+    e = a.experts or e
     arch = dict(
-        mlp="swiglu", moe=[e, 4], moe_kernel="scatter-dualgather", moe_init=0.006,
+        mlp="swiglu", moe=[e, a.topk], moe_kernel="scatter-dualgather", moe_init=0.006,
         moe_router_lr_mul=0.1, moe_gamma=1e-3, moe_seq=0.001, moe_update="sign",
         moe_score="sigmoid",
     )  # fmt: skip
@@ -171,6 +172,7 @@ def run(a):
 
 def layer(a):
     tmp, out = Path(tempfile.mkdtemp()), {}
+    shape = [f"--experts={a.experts}"] * bool(a.experts) + [f"--topk={a.topk}"]
     for name, impl, sets in (
         ("base", base_scripts(a.base), a.set or BASE_SET),
         ("new", HERE, []),
@@ -184,7 +186,7 @@ def layer(a):
             "--dump",
             str(tmp / name),
         ]
-        subprocess.run(cmd + [f"--set={s}" for s in sets], check=True)
+        subprocess.run(cmd + shape + [f"--set={s}" for s in sets], check=True)
         out[name] = torch.load(tmp / name)
     base, new = out["base"], out["new"]
     assert base.keys() == new.keys()
@@ -300,11 +302,15 @@ def aten_topk(x, k):
 
 def topk(a):
     """Router top-ks against torch.topk: routing indices of s + bias for k, values and indices of
-    s for k + 1, and zeros without stats."""
+    s for k + 1, and zeros without stats, at E 96 and 128 (the kernel's largest)."""
+    t, k = (65536, 4) if DEV == "cuda" else (256, 4)
+    gen = torch.Generator(DEV).manual_seed(4)
+    return all([topk_at(t, e, k, gen) for e in (96, 128)])
+
+
+def topk_at(t, e, k, gen):
     import modded_smoe
 
-    t, e, k = (65536, 96, 4) if DEV == "cuda" else (256, 96, 4)
-    gen = torch.Generator(DEV).manual_seed(4)
     ref = (lambda x, k: tuple(torch.topk(x, k, dim=-1))) if DEV == "cuda" else aten_topk
 
     def rand(*shape):
@@ -389,6 +395,10 @@ def main():
     p.add_argument(
         "--set", action="append", default=[], help="layer: MOD.NAME=VALUE (base side)"
     )
+    p.add_argument(
+        "--experts", type=int, default=0, help="layer: E (default 96, CPU 16)"
+    )
+    p.add_argument("--topk", type=int, default=4, help="layer: k")
     a = p.parse_args()
     if a.cmd == ["run"]:
         return run(a)
