@@ -694,6 +694,7 @@ def main():
             window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
             primary_sum.zero_()
             count_sum.zero_()
+            aux_sum.zero_()
         if stop_code:
             stop_reason = (
                 "signal"
