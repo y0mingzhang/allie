@@ -192,11 +192,10 @@ def _config_XtY():
         triton.Config({'BLOCK_N': 128, 'BLOCK_K': 128, 'BLOCK_M': 32}, num_stages=4, num_warps=4),
     ]
 
-def group_bwd_W(DY, X, expert_offsets, E, has_bias=False):
-    DWt = torch.zeros((E, DY.size(-1), X.size(-1)), device=DY.device, dtype=DY.dtype)
-    DW = DWt.permute(0, 2, 1)
+def group_bwd_W(DY, X, expert_offsets, E, has_bias=False, out=None):
+    DW = torch.empty((E, DY.size(-1), X.size(-1)), device=DY.device, dtype=DY.dtype).permute(0, 2, 1) if out is None else out
     if has_bias:
-        Db = torch.zeros((E, DY.size(-1)), device=DY.device, dtype=DY.dtype)
+        Db = torch.empty((E, DY.size(-1)), device=DY.device, dtype=DY.dtype)
     else:
         Db = None
     groupXtY_compileable(E, DW, Db, DY, X, expert_offsets)
@@ -280,46 +279,46 @@ def _groupXtY(
     end_idx = tl.load(expert_offsets_ptr + E_idx).to(tl.int32)
 
 
-    if end_idx > start_idx:
-        M_block = tl.max_contiguous(start_idx + tl.arange(0, BLOCK_M), BLOCK_M)
+    # every expert's tile is stored, zeros where it has no rows (group_bwd_W allocates empty)
+    M_block = tl.max_contiguous(start_idx + tl.arange(0, BLOCK_M), BLOCK_M)
 
-        K_block = K_block_id * BLOCK_K + tl.arange(0, BLOCK_K)
-        K_mask = K_block < K
-        K_block = tl.max_contiguous(tl.multiple_of(K_block % K, BLOCK_K), BLOCK_K)
+    K_block = K_block_id * BLOCK_K + tl.arange(0, BLOCK_K)
+    K_mask = K_block < K
+    K_block = tl.max_contiguous(tl.multiple_of(K_block % K, BLOCK_K), BLOCK_K)
 
-        N_block = N_block_id * BLOCK_N + tl.arange(0, BLOCK_N)
-        N_mask = N_block < N
-        N_block = tl.max_contiguous(tl.multiple_of(N_block % N, BLOCK_N), BLOCK_N)
+    N_block = N_block_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    N_mask = N_block < N
+    N_block = tl.max_contiguous(tl.multiple_of(N_block % N, BLOCK_N), BLOCK_N)
 
-        M_idxs = M_block
-        xt_blk_ptrs = X_ptr + K_block[:, None] * stride_xn + M_idxs[None, :] * stride_xm
-        dy_blk_ptrs = DY_ptr + M_idxs[:, None] * stride_dym + N_block[None, :] * stride_dyk
-        if (Db_ptr is not None) and (K_block_id == 0):
-            _xty_and_bias(
-                E_idx, start_idx, end_idx,
-                M_block,
-                K_block, K_mask, N_block, N_mask, 
-                dy_blk_ptrs, stride_dym,
-                xt_blk_ptrs, stride_xm,
-                DW_ptr, stride_dwe, stride_dwk, stride_dwn,
-                Db_ptr, stride_dbe, stride_dbn,
-                BLOCK_M, BLOCK_N, BLOCK_K, ACC_TYPE,
-                allow_tf32, NO_K_MASK, NO_N_MASK,
-                compute_bias=True
-            )
-        else:
-            _xty_and_bias(
-                E_idx, start_idx, end_idx,
-                M_block,
-                K_block, K_mask, N_block, N_mask, 
-                dy_blk_ptrs, stride_dym,
-                xt_blk_ptrs, stride_xm,
-                DW_ptr, stride_dwe, stride_dwk, stride_dwn,
-                Db_ptr, stride_dbe, stride_dbn,
-                BLOCK_M, BLOCK_N, BLOCK_K, ACC_TYPE,
-                allow_tf32, NO_K_MASK, NO_N_MASK,
-                compute_bias=False
-            )
+    M_idxs = M_block
+    xt_blk_ptrs = X_ptr + K_block[:, None] * stride_xn + M_idxs[None, :] * stride_xm
+    dy_blk_ptrs = DY_ptr + M_idxs[:, None] * stride_dym + N_block[None, :] * stride_dyk
+    if (Db_ptr is not None) and (K_block_id == 0):
+        _xty_and_bias(
+            E_idx, start_idx, end_idx,
+            M_block,
+            K_block, K_mask, N_block, N_mask, 
+            dy_blk_ptrs, stride_dym,
+            xt_blk_ptrs, stride_xm,
+            DW_ptr, stride_dwe, stride_dwk, stride_dwn,
+            Db_ptr, stride_dbe, stride_dbn,
+            BLOCK_M, BLOCK_N, BLOCK_K, ACC_TYPE,
+            allow_tf32, NO_K_MASK, NO_N_MASK,
+            compute_bias=True
+        )
+    else:
+        _xty_and_bias(
+            E_idx, start_idx, end_idx,
+            M_block,
+            K_block, K_mask, N_block, N_mask, 
+            dy_blk_ptrs, stride_dym,
+            xt_blk_ptrs, stride_xm,
+            DW_ptr, stride_dwe, stride_dwk, stride_dwn,
+            Db_ptr, stride_dbe, stride_dbn,
+            BLOCK_M, BLOCK_N, BLOCK_K, ACC_TYPE,
+            allow_tf32, NO_K_MASK, NO_N_MASK,
+            compute_bias=False
+        )
 
 
 @triton.jit
@@ -540,7 +539,9 @@ class ParallelLinear(torch.autograd.Function):
             DY=grouped_grad_out, X=grouped_x,
             expert_offsets=expert_offsets,
             E=expert_weights.size(0),
-            has_bias=expert_biases is not None
+            has_bias=expert_biases is not None,
+            # dW in the weight's own layout: AccumulateGrad takes it without a strided copy
+            out=torch.empty_like(expert_weights, dtype=grouped_grad_out.dtype)
         )
 
 
