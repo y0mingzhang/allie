@@ -227,7 +227,7 @@ def slices(budget, supply, f, cap):
 
 
 def elo(pool, total, s, f, engine, cap=8.0):
-    s = float(s)
+    s, f, engine, cap = map(float, (s, f, engine, cap))
     human = pool.supply[~pool.engine].sum()
     other = np.isin(pool.fmt, OTHER) & ~pool.engine
     w = np.zeros(len(pool.code))
@@ -252,16 +252,22 @@ def elo(pool, total, s, f, engine, cap=8.0):
 
 
 def hand(pool, total, cells, otb=1.0, engine=0.0):
+    otb, engine = float(otb), float(engine)
     rel = np.zeros((6, 4))
     for part in cells.split("/"):
         k, v = part.split(":")
         rel[int(k)] = [float(x) for x in v.split(",")]
-    base = rel[pool.fmt, pool.band] * np.where(pool.otb, float(otb), 1.0) * ~pool.engine
+    human = pool.supply[~pool.engine].sum()
+    other = np.isin(pool.fmt, OTHER) & ~pool.engine
+    base = (
+        rel[pool.fmt, pool.band] * np.where(pool.otb, otb, 1.0) * ~pool.engine * ~other
+    )
     w = base
     for _ in range(5):
         T = pool.drawn(total, w)
-        w = base * T * (1 - float(engine)) / (pool.supply @ base)
-        w[pool.engine] = float(engine) * T / pool.supply[pool.engine].sum()
+        budget = T * (1 - engine) - T / human * pool.supply[other].sum()
+        w = base * budget / (pool.supply @ base) + np.where(other, T / human, 0)
+        w[pool.engine] = engine * T / pool.supply[pool.engine].sum()
     return w
 
 
