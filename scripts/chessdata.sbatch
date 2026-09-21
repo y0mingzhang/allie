@@ -17,7 +17,7 @@ set -euo pipefail
 month=${1:?month, e.g. 2026-08}
 D=${STORE:-/data/group_data/dei-group/yimingz3/allie/data-v1}/$month
 PY=/home/yimingz3/src/allie/.venv/bin/python
-S=/home/yimingz3/src/allie/scripts/chessdata.py
+S=${SCRIPTS:-/home/yimingz3/src/allie/scripts}/chessdata.py
 if [ ! -f "$D/build-complete.json" ]; then
 	if [ -d "$D/hf" ]; then
 		$PY "$S" build --hf "$D/hf" --out "$D"

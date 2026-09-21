@@ -16,12 +16,21 @@
 set -uo pipefail
 ROOT=${STORE:-/data/group_data/dei-group/yimingz3/allie/data-v1}
 BASE=https://database.lichess.org/standard
-BUILD=/home/yimingz3/src/allie/scripts/chessdata.sbatch
+SCRIPTS=${SCRIPTS:-/home/yimingz3/src/allie/scripts}  # frozen checkout for long backfills
+BUILD=$SCRIPTS/chessdata.sbatch
+SOURCE=${SOURCE:-lichess}
+MIN_FREE_G=${MIN_FREE_G:-400}  # no new download below this much free space
+MAX_RAW=${MAX_RAW:-4}  # raw months awaiting a build
 MONTHS=${MONTHS:-"2026-07 2026-06 2026-05 2026-04 2026-03 2026-02 2026-01
 2025-12 2025-11 2025-10 2025-09 2025-08 2025-07 2025-06 2025-05 2025-04 2025-03 2025-02 2025-01"}
 ALL=${ALL:-"2026-08 $MONTHS"}
-SUMS=$(curl -sS --retry 5 $BASE/sha256sums.txt)
-COUNTS=$(curl -sS --retry 5 $BASE/counts.txt)
+# published game counts gate the raw cleanup; keep a copy in the store in case lichess.org throttles
+for f in sha256sums counts; do
+	curl -sS --fail --retry 5 --max-time 300 $BASE/$f.txt >"$ROOT/$f.txt.new" && mv "$ROOT/$f.txt.new" "$ROOT/$f.txt"
+	rm -f "$ROOT/$f.txt.new"
+done
+SUMS=$(cat "$ROOT/sha256sums.txt" 2>/dev/null)
+COUNTS=$(cat "$ROOT/counts.txt" 2>/dev/null)
 log() { echo "$(date -Is) $*"; }
 
 fetch() {
@@ -30,7 +39,7 @@ fetch() {
 	mkdir -p "$D"
 	[ -f "$D/download-verified" ] && return 0
 	if [ "$SOURCE" = hf ]; then
-		/home/yimingz3/src/allie/.venv/bin/python /home/yimingz3/src/allie/scripts/hf_fetch.py "$m" "$D/hf" &&
+		/home/yimingz3/src/allie/.venv/bin/python "$SCRIPTS/hf_fetch.py" "$m" "$D/hf" &&
 			touch "$D/download-verified" && log "$m verified (hf)"
 		return
 	fi
@@ -76,7 +85,21 @@ submit() {
 	job=$(cat "$D/build-job" 2>/dev/null)
 	state=$([ -n "$job" ] && sacct -n -X -j "$job" -o State 2>/dev/null | head -1 | tr -d ' ')
 	case "$state" in PENDING | RUNNING | REQUEUED | COMPLETED) return 0 ;; esac
-	sbatch --parsable -p dei-group -q dei_group_qos --export=ALL,STORE="$ROOT" --job-name="data-v1-build-$1" "$BUILD" "$1" >"$D/build-job" &&
+	local where="-p dei-group -q dei_group_qos"
+	# PREEMPT_BUILDS=1: one build on dei-group at a time, the rest on preempt CPUs (restartable per chunk)
+	if [ -n "${PREEMPT_BUILDS:-}" ] && squeue -h -u "$USER" -p dei-group -o %j | grep -q '^data-v1-build-'; then
+		where="-p preempt -q preempt_cpu_qos"
+	fi
+	# resources by the month's published game count (finalize holds the month in memory: ~3-5 GB per M games)
+	local n res
+	n=$(awk -v f="lichess_db_standard_rated_$1.pgn.zst" '$1==f {print $2}' <<<"$COUNTS")
+	if [ -n "${BUILD_RES:-}" ]; then res=$BUILD_RES
+	elif [ "${n:-0}" -lt 12000000 ]; then res="--cpus-per-task=16 --mem=96G --time=06:00:00"
+	elif [ "${n:-0}" -lt 40000000 ]; then res="--cpus-per-task=32 --mem=200G --time=12:00:00"
+	else res="--cpus-per-task=32 --mem=300G --time=12:00:00"
+	fi
+	sbatch --parsable $where $res --export=ALL,STORE="$ROOT",SCRIPTS="$SCRIPTS" --job-name="data-v1-build-$1" \
+		--output="$ROOT/%x-%j.log" "$BUILD" "$1" >"$D/build-job" &&
 		log "$1 build submitted $(cat "$D/build-job")"
 }
 
@@ -97,13 +120,13 @@ cleanup() {
 
 for m in $MONTHS; do
 	cleanup
-	while [ "$(df --output=avail -BG "$ROOT" | tail -1 | tr -dc 0-9)" -lt 400 ]; do
-		log "under 400G free; waiting"
+	while [ "$(df --output=avail -BG "$ROOT" | tail -1 | tr -dc 0-9)" -lt "$MIN_FREE_G" ]; do
+		log "under ${MIN_FREE_G}G free; waiting"
 		sleep 900
 	done
-	# raw months awaiting a build are large (~73 GB each from Hugging Face): keep at most four
-	while [ "$(for x in $ALL; do [ -f "$ROOT/$x/download-verified" ] && [ ! -f "$ROOT/$x/cleaned" ] && echo "$x"; done | wc -l)" -ge 4 ]; do
-		log "four months await builds; waiting"
+	# raw months awaiting a build are large (~73 GB each from Hugging Face): keep at most MAX_RAW
+	while [ "$(for x in $ALL; do [ -f "$ROOT/$x/download-verified" ] && [ ! -f "$ROOT/$x/cleaned" ] && echo "$x"; done | wc -l)" -ge "$MAX_RAW" ]; do
+		log "$MAX_RAW months await builds; waiting"
 		sleep 900
 		cleanup
 		for x in $ALL; do submit "$x"; done
