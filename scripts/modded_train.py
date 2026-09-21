@@ -19,6 +19,7 @@ import triton
 from modded_arch import attn_factor, extra_flops
 from modded_moe import STATS
 from modded_moe import full_state, local_state
+import modded_board
 import modded_medium
 import modded_moe
 import modded_smoe_aligned_linear
@@ -226,6 +227,11 @@ def main():
         help="causal window/game attention as a Triton FlashAttention-2 kernel (modded_attn), not FlexAttention",
     )
     p.add_argument(
+        "--board-gemm-wgrad",
+        action="store_true",
+        help="board conv 3x3 weight gradients as 9 row-shifted GEMMs, not cuDNN (changes rounding)",
+    )
+    p.add_argument(
         "--moe-topk-kernel",
         action="store_true",
         help="MoE router top-ks (routing and stats) in one Triton pass, bitwise torch.topk",
@@ -324,6 +330,7 @@ def main():
     modded_moe.TOPK_KERNEL = a.moe_topk_kernel
     modded_smoe_swiglu.EPILOGUE = a.moe_swiglu_epilogue
     modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
+    modded_board.GEMM_WGRAD = a.board_gemm_wgrad
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
