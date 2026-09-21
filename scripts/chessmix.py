@@ -8,6 +8,7 @@ the fly and packed into 1025-token rows like the original corpus: the overflowin
 """
 
 import copy
+import hashlib
 import itertools
 import json
 import math
@@ -28,14 +29,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chess_vocab import BOS, INCREMENTS_ID, SECONDS_ID, TERM_NORMAL, TERM_OTHER, UNK
 
 STORE = Path("/data/group_data/dei-group/yimingz3/allie/data-v1")
+RECIPES = Path("/data/group_data/dei-group/yimingz3/allie/results/recipe10x/recipes")
 COLUMNS = [
     "moves",
     "white_elo",
     "black_elo",
     "white_title",
     "black_title",
-    "white_diff",
-    "black_diff",
     "format",
     "rated_prefix",
     "base",
@@ -50,7 +50,6 @@ AUX_COLUMNS = ["result"]
 POOL = dict(
     tokens=np.int64,
     mask=bool,
-    clock=np.int16,
     time=np.int16,
     wdl=np.int8,
     feat=np.int32,
@@ -200,10 +199,6 @@ class Games:
             .to_numpy(zero_copy_only=False)
         )
         self.wbot, self.bbot = bot("white_title"), bot("black_title")
-        diff = lambda k: np.abs(
-            table.column(k).fill_null(0).to_numpy().astype(np.int16)
-        )
-        self.wdiff, self.bdiff = diff("white_diff"), diff("black_diff")
         self.n = len(self.welo)
         digits = lambda e: np.stack(
             [e // 1000 % 10, e // 100 % 10, e // 10 % 10, e % 10], 1
@@ -298,6 +293,7 @@ def control(g, p):
 
 
 def upsampled(k):
+    """control, with games whose stronger player is rated >= 2400 weighted k times."""
     return lambda g, p: (
         control(g, p)[0] * np.where(np.maximum(g.welo, g.belo) >= 2400, k, 1),
         True,
@@ -305,49 +301,35 @@ def upsampled(k):
     )
 
 
-# Factor taking control's game share in each format x max-Elo cell (<1400, 1400-2000, 2000-2400,
-# >=2400; data-v1 2025-01..2026-08) to the golden eval's uniform 1/16. Rows: format ids 0..5.
-BALANCE = np.ones((6, 4))
-BALANCE[1:5] = [
-    [1.3, 2.5, 2.5, 1.0],
-    [0.3, 0.6, 0.9, 1.4],
-    [0.3, 0.6, 1.1, 11.3],
-    [4.8, 1.6, 13.7, 139.4],
-]
-BAND = np.array([1400, 2000, 2400])
-
-
-def balanced(cap):
-    def fn(g, p):
-        cell = np.searchsorted(BAND, np.maximum(g.welo, g.belo), side="right")
-        f = np.minimum(BALANCE[np.clip(g.fmt, 0, 5), cell], cap)
-        return control(g, p)[0] * f, True, True
-
-    return fn
-
-
-def balanced_nobullet(cap):
-    """balanced(cap) with bullet cells left at control weight (no bullet boost)."""
-    inner = balanced(cap)
-
-    def fn(g, p):
-        w = inner(g, p)[0]
-        return np.where(g.fmt == 1, control(g, p)[0], w), True, True
-
-    return fn
-
-
 def relaxed(r):
-    """control with the down-sampling of sub-expert games relaxed r times (keep ratio min(1, r x keep)): fresh
-    abundant tokens instead of repeating a pass; >= 2400 games keep control's weight."""
+    """control with the down-sampling of sub-expert games relaxed r times (keep ratio
+    min(1, r x keep)): fresh abundant tokens instead of repeating a pass; >= 2400 games
+    keep control's weight."""
+
     def fn(g, p):
         w = control(g, p)[0]
-        return np.where(np.maximum(g.welo, g.belo) < 2400, np.minimum(1.0, r * w), w), True, True
+        top = np.maximum(g.welo, g.belo)
+        return np.where(top < 2400, np.minimum(1.0, r * w), w), True, True
 
     return fn
+
+
+# ext-v1 source digits: pgnmentor, twic, broadcast; tcec, ccrl
+OTB, ENGINE = (1, 2, 3), (5, 6, 7)
+EXT = (("otb", OTB), ("engine", ENGINE))
+
+
+def sources(srcs, k):
+    """control, with games from the given external sources weighted k times."""
+    return lambda g, p: (
+        control(g, p)[0] * np.where(np.isin(getattr(g, "src", 0), srcs), k, 1),
+        True,
+        True,
+    )
 
 
 def cooldown(policy, start, before=control):
+    """before until training progress start, then policy (list its name in PHASES)."""
     return lambda g, p: before(g, p) if p < start else policy(g, p)
 
 
@@ -355,124 +337,38 @@ POLICIES = dict(
     control=control,
     natural=lambda g, p: (np.ones(g.n), True, True),
     mover_rule=lambda g, p: (keep(g, np.maximum(g.welo, g.belo)), True, True),
-    up2=upsampled(2),
-    up4=upsampled(4),
-    bots_masked=lambda g, p: (control(g, p)[0], ~g.wbot, ~g.bbot),
-    cooldown20=lambda g, p: control(g, p) if p < 0.8 else upsampled(4)(g, p),
-    less_bullet=lambda g, p: (
-        control(g, p)[0] * np.where(g.fmt <= 1, 0.5, 1),
-        True,
-        True,
-    ),
+    **{f"up{k}": upsampled(k) for k in (2, 4, 8)},
+    **{f"relax{r}": relaxed(r) for r in (2, 3, 4, 8)},
+    **{f"{n}_x{k}": sources(s, k) for n, s in EXT for k in (2, 4, 10, 30)},
+    **{f"{n}_d{k}": sources(s, 1 / k) for n, s in EXT for k in (2, 3, 10)},
+    **{f"no{n}": sources(s, 0) for n, s in EXT},
 )
-POLICIES.update({f"relax{r}": relaxed(r) for r in (2, 3, 4, 8)})
-POLICIES.update(
-    cooldown20_up8=cooldown(upsampled(8), 0.8),
-    cooldown40=cooldown(upsampled(4), 0.6),
-    up2_cooldown20=cooldown(upsampled(8), 0.8, before=upsampled(2)),
-    balanced_c10=balanced(10),
-    balanced_nobullet_c10=balanced_nobullet(10),
-    cooldown20_balanced=cooldown(balanced(30), 0.8),
-    up8=upsampled(8),
-    up4_cooldown20_up16=cooldown(upsampled(16), 0.8, before=upsampled(4)),
-    up4_cooldown20_up1=cooldown(control, 0.8, before=upsampled(4)),
-    balanced_c30=balanced(30),
-    up4_balanced=lambda g, p: (
-        balanced(10)(g, p)[0] * np.where(np.maximum(g.welo, g.belo) >= 2400, 4, 1),
-        True,
-        True,
-    ),
-    mover_up4=lambda g, p: (
-        keep(g, np.maximum(g.welo, g.belo))
-        * np.where(np.maximum(g.welo, g.belo) >= 2400, 4, 1),
-        True,
-        True,
-    ),
-    slow_up4=lambda g, p: (
-        control(g, p)[0] * np.where((g.fmt == 3) | (g.fmt == 4), 4, 1),
-        True,
-        True,
-    ),
-    expert_slow10=lambda g, p: (
-        control(g, p)[0]
-        * np.where(
-            ((g.fmt == 3) | (g.fmt == 4)) & (np.maximum(g.welo, g.belo) >= 2400), 10, 1
-        ),
-        True,
-        True,
-    ),
-)
-PHASES = dict(
-    cooldown20=(0.0, 0.8),
-    cooldown20_up8=(0.0, 0.8),
-    cooldown40=(0.0, 0.6),
-    up2_cooldown20=(0.0, 0.8),
-    cooldown20_balanced=(0.0, 0.8),
-    up4_cooldown20_up16=(0.0, 0.8),
-    up4_cooldown20_up1=(0.0, 0.8),
-)
+# policy -> the training progress marks where its weights change (cooldown policies)
+PHASES = {}
 
 
-def expert_at(k, elo):
-    """control, with games whose stronger player is rated >= elo weighted k times."""
-    return lambda g, p: (
-        control(g, p)[0] * np.where(np.maximum(g.welo, g.belo) >= elo, k, 1),
-        True,
-        True,
+def recipe(name):
+    """Recipe NAME.json, whose name ends in the first 12 hex digits of its sha256
+    (pool_inventory.py recipe writes them): the frozen copy next to a study's source-ours if
+    there is one, else RECIPES."""
+    frozen = Path(__file__).resolve().parents[1] / "recipes" / f"{name}.json"
+    raw = (frozen if frozen.exists() else RECIPES / f"{name}.json").read_bytes()
+    assert hashlib.sha256(raw).hexdigest()[:12] == name[-12:], f"{name} edited"
+    return json.loads(raw)
+
+
+def table(name):
+    """table:NAME, a recipe's weight per bucket code."""
+    w = {int(c): v for c, v in recipe(name)["weights"].items()}
+    return lambda g, p: (w[g.code], True, True)
+
+
+def resolve(name):
+    return (
+        table(name.removeprefix("table:"))
+        if name.startswith("table:")
+        else POLICIES[name]
     )
-
-
-POLICIES.update(
-    up4_2200=expert_at(4, 2200),
-    up4_2600=expert_at(4, 2600),
-    clean_short=lambda g, p: (control(g, p)[0] * (np.diff(g.off) >= 10), True, True),
-    # drop abandoned, rules-infraction and unterminated games; keep time forfeits (real play)
-    clean_term=lambda g, p: (control(g, p)[0] * (g.term <= 1), True, True),
-    provisional_down=lambda g, p: (
-        control(g, p)[0] * np.where((g.wdiff >= 30) | (g.bdiff >= 30), 0.25, 1),
-        True,
-        True,
-    ),
-)
-
-OTB, ENGINE = (
-    (1, 2, 3),
-    (5, 6, 7),
-)  # ext-v1 source digits: pgnmentor, twic, broadcast; tcec, ccrl
-
-
-def sources(srcs, k, start=0.0):
-    """control, with games from the given external sources weighted k times from phase start."""
-    return lambda g, p: (
-        control(g, p)[0]
-        * np.where(np.isin(getattr(g, "src", 0), srcs) & (p >= start), k, 1),
-        True,
-        True,
-    )
-
-
-def recent(k, since):
-    """control, with games from Lichess months >= since weighted k times."""
-    return lambda g, p: (
-        control(g, p)[0] * (k if g.month[:4].isdigit() and g.month >= since else 1),
-        True,
-        True,
-    )
-
-
-POLICIES.update(
-    {f"recent6_x{k}": recent(k, "2026-02") for k in (2, 4)}
-    | {f"recent12_x{k}": recent(k, "2025-08") for k in (2,)}
-)
-
-EXT = (("otb", OTB), ("engine", ENGINE))
-POLICIES.update(
-    {f"{n}_x{k}": sources(s, k) for n, s in EXT for k in (2, 4, 10, 30)}
-    | {f"{n}_d{k}": sources(s, 1 / k) for n, s in EXT for k in (2, 3, 10)}
-    | {f"no{n}": sources(s, 0) for n, s in EXT}
-    | {f"engine_cd_x{k}": sources(ENGINE, k, 0.8) for k in (3, 10, 30)}
-)
-PHASES.update({f"engine_cd_x{k}": (0.0, 0.8) for k in (3, 10, 30)})
 
 
 def phase(policy, p):
@@ -481,9 +377,9 @@ def phase(policy, p):
 
 
 def compose(name):
-    """'a+b+...': policy a, times each later policy's weight relative to control, masks and-ed.
-    E.g. mover_rule+up4+clean_term."""
-    first, *rest = (POLICIES[k] for k in name.split("+"))
+    """'a+b+...': policy a, times each later policy's weight relative to control, masks
+    and-ed. E.g. mover_rule+up4+noengine+otb_x4."""
+    first, *rest = map(resolve, name.split("+"))
 
     def fn(g, p):
         w, mw, mb = first(g, p)
@@ -518,14 +414,8 @@ class Grid:
         keep = b <= w
         self.welo, self.belo, self.n = w[keep], b[keep], int(keep.sum())
         self.fmt = np.full(self.n, fmt)
-        self.src = code // 100000
-        self.month = "9999-99"
+        self.code, self.src = code, code // 100000
         self.rated = np.ones(self.n, bool)
-        self.wbot = self.bbot = np.zeros(self.n, bool)
-        # fields cleaning policies read, set to the values that maximise any weight
-        self.off = np.arange(self.n + 1) * 100
-        self.wdiff = self.bdiff = np.zeros(self.n, np.int16)
-        self.term = np.zeros(self.n, np.int8)
 
 
 LOCAL = pafs.LocalFileSystem()
@@ -541,16 +431,15 @@ def read(path, cols):
 class Shard:
     """The resident shard of one bucket plus its policy outputs for the current phase."""
 
-    def __init__(self, path, clock=False, aux=False, feats=False):
-        cols = COLUMNS + CLOCK_COLUMNS * (clock or aux or feats) + AUX_COLUMNS * aux
+    def __init__(self, path, aux=False, feats=False):
+        cols = COLUMNS + CLOCK_COLUMNS * (aux or feats) + AUX_COLUMNS * aux
         self.path, self.g, self.phase = (
             path,
-            Games(read(path, cols), clock, aux, feats),
+            Games(read(path, cols), aux=aux, feats=feats),
             None,
         )
-        self.g.src = (
-            int(Path(path).parent.name[1:]) // 100000
-        )  # 0 lichess, else ext source
+        self.g.code = int(Path(path).parent.name[1:])
+        self.g.src = self.g.code // 100000  # 0 lichess, else ext source
         self.g.month = Path(path).parents[2].name
 
     def policy(self, fn, ph):
@@ -575,7 +464,6 @@ class Sampler:
         stores=(STORE,),
         pool_frac=1.0,
         chunk=4096,
-        clock=False,
         aux=False,
         history=None,
         feats=False,
@@ -584,14 +472,9 @@ class Sampler:
         self.init = {
             k: v for k, v in locals().items() if k != "self"
         }  # to rebuild elsewhere
-        self.clock, self.aux, self.last = clock, aux, {}
+        self.aux, self.last = aux, {}
         self.feats = feats
-        self.channels = (
-            ["tokens", "mask"]
-            + ["clock"] * clock
-            + ["time", "wdl"] * aux
-            + ["feat"] * feats
-        )
+        self.channels = ["tokens", "mask"] + ["time", "wdl"] * aux + ["feat"] * feats
         self.policy, self.fn, self.total_rows, self.chunk = (
             policy,
             POLICIES[policy] if policy in POLICIES else compose(policy),
@@ -711,9 +594,7 @@ class Sampler:
     def _load(self, paths):
         """Futures reading shards on a shared thread pool (cold NFS reads are latency-bound)."""
         self.ex = self.ex or ThreadPoolExecutor(32)
-        return {
-            p: self.ex.submit(Shard, p, self.clock, self.aux, self.feats) for p in paths
-        }
+        return {p: self.ex.submit(Shard, p, self.aux, self.feats) for p in paths}
 
     def _warm(self):
         """Read the shards the next chunk opens in parallel, reusing reads started ahead of it."""
@@ -725,7 +606,7 @@ class Sampler:
         code = self.codes[k]
         if code not in self.resident or self.resident[code].path != path:
             self.resident[code] = self.preload.pop(path, None) or Shard(
-                path, self.clock, self.aux, self.feats
+                path, self.aux, self.feats
             )
         return self.resident[code]
 
@@ -742,8 +623,6 @@ class Sampler:
                 ok = idx[self.rng.random(len(idx)) * self.caps[k] < shard.w[idx]]
                 for i in ok:
                     game = shard.g.tokens(i, shard.mw[i], shard.mb[i])
-                    if self.clock:
-                        game += (shard.g.clock(i, len(game[0])),)
                     if self.aux:
                         game += shard.g.aux(i, len(game[0]))
                     if self.feats:
