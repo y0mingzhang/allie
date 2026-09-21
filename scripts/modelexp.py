@@ -1,30 +1,37 @@
 """Science rounds on the pinned data baseline (B_3) and the ship model recipe.
 
 A wave freezes one study. Its runs are budget x arm x seed, an arm being overrides of the
-baseline: shape (depth, width_mul, micro_batch), lr, sched fractions, data keys (policy,
-final_tokens, history, stores, months, feats, aux_time, ...), arch keys, stop_after legs
-and extra trainer flags. Arms are matched on trainer FLOPs (modded_train.useful_flops):
-an arm trains for the steps giving the FLOPs of the budget's base shape under the plain
+baseline: shape (depth, width_mul or absolute layers, width; micro_batch), lr, sched
+fractions, data keys (policy, final_tokens, history, stores, months, feats, aux_time,
+...), arch keys, stop_after legs and extra trainer flags. A wave's pin (datapin.py) fixes
+its runs' months and stores and is verified before every training leg; its history file
+replaces B_3's all-history counts. Arms are matched on trainer FLOPs
+(modded_train.useful_flops): an arm trains for the steps giving the FLOPs of the budget's base shape under the plain
 recipe. Schedule knobs are fractions of training, from the 3e16 base's absolute steps
 (8x512, 2274 steps). pool_frac = run tokens / final_tokens emulates the repetition of a
-final run of final_tokens. A round declares, e.g.:
+final run of final_tokens. Rounds live in results/recipe10x/STUDY/round.py, which imports
+this module and declares, e.g.:
 
+  from modelexp import MOE, variants, wave
   wave("iso1", "moe-v2-iso1e17", "mi1",
        variants("1e17", {"base": {}, "moe128k4": MOE(128, 4, moe_round=64)}, (42, 43)),
        "dense ship vs E128 top-4 at 1e17", "preempt4")
 
-  plan WAVE [COMMIT]   freeze COMMIT's (else this checkout's) trainer and evaluator and this
-                       driver into results/recipe10x/STUDY: plan.json and run.sbatch
-  submit WAVE          sbatch the study's array once
-  task WAVE            one array task: train its runs, score them, write results/
-  status WAVE          one line per run
-  table WAVE... [--controls STUDY,...]   golden loss and CM vs the 'base' arm
+  plan ROUND WAVE [COMMIT]   freeze COMMIT's (else this checkout's) trainer and evaluator,
+                             this driver, the round file, pin, history and recipe tables
+                             into results/recipe10x/STUDY: plan.json and run.sbatch
+  submit ROUND WAVE          sbatch the study's array once
+  task ROUND WAVE            one array task: train its runs, score them, write results/
+  status ROUND WAVE          one line per run
+  table ROUND WAVE... [--controls STUDY,...]   golden loss and CM vs the 'base' arm
 """
 
+import fcntl
 import hashlib
 import json
 import os
-import shutil
+import runpy
+import signal
 import subprocess
 import sys
 import time
@@ -34,10 +41,12 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import datapin
 from modded_arch import extra_flops
 
 ROOT = Path("/home/yimingz3/src/allie")
 STUDIES = ROOT / "results/recipe10x"
+RECIPES = STUDIES / "recipes"  # chessmix.RECIPES
 DATA = "/data/group_data/dei-group/yimingz3/allie/lichess_tokens_v2"  # validation rows
 # B_3, the final data recipe (data-v1-ledger.md); these keys are provenance, not inputs
 B3 = STUDIES / "data-v1-B3.json"
@@ -56,6 +65,7 @@ SIZES = {
     "3e16": dict(layers=8, width=512, steps=2274),
     "1e17": dict(layers=12, width=512, steps=5053),
     "3e17": dict(layers=16, width=768, steps=5053),
+    "1e18": dict(layers=16, width=768, steps=16843),  # 3e17's shape, 10/3 its steps
 }
 SCHEDULE = dict(batch_rows=512, plateau=4.0, final_lr=0.2, decay_shape="linear")
 FRAC = dict(warmup=32 / 2274, mtp=64 / 2274, split=65 / 2274, decay=32 / 2274)
@@ -71,6 +81,7 @@ QOS = {"dei-group": "dei_group_qos", "preempt": "preempt_qos", "general": "norma
 # lane: runs per task, GPUs per task, partition, gres, constraint, CPUs, GB, array throttle
 LANES = dict(
     dei=(4, 4, "dei-group", "gpu:A6000:4", None, 16, 128, None),
+    dei4=(1, 4, "dei-group", "gpu:A6000:4", None, 24, 200, 4),
     preempt=(1, 1, "preempt", "gpu:1", FAST, 8, 64, 8),
     general=(1, 1, "general", "gpu:1", FAST, 8, 64, 4),
     l40s=(1, 1, "preempt", "gpu:1", "L40S", 8, 64, 2),
@@ -83,6 +94,7 @@ LANES = dict(
 )
 SOURCE = ("lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py")
 SOURCE += ("board_encode.cpp", "move-table.json")
+DRIVER = ("modelexp.py", "modded_arch.py", "datapin.py")
 
 
 def sha(p):
@@ -131,8 +143,8 @@ def shape(r):
     """Layers, width (in 64s) and FLOP-matched steps of a run, relative to its budget's
     base shape, so an arm means the same aspect-ratio change at every budget."""
     base = SIZES[r["budget"]]
-    layers = round(base["layers"] * r.get("depth", 1))
-    width = round(base["width"] * r.get("width_mul", 1) / 64) * 64
+    layers = r.get("layers") or round(base["layers"] * r.get("depth", 1))
+    width = r.get("width") or round(base["width"] * r.get("width_mul", 1) / 64) * 64
     flops = base["steps"] * per_token(base["layers"], base["width"])
     return layers, width, round(flops / per_token(layers, width, r["arch"]))
 
@@ -157,9 +169,10 @@ def variants(budget, specs, seeds=(42,)):
     tag = f"pf{round(pf * 1000):03d}" + "h" * bool(data.get("history"))
     return [
         data
+        | dict(tag=tag)
         | spec
         | dict(arch=data["arch"] | spec.get("arch", {}))
-        | dict(v=label, budget=budget, seed=s, tag=tag)
+        | dict(v=label, budget=budget, seed=s)
         for label, spec in specs.items()
         for s in seeds
     ]
@@ -184,10 +197,15 @@ def stack(budget, parts, seed=43):
 
 
 WAVES = {}
+ROUND = None  # the round file being loaded
 
 
-def wave(key, study, prefix, runs, purpose, lane="dei", group=None):
-    """Declare a wave. Waves split across lanes share one group (and its 'base' runs)."""
+def wave(
+    key, study, prefix, runs, purpose, lane="dei", group=None, pin=None, history=None
+):
+    """Declare a wave. Waves split across lanes share one group (and its 'base' runs).
+    pin: a datapin file fixing every run's months and stores; history: the all-history
+    counts file of history runs (default B_3's)."""
     pack, gpus, part, gres, constraint, cpus, mem, throttle = LANES[lane]
     sbatch = ["--account=dippolit", f"--partition={part}", f"--qos={QOS[part]}"]
     sbatch += [f"--gres={gres}"] + [f"--constraint={constraint}"] * bool(constraint)
@@ -203,6 +221,9 @@ def wave(key, study, prefix, runs, purpose, lane="dei", group=None):
         sbatch="\n".join(f"#SBATCH {x}" for x in sbatch),
         throttle=throttle,
         group=group or key,
+        pin=pin and Path(pin),
+        history=Path(history) if history else history_file(),
+        round=ROUND,
     )
 
 
@@ -214,8 +235,13 @@ def name(w, r):
 def planned(w, r):
     layers, width, steps = shape(r)
     s, decay = schedule(r, steps)
+    pf = steps * 512 * 1024 / r.get("final_tokens", FINAL_TOKENS)
+    assert pf <= 1, f"{name(w, r)} trains past its final_tokens"
+    if w["pin"]:
+        pin = json.loads(w["pin"].read_text())
+        r = r | dict(months=pin["months"], stores=pin["stores"])
     return r | dict(
-        pool_frac=steps * 512 * 1024 / r.get("final_tokens", FINAL_TOKENS),
+        pool_frac=pf,
         baseline=BASE["meta"]["sha256"],
         group=w["group"],
         name=name(w, r),
@@ -245,36 +271,42 @@ def frozen_files(commit=None):
         if trainer(Path(n).name)
     }
     out["evaluator-ours/eval_strat.py"] = read("scripts/eval_strat.py")
-    return out | {f: read(f"scripts/{f}") for f in ("modelexp.py", "modded_arch.py")}
+    return out | {f: read(f"scripts/{f}") for f in DRIVER}
+
+
+def tables(runs):
+    """Recipe tables (chessmix table:NAME policies) the runs train on."""
+    names = {k for r in runs for k in r["policy"].split("+") if k.startswith("table:")}
+    return {
+        f"recipes/{k[6:]}.json": (RECIPES / f"{k[6:]}.json").read_bytes() for k in names
+    }
 
 
 def plan(key, commit=None):
     w = WAVES[key]
     study = STUDIES / w["study"]
-    assert not study.exists(), "never overwrite a frozen study"
+    assert not (study / "plan.json").exists(), "never overwrite a frozen study"
     if commit:  # as a sha; commits of every worktree are in ROOT's object store
         rev = ["git", "-C", Path(__file__).parent, "rev-parse", f"{commit}^{{commit}}"]
         commit = subprocess.check_output(rev, text=True).strip()
-    files = frozen_files(commit)
+    runs = [planned(w, r) for r in w["runs"]]
+    files = frozen_files(commit) | tables(runs)
+    files |= {"round.py": w["round"].read_bytes()}
+    files |= {"history-counts.json": w["history"].read_bytes()}
+    files |= {"data-pin.json": w["pin"].read_bytes()} if w["pin"] else {}
     hashes = {k: hashlib.sha256(v).hexdigest() for k, v in files.items()}
-    hashes |= {
-        "history-counts.json": sha(history_file()),
-        "baseline": BASE["meta"]["sha256"],
-    }
+    hashes["baseline"] = BASE["meta"]["sha256"]
+    shared = lambda h: {k: v for k, v in h.items() if not k.startswith("recipes/")}
     for k, o in WAVES.items():  # a group's waves pool controls only on the same files
         p = STUDIES / o["study"] / "plan.json"
         if k != key and o["group"] == w["group"] and p.exists():
-            assert json.loads(p.read_text())["hashes"] == hashes, (
-                f"{k} froze other files"
-            )
-    for d in ("source-ours", "evaluator-ours", "logs", "results"):
-        (study / d).mkdir(parents=True)
+            other = json.loads(p.read_text())["hashes"]
+            assert shared(other) == shared(hashes), f"{k} froze other files"
+    for d in ("source-ours", "evaluator-ours", "recipes", "logs", "results"):
+        (study / d).mkdir(parents=True, exist_ok=True)
     for rel, data in files.items():
-        (study / rel).write_bytes(data)
-    shutil.copy2(history_file(), study / "history-counts.json")
-    runs = [planned(w, r) for r in w["runs"]]
-    p = dict(wave=key, purpose=w["purpose"], commit=commit, hashes=hashes, runs=runs)
-    (study / "plan.json").write_text(json.dumps(p, indent=2) + "\n")
+        if (study / rel).resolve() != w["round"]:
+            (study / rel).write_bytes(data)
     tasks = -(-len(runs) // w["pack"])
     (study / "run.sbatch").write_text(f"""#!/bin/bash
 #SBATCH --job-name={w["prefix"]}
@@ -285,8 +317,10 @@ def plan(key, commit=None):
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output={study}/logs/%x-%A_%a.out
-exec {ROOT}/.venv/bin/python {study}/modelexp.py task {key}
+exec {ROOT}/.venv/bin/python {study}/modelexp.py task {study}/round.py {key}
 """)
+    p = dict(wave=key, purpose=w["purpose"], commit=commit, hashes=hashes, runs=runs)
+    (study / "plan.json").write_text(json.dumps(p, indent=2) + "\n")  # the commit point
 
 
 def submit(key):
@@ -313,10 +347,67 @@ def seconds_left():
     return seconds + 86400 * int(days or 0)
 
 
+CHILDREN = set()  # running children, each the root of its own session
+
+
+def tree(root):
+    """root and its descendants, from /proc parent links (session changes don't break them)."""
+    kids = {}
+    for d in Path("/proc").iterdir():
+        try:
+            ppid = int((d / "stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        kids.setdefault(ppid, []).append(int(d.name))
+    out, todo = [], [root]
+    while todo:
+        out.append(todo.pop())
+        todo += kids.get(out[-1], [])
+    return out
+
+
+def reap(p, grace=60):
+    """TERM, then KILL, a live child's whole process tree (its members found before the
+    child dies, since orphans lose the parent link)."""
+    pids = set()
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        pids |= set(tree(p.pid)) if p.poll() is None else set()
+        for q in pids:
+            try:
+                os.kill(q, sig)
+            except ProcessLookupError:
+                pass
+        try:
+            p.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            pass
+        pids = {q for q in pids if Path(f"/proc/{q}").exists()}
+        if not pids:
+            break
+
+
 def run(cmd, env, log):
+    cmd = [str(x) for x in cmd]
     with open(log, "a") as f:
-        cmd = [str(x) for x in cmd]
-        subprocess.run(cmd, env=env, stdout=f, stderr=subprocess.STDOUT, check=True)
+        p = subprocess.Popen(
+            cmd, env=env, stdout=f, stderr=subprocess.STDOUT, start_new_session=True
+        )
+    CHILDREN.add(p)
+    try:
+        p.wait()
+    finally:
+        if p.poll() is None:
+            reap(p)
+        CHILDREN.discard(p)
+    if p.returncode:
+        raise subprocess.CalledProcessError(p.returncode, cmd)
+
+
+def stop(signum, frame):
+    """Preemption or cancel: take every child's tree down with this task."""
+    for p in list(CHILDREN):
+        reap(p, grace=30)
+    raise SystemExit(128 + signum)
 
 
 def task(key):
@@ -330,6 +421,7 @@ def task(key):
     assert not bad, f"frozen copies changed since plan: {sorted(bad)}"
     i, k = int(os.environ["SLURM_ARRAY_TASK_ID"]), w["pack"]
     mine = plan["runs"][i * k : (i + 1) * k]
+    signal.signal(signal.SIGTERM, stop)
     visible = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")
     rg = w["gpus"] // w["pack"]  # GPUs per run (one torchrun each)
     gpus = lambda j: ",".join(visible[j * rg : (j + 1) * rg])
@@ -444,6 +536,8 @@ def run_one(study, r, gpu):
     result = study / "results" / f"{n}.json"
     if result.exists():
         return True
+    lock = open(study / "logs" / f"{n}.lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if another task runs n
     started, left = time.monotonic(), seconds_left()
     env = os.environ | dict(
         ALLIE_PROJECT_ROOT=str(ROOT),
@@ -469,6 +563,8 @@ def run_one(study, r, gpu):
         d = json.loads(done.read_text()) if done.exists() else {}
         if d.get("stop_reason") == "steps" or (leg and d.get("step", 0) >= leg):
             continue
+        if (study / "data-pin.json").exists():
+            datapin.verify(study / "data-pin.json", r["months"])
         cmd = [py, "-m", "torch.distributed.run", "--standalone"]
         cmd += [f"--nproc_per_node={len(gpu.split(','))}"]
         cmd += [src / "modded_train.py", *train_args(study, r)]
@@ -587,7 +683,10 @@ def table(*keys, controls=()):
 
 
 if __name__ == "__main__":
-    cmd, rest = sys.argv[1], sys.argv[2:]
+    sys.modules["modelexp"] = sys.modules["__main__"]  # round files register here
+    cmd, ROUND, *rest = sys.argv[1:]
+    ROUND = Path(ROUND).resolve()
+    runpy.run_path(str(ROUND))
     match cmd:
         case "plan":
             plan(*rest)

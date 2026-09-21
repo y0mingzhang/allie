@@ -8,6 +8,7 @@ the fly and packed into 1025-token rows like the original corpus: the overflowin
 """
 
 import copy
+import hashlib
 import itertools
 import json
 import math
@@ -28,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chess_vocab import BOS, INCREMENTS_ID, SECONDS_ID, TERM_NORMAL, TERM_OTHER, UNK
 
 STORE = Path("/data/group_data/dei-group/yimingz3/allie/data-v1")
+RECIPES = Path("/data/group_data/dei-group/yimingz3/allie/results/recipe10x/recipes")
 COLUMNS = [
     "moves",
     "white_elo",
@@ -345,6 +347,19 @@ POLICIES = dict(
 PHASES = {}
 
 
+def table(name):
+    """table:NAME, a recipe's weight per bucket code from RECIPES/NAME.json, whose name ends in the first 12 hex
+    digits of its sha256 (pool_inventory.py recipe writes them)."""
+    raw = (RECIPES / f"{name}.json").read_bytes()
+    assert hashlib.sha256(raw).hexdigest()[:12] == name[-12:], f"{name} edited"
+    w = {int(c): v for c, v in json.loads(raw)["weights"].items()}
+    return lambda g, p: (w[g.code], True, True)
+
+
+def resolve(name):
+    return table(name.removeprefix("table:")) if name.startswith("table:") else POLICIES[name]
+
+
 def phase(policy, p):
     marks = {x for k in policy.split("+") for x in PHASES.get(k, (0.0,))}
     return max(x for x in marks if x <= p)
@@ -353,7 +368,7 @@ def phase(policy, p):
 def compose(name):
     """'a+b+...': policy a, times each later policy's weight relative to control, masks
     and-ed. E.g. mover_rule+up4+noengine+otb_x4."""
-    first, *rest = (POLICIES[k] for k in name.split("+"))
+    first, *rest = map(resolve, name.split("+"))
 
     def fn(g, p):
         w, mw, mb = first(g, p)
@@ -388,7 +403,7 @@ class Grid:
         keep = b <= w
         self.welo, self.belo, self.n = w[keep], b[keep], int(keep.sum())
         self.fmt = np.full(self.n, fmt)
-        self.src = code // 100000
+        self.code, self.src = code, code // 100000
         self.rated = np.ones(self.n, bool)
 
 
@@ -412,9 +427,8 @@ class Shard:
             Games(read(path, cols), aux=aux, feats=feats),
             None,
         )
-        self.g.src = (
-            int(Path(path).parent.name[1:]) // 100000
-        )  # 0 lichess, else ext source
+        self.g.code = int(Path(path).parent.name[1:])
+        self.g.src = self.g.code // 100000  # 0 lichess, else ext source
         self.g.month = Path(path).parents[2].name
 
     def policy(self, fn, ph):
