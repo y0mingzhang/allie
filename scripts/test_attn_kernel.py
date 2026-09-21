@@ -60,17 +60,21 @@ def inputs(T, seed):
     q, k, v = qkv.chunk(3, 2)
     q, k = F.rms_norm(q, (D,)), F.rms_norm(k, (D,))
     do = torch.randn(1, T, H, D, generator=g, device="cuda").bfloat16()
+    gate = torch.randn(1, T, H, 1, generator=g, device="cuda").sigmoid().bfloat16()
     # v stays a strided view of qkv, as in the model
-    return [x.detach().requires_grad_() for x in (q, k, v)], do
+    return [x.detach().requires_grad_() for x in (q, k, v, gate)], do
 
 
-def reference(q, k, v, do, docs, window, row):
-    """FP32 per-row dense attention and grads under make_context's dense mask."""
-    outs = [[] for _ in range(4)]
+def reference(q, k, v, gate, do, docs, window, row):
+    """FP32 per-row dense attention (times gate, if given) and grads under make_context's dense mask."""
+    outs = [[] for _ in range(4 if gate is None else 5)]
     t = torch.arange(row, device="cuda")
     for r in range(q.shape[1] // row):
         s = slice(r * row, (r + 1) * row)
-        qq, kk, vv = (x[0, s].float().detach().requires_grad_() for x in (q, k, v))
+        qq, kk, vv, gg = (
+            None if x is None else x[0, s].float().detach().requires_grad_()
+            for x in (q, k, v, gate)
+        )
         d = docs[s]
         allow = (t[None] <= t[:, None]) & (t[:, None] - t[None] <= window)
         allow &= d[:, None] == d[None]
@@ -78,7 +82,9 @@ def reference(q, k, v, do, docs, window, row):
         o = torch.einsum(
             "hts,shd->thd", p.masked_fill(~allow, -torch.inf).softmax(-1), vv
         )
-        grads = torch.autograd.grad(o, (qq, kk, vv), do[0, s].float())
+        wrt = (qq, kk, vv) if gate is None else (qq, kk, vv, gg)
+        o = o if gate is None else o * gg
+        grads = torch.autograd.grad(o, wrt, do[0, s].float())
         for out, x in zip(outs, (o, *grads)):
             out.append(x.detach())
     return [torch.cat(x)[None] for x in outs]
@@ -120,19 +126,24 @@ def grads(o, qkv, do):
     return [o.detach(), *torch.autograd.grad(o, qkv, do)]
 
 
-def check(rows, windows, what, seed=0):
+def check(rows, windows, what, gated=False):
+    """Flex's gated path is the model's: its output times the gate, in BF16."""
     n, row = rows.shape
     flex = mm.make_context(rows, *windows, backend="flex")
     tri = mm.make_context(rows, *windows, backend="triton")
     for w in windows:
-        qkv, do = inputs(n * row, seed)
-        f = grads(mm.attention(*qkv, flex, w, SCALE), qkv, do)
-        t = grads(mm.attention(*qkv, tri, w, SCALE), qkv, do)
-        again = grads(mm.attention(*qkv, tri, w, SCALE), qkv, do)
-        ref = reference(*qkv, do, flex.documents, w, row)
+        (q, k, v, g), do = inputs(n * row, 0)
+        wrt, g = ((q, k, v, g), g) if gated else ((q, k, v), None)
+        y = mm.attention(q, k, v, flex, w, SCALE)
+        f = grads(y if g is None else y * g, wrt, do)
+        t = grads(mm.attention(q, k, v, tri, w, SCALE, g), wrt, do)
+        again = grads(mm.attention(q, k, v, tri, w, SCALE, g), wrt, do)
+        ref = reference(q, k, v, g, do, flex.documents, w, row)
         det = all(torch.equal(a, b) for a, b in zip(t, again))
+        names = "o dq dk dv" + " dgate" * gated
         print(
-            f"{what} window {w} (o dq dk dv max abs/rel err; triton rerun bitwise {det})"
+            f"{what}{' gated' * gated} window {w} ({names} max abs/rel err;"
+            f" triton rerun bitwise {det})"
         )
         for label, a, b in (
             ("triton-flex", t, f),
@@ -150,7 +161,7 @@ def timing(rows, windows, timed):
         lambda do, o: (do.float() * o.float()).sum(-1)[0].t().contiguous()
     )
     for w in timed:
-        qkv, do = inputs(n * row, 1)
+        (*qkv, g), do = inputs(n * row, 1)
         out = [f"window {w} ms:"]
         o = mm.attention(*qkv, flex, w, SCALE)
         f = bench(lambda: mm.attention(*qkv, flex, w, SCALE))
@@ -160,14 +171,16 @@ def timing(rows, windows, timed):
         o = mm.attention(*qkv, tri, w, SCALE)
         eager = bench(lambda: torch.autograd.grad(o, qkv, do, retain_graph=True))
         with torch.no_grad():
-            o, lse = ma.fwd(*qkv, lo, hi, SCALE)
+            o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
             dl = delta(do, o)
-            f = bench(lambda: ma.fwd(*qkv, lo, hi, SCALE))
+            f = bench(lambda: ma.fwd(*qkv, None, lo, hi, SCALE))
             d = bench(lambda: delta(do, o))
-            b = bench(lambda: ma.bwd(*qkv, do, lse, dl, lo, hi, SCALE))
+            b = bench(lambda: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
+            fg = bench(lambda: ma.fwd(*qkv, g, lo, hi, SCALE))
+            bg = bench(lambda: ma.bwd(*qkv, do, g, lse, dl, lo, hi, SCALE))
         out.append(
             f"triton fwd {f:.3f} bwd {b:.3f} + delta {d:.3f} sum {f + b + d:.3f}"
-            f" (eager autograd bwd {eager:.3f})"
+            f" (eager autograd bwd {eager:.3f}; gated fwd {fg:.3f} bwd {bg:.3f})"
         )
         try:
             m64 = mask64(flex.documents, w, row)
@@ -189,7 +202,7 @@ def timing(rows, windows, timed):
 
 def sweep(rows, tri):
     n, row = rows.shape
-    qkv, do = inputs(n * row, 2)
+    (*qkv, _), do = inputs(n * row, 2)
     lo, hi = tri.short_mask
     fwds = [
         (64, 32, 4, 2, False),
@@ -220,17 +233,17 @@ def sweep(rows, tri):
         (64, 64, 4, 2, True),
     ]
     with torch.no_grad():
-        o, lse = ma.fwd(*qkv, lo, hi, SCALE)
+        o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
         dl = (do.float() * o.float()).sum(-1)[0].t().contiguous()
         for cfg in fwds:
             ma.FWD = cfg
             print(
-                f"fwd {cfg}: {bench(lambda: ma.fwd(*qkv, lo, hi, SCALE)):.3f}",
+                f"fwd {cfg}: {bench(lambda: ma.fwd(*qkv, None, lo, hi, SCALE)):.3f}",
                 flush=True,
             )
         for cfg in bwds:
             ma.BWD = cfg
-            ms = bench(lambda: ma.bwd(*qkv, do, lse, dl, lo, hi, SCALE))
+            ms = bench(lambda: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
             print(f"bwd {cfg}: {ms:.3f}", flush=True)
 
 
@@ -246,6 +259,7 @@ def main():
     )
     check(rows, WSD, "real")
     tri = timing(rows, WSD, WSD[:1])
+    check(rows, WSD[:1], "real", gated=True)
     check(rows, SLIDING, "real")
     timing(rows, SLIDING, SLIDING)
     syn = torch.as_tensor(synthetic(np.random.default_rng(0), 16, 1024), device="cuda")

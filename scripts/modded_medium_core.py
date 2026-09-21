@@ -1399,18 +1399,23 @@ class CausalSelfAttention(nn.Module):
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
         attend = lambda q, k, v: medium_attention(q, k, v, seqlens, bm_size, attn_scale)
-        y = (
-            attend(q, k, v)
-            if self.diff is None
-            else diff_attention(q, k, v, self.diff(), self.diff.init, attend)
-        )
-        y = y.view(B, T, self.num_heads, self.head_dim)
-        gate = torch.sigmoid(
+        gate = lambda: torch.sigmoid(
             self.attn_gate(x[..., : self.attn_gate.weight.size(-1)])
         ).view(B, T, self.num_heads, 1)
-        y = y * (
-            gate if self.gates else gate * 0 + 0.5
-        )  # sigma(0): the default gate at init
+        if self.diff is None and seqlens.backend == "triton":  # gate fused into the kernel
+            g = gate()
+            y = medium_attention(
+                q, k, v, seqlens, bm_size, attn_scale, g if self.gates else g * 0 + 0.5
+            )
+        else:
+            y = (
+                attend(q, k, v)
+                if self.diff is None
+                else diff_attention(q, k, v, self.diff(), self.diff.init, attend)
+            )
+            y = y.view(B, T, self.num_heads, self.head_dim)
+            g = gate()
+            y = y * (g if self.gates else g * 0 + 0.5)  # sigma(0): the default gate at init
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side

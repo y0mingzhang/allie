@@ -188,10 +188,11 @@ def make_context(inputs, short_window, long_window, backend=None, host=None):
     )
 
 
-def attention(q, k, v, context, window, scale):
+def attention(q, k, v, context, window, scale, gate=None):
     mask = context.short_mask if window == context.short_window else context.long_mask
     if context.backend == "triton":
-        return modded_attn.attention(q, k, v, *mask, scale)
+        return modded_attn.attention(q, k, v, *mask, scale, gate)
+    assert gate is None
     q, k, v = (x.transpose(1, 2) for x in (q, k, v))
     if context.backend == "dense":
         y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=scale)
