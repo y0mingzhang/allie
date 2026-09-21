@@ -375,6 +375,10 @@ def table(name):
 
 
 def resolve(name):
+    """A policy name: POLICIES key, table:NAME, or coolNN:NAME (control until NN% of training, then NAME)."""
+    if name.startswith("cool"):
+        pct, rest = name[4:].split(":", 1)
+        return cooldown(resolve(rest), int(pct) / 100)
     return (
         table(name.removeprefix("table:"))
         if name.startswith("table:")
@@ -382,9 +386,14 @@ def resolve(name):
     )
 
 
+def marks(name):
+    if name.startswith("cool"):
+        return 0.0, int(name[4:].split(":", 1)[0]) / 100
+    return PHASES.get(name, (0.0,))
+
+
 def phase(policy, p):
-    marks = {x for k in policy.split("+") for x in PHASES.get(k, (0.0,))}
-    return max(x for x in marks if x <= p)
+    return max(x for k in policy.split("+") for x in marks(k) if x <= p)
 
 
 def compose(name):
