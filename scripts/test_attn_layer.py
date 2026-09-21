@@ -4,7 +4,7 @@ medians of forward and forward+backward per layer kind, so the fusions around at
 add, output gate, q/k norm, rotary) are inside the measurement. Ends with the reference's per-step sum:
 24 layers (10 with value embeddings), each forward twice under eager block checkpoints.
 
-    <runtime python> scripts/test_attn_layer.py --rows rows.npy (64 x 1025 tokens)
+    <runtime python> scripts/test_attn_layer.py --rows rows.npy (64 x 1025 tokens) [--profile]
 """
 
 import os
@@ -37,6 +37,18 @@ def bench(fn):
         b.record()
     torch.cuda.synchronize()
     return float(np.median([a.elapsed_time(b) for a, b in ev]))
+
+
+def kernels(fn, top=12):
+    """GPU kernels of one fn() call: total ms and count per kernel, largest first."""
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+        fn()
+        torch.cuda.synchronize()
+    rows = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
+    rows.sort(key=lambda e: -e.self_device_time_total)
+    total = sum(e.self_device_time_total for e in rows) / 1e3
+    out = [f"    {e.self_device_time_total / 1e3:7.3f} ms {e.count:3d}x {e.key[:100]}" for e in rows[:top]]
+    return "\n".join([f"    {total:7.3f} ms total GPU", *out])
 
 
 def err(a, b):
@@ -93,6 +105,12 @@ def main():
             fw = bench(lambda: f(xin, args))
             fb = bench(lambda: torch.autograd.grad(f(xin, args), wrt, dy))
             times[b] = fw, fb
+            if "--profile" in sys.argv:
+                print(f"{name} {b} fwd+bwd kernels:")
+                try:
+                    print(kernels(lambda: torch.autograd.grad(f(xin, args), wrt, dy)))
+                except Exception as e:  # diagnostics only
+                    print(f"    profile failed: {type(e).__name__}: {e}")
             total[b] += count * (fw + fb)
         names = [
             "y",
