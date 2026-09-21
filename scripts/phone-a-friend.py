@@ -31,6 +31,7 @@ LIVE = ROLE == "codex" or THREAD is not None
 ADDR = f"\0phone-a-friend-{os.getuid()}"
 DAEMON = os.path.expanduser("~/.codex/app-server-control/app-server-control.sock")
 BOX = os.path.expanduser("~/.cache/phone-a-friend")
+MAGIC = "\0phone-a-friend/1\n"  # codex -> claude envelope: MAGIC + {"to", "text"}
 ROUTING = {
     "claude": " Subagents: pass your agent id as `agent` so Codex can reply to you directly; its replies "
     f"then land in {BOX}/<id>.inbox (watch it with Monitor), not in the main session.",
@@ -151,10 +152,18 @@ def phone_claude(text, to=None):
     with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(30)
         s.connect(ADDR)
-        s.sendall((f"\0{to}\n" * bool(to) + text).encode())
+        s.sendall((MAGIC + json.dumps({"to": to, "text": text})).encode())
         s.shutdown(socket.SHUT_WR)
         if s.recv(2) != b"ok":
-            raise ConnectionError("channel dropped the message")
+            raise ConnectionError("channel refused the message")
+
+
+def unwrap(raw):
+    """(recipient or None, text); a payload without the envelope is a legacy peer's plain text."""
+    if not raw.startswith(MAGIC):
+        return None, raw
+    msg = json.loads(raw[len(MAGIC) :])
+    return agent_id(msg["to"]), msg["text"]
 
 
 def listen():
@@ -168,40 +177,57 @@ def listen():
     while True:
         c, _ = srv.accept()
         with c:
-            c.settimeout(30)
-            raw = c.makefile("rb").read().decode()
-            to, text = raw[1:].split("\n", 1) if raw.startswith("\0") else ("", raw)
-            if re.fullmatch(r"[0-9A-Za-z_-]{1,64}", to):
-                os.makedirs(BOX, exist_ok=True)
-                with open(f"{BOX}/{to}.inbox", "a") as f:
-                    f.write(f"--- {time.strftime('%FT%T%z')} codex:\n{text}{FOOTER}\n")
-            else:
-                emit(
-                    {
-                        "jsonrpc": "2.0",
-                        "method": "notifications/claude/channel",
-                        "params": {
-                            "content": text + FOOTER,
-                            "meta": {"sender": "codex"},
-                        },
-                    }
-                )
-            c.sendall(b"ok")
+            try:
+                c.settimeout(30)
+                to, text = unwrap(c.makefile("rb").read().decode())
+                if to:
+                    os.makedirs(BOX, exist_ok=True)
+                    with open(f"{BOX}/{to}.inbox", "a") as f:
+                        f.write(
+                            f"--- {time.strftime('%FT%T%z')} codex:\n{text}{FOOTER}\n"
+                        )
+                else:
+                    emit(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "notifications/claude/channel",
+                            "params": {
+                                "content": text + FOOTER,
+                                "meta": {"sender": "codex"},
+                            },
+                        }
+                    )
+                c.sendall(b"ok")
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+            ) as e:  # keep the only listener alive
+                print(f"phone-a-friend: refused a message: {e!r}", file=sys.stderr)
+                try:
+                    c.sendall(b"no")
+                except OSError:
+                    pass
 
 
 def call(args):
     try:
         peer = agent_id(args.get("agent" if ROLE == "claude" else "to"))
         (phone_codex if ROLE == "claude" else phone_claude)(args["message"], peer)
-        tag = f"claude:{peer}" if peer else "claude"
-        log(*((tag, "codex") if ROLE == "claude" else ("codex", tag)), args["message"])
-        where = f"claude agent {peer}'s inbox" if peer and ROLE == "codex" else PEER
-        return {"content": [{"type": "text", "text": f"delivered to {where}"}]}
-    except (OSError, RuntimeError, ValueError, struct.error) as e:
+    except (OSError, RuntimeError, ValueError, KeyError, struct.error) as e:
         return {
             "content": [{"type": "text", "text": f"{PEER} unreachable: {e!r}"}],
             "isError": True,
         }
+    tag = f"claude:{peer}" if peer else "claude"
+    try:
+        log(*((tag, "codex") if ROLE == "claude" else ("codex", tag)), args["message"])
+        note = ""
+    except OSError as e:
+        note = f" (not logged: {e!r})"
+    where = f"claude agent {peer}'s inbox" if peer and ROLE == "codex" else PEER
+    return {"content": [{"type": "text", "text": f"delivered to {where}{note}"}]}
 
 
 TOOL = {
