@@ -20,15 +20,20 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
 import torch._dynamo as dynamo
+import torch.utils.checkpoint
 import torch.distributed as dist
 import torch.nn.functional as F
 
 # torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
 import triton
 import triton.language as tl
+
+import modded_fp8 as fp8
 from torch import Tensor, nn
 
 from modded_arch import swiglu_hidden
+from modded_diffattn import diff_attention
+from modded_moe import MoE, replay_context
 
 dynamo.config.recompile_limit = 64
 
@@ -507,6 +512,60 @@ def _flush():
     _pending.clear()
 
 
+CKPT = ""  # "mlp" | "block" | "eager": recompute those activations in backward (training)
+CKPT_LAYERS = 1 << 30  # only blocks with layer_idx < CKPT_LAYERS are checkpointed (--ckpt-frac)
+CKPT_BLEND = False  # put the eager residual blend inside the block checkpoint boundary
+FUSED_BLEND = False  # --fused-blend: eager-checkpoint residual blends as fused kernels, bitwise eager
+ZERO2 = False  # --zero2: BF16-weight grads reduced to their NorMuon owner during backward (ZeRO-2)
+ZERO2_BF16 = False  # --zero2-bf16: that reduce in BF16 (half the traffic; not bit-identical), FP32 accumulate
+_inflight = []  # (work, param, fp32 grad) reduces of the running backward
+DEFER = False  # ZeRO-2 + eager checkpoints: NorMuon's param broadcasts finish under the next forward
+_bcast = {}  # block index (-1: outside blocks) -> the param broadcasts it waits on
+
+
+def sync_params(*blocks):
+    """Wait for the deferred param broadcasts of these blocks (all if none given)."""
+    for b in blocks or list(_bcast):
+        for w in _bcast.pop(b, ()):
+            w.wait()
+
+
+@torch.no_grad()
+def _finish(item):
+    work, p, g = item
+    work.wait()
+    if p.main_grad is not None:  # this rank owns p: accumulate the averaged grad into its FP32 row
+        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g.float())
+    p.fresh = False
+
+
+@torch.no_grad()
+def _drain():
+    while _inflight:
+        _finish(_inflight.pop(0))
+
+
+def zero2_hook(p):
+    """--zero2 post-accumulate hook: NorMuon-owned replicated params reduce to their owner; the rest
+    (DistAdam masters, rank-local sharded experts) accumulate as usual."""
+    return reduce_to_owner(p) if hasattr(p, "owner") else accumulate_fp32(p)
+
+
+@torch.no_grad()
+def reduce_to_owner(p):
+    """ZeRO-2: average this micro-batch's grad over ranks straight into its owner's FP32 row, then
+    drop it (a few reduces in flight overlap the rest of the backward)."""
+    if not _inflight:
+        torch.autograd.Variable._execution_engine.queue_callback(_drain)
+    g = p.grad if ZERO2_BF16 else p.grad.float()
+    p.grad = None
+    _inflight.append((dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True), p, g))
+    while len(_inflight) > 4:
+        _finish(_inflight.pop(0))
+
+
+
+
 def accumulate_fp32(p):
     """BF16 weight: sum micro-batch grads in FP32 exactly as an FP32 weight's grad would be; batched at
     the end of backward (fresh: first micro-batch into NorMuon's flat buffer overwrites)."""
@@ -539,6 +598,11 @@ def apply_normuon_variance_reduction(v_chunk, second_momentum_buffer, beta2, red
 
 # -----------------------------------------------------------------------------
 # NorMuon optimizer
+
+
+class _Done:
+    def wait(self):
+        pass
 
 
 class NorMuon(torch.optim.Optimizer):
@@ -587,11 +651,18 @@ class NorMuon(torch.optim.Optimizer):
         momentum=0.95,
         beta2=0.95,
         custom_sizing=True,
+        group=None,
     ):
         defaults = dict(
             lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2
         )
-        self.world_size = dist.get_world_size() if dist.is_initialized() else 1
+        # group: a single-rank group for rank-local params (sharded MoE experts: whole experts per rank)
+        self.group = group
+        self.world_size = dist.get_world_size(group) if dist.is_initialized() else 1
+        # ZeRO-2 params whose broadcast from their owner waits for launch(), after the step's collectives
+        self._deferred = [] if DEFER and group is None and self.world_size > 1 else None
+        # Reuse only optimizer-owned storage, after every gradient reduction has drained.
+        self._reuse_buffers = os.environ.get("NORMUON_REUSE_BUFFERS", "0") == "1"
         # custom sizing requires 8 GPUs and the upstream 16-layer matrices
         params = list(params)
         layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
@@ -607,7 +678,7 @@ class NorMuon(torch.optim.Optimizer):
         # BF16 weights (p.master): FP32 master of this rank's shard from the FP32 init, FP32 grads in one
         # padded stacked buffer per group (reduce-scattered in place) and the BF16 params as rows of
         # another (all-gathered in place)
-        rank = dist.get_rank() if dist.is_initialized() else 0
+        rank = dist.get_rank(group) if dist.is_initialized() else 0
         self._flat, self._pflat = {}, {}
         for i, group in enumerate(self.param_groups):
             ps, lo = group["params"], rank * group["chunk_size"]
@@ -616,18 +687,38 @@ class NorMuon(torch.optim.Optimizer):
             if lo < len(ps):
                 group["master"] = torch.stack(
                     [p.fp32 for p in ps[lo : lo + group["chunk_size"]]]
-                )
+                ).to(ps[0].device)
             shape = (group["chunk_size"] * self.world_size, *ps[0].shape)
-            self._flat[i] = torch.zeros(shape, dtype=torch.float32, device=ps[0].device)
+            zero2 = ZERO2 and self.world_size > 1
+            group["zero2"] = zero2  # grads arrive reduced into this rank's rows (reduce_to_owner)
+            rows = (group["chunk_size"], *ps[0].shape) if zero2 else shape
+            self._flat[i] = torch.zeros(rows, dtype=torch.float32, device=ps[0].device)
             self._pflat[i] = torch.zeros(shape, dtype=ps[0].dtype, device=ps[0].device)
             for k, p in enumerate(ps):
                 self._pflat[i][k].copy_(p.detach())
-                p.data, p.main_grad, p.fresh = self._pflat[i][k], self._flat[i][k], True
+                p.data, p.fresh = self._pflat[i][k], True
+                if zero2:
+                    own = lo <= k < lo + group["chunk_size"]
+                    p.main_grad = self._flat[i][k - lo] if own else None
+                    r = k // group["chunk_size"]
+                    p.owner = dist.get_global_rank(self.group, r) if self.group else r
+                else:
+                    p.main_grad = self._flat[i][k]
+                    p.acc = (self._flat[i], k)
                 del p.fp32
         # by index: load_state_dict replaces the group dicts
         self._group_of = {
             p: i for i, g in enumerate(self.param_groups) for p in g["params"]
         }
+
+    def launch(self):
+        """Broadcast the updated ZeRO-2 rows from their owners in block order. Call after the step's
+        last collective: later ones on this communicator would queue behind the broadcasts."""
+        for p in sorted(self._deferred, key=lambda p: getattr(p, "block", -1)):
+            work = dist.broadcast(p.data, p.owner, group=self.group, async_op=True)
+            _bcast.setdefault(getattr(p, "block", -1), []).append(work)
+        self._deferred.clear()
+        sync_params(-1)
 
     def reset(self):
         # expose a reset for clearing buffers
@@ -647,6 +738,11 @@ class NorMuon(torch.optim.Optimizer):
 
         param_groups = []
         for module_name, group_params in groups.items():
+            if self.group is not None and self.world_size == 1:
+                # rank-local params (sharded experts): one group per matrix stack, so the step's
+                # stacked grads, updates and Newton-Schulz buffers stay one layer's size
+                param_groups += [dict(params=[p], chunk_size=1) for p in group_params]
+                continue
             chunk_size = (len(group_params) + self.world_size - 1) // self.world_size
             param_groups.append(dict(params=group_params, chunk_size=chunk_size))
 
@@ -682,7 +778,9 @@ class NorMuon(torch.optim.Optimizer):
     def step(self):
         # Efficient distributed step by @YouJiacheng, @KonstantinWilleke, @alexrgilbert,
         # @adricarda, @tuttyfrutyee, @vdlad, @ryanyang0, @vagrawal, @varunneal, @chrisjmccormick
-        rank = dist.get_rank()
+        if self._deferred is not None:  # the last step's broadcasts (no-op once every block ran forward)
+            sync_params()
+        rank = dist.get_rank(self.group)
         group_infos = []
         for group in self.param_groups:
             params: list[Tensor] = group["params"]
@@ -691,12 +789,21 @@ class NorMuon(torch.optim.Optimizer):
 
             chunk_size = group["chunk_size"]
             flat = self._flat.get(self._group_of[params[0]])
+            if flat is not None and group.get("zero2"):  # already averaged into this rank's rows
+                _drain()
+                for p in params:
+                    p.fresh = True
+                # No collective remains for these rows. After step(), fresh=True
+                # makes the next backward overwrite the consumed gradient rows.
+                group_infos.append(dict(grad_source=flat, reduce_future=_Done()))
+                continue
             if flat is not None:  # BF16 weights: FP32 grads already stacked
                 for p in params:
                     p.fresh = True  # the next accumulation overwrites, after this reduce-scatter
                 grad_chunk = torch.empty_like(flat[:chunk_size])
                 reduce_future = dist.reduce_scatter_tensor(
-                    grad_chunk, flat, op=dist.ReduceOp.AVG, async_op=True
+                    grad_chunk, flat, op=dist.ReduceOp.AVG, group=self.group,
+                    async_op=True,
                 )
                 group_infos.append(
                     dict(grad_chunk=grad_chunk, reduce_future=reduce_future)
@@ -717,7 +824,8 @@ class NorMuon(torch.optim.Optimizer):
             grad_chunk = torch.empty_like(stacked_grads[:chunk_size])
 
             reduce_future = dist.reduce_scatter_tensor(
-                grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, async_op=True
+                grad_chunk, stacked_grads, op=dist.ReduceOp.AVG, group=self.group,
+                async_op=True,
             )
 
             group_infos.append(dict(grad_chunk=grad_chunk, reduce_future=reduce_future))
@@ -729,7 +837,12 @@ class NorMuon(torch.optim.Optimizer):
             info["reduce_future"].wait()
 
             params = group["params"]
-            grad_chunk = info["grad_chunk"]
+            if "grad_source" in info:
+                grad_chunk = info.pop("grad_source")
+                if not self._reuse_buffers:
+                    grad_chunk = grad_chunk.clone()
+            else:
+                grad_chunk = info["grad_chunk"]
             # BF16 weights: FP32 grads, momentum and update math on the FP32 master
             master = getattr(params[0], "master", False)
             chunk_size = group["chunk_size"]
@@ -814,9 +927,9 @@ class NorMuon(torch.optim.Optimizer):
             if num_params == 0:
                 v_chunk = updated_grads
             else:
-                v_chunk = polar_express(
-                    updated_grads, split_baddbmm=(ref_param.label == "mlp")
-                )
+                v_chunk = polar_express(  # 3D params (MoE experts): one matrix per leading index
+                    updated_grads.flatten(0, -3), split_baddbmm=(ref_param.label == "mlp")
+                ).view(updated_grads.shape)
 
             # Note that the head orientation in O is transposed relative to QKV, so red_dim
             # is 'incorrect' for O. However, correcting this showed no improvement. @chrisjmccormick
@@ -830,7 +943,14 @@ class NorMuon(torch.optim.Optimizer):
             v_chunk = v_chunk.view(grad_shape)
 
             # # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
-            updated_params = torch.empty_like(grad_chunk, dtype=params[0].dtype)
+            flat = self._pflat.get(self._group_of[params[0]])
+            direct_publish = (
+                self._reuse_buffers and self._deferred is not None and group.get("zero2")
+            )
+            updated_params = (
+                flat[start_idx : start_idx + chunk_size]
+                if direct_publish else torch.empty_like(grad_chunk, dtype=params[0].dtype)
+            )
             if num_params > 0:
                 # Work on a stacked copy to avoid touching original params; BF16 weights update the
                 # persistent FP32 master of this rank's shard instead (ZeRO-1)
@@ -855,10 +975,19 @@ class NorMuon(torch.optim.Optimizer):
                 param_chunk = torch.zeros_like(v_chunk)
 
             updated_params[:num_params].copy_(param_chunk)
-            if num_params < chunk_size:
+            if num_params < chunk_size and not direct_publish:
                 updated_params[num_params:].zero_()
 
-            flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
+            # These workspaces are not inputs to the parameter collective.
+            # In ZeRO-2 no group_infos entry owns them after this point.
+            del grad_chunk, updated_grads, v_chunk
+
+            if self._deferred is not None and group.get("zero2"):  # owners broadcast in launch()
+                # Only actual parameters are broadcast; padding rows stay untouched.
+                if not direct_publish:
+                    flat[start_idx : start_idx + chunk_size].copy_(updated_params)
+                self._deferred += params
+                continue
             stacked_params = (
                 torch.empty(
                     (padded_num_params, *param_shape),
@@ -870,7 +999,7 @@ class NorMuon(torch.optim.Optimizer):
             )
 
             gather_future = dist.all_gather_into_tensor(
-                stacked_params, updated_params, async_op=True
+                stacked_params, updated_params, group=self.group, async_op=True
             )
 
             all_gather_infos.append(
@@ -932,10 +1061,8 @@ class DistAdam(torch.optim.Optimizer):
             if getattr(p, "master", False):
                 n, w = len(chunk), getattr(p, "fp32", p)
                 self.state[p]["master"] = (
-                    (w if p.numel() < 1024 else w[rank * n : (rank + 1) * n])
-                    .float()
-                    .clone()
-                )
+                    w if p.numel() < 1024 else w[rank * n : (rank + 1) * n]
+                ).to(p.device, torch.float32, copy=True)
                 if hasattr(p, "fp32"):
                     del p.fp32
         # DistributedAdam implementation by @vagrawal, @akash5474
@@ -1187,6 +1314,7 @@ class CausalSelfAttention(nn.Module):
         self.dim = dim
         self.hdim = num_heads * head_dim
         self.qk_norm = self.gates = True  # model-track ablations
+        self.diff = None  # modded_diffattn.DiffLambda: differential attention
 
         assert self.hdim == self.dim, "num_heads * head_dim must equal model_dim"
         std = self.dim**-0.5
@@ -1233,7 +1361,7 @@ class CausalSelfAttention(nn.Module):
         )
 
         q, k, v = (
-            F.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x))
+            fp8.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x), self.training)
             .view(B, T, 3 * self.num_heads, self.head_dim)
             .chunk(3, dim=-2)
         )
@@ -1270,7 +1398,12 @@ class CausalSelfAttention(nn.Module):
         )
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
-        y = medium_attention(q, k, v, seqlens, bm_size, attn_scale)
+        attend = lambda q, k, v: medium_attention(q, k, v, seqlens, bm_size, attn_scale)
+        y = (
+            attend(q, k, v)
+            if self.diff is None
+            else diff_attention(q, k, v, self.diff(), self.diff.init, attend)
+        )
         y = y.view(B, T, self.num_heads, self.head_dim)
         gate = torch.sigmoid(
             self.attn_gate(x[..., : self.attn_gate.weight.size(-1)])
@@ -1281,8 +1414,8 @@ class CausalSelfAttention(nn.Module):
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side
-        y = F.linear(
-            y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y)
+        y = fp8.linear(
+            y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y), self.training
         )  # sa_lambdas[1] pre-multiplied to O @shenberg
         return y
 
@@ -1310,7 +1443,7 @@ class MLP(nn.Module):
             self.c_proj.zero_()  # zero init suggested by @Grad62304977
 
     def forward(self, x: Tensor):
-        x = F.linear(x, self.c_fc.type_as(x))
+        x = fp8.linear(x, self.c_fc.type_as(x), self.training)
         if self.kind == "swiglu":
             a, b = x.chunk(2, dim=-1)
             x = F.silu(a) * b
@@ -1320,8 +1453,79 @@ class MLP(nn.Module):
             x = F.relu(
                 x
             ).square()  # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
-        x = F.linear(x, self.c_proj.T.type_as(x))
+        x = fp8.linear(x, self.c_proj.T.type_as(x), self.training)
         return x
+
+
+@torch.compile(dynamic=False, fullgraph=True, options={"emulate_precision_casts": True})
+def _blend_fwd(*args):
+    y = args[0] * args[1]
+    for i in range(2, len(args), 2):
+        y = y + args[i] * args[i + 1]
+    return y
+
+
+@torch.compile(dynamic=False, fullgraph=True)
+def _blend_bwd(g, scales, ts):
+    return [(g.float() * s).to(g.dtype) for s in scales], [g * t for t in ts]
+
+
+class _Blend(torch.autograd.Function):
+    """Eager's l0 * t0 + l1 * t1 + ... (FP32 0-dim l, BF16 t) bit for bit in one kernel that rounds
+    each step as eager does (emulate_precision_casts, in these graphs only). One backward kernel
+    writes the tensor grads and the products whose eager sums are the scalar grads (autograd's
+    sum_to). Eager g * l keeps a CPU scalar's FP32 value but casts a CUDA 0-dim l to BF16 first."""
+
+    @staticmethod
+    def forward(ctx, *args):
+        ctx.save_for_backward(*args)
+        return _blend_fwd(*args)
+
+    @staticmethod
+    def backward(ctx, g):
+        args = ctx.saved_tensors
+        scales = [lam if lam.is_cpu else lam.to(g.dtype) for lam in args[::2]]
+        grads, prods = _blend_bwd(g, scales, args[1::2])
+        return tuple(v for p, gt in zip(prods, grads) for v in (p.sum(), gt))
+
+
+@torch.compiler.disable
+def _fused_blend(first, x, x0, x02, resid, w):
+    if first:
+        return _Blend.apply(resid + w[0], x, w[1], x02)
+    return _Blend.apply(resid, x, w[0], x0, w[1], x02)
+
+
+@torch.compiler.disable
+def _eager_block(module, *args, ckpt=True, blend=None):
+    # Create AND call the optimized bound method outside the outer Dynamo trace.
+    # Passing module._compiled through that trace can unwrap it back to Python;
+    # changing disable(recursive=...) alone does not preserve the compiled child.
+    if not hasattr(module, "_compiled"):
+        module._compiled = torch.compile(module._forward, dynamic=False, fullgraph=True)
+    sync_params(module.layer_idx)
+    if blend is not None:
+        # Keep the arithmetic eager and the compiled block unchanged. Only move
+        # the save/recompute boundary: otherwise autograd retains both the
+        # unblended block output (for scalar gradients) and its blended copy.
+        def run(x, attn_args, x0, x02, resid, x0_weights):
+            if FUSED_BLEND:
+                x = _fused_blend(module.layer_idx == 0, x, x0, x02, resid, x0_weights)
+            elif module.layer_idx == 0:
+                x = (resid + x0_weights[0]) * x + x0_weights[1] * x02
+            else:
+                x = resid * x + x0_weights[0] * x0 + x0_weights[1] * x02
+            return module._compiled(x, attn_args)
+        if not ckpt:
+            return run(*args, *blend)
+        return torch.utils.checkpoint.checkpoint(
+            run, *args, *blend, use_reentrant=False, context_fn=replay_context
+        )
+    if not ckpt:
+        return module._compiled(*args)
+    return torch.utils.checkpoint.checkpoint(
+        module._compiled, *args, use_reentrant=False, context_fn=replay_context
+    )
 
 
 class Block(nn.Module):
@@ -1332,15 +1536,37 @@ class Block(nn.Module):
         num_heads: int,
         layer_idx: int,
         mlp: str = "relu2",
+        moe: tuple | None = None,
     ):
         super().__init__()
         self.attn = CausalSelfAttention(dim, head_dim, num_heads, layer_idx)
-        self.mlp = MLP(dim, mlp)
+        self.layer_idx = layer_idx
+        # model track: MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
+        self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim, mlp)
 
-    def forward(self, x: Tensor, attn_args: AttnArgs):
+    def forward(self, x: Tensor, attn_args: AttnArgs, blend=None):
+        if CKPT == "eager" and self.training:
+            # eager checkpoint around this block's own compiled graph: everything the graph saves
+            # (incl. opaque autograd Functions' tensors, e.g. gathered sharded experts) is dropped
+            # and recomputed in backward, keeping only the block input. Blocks past --ckpt-frac run
+            # the same compiled graph without it (and wait for their deferred params the same way)
+            return _eager_block(self, x, attn_args, ckpt=self.layer_idx < CKPT_LAYERS, blend=blend)
+        assert blend is None, "residual blend recompute requires training with eager checkpoints"
+        if self.layer_idx >= CKPT_LAYERS:
+            return self._forward(x, attn_args)
+        if CKPT == "block" and self.training:
+            return torch.utils.checkpoint.checkpoint(
+                self._forward, x, attn_args, use_reentrant=False
+            )
+        return self._forward(x, attn_args)
+
+    def _forward(self, x: Tensor, attn_args: AttnArgs):
         x = x + self.attn(norm(x), attn_args)
-        x = x + self.mlp(norm(x))
-        return x
+        if CKPT == "mlp" and self.training:
+            return x + torch.utils.checkpoint.checkpoint(
+                lambda h: self.mlp(norm(h)), x, use_reentrant=False
+            )
+        return x + self.mlp(norm(x))
 
 
 # -----------------------------------------------------------------------------
@@ -1369,6 +1595,7 @@ class GPT(nn.Module):
         max_seq_len: int,
         mlp: str = "relu2",
         untie_ve: bool = False,
+        moe: tuple | None = None,
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -1399,7 +1626,10 @@ class GPT(nn.Module):
         for ve in self.value_embeds:
             ve.weight.label = "value_embed"
         self.blocks = nn.ModuleList(
-            [Block(model_dim, head_dim, num_heads, i, mlp) for i in range(num_layers)]
+            [
+                Block(model_dim, head_dim, num_heads, i, mlp, moe)
+                for i in range(num_layers)
+            ]
         )
         self.yarn = Yarn(head_dim, max_seq_len)
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
@@ -1498,8 +1728,15 @@ class GPT(nn.Module):
             False  # rotary position = index in the game instead of the packed batch
         )
         self.use_x0 = self.use_embed2 = self.softcap = self.use_key_offset = True
+        self.aux_detach = (
+            None  # first aux-head row, when those rows get stop-gradient features
+        )
         self.fp32_embed = False  # FP32 embedding/head state: cast lookups to BF16
         self.board = None  # modded_board branch, added at every position when set
+
+    def train(self, mode=True):  # eval forwards skip the eager checkpoints that wait per block
+        sync_params()
+        return super().train(mode)
 
     def forward(
         self,
@@ -1607,7 +1844,15 @@ class GPT(nn.Module):
         if self.doc_rope:
             cos, sin = cos[seqlens.positions], sin[seqlens.positions]
         skip_idx = 0
+        direct_owners = set()
         for i in range(self.num_layers):
+            mlp = self.blocks[i].mlp
+            if getattr(mlp, "kernel", None) == "scatter-accum":
+                # First-microbatch overwrite is captured at forward time: tied
+                # expert parameters must not contribute twice in this forward.
+                for p in (mlp.up, mlp.down):
+                    assert id(p) not in direct_owners, "direct accumulation requires one use per expert parameter"
+                    direct_owners.add(id(p))
             attn_args = AttnArgs(
                 ve=ve[i],
                 sa_lambdas=sa_lambdas[i],
@@ -1631,15 +1876,21 @@ class GPT(nn.Module):
                 skip_idx += 1
                 skip = skip_connections.pop()
                 x = x + skip_gate_out * (skip if self.use_skips else skip * 0)
-            if i == 0:
+            if CKPT_BLEND and CKPT == "eager" and self.training:
+                x = self.blocks[i](x, attn_args, blend=(x0, x02, resid_lambdas[i], x0_lambdas[i]))
+            elif FUSED_BLEND and CKPT == "eager" and self.training:
+                x = _fused_blend(i == 0, x, x0, x02, resid_lambdas[i], x0_lambdas[i])
+                x = self.blocks[i](x, attn_args)
+            elif i == 0:
                 x = (resid_lambdas[0] + x0_lambdas[0, 0]) * x + x0_lambdas[0, 1] * x02
+                x = self.blocks[i](x, attn_args)
             else:
                 x = (
                     resid_lambdas[i] * x
                     + x0_lambdas[i, 0] * x0
                     + x0_lambdas[i, 1] * x02
                 )
-            x = self.blocks[i](x, attn_args)
+                x = self.blocks[i](x, attn_args)
             if i in skip_in:
                 skip_connections.append(x)
             if i == backout_layer:
@@ -1650,6 +1901,12 @@ class GPT(nn.Module):
         x = norm(x)
 
         logits = self.lm_head(x)
+        if (
+            self.aux_detach
+        ):  # head rows from this index on (the aux heads) see stop-gradient features
+            k = self.aux_detach
+            aux = F.linear(x.detach(), self.lm_head.weight[k:].type_as(x))
+            logits = torch.cat((logits[..., :k], aux), -1)
         if not self.softcap:
             return logits
         return 23 * torch.sigmoid((logits + 5) / 7.5)
@@ -1753,9 +2010,13 @@ class TrainingManager:
             "embed2",
             "embed",
             "board",
+            "router",
+            "diff",
         ]
         scalar_labels = ["scalars"]
         muon_labels = ["attn_gate", "value_embed_gate", "attn", "mlp", "mlp_proj"]
+        muon_labels += ["moe", "moe_up", "mlp_shared", "mlp_shared_up"]
+        self.moe = [m for m in model.modules() if isinstance(m, MoE)]
         # model track: AdamW (base lr model.matrix_adam) for the attention / MLP matrices
         matrix_labels = (
             ["attn", "mlp", "mlp_proj"] if getattr(model, "matrix_adam", 0) else []
@@ -1773,8 +2034,12 @@ class TrainingManager:
         muon_params = [
             p for p in model.parameters() if getattr(p, "label", None) in muon_labels
         ]
+        local_labels = ["moe_sh", "moe_up_sh"]  # sharded experts: rank-local NorMuon
+        local_params = [
+            p for p in model.parameters() if getattr(p, "label", None) in local_labels
+        ]
         assert set(getattr(p, "label", None) for p in model.parameters()) <= set(
-            adam_labels + scalar_labels + muon_labels + matrix_labels
+            adam_labels + scalar_labels + muon_labels + matrix_labels + local_labels
         ), "All params must have label"
 
         self.adam_opt = DistAdam(
@@ -1797,6 +2062,14 @@ class TrainingManager:
             muon_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2
         )
         self.optimizers = [self.adam_opt, self.scalar_opt, self.muon_opt]
+        if local_params:
+            world = dist.get_world_size()
+            groups = [dist.new_group([r]) for r in range(world)]  # collective: every rank makes all
+            self.local_opt = NorMuon(
+                local_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2,
+                group=groups[dist.get_rank()],
+            )  # fmt: skip
+            self.optimizers.append(self.local_opt)
         if matrix_params:
             self.matrix_opt = DistAdam(
                 matrix_params,
@@ -1884,8 +2157,9 @@ class TrainingManager:
     def step_optimizers(self, step: int):
         step_lr = get_lr(step)
         muon_momentum = get_muon_momentum(step)
-        for group in self.muon_opt.param_groups:
-            group["momentum"] = muon_momentum
+        for opt in (self.muon_opt, getattr(self, "local_opt", None)):
+            for group in opt.param_groups if opt else ():
+                group["momentum"] = muon_momentum
 
         for opt in self.optimizers:
             if opt.freeze_timer > 0:
@@ -1900,9 +2174,20 @@ class TrainingManager:
                     if isinstance(opt, DistAdam):  # re-armed on the last micro-batch
                         opt.should_sync = False
 
+        # prop bias rule: full speed for the first 80% of training, then linearly to 0 at the end
+        # (DeepSeek-V3 stops bias updates in its final phase)
+        if self.moe:
+            n = args.num_iterations
+            scale = min(1.0, max(0.0, (n - step) / (0.2 * n)))
+            for m in self.moe:
+                m.rebalance(scale)
+
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()
             self.model.split_embed = True
+
+        if self.muon_opt._deferred:
+            self.muon_opt.launch()
 
     def start_transition(self, freeze_count=40):
         # freeze scalar weights during transition
@@ -1921,6 +2206,8 @@ class TrainingManager:
 
         # muon momentum buffers not in state dict
         self.muon_opt.reset()
+        if hasattr(self, "local_opt"):
+            self.local_opt.reset()
         self.model.split_embed = False
 
         self.ws_short, self.ws_long = get_ws(0)

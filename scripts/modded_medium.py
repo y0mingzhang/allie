@@ -9,6 +9,8 @@ import numpy as np
 
 os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "4")
 os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+import math
+
 import torch
 import torch.distributed as dist
 from torch.nn import functional as F
@@ -19,8 +21,12 @@ from torch.nn.attention.flex_attention import (
 )
 import modded_arch
 import modded_board
+import modded_diffattn
+import modded_fp8
+import modded_moe
 import modded_medium_core as core
 from modded_runtime import prime_source_key
+from modded_smoe_tuned import finish_direct_accum
 
 RUNTIME_SOURCE_KEY = prime_source_key()
 
@@ -34,7 +40,13 @@ MASTER_LABELS = (
     "attn",
     "mlp",
     "mlp_proj",
-)  # FP32 matrices that --bf16-weights stores in BF16
+    "moe",
+    "moe_up",
+    "mlp_shared",
+    "mlp_shared_up",
+    "moe_sh",
+    "moe_up_sh",
+)  # FP32 matrices that --bf16-weights stores in BF16 (MoE experts included; the router stays FP32)
 flex_kernel = torch.compile(flex_attention, dynamic=False)
 BOARD = False  # set by create_model when the model has a board branch; make_context then encodes
 
@@ -66,6 +78,13 @@ class Config:
     bf16_weights: bool = (
         False  # BF16 attention/MLP matrices, FP32 grads and master shards
     )
+    ckpt: str = ""  # activation checkpointing: "mlp" | "block" | "eager" (training only)
+    zero2: bool = False  # BF16-weight grads reduced to their NorMuon owner in backward (ZeRO-2)
+    zero2_bf16: bool = False  # that reduce in BF16 (half the traffic, not bit-identical)
+    ckpt_frac: float = 1.0  # checkpoint only the first ceil(frac * layers) blocks (selective recompute)
+    ckpt_blend: bool = False  # include the eager residual blend in each block checkpoint
+    fused_blend: bool = False  # --ckpt eager's residual blends as fused kernels (bitwise eager)
+    fp8: str = ""  # "dense": FP8 forwards of attention/MLP/shared-expert matmuls in training (modded_fp8)
     arch: dict = field(
         default_factory=dict
     )  # model-track switches (modded_arch.DEFAULTS)
@@ -153,7 +172,8 @@ def make_context(inputs, short_window, long_window, backend="flex", host=None):
         torch.from_numpy(
             modded_board.encode(inputs.cpu().numpy() if host is None else host)
         )
-        .to(flat.device)
+        .pin_memory()
+        .to(flat.device, non_blocking=True)
         .flatten(0, 1)
         if BOARD
         else None
@@ -214,6 +234,23 @@ def create_model(cfg, device="cuda"):
         # Keep that warmup out of module import so CPU inspection still works.
         torch.empty(1, device=device, requires_grad=True).backward()
     arch = modded_arch.resolve(cfg.arch)
+    assert cfg.ckpt in ("", "mlp", "block", "eager")
+    core.CKPT = cfg.ckpt
+    core.CKPT_LAYERS = math.ceil(cfg.ckpt_frac * cfg.layers)
+    assert not cfg.ckpt_blend or cfg.ckpt == "eager"
+    core.CKPT_BLEND = cfg.ckpt_blend
+    assert not cfg.fused_blend or cfg.ckpt == "eager"
+    core.FUSED_BLEND = cfg.fused_blend
+    assert not cfg.zero2 or cfg.bf16_weights, "--zero2 needs --bf16-weights"
+    core.ZERO2, core.ZERO2_BF16 = cfg.zero2, cfg.zero2_bf16
+    assert cfg.fp8 in ("", "dense", "dense-dgrad", "dense-all")
+    modded_fp8.DENSE = bool(cfg.fp8)
+    modded_fp8.BWD = {"dense-dgrad": ("dgrad",), "dense-all": ("dgrad", "wgrad")}.get(cfg.fp8, ())
+    assert not cfg.zero2_bf16 or cfg.zero2
+    modded_moe.BLOCK_RECOMPUTE = cfg.ckpt == "eager"
+    assert arch["moe_kernel"] != "scatter-accum" or cfg.bf16_weights, "direct expert accumulation requires BF16 masters"
+    assert not (arch["moe_kernel"] == "scatter-accum" and arch["moe_shard"]), "sharded experts reduce-scatter their grads"
+    assert not (arch["moe_kernel"] == "scatter-accum" and cfg.zero2), "--zero2 reduces grads before accumulating"
     global BOARD
     BOARD = bool(
         arch["board"]
@@ -227,7 +264,12 @@ def create_model(cfg, device="cuda"):
         cfg.max_tokens,
         mlp=arch["mlp"],
         untie_ve=arch["untie_ve"],
+        moe=modded_arch.moe_dims(cfg.width, arch),
     ).to(device)
+    for i, block in enumerate(model.blocks):
+        for p in block.parameters():
+            p.block = i
+    core.DEFER = cfg.zero2 and cfg.ckpt == "eager"
     model.use_clock, model.use_elo = cfg.clock, cfg.elo
     model.use_feats = cfg.feats
     model.doc_rope = cfg.doc_rope
@@ -237,6 +279,9 @@ def create_model(cfg, device="cuda"):
             model.yarn.base_scale = cfg.head_dim**-0.5
         model.yarn.reset()
     model.use_x0, model.use_embed2 = arch["x0"], arch["embed2"]
+    model.aux_detach = (
+        VOCAB if arch["aux_detach"] else None
+    )  # aux head rows start at VOCAB
     model.softcap, model.use_key_offset = arch["softcap"], arch["key_offset"]
     for block in model.blocks:
         block.attn.qk_norm, block.attn.gates = arch["qk_norm"], arch["gates"]
@@ -263,6 +308,9 @@ def create_model(cfg, device="cuda"):
         m.weight.fp32_state = True
     if arch["board"]:
         model.board = modded_board.build(arch["board"], cfg.width).to(device)
+    if arch["diff_attn"]:
+        for i, block in enumerate(model.blocks):
+            block.attn.diff = modded_diffattn.DiffLambda(cfg.head_dim, i).to(device)
     model.use_value_embeds, model.use_skips, model.use_smear = (
         cfg.value_embeds,
         cfg.skips,
@@ -275,19 +323,17 @@ def create_model(cfg, device="cuda"):
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)) and m not in fp32:
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
-        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
-            # the FP32 init seeds the optimizers' master shards (they drop it); grads summed in FP32
-            p.fp32, p.data, p.master, p.main_grad = (
-                p.data,
-                p.data.bfloat16(),
-                True,
-                None,
-            )
-            p.register_post_accumulate_grad_hook(core.accumulate_fp32)
-    for p in model.parameters():
+        if getattr(p, "label", "").endswith("_sh"):
+            continue  # sharded experts: each rank holds its own rows (broadcast before slicing)
         dist.broadcast(p.detach(), 0)
-        if hasattr(p, "fp32"):
-            dist.broadcast(p.fp32, 0)
+    for p in model.parameters():
+        if cfg.bf16_weights and getattr(p, "label", None) in MASTER_LABELS:
+            # the FP32 init seeds the optimizers' master shards (they drop it) from host memory, so the
+            # GPU never holds the FP32 model next to the BF16 one; grads summed in FP32
+            p.fp32, p.data, p.master, p.main_grad = p.data.cpu(), p.data.bfloat16(), True, None
+            direct = arch["moe_kernel"] == "scatter-accum" and getattr(p, "label", None) in ("moe", "moe_up")
+            hook = core.zero2_hook if cfg.zero2 else core.accumulate_fp32
+            p.register_post_accumulate_grad_hook(finish_direct_accum if direct else hook)
     if torch.device(device).type == "cuda":
         torch.cuda.synchronize()
     return model
@@ -398,14 +444,14 @@ class TrainingManager(core.TrainingManager):
         self.schedule_step = step
         self.batch_size = core.get_bs(step)
 
-    def rank_state_dict(self):
+    def rank_state_dict(self, snapshot=cpu_copy):
         # Checkpoint only at completed optimizer boundaries. Even boundaries
         # may legitimately retain gradients for the next odd Adam update.
         for opt in (self.adam_opt, self.scalar_opt):
             assert not opt._reduce_scatter_futures, (
                 "Checkpoint before optimizer collectives completed"
             )
-        return cpu_copy(
+        return snapshot(
             dict(
                 config=asdict(self.cfg),
                 rank=dist.get_rank(),
@@ -493,5 +539,5 @@ def config_dict(cfg):
         upstream_commit=COMMIT,
         output_support=[MOVE_START, MOVE_END],
         attention_backend="flex",
-        fp8=False,
+        fp8=cfg.fp8 or False,
     )

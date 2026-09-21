@@ -1,6 +1,7 @@
 """Recoverable training of the pinned medium recipe on original chess rows."""
 
 import argparse
+import ast
 from dataclasses import asdict
 import hashlib
 import json
@@ -15,7 +16,13 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import triton
-from modded_arch import extra_flops
+from modded_arch import attn_factor, extra_flops
+from modded_moe import STATS
+from modded_moe import full_state, local_state
+import modded_moe
+import modded_smoe_aligned_linear
+import modded_smoe_swiglu
+from modded_medium_core import sync_params
 from modded_medium import (
     Config,
     TrainingManager,
@@ -32,6 +39,7 @@ from modded_medium import (
 )
 from lm_data import Packed
 from lm_checkpoint import atomic_save, rng_state, restore_rng
+from modded_checkpoints import AsyncSaver, durable_save, publish
 from modded_checkpoints import prune as prune_checkpoints
 
 ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[1]))
@@ -82,6 +90,14 @@ def to_gpu(x):
     return torch.from_numpy(x).pin_memory().to("cuda", non_blocking=True)
 
 
+def moe_stats(manager):
+    """Per MoE layer, over the last step (modded_moe.STATS)."""
+    if not manager.moe:
+        return {}
+    stats = torch.stack([m.stats for m in manager.moe]).tolist()
+    return {f"moe_{k}": [round(x[i], 4) for x in stats] for i, k in enumerate(STATS)}
+
+
 def useful_flops(rows, cfg, short_window, long_window):
     x = rows[:, :-1]
     pos = np.arange(x.shape[1])[None, :]
@@ -98,7 +114,7 @@ def useful_flops(rows, cfg, short_window, long_window):
     per_token = 24 * layers * d * d + 2 * d * 2432 + 2 * (gates * heads * 16 + 64)
     per_token += extra_flops(cfg.arch, d, layers)  # model-track branches (0 by default)
     pairs = (layers - long) * short_pairs + long * long_pairs
-    return 3 * (x.size * per_token + 4 * d * pairs)
+    return 3 * (x.size * per_token + 4 * d * pairs * attn_factor(cfg.arch))
 
 
 def main():
@@ -125,10 +141,20 @@ def main():
         default=0,
         help="0 keeps all; otherwise retain latest N>=2 plus best",
     )
+    p.add_argument(
+        "--async-checkpoint",
+        action="store_true",
+        help="write checkpoints from a thread; pointers move once every rank's files are durable",
+    )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
-    p.add_argument("--profile", type=int, default=0, help="profile this step (CUDA kernels) into the log")
+    p.add_argument(
+        "--profile",
+        type=int,
+        default=0,
+        help="profile this step (CUDA kernels) into the log",
+    )
     p.add_argument("--resume")
     p.add_argument("--data", default="/scratch/yimingz3/allie/lichess_tokens_v2")
     p.add_argument(
@@ -166,6 +192,62 @@ def main():
         "--bf16-weights",
         action="store_true",
         help="BF16 attention/MLP matrices; FP32 grads and master shards in the optimizers",
+    )
+    p.add_argument(
+        "--zero2",
+        action="store_true",
+        help="with --bf16-weights: grads reduced to their NorMuon owner during backward (ZeRO-2)",
+    )
+    p.add_argument(
+        "--zero2-bf16",
+        action="store_true",
+        help="with --zero2: reduce the grads in BF16 (half the traffic; not bit-identical)",
+    )
+    p.add_argument(
+        "--ckpt-blend",
+        action="store_true",
+        help="with --ckpt eager: recompute residual blends too",
+    )
+    p.add_argument(
+        "--fused-blend",
+        action="store_true",
+        help="with --ckpt eager: residual blends as fused kernels, bitwise equal to eager",
+    )
+    p.add_argument(
+        "--moe-combine",
+        default="",
+        help="scatter-(dual)gather MoE combine as FP32 adds in this top-k order, e.g. '(0,1,2,3)'"
+        " (bitwise the cuBLAS bmm for the order test_moe_nongemm.py orders reports); default the bmm",
+    )
+    p.add_argument(
+        "--moe-topk-kernel",
+        action="store_true",
+        help="MoE router top-ks (routing and stats) in one Triton pass, bitwise torch.topk",
+    )
+    p.add_argument(
+        "--moe-swiglu-epilogue",
+        action="store_true",
+        help="scatter-dualgather SwiGLU experts: the activation in the up GEMM's epilogue and its"
+        " backward in the down dgrad's (modded_smoe_swiglu), bitwise the unfused kernels",
+    )
+    p.add_argument(
+        "--ckpt-frac",
+        type=float,
+        default=1.0,
+        help="with --ckpt: checkpoint only the first ceil(frac * layers) blocks (selective recompute)",
+    )
+    p.add_argument(
+        "--fp8",
+        choices=("", "dense", "dense-dgrad", "dense-all"),
+        default="",
+        help="dense: FP8 e4m3 forwards (dynamic tensorwise scales) of attention/MLP/shared-expert matmuls in training;"
+        " dense-dgrad adds FP8 input gradients, dense-all FP8 weight gradients too",
+    )
+    p.add_argument(
+        "--ckpt",
+        default="",
+        choices=("", "mlp", "block", "eager"),
+        help="activation checkpointing (recompute in backward) of each block's MLP or whole block",
     )
     p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
@@ -210,9 +292,31 @@ def main():
     start = time.monotonic()
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+    snap = os.environ.get("MEMSNAP")
+    if snap:
+        from modded_memsnap import start as start_memory_trace
+
+        start_memory_trace(snap, rank)
     dist.init_process_group("nccl")
+    cpu = dist.new_group(
+        backend="gloo"
+    )  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
+    # deterministic mode NaN-fills every fresh allocation (~1.5K fills/step); skipping it was bit-identical on the
+    # reference config; new kernels keep a poisoned-allocation test
+    torch.utils.deterministic.fill_uninitialized_memory = False
+    modded_smoe_aligned_linear.COMBINE = ast.literal_eval(a.moe_combine or "None")
+    if a.moe_combine:
+        leaves = lambda o: (
+            [o] if isinstance(o, int) else [x for c in o for x in leaves(c)]
+        )
+        k = json.loads(a.arch).get("moe", [0, 0])[1]
+        assert sorted(leaves(modded_smoe_aligned_linear.COMBINE)) == list(range(k)), (
+            "--moe-combine must use each top-k slot once"
+        )
+    modded_moe.TOPK_KERNEL = a.moe_topk_kernel
+    modded_smoe_swiglu.EPILOGUE = a.moe_swiglu_epilogue
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
@@ -239,7 +343,9 @@ def main():
     cfg.clock, cfg.elo, cfg.input_lr_mul = a.clock, a.elo, a.input_lr_mul
     cfg.feats = a.clock_feats
     cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
-    cfg.bf16_weights = a.bf16_weights
+    cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
+    cfg.zero2_bf16, cfg.ckpt_frac, cfg.fp8 = a.zero2_bf16, a.ckpt_frac, a.fp8
+    cfg.ckpt_blend, cfg.fused_blend = a.ckpt_blend, a.fused_blend
     cfg.arch = json.loads(a.arch)
     cfg.value_embeds, cfg.skips, cfg.smear = (
         not a.no_value_embeds,
@@ -254,7 +360,12 @@ def main():
         for opt in manager.optimizers:
             for group in opt.param_groups:
                 group["weight_decay"] *= a.wd_scale
-    net = torch.compile(model, dynamic=False, fullgraph=True)
+    # sharded MoE experts make every forward a collective (all ranks validate) and run their expert
+    # block as an eager checkpoint, which needs graph breaks
+    sharded = any(getattr(m, "sharded", False) for m in model.modules())
+    net = torch.compile(
+        model, dynamic=False, fullgraph=not sharded and a.ckpt != "eager"
+    )
     if a.mix:
         from chessmix import Prefetch, Sampler
 
@@ -276,7 +387,7 @@ def main():
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    vrows = val.rows(val_idx) if rank == 0 else None
+    vrows = val.rows(val_idx) if rank == 0 or sharded else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
     runtime = dict(
         torch=torch.__version__,
@@ -345,6 +456,21 @@ def main():
             assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
                 f"Resume changes {key}"
             )
+        assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, (
+            "Resume changes ckpt_blend"
+        )
+        assert shared["args"].get("fused_blend", False) == a.fused_blend, (
+            "Resume changes fused_blend"
+        )
+        for key, default in (
+            ("moe_combine", ""),
+            ("moe_topk_kernel", False),
+            ("fp8", ""),
+            ("zero2_bf16", False),
+        ):
+            assert shared["args"].get(key, default) == vars(a)[key], (
+                f"Resume changes {key}"
+            )
         if a.wsd_continue_from:
             from modded_continuation import prepare_continuation
 
@@ -386,7 +512,9 @@ def main():
             assert shared["runtime"] == runtime, (
                 "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
             )
-        model.load_state_dict(shared["model"])
+        model.load_state_dict(
+            local_state(model, shared["model"])
+        )  # sharded experts: own rows
         manager.load_rank_state_dict(local["manager"])
         train.load_state_dict(local["data"])
         restore_rng(local["rng"])
@@ -439,8 +567,11 @@ def main():
         )
         print(json.dumps(metadata | {"val_indices": len(val_idx)}), flush=True)
 
+    saver = AsyncSaver(cpu) if a.async_checkpoint else None
+
     def save(step, metrics):
         checkpoint_start = time.monotonic()
+        waited = saver.flush() if saver else 0.0
         total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
         dist.all_reduce(total_flops)
         identifier = [f"step-{step:08d}-{uuid.uuid4().hex[:8]}" if rank == 0 else None]
@@ -449,21 +580,28 @@ def main():
         if rank == 0:
             directory.mkdir(parents=True)
         dist.barrier()
+        host, write = (saver.snapshot, saver.add) if saver else (cpu_copy, atomic_save)
         # Save each rank independently: its sharded moments and pending grads
         # cannot be reconstructed from rank0's optimizer state.
-        atomic_save(
+        write(
             dict(
-                manager=manager.rank_state_dict(),
+                manager=manager.rank_state_dict(host),
                 rng=rng_state(),
                 data=train.state_dict(),
                 useful_training_flops=flops_local,
             ),
             directory / f"rank{rank}.pt",
         )
+        sync_params()
+        state = full_state(
+            model, model.state_dict()
+        )  # collective when experts are sharded
         if rank == 0:
-            atomic_save(
+            # its only CPU tensors are full_state's fresh gathers of sharded experts
+            state = saver.snapshot(state, owned=True) if saver else cpu_copy(state)
+            write(
                 dict(
-                    model=cpu_copy(model.state_dict()),
+                    model=state,
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=source_hashes,
@@ -473,7 +611,7 @@ def main():
                     metrics=metrics,
                     tokens=train.seen * 1024,
                     useful_training_flops=total_flops.item(),
-                    inference=cpu_copy(
+                    inference=host(
                         dict(
                             split_embed=model.split_embed,
                             ws_short=manager.ws_short,
@@ -491,19 +629,36 @@ def main():
                 ),
                 directory / "model.pt",
             )
+        names = ["last.pt"]
+        if step in fork_steps:
+            names.append(f"fork-{step}.pt")
+        if metrics is not None and metrics["move_ce"] <= best:
+            names.append("best.pt")
+        if saver:
+            torch.cuda.synchronize()  # completes the snapshot's pinned copies
+            seconds = time.monotonic() - checkpoint_start
+
+            def commit():
+                publish(out, directory, step, world, names, durable_save)
+                removed = prune_checkpoints(out, a.keep_checkpoints, directory)
+                append(
+                    "checkpoints.jsonl",
+                    {
+                        "step": step,
+                        "seconds": seconds,
+                        "wait_seconds": waited,
+                        "durable_seconds": time.monotonic() - checkpoint_start,
+                        "host_bytes": saver.nbytes,
+                        "directory": str(directory.relative_to(out)),
+                        "removed": removed,
+                    },
+                )
+
+            saver.start(commit if rank == 0 else None)
+            return
         dist.barrier()
         if rank == 0:
-            pointer = dict(
-                format="allie-modded-medium-1",
-                directory=str(directory.relative_to(out)),
-                step=step,
-                world_size=world,
-            )
-            atomic_save(pointer, out / "last.pt")
-            if step in fork_steps:
-                atomic_save(pointer, out / f"fork-{step}.pt")
-            if metrics is not None and metrics["move_ce"] <= best:
-                atomic_save(pointer, out / "best.pt")
+            publish(out, directory, step, world, names)
         dist.barrier()
         removed = (
             prune_checkpoints(out, a.keep_checkpoints, directory) if rank == 0 else []
@@ -527,9 +682,20 @@ def main():
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
     stop_reason = "steps"
     step = first
+    # MEMSNAP also dumps early OOMs; successful diagnostics stop before step3.
     for index in range(first, total_steps):
+        if snap and index == first + 2:
+            if rank == 0:
+                torch.cuda.memory._dump_snapshot(snap)
+            dist.barrier()
+            os._exit(0)
         if a.profile and index + 1 == a.profile:
-            prof = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA])
+            shapes = bool(os.environ.get("ALLIE_SHAPES"))
+            prof = torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA]
+                + [torch.profiler.ProfilerActivity.CPU] * shapes,
+                record_shapes=shapes,
+            )
             prof.__enter__()
         manager.advance_schedule(index)
         accum = manager.batch_size // (world * a.micro_batch * 1024)
@@ -589,11 +755,29 @@ def main():
             window_tokens += rows.shape[0] * world * 1024
         manager.step_optimizers(index)
         step = index + 1
+        if saver:
+            saver.poll()
         if a.profile and step == a.profile:
             torch.cuda.synchronize()
             prof.__exit__(None, None, None)
             if rank == 0:
-                print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=40), flush=True)
+                print(
+                    prof.key_averages().table(
+                        sort_by="self_cuda_time_total", row_limit=40
+                    ),
+                    flush=True,
+                )
+                if os.environ.get("ALLIE_TRACE"):
+                    prof.export_chrome_trace(os.environ["ALLIE_TRACE"])
+                if shapes:
+                    print(
+                        prof.key_averages(group_by_input_shape=True).table(
+                            sort_by="cuda_time_total",
+                            row_limit=60,
+                            max_name_column_width=40,
+                        ),
+                        flush=True,
+                    )
         if step % 25 == 0 or step == total_steps:
             stats = torch.cat(
                 (
@@ -621,6 +805,7 @@ def main():
                     split_embed=model.split_embed,
                     windows=[manager.ws_short * 128, manager.ws_long * 128],
                     max_memory_gb=torch.cuda.max_memory_allocated() / 1e9,
+                    **moe_stats(manager),
                     **(
                         dict(
                             time_ce=(stats[3] / stats[4]).item(),
@@ -651,15 +836,17 @@ def main():
                     or (a.stop_after and step >= a.stop_after)
                 )
             )
-            flag = torch.tensor(stop_code, device="cuda")
-            dist.all_reduce(flag, op=dist.ReduceOp.MAX)
-            stop_code = int(flag.item())
+            flag = torch.tensor(stop_code, device="cpu")
+            dist.all_reduce(flag, op=dist.ReduceOp.MAX, group=cpu)
+            stop_code = int(flag)
         metrics = None
         if stop_code != 2 and (
             step % a.eval_every == 0 or step == total_steps or stop_code
         ):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
+            if sharded and rank:
+                evaluate(net, manager, vrows, a.micro_batch)
             if rank == 0:
                 metrics = evaluate(net, manager, vrows, a.micro_batch)
                 best = min(best, metrics["move_ce"])
@@ -695,6 +882,8 @@ def main():
                 else "wall_clock_cap"
             )
             break
+    if saver:
+        saver.flush()
     if rank == 0:
         (out / "done.json").write_text(
             json.dumps(
@@ -713,4 +902,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        if os.environ.get("MEMSNAP"):
+            from modded_memsnap import dump_on_error
+
+            dump_on_error()
+        raise
