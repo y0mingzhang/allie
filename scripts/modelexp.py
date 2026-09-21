@@ -935,6 +935,19 @@ wave("lowrep3e17", "moe-v1-lowrep3e17", "mlr",
      "moe-v1 low-repetition MoE vs dense at 3e17 (16x768, E128 top-4 fixed router vs dense; mix capped at ~1.5x repetition)",
      "preempt4")
 
+# repetition test v2 (Codex review: v1 was not a clean test). Same buckets, same B_3 policy, same months, no history:
+# bucket weights use the disk counts at every pool_frac, so the two levels differ ONLY in pool size, i.e. repetition
+# scales exactly 1/pool_frac. low = pool_frac 1.0 (sampler accounting: share-weighted repetition 0.28, max bucket with
+# share >= 0.1% 1.5x, OTB), high = 0.125 (2.24, i.e. 8x). final_tokens is set per arm so pool_frac is exactly 1 / 0.125
+REP = lambda steps, f: dict(history=False, final_tokens=steps * 512 * 1024 / f)
+wave("rep3e17", "moe-v1-rep3e17", "mrp",
+     variants("3e17", b, {f"{m}{lev}": arm | REP(steps, f)
+                          for lev, f in (("low", 1.0), ("high", 0.125))
+                          for m, arm, steps in (("moe", S16D | dict(micro_batch=8), 4912),
+                                                ("dense", dict(arch=SHIP, bf16_weights=True), 4974))}),
+     "moe-v1 repetition test at 3e17: MoE (1.2B / 0.13B, E128 top-4, fixed router) and dense 16x768 at pool_frac 1 and 1/8",
+     "preempt4")
+
 wave(
     "moe1s",
     "moe-v1-smoke1",
