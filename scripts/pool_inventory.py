@@ -23,9 +23,10 @@ recipe INVENTORY {disk|full} TOKENS LABEL KIND [KEY=VALUE ...]
       hand cells= otb= engine= relative weights per format x Elo band (cells =
                               fmt:w,w,w,w/... over <1400, 1400-2000, 2000-2400, >=2400),
                               OTB x otb, engine a fixed share
-      topup base= p=          control (base: a replay of control on this pool, its realized
+      topup base= p= [elo= otb=]  control (base: a replay of control on this pool, its realized
                               passes per bucket) with every human game whose stronger player
-                              is >= 2400 raised to p passes; p=0: control as a table
+                              is >= elo (2400) raised to p passes, OTB games only if otb=1;
+                              p=0: control as a table
     Elo is the stronger player's (bucket max-Elo bin centre); OTB games fall in their
     format's cells.
 """
@@ -279,8 +280,8 @@ def hand(pool, total, cells, otb=1.0, engine=0.0):
     return w
 
 
-def topup(pool, total, base, p, minpool=200, base_sha256=None):
-    """Control with every human game whose stronger player is >= 2400 raised to p expected passes, never
+def topup(pool, total, base, p, minpool=200, base_sha256=None, elo=2400, otb=0):
+    """Control with every human game (OTB only if otb) whose stronger player is >= elo raised to p expected passes, never
     below control's own; the rest, engine included, keeps control's weights, scaled to fit the run.
     Buckets retaining fewer than minpool games in the replay take the supply-weighted passes of their
     source x format x 200-Elo cell."""
@@ -298,7 +299,8 @@ def topup(pool, total, base, p, minpool=200, base_sha256=None):
             np.average(seen[m], weights=pool.supply[m]) if pool.supply[m].sum() else 0.0
         )
         seen[(cell == k) & ~ok] = fill
-    top = (pool.code // 100 % 100 >= 24) & ~pool.engine & (p > 0)
+    top = (pool.code // 100 % 100 * 100 >= int(elo)) & ~pool.engine & (p > 0)
+    top &= pool.otb | (not int(otb))
     w = lambda c: np.where(top, np.maximum(p, seen), c * seen)
     return w(
         bisect(lambda c: pool.supply @ w(c) / pool.drawn(total, w(c)), 1.0, 0.0, 5.0)

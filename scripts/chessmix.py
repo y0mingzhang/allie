@@ -328,6 +328,16 @@ def sources(srcs, k):
     )
 
 
+def dated(before, k):
+    """control, with games from Lichess months before `before` (YYYY-MM) weighted k times."""
+    return lambda g, p: (
+        control(g, p)[0]
+        * (k if g.src == 0 and getattr(g, "month", before) < before else 1),
+        True,
+        True,
+    )
+
+
 def cooldown(policy, start, before=control):
     """before until training progress start, then policy (list its name in PHASES)."""
     return lambda g, p: before(g, p) if p < start else policy(g, p)
@@ -342,6 +352,7 @@ POLICIES = dict(
     **{f"{n}_x{k}": sources(s, k) for n, s in EXT for k in (2, 4, 10, 30)},
     **{f"{n}_d{k}": sources(s, 1 / k) for n, s in EXT for k in (2, 3, 10)},
     **{f"no{n}": sources(s, 0) for n, s in EXT},
+    pre2108_d2=dated("2021-08", 0.5),
 )
 # policy -> the training progress marks where its weights change (cooldown policies)
 PHASES = {}
