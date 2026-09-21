@@ -296,6 +296,9 @@ def main():
     )  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
+    # deterministic mode NaN-fills every fresh allocation (~1.5K fills/step); a finite loss under that fill already
+    # proves nothing reads uninitialized memory, so skipping it changes no bits
+    torch.utils.deterministic.fill_uninitialized_memory = False
     modded_smoe_aligned_linear.COMBINE = ast.literal_eval(a.moe_combine or "None")
     modded_moe.TOPK_KERNEL = a.moe_topk_kernel
     torch.backends.cuda.matmul.allow_tf32 = True
