@@ -7,7 +7,11 @@ and extra trainer flags. Arms are matched on trainer FLOPs (modded_train.useful_
 an arm trains for the steps giving the FLOPs of the budget's base shape under the plain
 recipe. Schedule knobs are fractions of training, from the 3e16 base's absolute steps
 (8x512, 2274 steps). pool_frac = run tokens / final_tokens emulates the repetition of a
-final run of final_tokens.
+final run of final_tokens. A round declares, e.g.:
+
+  wave("iso1", "moe-v2-iso1e17", "mi1",
+       variants("1e17", {"base": {}, "moe128k4": MOE(128, 4, moe_round=64)}, (42, 43)),
+       "dense ship vs E128 top-4 at 1e17", "preempt4")
 
   plan WAVE [COMMIT]   freeze COMMIT's (else this checkout's) trainer and evaluator and this
                        driver into results/recipe10x/STUDY: plan.json and run.sbatch
@@ -248,6 +252,9 @@ def plan(key, commit=None):
     w = WAVES[key]
     study = STUDIES / w["study"]
     assert not study.exists(), "never overwrite a frozen study"
+    if commit:  # as a sha; commits of every worktree are in ROOT's object store
+        rev = ["git", "-C", Path(__file__).parent, "rev-parse", f"{commit}^{{commit}}"]
+        commit = subprocess.check_output(rev, text=True).strip()
     files = frozen_files(commit)
     hashes = {k: hashlib.sha256(v).hexdigest() for k, v in files.items()}
     hashes |= {
