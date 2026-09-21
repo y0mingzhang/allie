@@ -8,6 +8,7 @@
 set -euo pipefail
 month=${1:?} L=/scratch/$USER/chessdata/$1 D=${STORE:?}/$1
 [ -f "$D/stats.json" ] && { rm -rf "$L"; exit 0; }
+/home/yimingz3/src/allie/.venv/bin/python "${SCRIPTS:?}/chessdata.py" verify --out "$L" --stage final
 mkdir -p "$D"
 ionice -c2 -n7 rsync -a --bwlimit=${BWLIMIT:-60000} --exclude stats.json "$L/" "$D/"
 cp "$L/stats.json" "$D/stats.json.tmp" && mv "$D/stats.json.tmp" "$D/stats.json"

@@ -4,6 +4,7 @@
  * A row the fast path cannot reproduce exactly is handed back to Python (fb_parse returns it).
  */
 #define _GNU_SOURCE
+#include <locale.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -46,6 +47,7 @@ static u64 KN[64], KI[64], PA[2][64], RAY[8][64];
 static u8 CLS[256]; /* 1 whitespace, 2 may start a STRIP match */
 static u16 IDX[64][64][6];
 static const u64 *VAL;
+static locale_t CLOC; /* float(): '.' whatever LC_NUMERIC says */
 static long NVAL;
 
 struct pos { u64 bb[7], co[2], castle; u8 sq[64]; int turn, ep, half; };
@@ -516,7 +518,7 @@ static int eval_value(const char *a, const char *b, i16 *v)
 				return -1;
 			memcpy(buf, vs, q - vs);
 			buf[q - vs] = 0;
-			double y = nearbyint(strtod(buf, NULL) * 100);
+			double y = nearbyint(strtod_l(buf, NULL, CLOC) * 100);
 			*v = y > 30000 ? 30000 : y < -30000 ? -30000 : (i16)y;
 		}
 		return 1;
@@ -893,6 +895,8 @@ void fb_init(const char *moves, const u64 *val, long nval)
 		while (*moves == ' ')
 			moves++;
 	}
+	if (!CLOC && !(CLOC = newlocale(LC_ALL_MASK, "C", (locale_t)0)))
+		abort();
 	VAL = val, NVAL = nval;
 }
 

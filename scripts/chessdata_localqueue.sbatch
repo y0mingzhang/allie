@@ -59,6 +59,7 @@ submit() {  # first attempt, or retry a failed build / publish
 	fi
 	tries=$(cat "$J/$m.tries" 2>/dev/null || echo 0)
 	[ "$tries" -ge 4 ] && { log "$m failed $tries times; skipping"; return 0; }
+	[ "$(inflight)" -ge "$MAX_BUILDS" ] && return 0
 	echo $((tries + 1)) >"$J/$m.tries"
 	n=$(awk -v f="lichess_db_standard_rated_$m.pgn.zst" '$1==f {print $2}' <<<"$COUNTS")
 	if [ "${FASTBUILD:-0}" = 1 ]; then  # fastbuild.py: under 10 GB resident; the time is mostly the download
@@ -84,12 +85,21 @@ for m in $MONTHS; do
 	submit "$m"
 	sleep 5
 done
+failed() {  # four failed builds and nothing left to retry
+	local b
+	b=$(cat "$J/$1.build" 2>/dev/null)
+	[ "$(cat "$J/$1.tries" 2>/dev/null || echo 0)" -ge 4 ] && ! active "$b" && [ "$(state "$b")" != COMPLETED ]
+}
 while :; do
 	cleanup
-	left=$(for m in $MONTHS; do [ -f "$ROOT/$m/stats.json" ] || echo "$m"; done)
+	left= dead=
+	for m in $MONTHS; do
+		[ -f "$ROOT/$m/stats.json" ] && continue
+		if failed "$m"; then dead="$dead $m"; else left="$left $m"; fi
+	done
 	[ -z "$left" ] && break
 	for m in $left; do submit "$m"; done
-	log "waiting on: $(echo $left)"
+	log "waiting on:$left${dead:+; failed after 4 tries:$dead}"
 	sleep 900
 done
-log QUEUE_DONE
+log "QUEUE_DONE${dead:+; FAILED after 4 tries:$dead}"

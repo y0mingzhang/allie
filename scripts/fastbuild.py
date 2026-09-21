@@ -5,7 +5,8 @@ build     parse the Hugging Face row groups in threads with the C core (fastbuil
           and spill the games grouped by bucket
 finalize  per bucket: gather, order and shard exactly like chessdata.finalize, then
           buckets.json and stats.json
-check     compare the C core with chessdata.record() row by row on sampled rows
+verify    exit 0 iff a month's build or finalize markers parse and agree with its files
+check     compare fast rows (C core or its fallback) with chessdata build row by row
 
 Rows the C core cannot reproduce exactly (non-ASCII movetext, unusual TimeControl,
 oversized numbers) go through chessdata.record() itself.
@@ -21,6 +22,7 @@ import subprocess
 import sys
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from itertools import chain
 from pathlib import Path
 
 import numpy as np
@@ -147,7 +149,10 @@ def columns(batch):
 
 
 def append(r, g):
-    """A chessdata.record() dict into run r."""
+    """A chessdata.record() dict into run r, range-checked by cd.SCHEMA first: a value
+    parse_hf's pa.table() rejects raises the same ArrowInvalid here."""
+    one = {k: [g[k]] for k in cd.SCHEMA.names}
+    g = pa.table(one, schema=cd.SCHEMA).to_pylist()[0]
     s = [g[k] for k in STRS]
     enc = [(x or "").encode() for x in s]
     mv, clk, ev = (
@@ -191,16 +196,19 @@ def reference(batch, i):
     return cd.record(cd.hf_header(row), row["movetext"] or "")
 
 
-def parse(r, batch):
-    """Rows of batch into run r; rows the C core hands back go through record()."""
-    c, n, i = columns(batch), batch.num_rows, 0
+def parse(r, batch, c=None, i=0, n=None):
+    """Rows [i, n) of batch into run r; rows the C core hands back go through
+    record(). The number handed back."""
+    c = columns(batch) if c is None else c
+    n, handed = batch.num_rows if n is None else n, 0
     while (i := L.fb_parse(r, c, i, n)) < n:
         g, why = reference(batch, i)
         if g is None:
             L.fb_skip(r, {v: k for k, v in SKIPS.items()}[why])
         else:
             append(r, g)
-        i += 1
+        i, handed = i + 1, handed + 1
+    return handed
 
 
 def tasks(files, workers, most=128):
@@ -218,6 +226,7 @@ def tasks(files, workers, most=128):
 def build(a):
     root = Path(a.out)
     spill = root / "spill"
+    (root / "build-complete.json").unlink(missing_ok=True)
     shutil.rmtree(spill, ignore_errors=True)
     spill.mkdir(parents=True)
     files = sorted(Path(a.hf).glob("*.parquet"))
@@ -249,20 +258,22 @@ def build(a):
     idx = np.concatenate([np.c_[np.full(len(e), seq), e] for seq, _, e, _ in done])
     np.save(spill / "index.npy", idx[np.lexsort((idx[:, 0], idx[:, 1]))])
     np.save(spill / "runs.npy", np.array([info[0] for *_, info in done], np.int64))
-    with open(root / "build-log.jsonl", "w") as log:
-        for i, f in enumerate(files):
-            games, bad = 0, {}
-            for info in (info for _, j, _, info in done if j == i):
-                games += int(info[0])
-                for kind in info[4 : 4 + info[3]]:  # bad keys in first-seen order
-                    bad.setdefault(SKIPS[int(kind)], 0)
-                for kind, name in SKIPS.items():
-                    if info[kind]:
-                        bad[name] += int(info[kind])
-            line = dict(chunk=i, source=f.name, games=games, bad=bad)
-            log.write(json.dumps(line) + "\n")
+    log = []
+    for i, f in enumerate(files):
+        games, bad = 0, {}
+        for info in (info for _, j, _, info in done if j == i):
+            games += int(info[0])
+            for kind in info[4 : 4 + info[3]]:  # bad keys in first-seen order
+                bad.setdefault(SKIPS[int(kind)], 0)
+            for kind, name in SKIPS.items():
+                if info[kind]:
+                    bad[name] += int(info[kind])
+        log.append(
+            json.dumps(dict(chunk=i, source=f.name, games=games, bad=bad)) + "\n"
+        )
+    cd.write_atomic(root / "build-log.jsonl", "".join(log))
     parts = dict(parts=len(files), chunks=len(files))
-    (root / "build-complete.json").write_text(json.dumps(parts) + "\n")
+    cd.write_atomic(root / "build-complete.json", json.dumps(parts) + "\n")
 
 
 def schema():
@@ -331,7 +342,9 @@ def shard(b, code, lo, n, path):
 
 def finalize(a):
     root = Path(a.out)
-    assert (root / "build-complete.json").exists(), "build not complete"
+    for f in ("stats.json", "buckets.json"):  # the previous store is no longer complete
+        (root / f).unlink(missing_ok=True)
+    assert not (why := spilled(root)), why
     spill = root / "spill"
     idx, runs = np.load(spill / "index.npy"), np.load(spill / "runs.npy")
     base = np.r_[0, np.cumsum(runs)[:-1]].astype(np.int64)
@@ -391,16 +404,34 @@ def finalize(a):
             release()
     os.close(fd)
     del val
-    old = root / "games.old"
-    if (root / "games").exists():
-        (root / "games").rename(old)
-    games.rename(root / "games")
-    shutil.rmtree(old, ignore_errors=True)
+    cd.swap(root, games)
     out = summary(stats, root)
-    (root / "buckets.json").write_text(json.dumps(buckets, indent=1) + "\n")
+    cd.write_atomic(root / "buckets.json", json.dumps(buckets, indent=1) + "\n")
     text = json.dumps(out | dict(buckets=len(buckets)), indent=2)
-    (root / "stats.json").write_text(text + "\n")
+    cd.write_atomic(root / "stats.json", text + "\n")
     print(json.dumps(out, indent=2))
+
+
+def spilled(root):
+    """Why root holds no complete fast build (a Python build keeps parts/, not spill/),
+    or None."""
+    if why := cd.check_store(root, "build"):
+        return why
+    try:
+        idx, runs = (np.load(root / "spill" / f) for f in ("index.npy", "runs.npy"))
+        size = (root / "spill" / "games.bin").stat().st_size
+        assert idx[:, 5].sum() == runs.sum() > 0, "spill index"
+        assert (idx[:, 2] + idx[:, 3]).max() <= size, "spill size"
+    except (OSError, ValueError, IndexError, AssertionError) as e:
+        return f"spill: {type(e).__name__}: {e}"
+    return None
+
+
+def verify(a):
+    root = Path(a.out)
+    if why := spilled(root) if a.stage == "build" else cd.check_store(root, "final"):
+        print(f"{root} {a.stage} not done: {why}", flush=True)
+        sys.exit(1)
 
 
 def names(code, n, per):
@@ -469,40 +500,88 @@ def decode(g):
     )
 
 
+# int32 / int16 / uint32 boundaries of TimeControl, clocks and mate evals (the first
+# row of the first file with one field replaced), and a locale-sensitive eval
+EDGE = (
+    *(
+        {"TimeControl": t}
+        for t in ("2147483647+32767", "2147483648+0", "4294967296+0", "0+32768")
+    ),
+    *({"TimeControl": t} for t in ("0+-32768", "0+-32769", "1_0+5", "300+0")),
+    *({"movetext": f"e4 {{[%clk {c}]}}"} for c in ("1193046:28:15", "1193046:28:16")),
+    *(
+        {"movetext": f"e4 {{[%eval #{v}]}}"}
+        for v in ("64768", "64769", "-64767", "-64768")
+    ),
+    {"movetext": "e4 {[%eval 1.25]} e5 {[%eval -0.125]}"},
+)
+
+
+def expect(batch, i):
+    """What chessdata build makes of row i: (record, None), (None, skip reason), or
+    ("raises", exception) for a row that stops the build."""
+    try:
+        g, why = reference(batch, i)
+        if g is not None:
+            pa.table({k: [g[k]] for k in cd.SCHEMA.names}, schema=cd.SCHEMA)
+        return g, why
+    except Exception as e:
+        return "raises", type(e).__name__
+
+
+def stored(batch, c, i):
+    """What the fast build stores for row i, through parse() and its fallback, and
+    whether the row was handed back to Python."""
+    r, info, g = L.fb_run_new(), np.empty(7, np.int64), Game()
+    try:
+        handed = parse(r, batch, c, i, i + 1)
+        L.fb_run_info(r, info.ctypes.data)
+        if info[0]:
+            L.fb_record(L.fb_run_buf(r), 0, ctypes.byref(g))
+            return (decode(g), None), handed
+        return (None, SKIPS[1 if info[1] else 2]), handed
+    except Exception as e:
+        return ("raises", type(e).__name__), 1
+    finally:
+        L.fb_run_free(r)
+
+
 def check(a):
-    """The C core against record() on a.groups random row groups per file; rows where
-    record() raises must be handed back to Python."""
+    """Fast rows (C core, or record() when handed back) against chessdata build on the
+    EDGE rows and a.groups random row groups per file."""
     init()
-    rng, info, g = np.random.default_rng(a.seed), np.empty(7, np.int64), Game()
-    seen = mismatched = handed = 0
-    for f in sorted(Path(a.hf).glob("*.parquet"))[: a.files]:
-        pf = pq.ParquetFile(f)
-        k = pf.metadata.num_row_groups
-        rgs = sorted(rng.choice(k, min(a.groups, k), replace=False))
-        for batch in pf.iter_batches(8192, rgs, COLS, use_threads=False):
-            c, r, off = columns(batch), L.fb_run_new(), 0
-            for i in range(batch.num_rows):
-                try:
-                    want = reference(batch, i)
-                except Exception as e:
-                    want = ("raises", type(e).__name__)
-                L.fb_run_info(r, info.ctypes.data)
-                n, bad = info[0], info[1:3].copy()
-                if L.fb_parse(r, c, i, i + 1) == i:
-                    handed += 1
-                    continue
-                L.fb_run_info(r, info.ctypes.data)
-                if info[0] > n:
-                    off = L.fb_record(L.fb_run_buf(r), off, ctypes.byref(g))
-                    got = (decode(g), None)
-                else:
-                    got = (None, SKIPS[1 + int(np.flatnonzero(info[1:3] - bad)[0])])
-                seen += 1
-                if got != want:
-                    mismatched += 1
-                    if mismatched <= 5:
-                        print("MISMATCH", f.name, batch.column("Site")[i], got, want)
-            L.fb_run_free(r)
+    files = sorted(Path(a.hf).glob("*.parquet"))[: a.files]
+    first = pq.ParquetFile(files[0]).read_row_group(0).slice(0, 1).to_pylist()[0]
+    edge = [first | e for e in EDGE]
+    batches = [pa.RecordBatch.from_pylist(edge, schema=pa.schema(TYPES.items()))]
+    rng, seen, mismatched, handed = np.random.default_rng(a.seed), 0, 0, 0
+
+    def sampled():
+        for f in files:
+            pf = pq.ParquetFile(f)
+            k = pf.metadata.num_row_groups
+            rgs = sorted(rng.choice(k, min(a.groups, k), replace=False))
+            yield from pf.iter_batches(8192, rgs, COLS, use_threads=False)
+
+    for n, batch in enumerate(chain(batches, sampled())):
+        c = columns(batch)
+        for i in range(batch.num_rows):
+            want = expect(batch, i)
+            got, h = stored(batch, c, i)
+            seen, handed = seen + 1, handed + h
+            if n == 0:
+                kind = got[0] if isinstance(got[0], str) else got[1] or "stored"
+                print(
+                    "edge",
+                    EDGE[i],
+                    kind,
+                    got[1] if kind == "raises" else "",
+                    "handed" * h,
+                )
+            if got != want:
+                mismatched += 1
+                if mismatched <= 5:
+                    print("MISMATCH", batch.column("Site")[i], got, want)
     print(json.dumps(dict(rows=seen, mismatched=mismatched, handed_to_python=handed)))
     sys.exit(1 if mismatched else 0)
 
@@ -525,10 +604,13 @@ if __name__ == "__main__":
     f.add_argument("--seed", type=int, default=0)
     f.add_argument("--workers", type=int, default=0)
     f.add_argument("--mem-gb", type=int, default=6, help="loaded buckets at once")
+    v = sub.add_parser("verify")
+    v.add_argument("--out", required=True)
+    v.add_argument("--stage", choices=("build", "final"), required=True)
     c = sub.add_parser("check")
     c.add_argument("--hf", required=True)
     c.add_argument("--files", type=int, default=2)
     c.add_argument("--groups", type=int, default=5, help="row groups per file")
     c.add_argument("--seed", type=int, default=0)
     a = p.parse_args()
-    dict(build=build, finalize=finalize, check=check)[a.cmd](a)
+    dict(build=build, finalize=finalize, verify=verify, check=check)[a.cmd](a)
