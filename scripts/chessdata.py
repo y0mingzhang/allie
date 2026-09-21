@@ -3,6 +3,7 @@
 build     parse a monthly pgn.zst into restartable per-chunk Parquet parts
 finalize  bucket games (format x max-Elo x min-Elo), pre-shuffle into small shards, write stats
 gate      check on-the-fly tokenization against games tokenized by the original pipeline
+verify    exit 0 iff a month's build or finalize markers parse and agree with its files
 """
 
 import argparse
@@ -11,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
@@ -301,13 +303,87 @@ def chunks(path, size=1 << 26):
             yield buf
 
 
+def write_atomic(path, text):
+    """Replace path by text in one step: a kill never leaves a partial marker."""
+    tmp = Path(path).with_name(Path(path).name + ".tmp")
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def swap(root, new):
+    """Publish the complete dir new as root/games. Only complete dirs are ever named
+    games or games.new here, so a leftover games.old is never the only copy."""
+    old = root / "games.old"
+    shutil.rmtree(old, ignore_errors=True)
+    if (root / "games").exists():
+        (root / "games").rename(old)
+    new.rename(root / "games")
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def logged(root):
+    """Build log lines by chunk, the last one winning; lines cut short by a kill dropped."""
+    out, path = {}, root / "build-log.jsonl"
+    for line in path.read_text().splitlines() if path.exists() else []:
+        try:
+            x = json.loads(line)
+            out[x["chunk"]] = x
+        except (ValueError, KeyError, TypeError):
+            pass
+    return out
+
+
+def check_store(root, stage):
+    """Why the markers of a built ("build") or finalized ("final") month cannot be
+    trusted, or None."""
+    try:
+        done = json.loads((root / "build-complete.json").read_text())
+        assert done["parts"] == done["chunks"] > 0, "build-complete.json"
+        assert set(logged(root)) == set(range(done["chunks"])), "build log"
+        if stage == "final":
+            stats = json.loads((root / "stats.json").read_text())
+            buckets = json.loads((root / "buckets.json").read_text())
+            assert stats["buckets"] == len(buckets), "bucket count"
+            assert stats["games"] == sum(b["games"] for b in buckets), "game count"
+            shards = [root / x for b in buckets for x in b["shards"]]
+            assert all(x.is_file() for x in shards), "missing shard"
+            files = sum(x.is_file() for x in (root / "games").rglob("*"))
+            assert files == len(shards), "stray file in games"
+    except (OSError, ValueError, KeyError, TypeError, AssertionError) as e:
+        return f"{type(e).__name__}: {e}"
+    return None
+
+
+def verify(a):
+    root = Path(a.out)
+    why = check_store(root, a.stage)
+    if not why and a.stage == "build":
+        n = len(list((root / "parts").glob("part-*.parquet")))
+        k = json.loads((root / "build-complete.json").read_text())["parts"]
+        why = None if n == k else f"{n} parts for {k}"
+    if why:
+        print(f"{root} {a.stage} not done: {why}", flush=True)
+        sys.exit(1)
+
+
 def build(a):
-    parts = Path(a.out) / "parts"
+    root = Path(a.out)
+    parts = root / "parts"
     parts.mkdir(parents=True, exist_ok=True)
-    done = {int(p.stem.split("-")[1]) for p in parts.glob("part-*.parquet")}
+    (root / "build-complete.json").unlink(missing_ok=True)
+    # a part counts as built only with its log line (a kill can fall between the two)
+    have = {int(p.stem.split("-")[1]) for p in parts.glob("part-*.parquet")}
+    kept = {k: v for k, v in logged(root).items() if k in have}
+    write_atomic(
+        root / "build-log.jsonl", "".join(json.dumps(x) + "\n" for x in kept.values())
+    )
+    done = set(kept)
     workers = len(os.sched_getaffinity(0))
     with (
-        open(Path(a.out) / "build-log.jsonl", "a") as log,
+        open(root / "build-log.jsonl", "a") as log,
         ProcessPoolExecutor(workers) as ex,
     ):
         pending = set()
@@ -331,8 +407,8 @@ def build(a):
                 drain(finished)
         drain(wait(pending)[0])
     n = len(list(parts.glob("part-*.parquet")))
-    (Path(a.out) / "build-complete.json").write_text(
-        json.dumps(dict(parts=n, chunks=i + 1)) + "\n"
+    write_atomic(
+        root / "build-complete.json", json.dumps(dict(parts=n, chunks=i + 1)) + "\n"
     )
 
 
@@ -363,7 +439,9 @@ def with_annotations(t):
 
 def finalize(a):
     root = Path(a.out)
-    assert (root / "build-complete.json").exists(), "build not complete"
+    for f in ("stats.json", "buckets.json"):  # the previous store is no longer complete
+        (root / f).unlink(missing_ok=True)
+    assert not (why := check_store(root, "build")), why
     parts = sorted((root / "parts").glob("part-*.parquet"))
     annotated = all({"end", "evals"} <= set(pq.read_schema(p).names) for p in parts)
     table = pa.concat_tables(with_annotations(pq.read_table(p)) for p in parts)
@@ -393,8 +471,6 @@ def finalize(a):
     stats = summarize(table, welo, belo, fmt, leak, root)
     order = np.lexsort((np.random.default_rng(a.seed).random(len(bucket)), bucket))
     table, bucket = table.take(pa.array(order)), bucket[order]
-    import shutil
-
     games = root / "games.new"  # published by rename once complete
     if games.exists():
         shutil.rmtree(games)
@@ -424,15 +500,10 @@ def finalize(a):
                 shards=shards,
             )
         )
-    old = root / "games.old"
-    if (root / "games").exists():
-        (root / "games").rename(old)
-    games.rename(root / "games")
-    shutil.rmtree(old, ignore_errors=True)
-    (root / "buckets.json").write_text(json.dumps(buckets, indent=1) + "\n")
-    (root / "stats.json").write_text(
-        json.dumps(stats | dict(buckets=len(buckets)), indent=2) + "\n"
-    )
+    swap(root, games)
+    write_atomic(root / "buckets.json", json.dumps(buckets, indent=1) + "\n")
+    text = json.dumps(stats | dict(buckets=len(buckets)), indent=2)
+    write_atomic(root / "stats.json", text + "\n")
     print(json.dumps(stats, indent=2))
 
 
@@ -558,5 +629,8 @@ if __name__ == "__main__":
     g.add_argument("--hf-shard", required=True)
     g.add_argument("--v2-shard", required=True)
     g.add_argument("--out")
+    v = sub.add_parser("verify")
+    v.add_argument("--out", required=True)
+    v.add_argument("--stage", choices=("build", "final"), required=True)
     a = p.parse_args()
-    dict(build=build, finalize=finalize, gate=gate)[a.cmd](a)
+    dict(build=build, finalize=finalize, gate=gate, verify=verify)[a.cmd](a)
