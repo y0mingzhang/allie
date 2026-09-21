@@ -330,6 +330,7 @@ def sources(srcs, k):
 
 def dated(before, k):
     """control, with games from Lichess months before `before` (YYYY-MM) weighted k times."""
+    assert 0 <= k <= 1, "bucket caps are control's"
     return lambda g, p: (
         control(g, p)[0]
         * (k if g.src == 0 and getattr(g, "month", before) < before else 1),
