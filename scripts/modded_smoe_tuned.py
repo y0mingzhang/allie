@@ -73,10 +73,10 @@ def wgrad_op(dy:torch.Tensor,x:torch.Tensor,offsets:torch.Tensor,out:torch.Tenso
         ACC_TYPE=tl.float32,allow_tf32=True,num_warps=nw,num_stages=ns)
 
 
-def group_bwd_W(DY,X,expert_offsets,E,has_bias=False):
+def group_bwd_W(DY,X,expert_offsets,E,has_bias=False,out=None):
     if has_bias or weight_config(DY,X,E) is None:
-        return ref.group_bwd_W(DY,X,expert_offsets,E,has_bias)
-    out=DY.new_zeros((E,DY.shape[-1],X.shape[-1])).transpose(1,2)
+        return ref.group_bwd_W(DY,X,expert_offsets,E,has_bias,out)
+    if out is None:out=DY.new_empty((E,DY.shape[-1],X.shape[-1])).transpose(1,2)
     wgrad_op(DY,X,expert_offsets,out)
     return out,None
 
@@ -225,7 +225,8 @@ class TunedLinear(torch.autograd.Function):
                 DY=grouped_grad_out, X=grouped_x,
                 expert_offsets=expert_offsets,
                 E=expert_weights.size(0),
-                has_bias=expert_biases is not None
+                has_bias=expert_biases is not None,
+                out=torch.empty_like(expert_weights, dtype=grouped_grad_out.dtype)
             )
         else:
             assert expert_biases is None

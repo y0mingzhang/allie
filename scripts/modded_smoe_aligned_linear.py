@@ -118,7 +118,8 @@ class AlignedLinear(torch.autograd.Function):
         else:
             grouped_x=group(x,order,fan_out=ctx.k);dx=grouped_x
         if not (ctx.gather and not ctx.grouped_in):
-            dw,_=tuned.group_bwd_W(grouped_grad,grouped_x,offsets,weights.size(0))
+            dw,_=tuned.group_bwd_W(grouped_grad,grouped_x,offsets,weights.size(0),
+                                   out=torch.empty_like(weights,dtype=grouped_grad.dtype))
         dx=matmul(grouped_grad,weights.permute(0,2,1),se,order,offsets,
                   1,True,ctx.grouped_in,out=dx)
         if ctx.k!=1:

@@ -100,7 +100,8 @@ def weight_grad(dy,x,gates,order,offsets,config=None,out=None):
     if config is None:
         config=WEIGHT.get((offsets.numel(),order.numel(),x.shape[-1],dy.shape[-1]),
                           (32,128,128,4,4))
-    if out is None:out=dy.new_empty((offsets.numel(),dy.shape[-1],x.shape[-1])).transpose(1,2)
+    # The down weight's own [E,H,D] layout: AccumulateGrad keeps it instead of a strided copy.
+    if out is None:out=dy.new_empty((offsets.numel(),x.shape[-1],dy.shape[-1]))
     dw_op(dy,x,gates,order,offsets,out,gates.shape[1],*config)
     return out
 
