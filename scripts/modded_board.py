@@ -19,8 +19,6 @@ import numpy as np
 import torch
 from modded_arch import BOARD_IN
 from torch import nn
-
-GEMM_WGRAD = False  # --board-gemm-wgrad: Conv3's weight gradient (changes rounding vs cuDNN)
 from torch.nn import functional as F
 
 SOURCE = Path(__file__).resolve().parent
@@ -152,10 +150,6 @@ class Conv3(torch.autograd.Function):
         return gx, gw[:, :c].reshape_as(w).to(w.dtype)
 
 
-def conv3(x, w):
-    return Conv3.apply(x, w) if GEMM_WGRAD else F.conv2d(x, w, padding=1)
-
-
 class BoardConv(nn.Module):
     """Codex's BoardConv: 13 planes -> 3x3 conv 32 -> 2 residual 3x3 convs -> 1x1 squeeze 8 ->
     concat side / castling / en-passant embedding -> layer norm -> zero-init linear."""
@@ -181,9 +175,9 @@ class BoardConv(nn.Module):
             .reshape(-1, 8, 8, 13)
             .permute(0, 3, 1, 2)
         )
-        x = F.gelu(conv3(x, self.first.type(dtype)), approximate="tanh")
+        x = F.gelu(Conv3.apply(x, self.first.type(dtype)), approximate="tanh")
         for w in self.residual:
-            x = x + F.gelu(conv3(x, w.type(dtype)), approximate="tanh")
+            x = x + F.gelu(Conv3.apply(x, w.type(dtype)), approximate="tanh")
         x = F.conv2d(x, self.squeeze.type(dtype)).flatten(1)
         m = meta(states).to(dtype) @ self.meta.type(dtype)
         x = F.layer_norm(torch.cat((x, m), -1), (544,))
