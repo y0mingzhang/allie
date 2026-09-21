@@ -12,8 +12,8 @@ import triton
 import triton.language as tl
 
 LOG2E = 1.4426950408889634
-FWD = (64, 32, 4, 2, False)  # BM, BN, warps, stages, heads-fastest grid
-BWD = (64, 32, 4, 2, False)  # block, inner tile, warps, stages, heads-fastest grid
+FWD = (64, 64, 4, 2, True)  # BM, BN, warps, stages, heads-fastest grid (DRAM locality: 1.53 -> 1.12 ms)
+BWD = (32, 32, 2, 2, True)  # block, inner tile, warps, stages, heads-fastest grid (3.05 -> 2.22 ms)
 
 
 # fmt: off
