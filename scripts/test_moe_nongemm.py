@@ -16,7 +16,7 @@ topk: modded_moe_topk's router top-ks against torch.topk (CUDA; CPU: aten_topk, 
 ATen's kernels, under TRITON_INTERPRET=1) on live, tie-heavy and special (+-0, +-inf, NaN,
 subnormal) scores, and their times.
 
-    inhold.sh scripts/test_moe_nongemm.py layer [--eager] [--no-ckpt] [--set ...]
+    inhold.sh scripts/test_moe_nongemm.py layer [--eager] [--no-ckpt] [--base COMMIT] [--set ...]
     inhold.sh scripts/test_moe_nongemm.py orders
     inhold.sh scripts/test_moe_nongemm.py layer --set 'modded_smoe_aligned_linear.COMBINE=(0,1,2,3)'
     inhold.sh scripts/test_moe_nongemm.py topk
@@ -55,9 +55,9 @@ def bitdiff(a, b):
     return (a.long() - b.long()).abs().max().item() if a.numel() else 0
 
 
-def base_scripts():
+def base_scripts(base=BASE):
     out = tempfile.mkdtemp()
-    git = ["git", "-C", str(HERE.parent), "archive", f"{BASE}:scripts"]
+    git = ["git", "-C", str(HERE.parent), "archive", f"{base}:scripts"]
     tar = subprocess.run(git, capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-f", "-", "-C", out], input=tar, check=True)
     assert os.path.exists(f"{out}/modded_moe.py"), out
@@ -177,7 +177,7 @@ def layer(a):
     out = {}
     tmp = Path(tempfile.mkdtemp())
     for name, impl, extra in (
-        ("base", base_scripts(), []),
+        ("base", base_scripts(a.base), []),
         ("new", HERE, [f"--set={s}" for s in a.set]),
     ):
         cmd = [sys.executable, __file__, "run", "--impl", str(impl)]
@@ -363,6 +363,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("cmd", choices=("layer", "orders", "topk", "run"))
     p.add_argument("--impl")
+    p.add_argument("--base", default=BASE, help="layer: the reference commit")
     p.add_argument("--dump")
     p.add_argument("--kernel")
     p.add_argument("--eager", action="store_true")
