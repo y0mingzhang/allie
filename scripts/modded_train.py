@@ -296,10 +296,18 @@ def main():
     )  # host-side flags: never queue behind in-flight NCCL work
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
-    # deterministic mode NaN-fills every fresh allocation (~1.5K fills/step); a finite loss under that fill already
-    # proves nothing reads uninitialized memory, so skipping it changes no bits
+    # deterministic mode NaN-fills every fresh allocation (~1.5K fills/step); skipping it was bit-identical on the
+    # reference config; new kernels keep a poisoned-allocation test
     torch.utils.deterministic.fill_uninitialized_memory = False
     modded_smoe_aligned_linear.COMBINE = ast.literal_eval(a.moe_combine or "None")
+    if a.moe_combine:
+        leaves = lambda o: (
+            [o] if isinstance(o, int) else [x for c in o for x in leaves(c)]
+        )
+        k = json.loads(a.arch).get("moe", [0, 0])[1]
+        assert sorted(leaves(modded_smoe_aligned_linear.COMBINE)) == list(range(k)), (
+            "--moe-combine must use each top-k slot once"
+        )
     modded_moe.TOPK_KERNEL = a.moe_topk_kernel
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
@@ -446,6 +454,15 @@ def main():
         assert shared["args"].get("fused_blend", False) == a.fused_blend, (
             "Resume changes fused_blend"
         )
+        for key, default in (
+            ("moe_combine", ""),
+            ("moe_topk_kernel", False),
+            ("fp8", ""),
+            ("zero2_bf16", False),
+        ):
+            assert shared["args"].get(key, default) == vars(a)[key], (
+                f"Resume changes {key}"
+            )
         if a.wsd_continue_from:
             from modded_continuation import prepare_continuation
 
