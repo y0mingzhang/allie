@@ -1360,11 +1360,31 @@ class CausalSelfAttention(nn.Module):
             attn_args.bm_size,
         )
 
-        q, k, v = (
-            fp8.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x), self.training)
-            .view(B, T, 3 * self.num_heads, self.head_dim)
-            .chunk(3, dim=-2)
-        )
+        qkv = fp8.linear(
+            x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x), self.training
+        ).view(B, T, 3 * self.num_heads, self.head_dim)
+        gate = lambda: torch.sigmoid(
+            self.attn_gate(x[..., : self.attn_gate.weight.size(-1)])
+        ).view(B, T, self.num_heads, 1)
+        ve_gate = lambda: 2 * torch.sigmoid(
+            self.value_embed_gate(x[..., : self.value_embed_gate.weight.size(-1)])
+        ).view(B, T, self.num_heads, 1)
+        fused = seqlens.backend == "triton" and self.diff is None
+        if fused and not key_offset:
+            # q/k norm, rotary, value embeddings and the output gate inside the attention kernels
+            g = gate()
+            vg = None if ve is None else ve_gate()
+            y = medium_attention_qkv(
+                qkv, seqlens, bm_size, attn_scale, cos, sin,
+                g if self.gates else g * 0 + 0.5,
+                None if ve is None else ve.view(B, T, self.num_heads, self.head_dim),
+                None if vg is None else vg if self.gates else vg * 0 + 1,
+                self.qk_norm,
+            )  # fmt: skip
+            return fp8.linear(
+                y.view(B, T, self.dim), sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y), self.training
+            )  # fmt: skip
+        q, k, v = qkv.chunk(3, dim=-2)
         if self.qk_norm:
             q, k = norm(q), norm(k)  # QK norm @Grad62304977
         q, k = rotary(q, cos, sin), rotary(k, cos, sin)
@@ -1384,9 +1404,7 @@ class CausalSelfAttention(nn.Module):
                 k[:, 1:, :, 3 * self.head_dim // 4 :],
             )
         if ve is not None:
-            ve_gate_out = 2 * torch.sigmoid(
-                self.value_embed_gate(x[..., : self.value_embed_gate.weight.size(-1)])
-            ).view(B, T, self.num_heads, 1)
+            ve_gate_out = ve_gate()
             if not self.gates:  # identity gate; the gate weight keeps a (zero) gradient
                 ve_gate_out = ve_gate_out * 0 + 1
             v = v + ve_gate_out * ve.view_as(v)  # @ KoszarskyB & @Grad62304977
@@ -1399,18 +1417,20 @@ class CausalSelfAttention(nn.Module):
 
         # use flash_attn over flex_attn @varunneal. flash_attn_varlen suggested by @YouJiacheng
         attend = lambda q, k, v: medium_attention(q, k, v, seqlens, bm_size, attn_scale)
-        y = (
-            attend(q, k, v)
-            if self.diff is None
-            else diff_attention(q, k, v, self.diff(), self.diff.init, attend)
-        )
-        y = y.view(B, T, self.num_heads, self.head_dim)
-        gate = torch.sigmoid(
-            self.attn_gate(x[..., : self.attn_gate.weight.size(-1)])
-        ).view(B, T, self.num_heads, 1)
-        y = y * (
-            gate if self.gates else gate * 0 + 0.5
-        )  # sigma(0): the default gate at init
+        if fused:  # gate fused into the kernel
+            g = gate()
+            y = medium_attention(
+                q, k, v, seqlens, bm_size, attn_scale, g if self.gates else g * 0 + 0.5
+            )
+        else:
+            y = (
+                attend(q, k, v)
+                if self.diff is None
+                else diff_attention(q, k, v, self.diff(), self.diff.init, attend)
+            )
+            y = y.view(B, T, self.num_heads, self.head_dim)
+            g = gate()
+            y = y * (g if self.gates else g * 0 + 0.5)  # sigma(0): the default gate at init
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side
