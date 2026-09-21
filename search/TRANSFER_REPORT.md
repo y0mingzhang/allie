@@ -32,7 +32,7 @@ root prefill. Training cost, memory and CPU-hosting latency are separate.
 - [Node frontier PDF](../results/search-v1/transfer-v1/pareto.pdf)
 - [CM versus pretraining scale](../results/search-v1/transfer-v1/transfer-cm.png)
 - [Inference-FLOP frontier](../results/search-v1/transfer-v1/inference-flops.png)
-- [Implementation and CPU reproduction](transfer/README.md)
+- [Production implementation, tests and historical reproduction](README.md)
 
 Limits: one checkpoint per scale; reused 8,192-position golden sample anchored
 to the full canonical evaluation; no fresh independent confirmation; imagined
