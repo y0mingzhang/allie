@@ -282,6 +282,7 @@ def tables(w, runs):
     out = {}
     for r in runs:
         for k in r["policy"].split("+"):
+            k = k.split(":", 1)[1] if k.startswith("cool") else k  # coolNN:table:NAME
             if not k.startswith("table:"):
                 continue
             raw = (RECIPES / f"{k[6:]}.json").read_bytes()
