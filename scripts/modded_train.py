@@ -19,6 +19,7 @@ import triton
 from modded_arch import attn_factor, extra_flops
 from modded_moe import STATS
 from modded_moe import full_state, local_state
+import modded_medium
 import modded_moe
 import modded_smoe_aligned_linear
 from modded_medium_core import sync_params
@@ -219,6 +220,11 @@ def main():
         " (bitwise the cuBLAS bmm for the order test_moe_nongemm.py orders reports); default the bmm",
     )
     p.add_argument(
+        "--attn-kernel",
+        action="store_true",
+        help="causal window/game attention as a Triton FlashAttention-2 kernel (modded_attn), not FlexAttention",
+    )
+    p.add_argument(
         "--moe-topk-kernel",
         action="store_true",
         help="MoE router top-ks (routing and stats) in one Triton pass, bitwise torch.topk",
@@ -301,6 +307,7 @@ def main():
     torch.utils.deterministic.fill_uninitialized_memory = False
     modded_smoe_aligned_linear.COMBINE = ast.literal_eval(a.moe_combine or "None")
     modded_moe.TOPK_KERNEL = a.moe_topk_kernel
+    modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0

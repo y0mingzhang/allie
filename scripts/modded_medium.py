@@ -20,6 +20,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 import modded_arch
+import modded_attn
 import modded_board
 import modded_diffattn
 import modded_fp8
@@ -49,6 +50,7 @@ MASTER_LABELS = (
 )  # FP32 matrices that --bf16-weights stores in BF16 (MoE experts included; the router stays FP32)
 flex_kernel = torch.compile(flex_attention, dynamic=False)
 BOARD = False  # set by create_model when the model has a board branch; make_context then encodes
+ATTENTION = "flex"  # make_context's default backend; --attn-kernel: "triton" (modded_attn)
 
 
 @dataclass
@@ -119,10 +121,11 @@ def game_blocks(docs, size=128):
     return (some & ~full).to(torch.int8)[None, None], full.to(torch.int8)[None, None]
 
 
-def make_context(inputs, short_window, long_window, backend="flex", host=None):
+def make_context(inputs, short_window, long_window, backend=None, host=None):
     """Inputs are complete original rows (or shorter rows for correctness tests); host is the
     same rows as a numpy array, if at hand, so board models encode without a device sync."""
-    assert inputs.ndim == 2 and backend in ("flex", "dense")
+    backend = backend or ATTENTION
+    assert inputs.ndim == 2 and backend in ("flex", "dense", "triton")
     flat = inputs.flatten()
     starts = flat == BOS
     starts[:: inputs.size(1)] = True
@@ -132,6 +135,8 @@ def make_context(inputs, short_window, long_window, backend="flex", host=None):
     blocks = []
 
     def make(window):
+        if backend == "triton":
+            return modded_attn.bounds(starts, inputs.size(1), window)
         if backend == "dense":
             q = torch.arange(length, device=flat.device)[:, None]
             k = torch.arange(length, device=flat.device)[None, :]
@@ -185,6 +190,8 @@ def make_context(inputs, short_window, long_window, backend="flex", host=None):
 
 def attention(q, k, v, context, window, scale):
     mask = context.short_mask if window == context.short_window else context.long_mask
+    if context.backend == "triton":
+        return modded_attn.attention(q, k, v, *mask, scale)
     q, k, v = (x.transpose(1, 2) for x in (q, k, v))
     if context.backend == "dense":
         y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=scale)
@@ -538,6 +545,6 @@ def config_dict(cfg):
     return asdict(cfg) | dict(
         upstream_commit=COMMIT,
         output_support=[MOVE_START, MOVE_END],
-        attention_backend="flex",
+        attention_backend=ATTENTION,
         fp8=cfg.fp8 or False,
     )
