@@ -61,7 +61,10 @@ submit() {  # first attempt, or retry a failed build / publish
 	[ "$tries" -ge 4 ] && { log "$m failed $tries times; skipping"; return 0; }
 	echo $((tries + 1)) >"$J/$m.tries"
 	n=$(awk -v f="lichess_db_standard_rated_$m.pgn.zst" '$1==f {print $2}' <<<"$COUNTS")
-	if [ "${n:-0}" -lt 12000000 ]; then res="--cpus-per-task=16 --mem=96G --time=08:00:00"
+	if [ "${FASTBUILD:-0}" = 1 ]; then  # fastbuild.py: under 10 GB resident; the time is mostly the download
+		res="--cpus-per-task=16 --mem=24G --time=03:00:00"
+		[ "${n:-0}" -lt 12000000 ] && res="--cpus-per-task=8 --mem=16G --time=02:00:00"
+	elif [ "${n:-0}" -lt 12000000 ]; then res="--cpus-per-task=16 --mem=96G --time=08:00:00"
 	elif [ "${n:-0}" -lt 40000000 ]; then res="--cpus-per-task=32 --mem=200G --time=12:00:00"
 	else res="--cpus-per-task=32 --mem=300G --time=16:00:00"
 	fi
