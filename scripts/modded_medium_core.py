@@ -429,9 +429,11 @@ def reduce_to_owner(p):
     if not _inflight:
         torch.autograd.Variable._execution_engine.queue_callback(_drain)
     g, p.grad = p.grad, None
-    _inflight.append(
-        (dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True), p, g)
-    )
+    # one rank has nothing to reduce: no collective, no stream sync per param
+    work = _Done()
+    if dist.get_world_size() > 1:
+        work = dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True)
+    _inflight.append((work, p, g))
     while len(_inflight) > 4:
         _finish(_inflight.pop(0))
 
@@ -473,7 +475,7 @@ class NorMuon(torch.optim.Optimizer):
         )
         self.world_size = dist.get_world_size()
         # params whose broadcast from their owner waits for launch(), after the step's collectives
-        self._deferred = [] if DEFER else None
+        self._deferred = [] if DEFER and self.world_size > 1 else None
         groups = defaultdict(list)
         for p in params:
             groups[p.label].append(p)
