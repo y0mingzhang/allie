@@ -109,7 +109,7 @@ scale = target / rows
 table = {}
 for k in run["policy"].split("+"):
     if k.startswith("table:"):
-        table = json.loads((cm.RECIPES / f"{k[6:]}.json").read_text())["weights"]
+        table = cm.recipe(k[6:])["weights"]
 buckets = {
     str(c): dict(
         pool=pool[c],

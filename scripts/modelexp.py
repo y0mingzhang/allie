@@ -292,7 +292,8 @@ def tables(w, runs):
             hist = json.loads(w["history"].read_text()).get("pin_digest")
             assert (t["basis"] == "full") == bool(r.get("history")), f"{k}: history"
             assert t["basis"] == "disk" or hist == pin["sha256"], f"{k}: history pin"
-            assert t.get("history_sha256") in (None, sha(w["history"])), f"{k}: history"
+            want = sha(w["history"]) if t["basis"] == "full" else None
+            assert t.get("history_sha256") == want, f"{k}: history file"
             out[f"recipes/{k[6:]}.json"] = raw
     return out
 
@@ -458,11 +459,27 @@ def kill(known, grace=60):
             return
 
 
+def session(sid):
+    """Processes of a session (the child's own: start_new_session makes its id the pid)."""
+    out = []
+    for d in Path("/proc").iterdir():
+        try:
+            if (
+                d.name.isdigit()
+                and int((d / "stat").read_text().rsplit(")", 1)[1].split()[3]) == sid
+            ):
+                out.append(int(d.name))
+        except (OSError, IndexError, ValueError):
+            pass
+    return out
+
+
 def reap(p, known=None, grace=60):
-    """Kill a child's tree: its live descendants plus every process seen in it earlier, so
-    workers orphaned by a dead wrapper go too."""
+    """Kill a child's tree: its live descendants, everything left in its session, and every
+    process seen in the tree earlier, so workers orphaned by a dead wrapper go too."""
     known = dict(known or {})
     known |= {q: started(q) for q in tree(p.pid)} if p.poll() is None else {}
+    known |= {q: started(q) for q in session(p.pid)}
     kill({q: t for q, t in known.items() if t is not None}, grace)
     p.wait()
 
@@ -657,9 +674,13 @@ def pooled_controls(study, controls):
 
 def owner(study, r):
     """The manifest binding a run's global checkpoint and score directories to one planned
-    run of one study."""
-    body = json.dumps(r, sort_keys=True)
-    return dict(study=str(study), run=hashlib.sha256(body.encode()).hexdigest())
+    run of one frozen study."""
+    plan = study / "plan.json"
+    frozen = json.loads(plan.read_text())["hashes"] if plan.exists() else {}
+    digest = lambda x: hashlib.sha256(
+        json.dumps(x, sort_keys=True).encode()
+    ).hexdigest()
+    return dict(study=str(study), run=digest(r), frozen=digest(frozen))
 
 
 def claim(study, r):

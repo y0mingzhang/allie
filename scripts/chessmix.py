@@ -347,14 +347,19 @@ POLICIES = dict(
 PHASES = {}
 
 
-def table(name):
-    """table:NAME, a recipe's weight per bucket code from NAME.json, whose name ends in the first
-    12 hex digits of its sha256 (pool_inventory.py recipe writes them): the frozen copy next to
-    a study's source-ours if there is one, else RECIPES."""
+def recipe(name):
+    """Recipe NAME.json, whose name ends in the first 12 hex digits of its sha256
+    (pool_inventory.py recipe writes them): the frozen copy next to a study's source-ours if
+    there is one, else RECIPES."""
     frozen = Path(__file__).resolve().parents[1] / "recipes" / f"{name}.json"
     raw = (frozen if frozen.exists() else RECIPES / f"{name}.json").read_bytes()
     assert hashlib.sha256(raw).hexdigest()[:12] == name[-12:], f"{name} edited"
-    w = {int(c): v for c, v in json.loads(raw)["weights"].items()}
+    return json.loads(raw)
+
+
+def table(name):
+    """table:NAME, a recipe's weight per bucket code."""
+    w = {int(c): v for c, v in recipe(name)["weights"].items()}
     return lambda g, p: (w[g.code], True, True)
 
 
