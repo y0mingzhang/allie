@@ -28,6 +28,7 @@ import modded_moe_topk
 from modded_smoe import parallel_linear
 from modded_smoe_tuned import parallel_linear as tuned_linear
 from modded_smoe_aligned_linear import parallel_linear as gather_linear
+import modded_smoe_swiglu as swiglu
 
 # MoE.stats, per layer over the last step (modded_train logs them as moe_<name>)
 STATS = (
@@ -299,6 +300,11 @@ class MoE(nn.Module):
             up, down = Gather.apply(self.up, h.dtype), Gather.apply(self.down, h.dtype)
         else:
             up, down = self.up.type_as(h), self.down.type_as(h)
+        if swiglu.EPILOGUE:  # --moe-swiglu-epilogue
+            assert self.kind == "swiglu" and self.kernel == "scatter-dualgather", "swiglu dualgather only"
+            gates, offs = w.type_as(h), count.cumsum(0)
+            routed = swiglu.routed(h, up.transpose(1, 2), down, k, flat[order], order, offs, gates)
+            return routed, torch.zeros((), dtype=torch.long, device=h.device)
         if self.kernel in ("scatter", "scatter-tuned", "scatter-accum", "scatter-gather", "scatter-dualgather"):  # dropless
             offs = count.cumsum(0)
             se = flat[order]
