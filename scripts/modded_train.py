@@ -21,6 +21,7 @@ from modded_moe import STATS
 from modded_moe import full_state, local_state
 import modded_moe
 import modded_smoe_aligned_linear
+import modded_smoe_swiglu
 from modded_medium_core import sync_params
 from modded_medium import (
     Config,
@@ -224,6 +225,12 @@ def main():
         help="MoE router top-ks (routing and stats) in one Triton pass, bitwise torch.topk",
     )
     p.add_argument(
+        "--moe-swiglu-epilogue",
+        action="store_true",
+        help="scatter-dualgather SwiGLU experts: the activation in the up GEMM's epilogue and its"
+        " backward in the down dgrad's (modded_smoe_swiglu), bitwise the unfused kernels",
+    )
+    p.add_argument(
         "--ckpt-frac",
         type=float,
         default=1.0,
@@ -309,6 +316,7 @@ def main():
             "--moe-combine must use each top-k slot once"
         )
     modded_moe.TOPK_KERNEL = a.moe_topk_kernel
+    modded_smoe_swiglu.EPILOGUE = a.moe_swiglu_epilogue
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
