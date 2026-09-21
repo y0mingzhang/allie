@@ -9,8 +9,8 @@ import triton
 import triton.language as tl
 
 LOG2E = 1.4426950408889634
-FWD = (64, 32, 4, 2)  # BM, BN, warps, stages
-BWD = (64, 32, 4, 2)  # block, inner tile, warps, stages
+FWD = (64, 32, 4, 2, False)  # BM, BN, warps, stages, heads-fastest grid
+BWD = (64, 32, 4, 2, False)  # block, inner tile, warps, stages, heads-fastest grid
 
 
 @triton.jit
@@ -33,9 +33,12 @@ def _fwd(
     D: tl.constexpr,
     BM: tl.constexpr,
     BN: tl.constexpr,
+    HF: tl.constexpr,
 ):
-    m0 = tl.program_id(0) * BM
-    h = tl.program_id(1)
+    if HF:
+        m0, h = tl.program_id(1) * BM, tl.program_id(0)
+    else:
+        m0, h = tl.program_id(0) * BM, tl.program_id(1)
     rm = m0 + tl.arange(0, BM)
     rn = tl.arange(0, BN)
     rd = tl.arange(0, D)
@@ -100,9 +103,12 @@ def _bwd(
     D: tl.constexpr,
     B: tl.constexpr,
     BI: tl.constexpr,
+    HF: tl.constexpr,
 ):
-    b0 = tl.program_id(0) * B
-    h = tl.program_id(1)
+    if HF:
+        b0, h = tl.program_id(1) * B, tl.program_id(0)
+    else:
+        b0, h = tl.program_id(0) * B, tl.program_id(1)
     Q, K, V, DO = Q + h * SQH, K + h * SKH, V + h * SVH, DO + h * SDH
     LSE, DELTA = LSE + h * T, DELTA + h * T
     rb = b0 + tl.arange(0, B)
@@ -170,8 +176,9 @@ def fwd(
     _, T, H, D = q.shape
     o = torch.empty_like(q, memory_format=torch.contiguous_format)
     lse = q.new_empty((H, T), dtype=torch.float32)
-    bm, bn, warps, stages = FWD
-    _fwd[(triton.cdiv(T, bm), H)](
+    bm, bn, warps, stages, hf = FWD
+    grid = (H, triton.cdiv(T, bm)) if hf else (triton.cdiv(T, bm), H)
+    _fwd[grid](
         q,
         k,
         v,
@@ -185,6 +192,7 @@ def fwd(
         D,
         bm,
         bn,
+        hf,
         num_warps=warps,
         num_stages=stages,
     )
@@ -214,8 +222,9 @@ def bwd(
     dq, dk, dv = (
         torch.empty_like(x, memory_format=torch.contiguous_format) for x in (q, k, v)
     )
-    b, bi, warps, stages = BWD
-    _bwd[(triton.cdiv(T, b), H)](
+    b, bi, warps, stages, hf = BWD
+    grid = (H, triton.cdiv(T, b)) if hf else (triton.cdiv(T, b), H)
+    _bwd[grid](
         q,
         k,
         v,
@@ -235,6 +244,7 @@ def bwd(
         D,
         b,
         bi,
+        hf,
         num_warps=warps,
         num_stages=stages,
     )
