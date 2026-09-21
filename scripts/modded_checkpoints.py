@@ -54,7 +54,7 @@ def prune(out, keep, current):
     return removed
 
 
-def publish(out, directory, step, world, names, save=atomic_save):
+def publish(out, directory, step, world, names):
     """Point each of names (last.pt, fork-*.pt, best.pt) at a complete checkpoint directory."""
     pointer = {
         "format": "allie-modded-medium-1",
@@ -63,7 +63,7 @@ def publish(out, directory, step, world, names, save=atomic_save):
         "world_size": world,
     }
     for name in names:
-        save(pointer, out / name)
+        durable_save(pointer, out / name)
 
 
 def durable_save(state, path, tries=4):
@@ -100,7 +100,7 @@ def pinned(like):
 
 
 class AsyncSaver:
-    """--async-checkpoint, at most one save in flight. Each rank snapshots its state into host
+    """Checkpoints written from a thread, at most one save in flight. Each rank snapshots its state into host
     buffers reused across saves and a thread writes it; commit (rank 0: pointers, prune) runs on
     the main thread once poll() finds every rank's files durable. The gloo group is used only by
     poll(), which every rank calls at the same step boundaries."""
@@ -114,28 +114,25 @@ class AsyncSaver:
     def nbytes(self):
         return sum(b.untyped_storage().nbytes() for _, b in self.buffers.values())
 
-    def snapshot(self, value, owned=False):
+    def snapshot(self, value):
         """cpu_copy into reused buffers; CUDA tensors are copied asynchronously into pinned
-        memory, so the snapshot is complete after torch.cuda.synchronize(). owned: value's CPU
-        tensors are fresh and referenced nowhere else, so they are written as they are."""
+        memory, so the snapshot is complete after torch.cuda.synchronize()."""
         self.roots += 1
-        return self._copy(value, (self.roots,), owned)
+        return self._copy(value, (self.roots,))
 
-    def _copy(self, value, path, owned):
+    def _copy(self, value, path):
         if isinstance(value, torch.Tensor):
-            if owned and not value.is_cuda:
-                return value.detach()
             meta = value.dtype, value.shape, value.stride(), value.device
             if path not in self.buffers or self.buffers[path][0] != meta:
                 buffer = pinned(value) if value.is_cuda else torch.empty_like(value)
                 self.buffers[path] = meta, buffer
             return self.buffers[path][1].copy_(value.detach(), non_blocking=True)
         if isinstance(value, dict):
-            return {k: self._copy(v, (*path, k), owned) for k, v in value.items()}
+            return {k: self._copy(v, (*path, k)) for k, v in value.items()}
         if isinstance(value, list):
-            return [self._copy(v, (*path, i), owned) for i, v in enumerate(value)]
+            return [self._copy(v, (*path, i)) for i, v in enumerate(value)]
         if isinstance(value, tuple):
-            return tuple(self._copy(v, (*path, i), owned) for i, v in enumerate(value))
+            return tuple(self._copy(v, (*path, i)) for i, v in enumerate(value))
         return copy.deepcopy(value)
 
     def add(self, state, path):

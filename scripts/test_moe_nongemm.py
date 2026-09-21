@@ -1,47 +1,50 @@
-"""Gates of the MoE layer's non-GEMM speedups against perf-int (a522ee6), bit for bit.
+"""MoE layer tests. CUDA: the reference layer (d1536 SwiGLU, E96 top-4, 64K tokens, BF16 weights);
+CPU: under TRITON_INTERPRET=1, whose BF16 dots run in FP32 and which has no libdevice, so the CPU
+runs check indexing, masking, rounding points and autograd wiring, not MMA order.
 
-layer: one MoE layer as --ckpt eager runs it (x + moe(norm(x)) compiled whole by _eager_block,
-checkpointed, deterministic), 2 steps x 3 micro-batches plus a no-grad training forward, the
-bias nonzero and one step per update rule. Each implementation runs in its own process; outputs,
-input and parameter gradients, the load buffer after every micro-batch, the rebalanced bias and
-the logged stats must match perf-int's bitwise. --set MOD.NAME=VALUE switches (new side only).
-CUDA: the candidate layer (d1536 SwiGLU, E96 top-4, 64K tokens, BF16 weights), fwd+bwd ms and
-the kernels whose time changed. CPU: 2048 tokens of a d64 E16 top-4 layer (pad kernel).
+layer: one MoE layer as --ckpt eager runs it (x + moe(norm(x)) compiled whole and checkpointed with
+replay_context, deterministic; CPU: eager, d64 E16 top-4, 2048 tokens), 2 steps x 3 micro-batches
+plus a no-grad training forward, the bias nonzero and one step per update rule, against a base
+commit's layer (--base, with its shipped flags --set) bit for bit: outputs, input and parameter
+gradients, the load buffer after every micro-batch, the rebalanced bias and the logged stats. Each
+implementation runs in its own process.
 
-orders (CUDA): which FP32 add order over the top-k (any of the 15 add trees for k = 4) equals
-cuBLAS's gates @ expanded on 64K x 4 x 1536 BF16 inputs of wide dynamic range, eagerly and
-compiled with the shared-expert add and residual as the layer fuses them.
+kernels: modded_smoe.routed (output, input, weight and gate grads, and the no-grad path) against an
+FP32 torch reference on ragged shapes with empty experts.
 
-topk: modded_moe_topk's router top-ks against torch.topk (CUDA; CPU: aten_topk, an emulation of
-ATen's kernels, under TRITON_INTERPRET=1) on live, tie-heavy and special (+-0, +-inf, NaN,
-subnormal) scores, and their times.
+topk: modded_smoe.route against torch.topk (CUDA; CPU: aten_topk, an emulation of ATen's kernels)
+on live, tie-heavy and special (+-0, +-inf, NaN, subnormal) scores.
 
-    inhold.sh scripts/test_moe_nongemm.py layer [--eager] [--no-ckpt] [--base COMMIT] [--set ...]
-    inhold.sh scripts/test_moe_nongemm.py orders
-    inhold.sh scripts/test_moe_nongemm.py layer --set 'modded_smoe_aligned_linear.COMBINE=(0,1,2,3)'
-    inhold.sh scripts/test_moe_nongemm.py topk
-    inhold.sh scripts/test_moe_nongemm.py layer --set modded_moe.TOPK_KERNEL=True
+counts: modded_moe.counts against the scatter_add_ histogram, eager and compiled.
+
+    inhold.sh scripts/test_moe_nongemm.py [layer|kernels|topk|counts ...] [--base COMMIT]
+    .venv/bin/python scripts/test_moe_nongemm.py    # CPU: reruns itself under TRITON_INTERPRET=1
 """
 
 import argparse
 import ast
-import functools
 import importlib
 import itertools
 import os
-import re
-import statistics
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import torch
-import triton.testing
+import torch.distributed as dist
+import torch.nn.functional as F
 
-BASE = "a522ee6"
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+DEV = "cuda" if torch.cuda.is_available() else "cpu"
+BASE = "cc1ac00"
+BASE_SET = [
+    "modded_moe.TOPK_KERNEL=True",
+    "modded_smoe_swiglu.EPILOGUE=True",
+    "modded_smoe_aligned_linear.COMBINE=(((0,1),2),3)",
+]
 
 
 def bitdiff(a, b):
@@ -55,28 +58,74 @@ def bitdiff(a, b):
     return (a.long() - b.long()).abs().max().item() if a.numel() else 0
 
 
-def base_scripts(base=BASE):
+def interpret():
+    """Interpreter fixes: BF16 dots in FP32 (it multiplies the raw bits), FP32 -> BF16 to nearest
+    even (it truncates), libdevice exp as numpy's (its libdevice is stubs)."""
+    import numpy as np
+    import triton.language as tl
+    from triton.language.extra import libdevice
+    from triton.runtime import interpreter as ip
+
+    b = ip.InterpreterBuilder
+    dot, cast = b.create_dot, b.cast_impl
+
+    def f32(t):
+        if t.dtype.scalar != tl.bfloat16:
+            return t
+        return ip.TensorHandle(
+            (t.data.astype(np.uint32) << 16).view(np.float32), tl.float32
+        )
+
+    def to_bf16(self, src, ty):
+        if src.dtype.scalar == tl.float32 and ty.scalar == tl.bfloat16:
+            x = torch.from_numpy(np.ascontiguousarray(src.data)).bfloat16()
+            return ip.TensorHandle(
+                x.view(torch.int16).numpy().view(np.uint16), tl.bfloat16
+            )
+        return cast(self, src, ty)
+
+    b.create_dot = lambda self, x, y, *rest: dot(self, f32(x), f32(y), *rest)
+    b.cast_impl = to_bf16
+    libdevice.exp = lambda x: tl.math.exp(x)
+
+
+def base_scripts(base):
     out = tempfile.mkdtemp()
-    git = ["git", "-C", str(HERE.parent), "archive", f"{base}:scripts"]
+    repo = os.environ.get(
+        "ALLIE_PROJECT_ROOT", HERE.parent
+    )  # for a git-archived copy of scripts/
+    git = ["git", "-C", str(repo), "archive", f"{base}:scripts"]
     tar = subprocess.run(git, capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-f", "-", "-C", out], input=tar, check=True)
-    assert os.path.exists(f"{out}/modded_moe.py"), out
     return out
 
 
-def build(dev, kernel):
+def run(a):
+    """One implementation's layer record (subprocess: its own scripts directory first)."""
+    sys.path.insert(0, a.impl)
+    import modded_moe
     from modded_arch import moe_dims
     from modded_moe import MoE
 
+    for s in a.set:
+        target, _, value = s.partition("=")
+        mod, _, name = target.rpartition(".")
+        assert hasattr(importlib.import_module(mod), name), target
+        setattr(importlib.import_module(mod), name, ast.literal_eval(value))
+    backend = "nccl" if DEV == "cuda" else "gloo"
+    dist.init_process_group(
+        backend, init_method=f"file://{a.dump}.store", rank=0, world_size=1
+    )
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cuda.matmul.allow_tf32 = True
     torch.manual_seed(0)
-    if dev == "cuda":
-        arch = {"mlp": "swiglu", "moe_init": 0.006, "moe_seq": 0.001}
-        arch |= {"moe": [96, 4], "moe_kernel": kernel or "scatter-dualgather"}
-        m, t = MoE(1536, *moe_dims(1536, arch)), 65536
-    else:
-        m = MoE(64, 16, 4, 32, 64, kind="swiglu", seq=0.001, kernel=kernel or "pad")
-        t = 2048
-    m = m.to(dev).train()
+    (e, d, t) = (96, 1536, 65536) if DEV == "cuda" else (16, 64, 2048)
+    arch = dict(
+        mlp="swiglu", moe=[e, 4], moe_kernel="scatter-dualgather", moe_init=0.006,
+        moe_router_lr_mul=0.1, moe_gamma=1e-3, moe_seq=0.001, moe_update="sign",
+        moe_score="sigmoid",
+    )  # fmt: skip
+    m = MoE(d, *moe_dims(d, arch)).to(DEV).train()
     with torch.no_grad():
         m.down.normal_(0, 0.02)
         m.shared_down.normal_(0, 0.02)
@@ -84,183 +133,133 @@ def build(dev, kernel):
     for n, p in m.named_parameters():
         if n != "router":
             p.data = p.data.bfloat16()
-    return m, t
 
+    def block(x):
+        return x + m(F.rms_norm(x, (x.size(-1),)))
 
-class Block(torch.nn.Module):
-    layer_idx = 1
+    fn = block if DEV == "cpu" else torch.compile(block, dynamic=False, fullgraph=True)
 
-    def __init__(self, mlp):
-        super().__init__()
-        self.mlp = mlp
+    def forward(x):
+        return torch.utils.checkpoint.checkpoint(
+            fn, x, use_reentrant=False, context_fn=modded_moe.replay_context
+        )
 
-    def _forward(self, x, attn_args):
-        import modded_medium_core as core
-
-        return x + self.mlp(core.norm(x))
-
-
-def run(a):
-    sys.path.insert(0, a.impl)
-    import modded_medium_core as core
-    import modded_moe
-
-    for s in a.set:
-        target, _, value = s.partition("=")
-        mod, _, name = target.rpartition(".")
-        assert hasattr(importlib.import_module(mod), name), target
-        setattr(importlib.import_module(mod), name, ast.literal_eval(value))
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.use_deterministic_algorithms(True)
-    torch.backends.cuda.matmul.allow_tf32 = True
-    modded_moe.BLOCK_RECOMPUTE = True
-    m, t = build(dev, a.kernel)
-    blk = Block(m)
-    if a.eager:
-        blk._compiled = blk._forward
-    gen = torch.Generator(dev).manual_seed(1)
+    gen = torch.Generator(DEV).manual_seed(1)
 
     def rand():
-        return torch.randn(t, m.router.shape[1], device=dev, generator=gen).bfloat16()
-
-    def step(x, dy):
-        y = core._eager_block(blk, x, None, ckpt=a.ckpt)
-        y.backward(dy)
-        return y
+        return torch.randn(t, d, device=DEV, generator=gen).bfloat16()
 
     rec = {}
     for i, rule in enumerate(("sign", "prop")):
         m.update = rule
         for j in range(3):
             x, dy = rand().requires_grad_(), rand()
-            rec[f"y{i}{j}"] = step(x, dy).detach()
-            rec[f"dx{i}{j}"], rec[f"load{i}{j}"] = x.grad, m.load.clone()
+            y = forward(x)
+            y.backward(dy)
+            rec[f"y{i}{j}"], rec[f"dx{i}{j}"] = y.detach(), x.grad
+            rec[f"load{i}{j}"] = m.load.clone()
         with torch.no_grad():
-            rec[f"y{i}-nograd"] = core._eager_block(blk, rand(), None, ckpt=a.ckpt)
+            rec[f"y{i}-nograd"] = forward(rand())
             rec[f"load{i}-nograd"] = m.load.clone()
         rec |= {f"{n}.grad{i}": p.grad.clone() for n, p in m.named_parameters()}
         m.zero_grad(set_to_none=True)
         m.rebalance(0.7)
         rec[f"bias{i}"], rec[f"stats{i}"] = m.bias.clone(), m.stats.clone()
-    acts = [torch.profiler.ProfilerActivity.CPU]
-    acts += [torch.profiler.ProfilerActivity.CUDA] * (dev == "cuda")
-    with torch.profiler.profile(activities=acts) as prof:
-        step(rand().requires_grad_(), rand())
-        if dev == "cuda":
-            torch.cuda.synchronize()
-    events = prof.key_averages()
-    topk = sum(e.count for e in events if e.key == "aten::topk")
-    kernels = {}
-    for e in events:
-        if e.device_type == torch.autograd.DeviceType.CUDA:
-            name = re.sub(r"_\d+$", "", e.key)  # inductor's kernel numbering
-            n, ms = kernels.get(name, (0, 0.0))
-            kernels[name] = n + e.count, ms + e.device_time_total / 1e3
-    ms = []
-    if dev == "cuda":
-        x, dy = rand().requires_grad_(), rand()
-        start, end = (torch.cuda.Event(enable_timing=True) for _ in range(2))
-        for _ in range(8):
-            start.record()
-            for _ in range(4):
-                step(x, dy)
-            end.record()
-            end.synchronize()
-            ms.append(start.elapsed_time(end) / 4)
-    rec = {k: v.cpu() for k, v in rec.items()}
-    torch.save({"rec": rec, "ms": ms, "topk": topk, "kernels": kernels}, a.dump)
+    torch.save({k: v.cpu() for k, v in rec.items()}, a.dump)
+    dist.destroy_process_group()
 
 
 def layer(a):
-    flags = ["--eager"] * a.eager + ["--no-ckpt"] * (not a.ckpt)
-    flags += ["--kernel", a.kernel] * bool(a.kernel)
-    out = {}
-    tmp = Path(tempfile.mkdtemp())
-    for name, impl, extra in (
-        ("base", base_scripts(a.base), []),
-        ("new", HERE, [f"--set={s}" for s in a.set]),
+    tmp, out = Path(tempfile.mkdtemp()), {}
+    for name, impl, sets in (
+        ("base", base_scripts(a.base), a.set or BASE_SET),
+        ("new", HERE, []),
     ):
-        cmd = [sys.executable, __file__, "run", "--impl", str(impl)]
-        cmd += ["--dump", str(tmp / f"{name}.pt"), *flags, *extra]
-        subprocess.run(cmd, check=True)
-        out[name] = torch.load(tmp / f"{name}.pt")
-    base, new = out["base"]["rec"], out["new"]["rec"]
+        cmd = [
+            sys.executable,
+            __file__,
+            "run",
+            "--impl",
+            str(impl),
+            "--dump",
+            str(tmp / name),
+        ]
+        subprocess.run(cmd + [f"--set={s}" for s in sets], check=True)
+        out[name] = torch.load(tmp / name)
+    base, new = out["base"], out["new"]
     assert base.keys() == new.keys()
     diff = {k: bitdiff(base[k], new[k]) for k in base}
     bad = {k: v for k, v in diff.items() if v}
-    kb, kn = out["base"]["kernels"], out["new"]["kernels"]
-    for name in sorted(kb.keys() | kn.keys()):
-        (cb, tb), (cn, tn) = kb.get(name, (0, 0)), kn.get(name, (0, 0))
-        if abs(tn - tb) > 0.05:
-            print(f"  {tb:7.3f} ms {cb:3d}x -> {tn:7.3f} ms {cn:3d}x  {name[:80]}")
-    what = f"layer {' '.join(flags + a.set) or 'default'}: {len(diff)} tensors"
-    what += (
-        f"; topk calls per micro-batch {out['base']['topk']} -> {out['new']['topk']}"
-    )
-    if out["new"]["ms"]:
-        ms = [statistics.median(out[n]["ms"]) for n in ("base", "new")]
-        what += f"; fwd+bwd ms {ms[0]:.3f} -> {ms[1]:.3f}"
-    verdict = "FAIL" if bad else "PASS"
     print(
-        f"{verdict} {what}; max bit diff {max(diff.values())} {bad or ''}", flush=True
+        f"{'FAIL' if bad else 'PASS'} layer vs {a.base} ({DEV}): {len(diff)} tensors {bad or ''}"
     )
     return not bad
 
 
-def trees(leaves):
-    """Every add tree over leaves up to commutativity (FP adds commute but do not associate)."""
-    if len(leaves) == 1:
-        yield leaves[0]
-        return
-    first, rest = leaves[0], leaves[1:]
-    for r in range(len(rest)):
-        for left in itertools.combinations(rest, r):
-            right = tuple(x for x in rest if x not in left)
-            yield from itertools.product(trees((first, *left)), trees(right))
+def reference(x, up, down, k, flat, gates):
+    """FP32 routed SwiGLU experts: x [T, D], up [E, 2H, D], down [E, H, D], flat [T * k]."""
+    xs = x.repeat_interleave(k, 0)
+    out = xs.new_zeros(len(xs), down.shape[-1])
+    for e in range(len(up)):
+        rows = (flat == e).nonzero()[:, 0]
+        a, b = (xs[rows] @ up[e].T).chunk(2, -1)
+        out[rows] = (F.silu(a) * b) @ down[e]
+    return (out.view(len(x), k, -1) * gates[..., None]).sum(1)
 
 
-def orders(a):
-    from modded_smoe_aligned_linear import combine
+def kernels(a):
+    import modded_moe
+    import modded_smoe
 
-    t, k, d, dev = a.tokens, a.topk, 1536, "cuda"
-    torch.use_deterministic_algorithms(True)
-    gen = torch.Generator(dev).manual_seed(3)
-
-    def normal(*shape):
-        return torch.randn(*shape, device=dev, generator=gen)
-
-    # expert outputs over 2^-20..2^20: the top-k sums round, so add orders differ
-    scale = 2.0 ** torch.randint(-20, 21, (t, k, d), device=dev, generator=gen)
-    e = (normal(t, k, d) * scale).bfloat16()
-    w = torch.sigmoid(normal(t, k))
-    # FP32, cast to BF16 as MoE.experts_out does
-    w = w * (k**0.5 / w.sum(-1, keepdim=True))
-    s, x = (normal(t, d) * 0.1).bfloat16(), normal(t, d).bfloat16()
-    ref = (w.bfloat16().unsqueeze(1) @ e).squeeze(1)
-    found = []
-    for tree in trees(tuple(range(k))):
-        got = combine(e, w.bfloat16(), tree)
-        n = (got.view(torch.int16) != ref.view(torch.int16)).sum().item()
-        print(
-            f"  {tree}: {n} of {ref.numel()} differ, max bit diff {bitdiff(ref, got)}"
-        )
-        found += [tree] * (n == 0)
-    ok = bool(found)
-    for tree in found:  # compiled as the layer fuses it: + shared expert, + residual
-        old = torch.compile(
-            lambda e, w, s, x: x + ((w.bfloat16().unsqueeze(1) @ e).squeeze(1) + s)
-        )
-        new = torch.compile(
-            lambda e, w, s, x, tree=tree: x + (combine(e, w.bfloat16(), tree) + s)
-        )
-        n = bitdiff(old(e, w, s, x), new(e, w, s, x))
-        print(f"  {tree} compiled with the shared add and residual: max bit diff {n}")
-        ok &= n == 0
-    verdict = "PASS" if ok else "FAIL"
-    print(
-        f"{verdict} orders equal to cuBLAS at {t} x {k} x {d}: {found or 'none'}",
-        flush=True,
+    gen = torch.Generator(DEV).manual_seed(2)
+    ok = True
+    shapes = (
+        ((96, 1536, 512, 4, 8192), (128, 768, 256, 4, 4096)) if DEV == "cuda" else ()
     )
+    for e, d, h, k, t in shapes + ((16, 64, 22, 4, 300), (8, 48, 40, 2, 129)):
+        s = torch.rand(t, e, device=DEV, generator=gen)
+        s[:, : e // 4] -= 2  # a quarter of the experts get no routes
+        idx = s.topk(k, -1).indices
+        gates = torch.rand(t, k, device=DEV, generator=gen).bfloat16()
+        x = torch.randn(t, d, device=DEV, generator=gen).bfloat16()
+        up = (torch.randn(e, 2 * h, d, device=DEV, generator=gen) / d**0.5).bfloat16()
+        down = (torch.randn(e, h, d, device=DEV, generator=gen) / h**0.5).bfloat16()
+        dy = torch.randn(t, d, device=DEV, generator=gen).bfloat16()
+        flat = idx.flatten()
+        order = flat.argsort(stable=True)
+        offsets = modded_moe.counts(flat[order], e).cumsum(0)
+        leaves = [v.clone().requires_grad_() for v in (x, up, down, gates)]
+        y = modded_smoe.routed(
+            leaves[0],
+            leaves[1].transpose(1, 2),
+            leaves[2],
+            k,
+            flat[order],
+            order,
+            offsets,
+            leaves[3],
+        )
+        y.backward(dy)
+        with torch.no_grad():
+            y0 = modded_smoe.routed(
+                x, up.transpose(1, 2), down, k, flat[order], order, offsets, gates
+            )
+        refs = [v.float().requires_grad_() for v in (x, up, down, gates)]
+        r = reference(*refs[:3], k, flat, refs[3])
+        r.backward(dy.float())
+        errs = [
+            ((u.float() - v).norm() / v.norm()).item()
+            for u, v in zip(
+                (y, *(p.grad for p in leaves)), (r, *(p.grad for p in refs))
+            )
+        ]
+        exact = torch.equal(y0, y.detach())
+        good = max(errs) < 2e-2 and exact
+        print(
+            f"  E{e} d{d} h{h} k{k} T{t}: rel err out/dx/dup/ddown/dgates {errs}, no-grad == grad {exact}"
+        )
+        ok &= good
+    print(f"{'PASS' if ok else 'FAIL'} routed kernels vs FP32 reference ({DEV})")
     return ok
 
 
@@ -300,83 +299,102 @@ def aten_topk(x, k):
 
 
 def topk(a):
-    """Router top-ks (modded_moe_topk.route) against torch.topk (CUDA) or aten_topk (CPU, under
-    TRITON_INTERPRET=1): routing indices of s + bias for k, values and indices of s for k + 1."""
-    import modded_moe_topk
+    """Router top-ks against torch.topk: routing indices of s + bias for k, values and indices of
+    s for k + 1, and zeros without stats."""
+    import modded_smoe
 
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
-    t, e, k = (a.tokens, 96, a.topk) if dev == "cuda" else (256, 96, a.topk)
-    gen = torch.Generator(dev).manual_seed(4)
-    ref = (lambda x, k: tuple(torch.topk(x, k, dim=-1))) if dev == "cuda" else aten_topk
+    t, e, k = (65536, 96, 4) if DEV == "cuda" else (256, 96, 4)
+    gen = torch.Generator(DEV).manual_seed(4)
+    ref = (lambda x, k: tuple(torch.topk(x, k, dim=-1))) if DEV == "cuda" else aten_topk
 
     def rand(*shape):
-        return torch.rand(*shape, device=dev, generator=gen)
+        return torch.rand(*shape, device=DEV, generator=gen)
 
     live = torch.sigmoid(8 * rand(t, e) - 4), 0.02 * rand(e) - 0.01
-    grid = (torch.randint(0, 6, (t, e), device=dev, generator=gen) / 8).float()
-    ties = grid, torch.randint(-2, 3, (e,), device=dev, generator=gen) / 8
+    grid = (torch.randint(0, 6, (t, e), device=DEV, generator=gen) / 8).float()
+    ties = grid, torch.randint(-2, 3, (e,), device=DEV, generator=gen) / 8
     odd = torch.tensor(
         [0.0, -0.0, float("inf"), -float("inf"), float("nan"), 0.5, 2**-149]
     )
-    pick = torch.randint(0, len(odd), (t, e), device=dev, generator=gen)
+    pick = torch.randint(0, len(odd), (t, e), device=DEV, generator=gen)
     special = (
-        torch.where(rand(t, e) < 0.3, odd.to(dev)[pick], grid),
-        torch.zeros(e, device=dev),
+        torch.where(rand(t, e) < 0.3, odd.to(DEV)[pick], grid),
+        torch.zeros(e, device=DEV),
     )
     ok = True
     for name, (s, bias) in {"live": live, "ties": ties, "special": special}.items():
         s, bias = s.contiguous(), bias.float()
-        idx, val, top = modded_moe_topk.route(s, bias, k, True)
+        got = modded_smoe.route(s, bias, k, True)
         want = ref(s + bias, k)[1], *ref(s, k + 1)
-        got = (idx, val, top)
         diff = [bitdiff(w.cpu(), g.cpu()) for w, g in zip(want, got)]
-        zeros = modded_moe_topk.route(s, bias, k, False)
+        zeros = modded_smoe.route(s, bias, k, False)
         diff.append(bitdiff(want[0].cpu(), zeros[0].cpu()))
         diff.append(max(z.abs().max().item() for z in zeros[1:]))
         print(
             f"  {name}: routing idx, stats values, stats idx, no-stats idx, no-stats zeros: {diff}"
         )
         ok &= not any(diff)
-    if dev == "cuda":
-        s, bias = live
-        bench = triton.testing.do_bench
-        routing = bench(lambda: torch.topk(s + bias, k))
-        both = bench(lambda: (torch.topk(s + bias, k), torch.topk(s, k + 1)))
-        print(f"  torch.topk ms: routing {routing:.3f}, both {both:.3f}")
-        for rows, warps in ((8, 4), (16, 4), (16, 8), (32, 8)):
-            run = functools.partial(modded_moe_topk.route, s, bias, k)
-            ms = [
-                bench(functools.partial(run, st, rows, warps)) for st in (False, True)
-            ]
-            print(
-                f"  route ms, {rows} rows {warps} warps: routing {ms[0]:.3f}, both {ms[1]:.3f}"
-            )
-    verdict = "PASS" if ok else "FAIL"
     print(
-        f"{verdict} router top-k at {t} x {e}, k {k}: bitwise torch.topk incl. ties",
-        flush=True,
+        f"{'PASS' if ok else 'FAIL'} router top-k at {t} x {e}, k {k}: bitwise torch.topk"
+    )
+    return ok
+
+
+def counts(a):
+    from modded_moe import counts as new
+
+    def old(flat, e):
+        return flat.new_zeros(e).scatter_add_(0, flat, torch.ones_like(flat))
+
+    g = torch.Generator().manual_seed(0)
+    ok = True
+    for e, k, t in itertools.product((64, 96, 128), (4, 8), (1024, 65536)):
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda f, e=e: new(f[f.argsort(stable=True)], e), fullgraph=True
+        )
+        s = torch.rand(t, e, generator=g)
+        few = torch.randperm(e, generator=g) < 2 * k
+        routings = (
+            s.topk(k, -1).indices,
+            (s + torch.linspace(8, 0, e)).topk(k, -1).indices,
+            (s + 2 * few).topk(k, -1).indices,  # e - 2k experts empty
+            torch.full((t, k), e - 1),  # every route to one expert
+        )
+        for idx in routings:
+            flat = idx.flatten().to(DEV)
+            want = old(flat, e)
+            for c in (new(flat[flat.argsort(stable=True)], e), compiled(flat)):
+                ok &= c.dtype == want.dtype and torch.equal(c, want)
+    print(
+        f"{'PASS' if ok else 'FAIL'} counts vs scatter_add_ ({DEV}), eager and compiled"
     )
     return ok
 
 
 def main():
+    if (
+        DEV == "cpu" and os.environ.get("TRITON_INTERPRET") != "1"
+    ):  # before triton's import
+        env = os.environ | {"TRITON_INTERPRET": "1"}
+        os.execve(sys.executable, [sys.executable, *sys.argv], env)
+    if DEV == "cpu":
+        interpret()
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=("layer", "orders", "topk", "run"))
+    tests = dict(layer=layer, kernels=kernels, topk=topk, counts=counts)
+    p.add_argument("cmd", nargs="*", choices=(*tests, "run"))
     p.add_argument("--impl")
-    p.add_argument("--base", default=BASE, help="layer: the reference commit")
     p.add_argument("--dump")
-    p.add_argument("--kernel")
-    p.add_argument("--eager", action="store_true")
-    p.add_argument("--no-ckpt", dest="ckpt", action="store_false")
-    p.add_argument("--set", action="append", default=[])
-    p.add_argument("--tokens", type=int, default=65536)
-    p.add_argument("--topk", type=int, default=4)
-    a = p.parse_args()
-    if a.cmd == "run":
-        return run(a)
-    raise SystemExit(
-        0 if {"layer": layer, "orders": orders, "topk": topk}[a.cmd](a) else 1
+    p.add_argument("--base", default=BASE, help="layer: the reference commit")
+    p.add_argument(
+        "--set", action="append", default=[], help="layer: MOD.NAME=VALUE (base side)"
     )
+    a = p.parse_args()
+    if a.cmd == ["run"]:
+        return run(a)
+    torch.use_deterministic_algorithms(True)
+    results = [tests[c](a) for c in a.cmd or tests]
+    raise SystemExit(0 if all(results) else 1)
 
 
 if __name__ == "__main__":

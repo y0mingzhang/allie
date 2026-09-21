@@ -64,7 +64,7 @@ def same(a, b, what):
 
 def check(rows, windows, device, what):
     x = torch.as_tensor(rows, device=device)
-    ctx = make_context(x, *windows)
+    ctx = make_context(x, *windows, board=False)
     compiled = device == "cuda"
     for mask, w in ((ctx.short_mask, windows[0]), (ctx.long_mask, windows[1])):
         same(mask, reference(x, w, compiled), f"{what} window {w}")
@@ -97,7 +97,7 @@ def main():
     rng = np.random.default_rng(0)
     val = Packed(DATA, "val")
     real = val.rows(rng.choice(int(val.ends[-1]), 17, replace=False))[:, :-1]
-    train_windows = (11 * 128, 23 * 128)  # modded_wsd.install: fixed (11, 23) blocks
+    train_windows = (11 * 128, 23 * 128)  # the fixed WSD windows, in 128-token blocks
     n = 0
     for rows in (
         16,

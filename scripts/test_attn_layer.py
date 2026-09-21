@@ -20,10 +20,9 @@ import modded_medium as mm
 from modded_medium import core
 
 REPS, WIDTH, WINDOWS = 20, 1536, (11 * 128, 23 * 128)
-KINDS = (  # name, layer index, value embeddings, key offset, count in the reference
-    ("plain", 7, False, False, 14),
-    ("ve", 2, True, False, 10),
-    ("ve+key-offset", 0, True, True, 0),
+KINDS = (  # name, layer index, value embeddings, count in the reference
+    ("plain", 7, False, 14),
+    ("ve", 2, True, 10),
 )
 
 
@@ -41,13 +40,22 @@ def bench(fn):
 
 def kernels(fn, top=12):
     """GPU kernels of one fn() call: total ms and count per kernel, largest first."""
-    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CUDA]
+    ) as prof:
         fn()
         torch.cuda.synchronize()
-    rows = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
+    rows = [
+        e
+        for e in prof.key_averages()
+        if e.device_type == torch.autograd.DeviceType.CUDA
+    ]
     rows.sort(key=lambda e: -e.self_device_time_total)
     total = sum(e.self_device_time_total for e in rows) / 1e3
-    out = [f"    {e.self_device_time_total / 1e3:7.3f} ms {e.count:3d}x {e.key[:100]}" for e in rows[:top]]
+    out = [
+        f"    {e.self_device_time_total / 1e3:7.3f} ms {e.count:3d}x {e.key[:100]}"
+        for e in rows[:top]
+    ]
     return "\n".join([f"    {total:7.3f} ms total GPU", *out])
 
 
@@ -69,7 +77,10 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch._dynamo.config.cache_size_limit = 64
     yarn = core.Yarn(64, T)
-    ctx = {b: mm.make_context(x, *WINDOWS, backend=b) for b in ("flex", "triton")}
+    ctx = {
+        b: mm.make_context(x, *WINDOWS, backend=b, board=False)
+        for b in ("flex", "triton")
+    }
     g = torch.Generator(device="cuda").manual_seed(0)
     h = F.rms_norm(
         torch.randn(1, T, WIDTH, generator=g, device="cuda"), (WIDTH,)
@@ -79,7 +90,7 @@ def main():
     sa = torch.tensor([0.5, 1.0], device="cuda")
     total = {"flex": 0.0, "triton": 0.0}
     print(f"{torch.cuda.get_device_name()}: {T} tokens, width {WIDTH}", flush=True)
-    for name, i, use_ve, offset, count in KINDS:
+    for name, i, use_ve, count in KINDS:
         torch.manual_seed(i)
         attn = core.CausalSelfAttention(WIDTH, 64, WIDTH // 64, i).cuda()
         with torch.no_grad():
@@ -97,9 +108,7 @@ def main():
         wrt = [xin, *([vin] if use_ve else []), *attn.parameters()]
         res, times = {}, {}
         for b in ("flex", "triton"):
-            args = core.AttnArgs(
-                vin, sa, ctx[b], WINDOWS[0], yarn.cos, yarn.sin, 0.1, offset
-            )
+            args = core.AttnArgs(vin, sa, ctx[b], WINDOWS[0], yarn.cos, yarn.sin, 0.1)
             y = f(xin, args)
             res[b] = [y.detach(), *torch.autograd.grad(y, wrt, dy)]
             fw = bench(lambda: f(xin, args))

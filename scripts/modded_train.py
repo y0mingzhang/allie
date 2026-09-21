@@ -1,50 +1,50 @@
-"""Recoverable training of the pinned medium recipe on original chess rows."""
+"""Recoverable training of the pinned medium recipe on chessmix-sampled chess rows."""
 
 import argparse
-import ast
-from dataclasses import asdict
 import hashlib
 import json
 import os
-from pathlib import Path
 import random
 import signal
 import time
 import uuid
+from dataclasses import asdict
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import triton
-from modded_arch import attn_factor, extra_flops
-from modded_moe import STATS
-from modded_moe import full_state, local_state
+
 import modded_medium
-import modded_moe
-import modded_smoe_aligned_linear
-import modded_smoe_swiglu
-from modded_medium_core import sync_params
+from lm_checkpoint import restore_rng, rng_state
+from lm_data import Packed
+from modded_arch import extra_flops
+from modded_checkpoints import AsyncSaver, publish
+from modded_checkpoints import prune as prune_checkpoints
 from modded_medium import (
+    RUNTIME_SOURCE_KEY,
     Config,
     TrainingManager,
+    aux_losses,
+    config_dict,
     create_model,
     make_context,
     move_losses,
-    aux_losses,
-    elo_buckets,
     ratings,
-    cpu_copy,
-    config_dict,
-    core,
-    RUNTIME_SOURCE_KEY,
 )
-from lm_data import Packed
-from lm_checkpoint import atomic_save, rng_state, restore_rng
-from modded_checkpoints import AsyncSaver, durable_save, publish
-from modded_checkpoints import prune as prune_checkpoints
+from modded_medium_core import sync_params
+from modded_moe import STATS
+from modded_wsd import Schedule
 
 ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[1]))
 SOURCE = Path(__file__).resolve().parent
+# arguments a resume, fork or continuation shares with its checkpoint: they change what is computed
+SAME = (
+    "width", "layers", "head_dim", "initial_batch_rows", "micro_batch", "lr_scale", "seed",
+    "deterministic", "wsd_schedule", "mix", "mix_stores", "mix_pool_frac", "mix_history",
+    "mix_months", "clock_feats", "input_lr_mul", "aux_time", "aux_wdl", "arch", "attn_kernel",
+)  # fmt: skip
 
 
 @torch.inference_mode()
@@ -56,14 +56,7 @@ def evaluate(model, manager, rows, batch):
         ids = torch.as_tensor(data, device="cuda")
         x, y = ids[:, :-1], ids[:, 1:]
         context = make_context(x, manager.ws_short * 128, manager.ws_long * 128)
-        elo = (
-            torch.as_tensor(elo_buckets(data), device="cuda").flatten()
-            if getattr(model, "use_elo", False)
-            else None
-        )
-        logits = model(
-            x.flatten(), y.flatten(), context, manager.get_forward_args(), elo_seq=elo
-        )
+        logits = model(x.flatten(), y.flatten(), context, manager.get_forward_args())
         values = logits.flatten(0, 1)[:, 378:2346].float()
         targets = y.flatten()
         losses = (
@@ -113,9 +106,52 @@ def useful_flops(rows, cfg, short_window, long_window):
     long = len({round(i * (layers - 1) / 15) for i in (0, 4, 11, 15)})
     gates = layers + 2 * min(5, layers // 2)
     per_token = 24 * layers * d * d + 2 * d * 2432 + 2 * (gates * heads * 16 + 64)
-    per_token += extra_flops(cfg.arch, d, layers)  # model-track branches (0 by default)
+    per_token += extra_flops(cfg.arch, d, layers)  # board, SwiGLU and MoE
     pairs = (layers - long) * short_pairs + long * long_pairs
-    return 3 * (x.size * per_token + 4 * d * pairs * attn_factor(cfg.arch))
+    return 3 * (x.size * per_token + 4 * d * pairs)
+
+
+def continuation(shared, local, args, config, output, pointer):
+    """Strict stable-prefix horizon continuation (--wsd-continue-from): the rank state with only
+    the manager's configured horizon migrated, and its provenance."""
+    assert shared["args"]["wsd_decay_start"] == -1, "Continue only a stable prefix"
+    old = shared["config"]
+    assert old == local["manager"]["config"], "Rank/model configuration mismatch"
+    assert set(old) == set(config)
+    for key in old:
+        if key == "scheduled_steps":
+            assert config[key] >= old[key], "Cannot shorten the configured horizon"
+        else:
+            assert old[key] == config[key], f"Continuation changes {key}"
+    assert old["scheduled_steps"] == shared["args"]["steps"]
+    assert config["scheduled_steps"] == args["steps"]
+    assert 0 < shared["step"] < args["wsd_end_step"] <= args["steps"]
+    assert args["wsd_decay_start"] == -1 or args["wsd_decay_start"] >= shared["step"], (
+        "Cannot change past LR updates"
+    )
+    assert shared["tokens"] == local["data"]["seen"] * 1024
+    assert shared["step"] <= shared["args"]["wsd_end_step"]
+    assert local["manager"]["schedule_step"] == shared["step"] - 1
+    assert Path(pointer).resolve().parent != Path(output).resolve()
+    assert not (Path(output) / "last.pt").exists(), (
+        "Continue into a fresh run; use resume thereafter"
+    )
+    # Tensor states, moments, gradients, RNG and loader state are unchanged.
+    migrated = dict(local, manager=dict(local["manager"], config=dict(config)))
+    provenance = dict(
+        parent_pointer=str(Path(pointer).resolve()),
+        parent_step=shared["step"],
+        parent_tokens=shared["tokens"],
+        parent_useful_training_flops=shared["useful_training_flops"],
+        parent_config=old,
+        parent_source_sha256=shared["source_sha256"],
+        previous=shared.get("continuation_provenance"),
+        changed_configuration_fields=["scheduled_steps"]
+        if old["scheduled_steps"] != config["scheduled_steps"]
+        else [],
+        accounting="Inherited tokens/model FLOPs include the already-paid prefix; new allocation elapsed time starts at zero.",
+    )
+    return migrated, provenance
 
 
 def main():
@@ -124,13 +160,8 @@ def main():
     p.add_argument("--width", type=int, default=512)
     p.add_argument("--layers", type=int, default=16)
     p.add_argument("--head-dim", type=int, default=64)
-    p.add_argument(
-        "--steps", type=int, default=4700, help="Scheduled steps before extension"
-    )
-    p.add_argument("--extension-steps", type=int, default=40)
-    p.add_argument(
-        "--initial-batch-rows", type=int, default=32, help="Global rows; ramps 1:2:3:4"
-    )
+    p.add_argument("--steps", type=int, default=4700, help="Scheduled steps")
+    p.add_argument("--initial-batch-rows", type=int, default=32, help="Global rows")
     p.add_argument("--micro-batch", type=int, default=8)
     p.add_argument("--lr-scale", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=42)
@@ -142,11 +173,6 @@ def main():
         default=0,
         help="0 keeps all; otherwise retain latest N>=2 plus best",
     )
-    p.add_argument(
-        "--async-checkpoint",
-        action="store_true",
-        help="write checkpoints from a thread; pointers move once every rank's files are durable",
-    )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
@@ -157,10 +183,12 @@ def main():
         help="profile this step (CUDA kernels) into the log",
     )
     p.add_argument("--resume")
-    p.add_argument("--data", default="/scratch/yimingz3/allie/lichess_tokens_v2")
     p.add_argument(
-        "--mix", default="", help="chessmix policy; empty trains on the packed corpus"
+        "--data",
+        default="/scratch/yimingz3/allie/lichess_tokens_v2",
+        help="packed corpus of the validation rows",
     )
+    p.add_argument("--mix", required=True, help="chessmix policy")
     p.add_argument("--mix-stores", default="", help="comma-separated data-v1 stores")
     p.add_argument("--mix-pool-frac", type=float, default=1.0)
     p.add_argument(
@@ -170,90 +198,21 @@ def main():
         "--mix-months", default="", help="comma-separated month dirs (else all built)"
     )
     p.add_argument(
-        "--clock",
-        action="store_true",
-        help="feed each mover's remaining clock (needs --mix)",
-    )
-    p.add_argument("--elo", action="store_true", help="feed each mover's rating bucket")
-    p.add_argument("--no-value-embeds", action="store_true")
-    p.add_argument(
-        "--no-skips", action="store_true", help="drop skip connections and backout"
-    )
-    p.add_argument("--no-smear", action="store_true")
-    p.add_argument(
-        "--wd-scale", type=float, default=1.0, help="scales every weight decay"
-    )
-    p.add_argument(
-        "--doc-rope", action="store_true", help="rotary position within game"
-    )
-    p.add_argument(
-        "--rope-fp32", action="store_true", help="FP32 rotary cos/sin tables"
-    )
-    p.add_argument(
-        "--bf16-weights",
-        action="store_true",
-        help="BF16 attention/MLP matrices; FP32 grads and master shards in the optimizers",
-    )
-    p.add_argument(
-        "--zero2",
-        action="store_true",
-        help="with --bf16-weights: grads reduced to their NorMuon owner during backward (ZeRO-2)",
-    )
-    p.add_argument(
-        "--zero2-bf16",
-        action="store_true",
-        help="with --zero2: reduce the grads in BF16 (half the traffic; not bit-identical)",
-    )
-    p.add_argument(
-        "--ckpt-blend",
-        action="store_true",
-        help="with --ckpt eager: recompute residual blends too",
-    )
-    p.add_argument(
-        "--fused-blend",
-        action="store_true",
-        help="with --ckpt eager: residual blends as fused kernels, bitwise equal to eager",
-    )
-    p.add_argument(
-        "--moe-combine",
-        default="",
-        help="scatter-(dual)gather MoE combine as FP32 adds in this top-k order, e.g. '(0,1,2,3)'"
-        " (bitwise the cuBLAS bmm for the order test_moe_nongemm.py orders reports); default the bmm",
-    )
-    p.add_argument(
         "--attn-kernel",
         action="store_true",
         help="causal window/game attention as a Triton FlashAttention-2 kernel (modded_attn), not FlexAttention",
     )
     p.add_argument(
-        "--moe-topk-kernel",
-        action="store_true",
-        help="MoE router top-ks (routing and stats) in one Triton pass, bitwise torch.topk",
-    )
-    p.add_argument(
-        "--moe-swiglu-epilogue",
-        action="store_true",
-        help="scatter-dualgather SwiGLU experts: the activation in the up GEMM's epilogue and its"
-        " backward in the down dgrad's (modded_smoe_swiglu), bitwise the unfused kernels",
+        "--ckpt",
+        default="none",
+        choices=("none", "eager"),
+        help="eager: each block and its residual blend recomputed in backward",
     )
     p.add_argument(
         "--ckpt-frac",
         type=float,
         default=1.0,
-        help="with --ckpt: checkpoint only the first ceil(frac * layers) blocks (selective recompute)",
-    )
-    p.add_argument(
-        "--fp8",
-        choices=("", "dense", "dense-dgrad", "dense-all"),
-        default="",
-        help="dense: FP8 e4m3 forwards (dynamic tensorwise scales) of attention/MLP/shared-expert matmuls in training;"
-        " dense-dgrad adds FP8 input gradients, dense-all FP8 weight gradients too",
-    )
-    p.add_argument(
-        "--ckpt",
-        default="",
-        choices=("", "mlp", "block", "eager"),
-        help="activation checkpointing (recompute in backward) of each block's MLP or whole block",
+        help="with --ckpt eager: checkpoint only the first ceil(frac * layers) blocks",
     )
     p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
@@ -266,7 +225,7 @@ def main():
         help="continuous clock features: 1 = own time left, 3 = + opponent's, previous think",
     )
     p.add_argument(
-        "--input-lr-mul", type=float, default=75.0, help="clock/Elo table lr mul"
+        "--input-lr-mul", type=float, default=75.0, help="clock feature table lr mul"
     )
     p.add_argument("--aux-time", type=float, default=0.0, help="think-time CE weight")
     p.add_argument("--aux-wdl", type=float, default=0.0, help="game-outcome CE weight")
@@ -280,11 +239,9 @@ def main():
     p.add_argument("--wsd-continue-from")
     p.add_argument("--wsd-fork-steps", default="")
     a = p.parse_args()
-    from modded_wsd import Schedule, install
-
     schedule = Schedule(**json.loads(a.wsd_schedule))
     schedule.validate()
-    assert a.extension_steps == 0 and a.initial_batch_rows == schedule.batch_rows
+    assert a.initial_batch_rows == schedule.batch_rows
     assert 0 < a.wsd_end_step <= a.steps
     assert sum(bool(x) for x in (a.resume, a.wsd_fork_from, a.wsd_continue_from)) <= 1
     fork_steps = (
@@ -294,7 +251,6 @@ def main():
     if a.wsd_decay_start >= 0:
         assert schedule.warmup_steps <= a.wsd_decay_start < a.wsd_end_step
         assert not fork_steps
-    install(core, schedule, a.wsd_decay_start, a.wsd_end_step)
     start = time.monotonic()
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -304,25 +260,13 @@ def main():
 
         start_memory_trace(snap, rank)
     dist.init_process_group("nccl")
-    cpu = dist.new_group(
-        backend="gloo"
-    )  # host-side flags: never queue behind in-flight NCCL work
+    # host-side flags: never queue behind in-flight NCCL work
+    cpu = dist.new_group(backend="gloo")
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
     # deterministic mode NaN-fills every fresh allocation (~1.5K fills/step); skipping it was bit-identical on the
     # reference config; new kernels keep a poisoned-allocation test
     torch.utils.deterministic.fill_uninitialized_memory = False
-    modded_smoe_aligned_linear.COMBINE = ast.literal_eval(a.moe_combine or "None")
-    if a.moe_combine:
-        leaves = lambda o: (
-            [o] if isinstance(o, int) else [x for c in o for x in leaves(c)]
-        )
-        k = json.loads(a.arch).get("moe", [0, 0])[1]
-        assert sorted(leaves(modded_smoe_aligned_linear.COMBINE)) == list(range(k)), (
-            "--moe-combine must use each top-k slot once"
-        )
-    modded_moe.TOPK_KERNEL = a.moe_topk_kernel
-    modded_smoe_swiglu.EPILOGUE = a.moe_swiglu_epilogue
     modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows % (a.micro_batch * world) == 0
@@ -339,62 +283,38 @@ def main():
         head_dim=a.head_dim,
         max_tokens=a.micro_batch * 1024,
         scheduled_steps=a.steps,
-        extension_steps=a.extension_steps,
-        initial_batch_rows=a.initial_batch_rows,
         lr_scale=a.lr_scale,
+        feats=a.clock_feats,
+        input_lr_mul=a.input_lr_mul,
+        ckpt=a.ckpt,
+        ckpt_frac=a.ckpt_frac,
+        arch=json.loads(a.arch),
     )
     aux = bool(a.aux_time or a.aux_wdl)
-    assert a.mix or not (a.clock or aux), (
-        "--clock and aux heads need the chessmix sampler"
-    )
-    cfg.clock, cfg.elo, cfg.input_lr_mul = a.clock, a.elo, a.input_lr_mul
-    cfg.feats = a.clock_feats
-    cfg.doc_rope, cfg.rope_fp32 = a.doc_rope, a.rope_fp32
-    cfg.bf16_weights, cfg.ckpt, cfg.zero2 = a.bf16_weights, a.ckpt, a.zero2
-    cfg.zero2_bf16, cfg.ckpt_frac, cfg.fp8 = a.zero2_bf16, a.ckpt_frac, a.fp8
-    cfg.ckpt_blend, cfg.fused_blend = a.ckpt_blend, a.fused_blend
-    cfg.arch = json.loads(a.arch)
-    cfg.value_embeds, cfg.skips, cfg.smear = (
-        not a.no_value_embeds,
-        not a.no_skips,
-        not a.no_smear,
-    )
     torch.manual_seed(a.seed)
     model = create_model(cfg)
-    manager = TrainingManager(model, cfg)
-    manager.split_step = schedule.split_step
-    if a.wd_scale != 1:
-        for opt in manager.optimizers:
-            for group in opt.param_groups:
-                group["weight_decay"] *= a.wd_scale
-    # sharded MoE experts make every forward a collective (all ranks validate) and run their expert
-    # block as an eager checkpoint, which needs graph breaks
-    sharded = any(getattr(m, "sharded", False) for m in model.modules())
-    net = torch.compile(
-        model, dynamic=False, fullgraph=not sharded and a.ckpt != "eager"
-    )
-    if a.mix:
-        from chessmix import Prefetch, Sampler
+    manager = TrainingManager(model, cfg, schedule, a.wsd_decay_start, a.wsd_end_step)
+    net = torch.compile(model, dynamic=False, fullgraph=a.ckpt != "eager")
+    from chessmix import (
+        Prefetch,
+        Sampler,
+    )  # its data dependencies only where it samples
 
-        kw = dict(
-            pool_frac=a.mix_pool_frac, clock=a.clock, aux=aux, feats=bool(a.clock_feats)
-        )
-        if a.mix_stores:
-            kw["stores"] = a.mix_stores.split(",")
-        if a.mix_history:
-            kw["history"] = a.mix_history
-        if a.mix_months:
-            kw["months"] = a.mix_months.split(",")
-        train = Prefetch(
-            Sampler(a.mix, a.seed, total_rows=a.steps * a.initial_batch_rows, **kw)
-        )
-    else:
-        train = Packed(a.data, "train", a.seed)
+    kw = dict(pool_frac=a.mix_pool_frac, aux=aux, feats=bool(a.clock_feats))
+    if a.mix_stores:
+        kw["stores"] = a.mix_stores.split(",")
+    if a.mix_history:
+        kw["history"] = a.mix_history
+    if a.mix_months:
+        kw["months"] = a.mix_months.split(",")
+    train = Prefetch(
+        Sampler(a.mix, a.seed, total_rows=a.steps * a.initial_batch_rows, **kw)
+    )
     val = Packed(a.data, "val")
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    vrows = val.rows(val_idx) if rank == 0 or sharded else None
+    vrows = val.rows(val_idx) if rank == 0 else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
     runtime = dict(
         torch=torch.__version__,
@@ -402,14 +322,10 @@ def main():
         cuda=torch.version.cuda,
         torch_source_key=RUNTIME_SOURCE_KEY,
     )
+    hashed = ("lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py")
     source_hashes = {
         f.name: hashlib.sha256(f.read_bytes()).hexdigest()
-        for f in [
-            *SOURCE.glob("modded_*.py"),
-            SOURCE / "lm_data.py",
-            SOURCE / "lm_checkpoint.py",
-            *([SOURCE / "chessmix.py", SOURCE / "chess_vocab.py"] if a.mix else []),
-        ]
+        for f in [*SOURCE.glob("modded_*.py"), *(SOURCE / n for n in hashed)]
     }
     torch.manual_seed(a.seed + rank)
     np.random.seed(a.seed + rank)
@@ -426,70 +342,17 @@ def main():
         local = torch.load(
             directory / f"rank{rank}.pt", weights_only=False, map_location="cpu"
         )
-        for key in (
-            "width",
-            "layers",
-            "head_dim",
-            "extension_steps",
-            "initial_batch_rows",
-            "micro_batch",
-            "lr_scale",
-            "seed",
-            "deterministic",
-            "wsd_schedule",
-        ):
+        for key in SAME:
             assert shared["args"][key] == vars(a)[key], f"Resume changes {key}"
-        for key in (  # added with the data/model tracks; absent in older checkpoints
-            "mix",
-            "mix_stores",
-            "mix_pool_frac",
-            "mix_history",
-            "mix_months",
-            "clock",
-            "elo",
-            "clock_feats",
-            "input_lr_mul",
-            "aux_time",
-            "aux_wdl",
-            "no_value_embeds",
-            "no_skips",
-            "no_smear",
-            "wd_scale",
-            "doc_rope",
-            "rope_fp32",
-            "arch",
-            "bf16_weights",
-        ):
-            assert shared["args"].get(key, vars(a)[key]) == vars(a)[key], (
-                f"Resume changes {key}"
-            )
-        assert shared["args"].get("ckpt_blend", False) == a.ckpt_blend, (
-            "Resume changes ckpt_blend"
+        assert shared["source_sha256"] == source_hashes, (
+            "Resume requires the frozen training source"
         )
-        assert shared["args"].get("fused_blend", False) == a.fused_blend, (
-            "Resume changes fused_blend"
+        assert shared["runtime"] == runtime, (
+            "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
         )
-        for key, default in (
-            ("moe_combine", ""),
-            ("moe_topk_kernel", False),
-            ("fp8", ""),
-            ("zero2_bf16", False),
-        ):
-            assert shared["args"].get(key, default) == vars(a)[key], (
-                f"Resume changes {key}"
-            )
         if a.wsd_continue_from:
-            from modded_continuation import prepare_continuation
-
-            local, continuation_provenance = prepare_continuation(
-                shared,
-                local,
-                vars(a),
-                asdict(cfg),
-                source_hashes,
-                runtime,
-                out,
-                load_path,
+            local, continuation_provenance = continuation(
+                shared, local, vars(a), asdict(cfg), out, load_path
             )
         else:
             assert shared["args"]["steps"] == a.steps, "Resume changes steps"
@@ -513,15 +376,7 @@ def main():
                     "wsd_fork_steps",
                 ):
                     assert shared["args"][key] == vars(a)[key], f"Resume changes {key}"
-            assert shared["source_sha256"] == source_hashes, (
-                "Resume requires the frozen training source"
-            )
-            assert shared["runtime"] == runtime, (
-                "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
-            )
-        model.load_state_dict(
-            local_state(model, shared["model"])
-        )  # sharded experts: own rows
+        model.load_state_dict(shared["model"])
         manager.load_rank_state_dict(local["manager"])
         train.load_state_dict(local["data"])
         restore_rng(local["rng"])
@@ -559,9 +414,9 @@ def main():
         dataset=json.loads((ROOT / "results/original-data.json").read_text()),
         train_rows=int(train.ends[-1]),
         train_shards=len(train.paths),
-        mix_infeasible_buckets=list(getattr(train, "infeasible", [])),
-        mix_missing_history_games=getattr(train, "missing", 0),
-        mix_months=list(getattr(train, "months", [])),
+        mix_infeasible_buckets=list(train.infeasible),
+        mix_missing_history_games=train.missing,
+        mix_months=list(train.months),
         val_indices=val_idx.tolist(),
         continuation_provenance=continuation_provenance,
         job_id=os.environ.get("SLURM_JOB_ID"),
@@ -574,11 +429,12 @@ def main():
         )
         print(json.dumps(metadata | {"val_indices": len(val_idx)}), flush=True)
 
-    saver = AsyncSaver(cpu) if a.async_checkpoint else None
+    # checkpoints are written from a thread; pointers move once every rank's files are durable
+    saver = AsyncSaver(cpu)
 
     def save(step, metrics):
         checkpoint_start = time.monotonic()
-        waited = saver.flush() if saver else 0.0
+        waited = saver.flush()
         total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
         dist.all_reduce(total_flops)
         identifier = [f"step-{step:08d}-{uuid.uuid4().hex[:8]}" if rank == 0 else None]
@@ -587,12 +443,11 @@ def main():
         if rank == 0:
             directory.mkdir(parents=True)
         dist.barrier()
-        host, write = (saver.snapshot, saver.add) if saver else (cpu_copy, atomic_save)
         # Save each rank independently: its sharded moments and pending grads
         # cannot be reconstructed from rank0's optimizer state.
-        write(
+        saver.add(
             dict(
-                manager=manager.rank_state_dict(host),
+                manager=manager.rank_state_dict(saver.snapshot),
                 rng=rng_state(),
                 data=train.state_dict(),
                 useful_training_flops=flops_local,
@@ -600,15 +455,21 @@ def main():
             directory / f"rank{rank}.pt",
         )
         sync_params()
-        state = full_state(
-            model, model.state_dict()
-        )  # collective when experts are sharded
         if rank == 0:
-            # its only CPU tensors are full_state's fresh gathers of sharded experts
-            state = saver.snapshot(state, owned=True) if saver else cpu_copy(state)
-            write(
+            inference = dict(
+                split_embed=model.split_embed,
+                ws_short=manager.ws_short,
+                ws_long=manager.ws_long,
+                yarn=dict(
+                    angular_freq=model.yarn.angular_freq,
+                    cos=model.yarn.cos,
+                    sin=model.yarn.sin,
+                    attn_scale=model.yarn.attn_scale,
+                ),
+            )
+            saver.add(
                 dict(
-                    model=state,
+                    model=saver.snapshot(model.state_dict()),
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=source_hashes,
@@ -618,19 +479,7 @@ def main():
                     metrics=metrics,
                     tokens=train.seen * 1024,
                     useful_training_flops=total_flops.item(),
-                    inference=host(
-                        dict(
-                            split_embed=model.split_embed,
-                            ws_short=manager.ws_short,
-                            ws_long=manager.ws_long,
-                            yarn=dict(
-                                angular_freq=model.yarn.angular_freq,
-                                cos=model.yarn.cos,
-                                sin=model.yarn.sin,
-                                attn_scale=model.yarn.attn_scale,
-                            ),
-                        )
-                    ),
+                    inference=saver.snapshot(inference),
                     continuation_provenance=continuation_provenance,
                     elapsed_seconds=elapsed_prior + time.monotonic() - start,
                 ),
@@ -641,49 +490,29 @@ def main():
             names.append(f"fork-{step}.pt")
         if metrics is not None and metrics["move_ce"] <= best:
             names.append("best.pt")
-        if saver:
-            torch.cuda.synchronize()  # completes the snapshot's pinned copies
-            seconds = time.monotonic() - checkpoint_start
+        torch.cuda.synchronize()  # completes the snapshot's pinned copies
+        seconds = time.monotonic() - checkpoint_start
 
-            def commit():
-                publish(out, directory, step, world, names, durable_save)
-                removed = prune_checkpoints(out, a.keep_checkpoints, directory)
-                append(
-                    "checkpoints.jsonl",
-                    {
-                        "step": step,
-                        "seconds": seconds,
-                        "wait_seconds": waited,
-                        "durable_seconds": time.monotonic() - checkpoint_start,
-                        "host_bytes": saver.nbytes,
-                        "directory": str(directory.relative_to(out)),
-                        "removed": removed,
-                    },
-                )
-
-            saver.start(commit if rank == 0 else None)
-            return
-        dist.barrier()
-        if rank == 0:
+        def commit():
             publish(out, directory, step, world, names)
-        dist.barrier()
-        removed = (
-            prune_checkpoints(out, a.keep_checkpoints, directory) if rank == 0 else []
-        )
-        dist.barrier()
-        append(
-            "checkpoints.jsonl",
-            dict(
-                step=step,
-                seconds=time.monotonic() - checkpoint_start,
-                directory=str(directory.relative_to(out)),
-                removed=removed,
-            ),
-        )
+            removed = prune_checkpoints(out, a.keep_checkpoints, directory)
+            append(
+                "checkpoints.jsonl",
+                {
+                    "step": step,
+                    "seconds": seconds,
+                    "wait_seconds": waited,
+                    "durable_seconds": time.monotonic() - checkpoint_start,
+                    "host_bytes": saver.nbytes,
+                    "directory": str(directory.relative_to(out)),
+                    "removed": removed,
+                },
+            )
+
+        saver.start(commit if rank == 0 else None)
 
     total_steps = a.wsd_end_step
-    train_wait = lambda: getattr(train, "waited", 0.0)
-    window_start, window_tokens, wait0 = time.monotonic(), 0, train_wait()
+    window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
     primary_sum = torch.zeros((), device="cuda")
     count_sum = torch.zeros((), device="cuda")
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
@@ -707,7 +536,6 @@ def main():
         manager.advance_schedule(index)
         accum = manager.batch_size // (world * a.micro_batch * 1024)
         assert accum > 0 and accum * world * a.micro_batch * 1024 == manager.batch_size
-        core.grad_accum_steps = accum
         for micro in range(accum):
             rows = train.batch(a.micro_batch, rank, world)
             flops_local += useful_flops(
@@ -720,34 +548,23 @@ def main():
             )
             if micro == accum - 1:
                 manager.activate_hooks(index)
-            last = getattr(train, "last", {})
-            clock = last.get("clock")
-            feat = last.get("feat")
+            feat = train.last.get("feat")
             if feat is not None:
                 feat = to_gpu(feat[:, :-1].astype(np.int64)).flatten(0, 1)
-            extra = (
-                ()
-                if clock is None
-                else (to_gpu(clock[:, :-1].astype(np.int64)).flatten(),)
-            )
-            elo = to_gpu(elo_buckets(rows)).flatten() if a.elo else None
             logits = net(
                 x.flatten(),
                 y.flatten(),
                 context,
                 manager.get_forward_args(),
-                *extra,
-                elo_seq=elo,
                 feat_seq=feat,
             )
-            mask = last.get("mask")
-            mask = None if mask is None else to_gpu(mask[:, 1:])
+            mask = to_gpu(train.last["mask"][:, 1:])
             loss, primary, count = move_losses(
                 logits, x, y, context, manager.mtp_weights, mask
             )
             if aux:
                 t, w = (
-                    to_gpu(last[k][:, :-1].astype(np.int64)).flatten()
+                    to_gpu(train.last[k][:, :-1].astype(np.int64)).flatten()
                     for k in ("time", "wdl")
                 )
                 parts = aux_losses(logits, t, w, mask.flatten())
@@ -762,8 +579,7 @@ def main():
             window_tokens += rows.shape[0] * world * 1024
         manager.step_optimizers(index)
         step = index + 1
-        if saver:
-            saver.poll()
+        saver.poll()
         if a.profile and step == a.profile:
             torch.cuda.synchronize()
             prof.__exit__(None, None, None)
@@ -805,7 +621,7 @@ def main():
                     train_ce=(stats[0] / stats[1]).item(),
                     tokens=train.seen * 1024,
                     tokens_per_second=window_tokens / dt,
-                    sampler_wait=(train_wait() - wait0) / dt,
+                    sampler_wait=(train.waited - wait0) / dt,
                     seconds=elapsed_prior + time.monotonic() - start,
                     useful_training_flops=stats[2].item(),
                     global_batch_tokens=manager.batch_size,
@@ -823,7 +639,7 @@ def main():
                     ),
                 ),
             )
-            window_start, window_tokens, wait0 = time.monotonic(), 0, train_wait()
+            window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
             primary_sum.zero_()
             count_sum.zero_()
             aux_sum.zero_()
@@ -852,8 +668,6 @@ def main():
         ):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
-            if sharded and rank:
-                evaluate(net, manager, vrows, a.micro_batch)
             if rank == 0:
                 metrics = evaluate(net, manager, vrows, a.micro_batch)
                 best = min(best, metrics["move_ce"])
@@ -877,7 +691,7 @@ def main():
             or stop_code
         ):
             save(step, metrics)
-            window_start, window_tokens, wait0 = time.monotonic(), 0, train_wait()
+            window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
             primary_sum.zero_()
             count_sum.zero_()
         if stop_code:
@@ -889,8 +703,7 @@ def main():
                 else "wall_clock_cap"
             )
             break
-    if saver:
-        saver.flush()
+    saver.flush()
     if rank == 0:
         (out / "done.json").write_text(
             json.dumps(

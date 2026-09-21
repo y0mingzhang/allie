@@ -1,12 +1,12 @@
-"""CPU proof of the --async-checkpoint writer (modded_checkpoints.AsyncSaver) on two gloo ranks.
+"""CPU proof of the checkpoint writer (modded_checkpoints.AsyncSaver) on two gloo ranks.
 
-save() mirrors modded_train.save() for both paths on nested rank/model/data state (bf16/fp32/fp64,
-non-contiguous and 0-dim tensors, None grads, RNG state, Python scalars). Checked: every async file,
-pointer and log row equals its synchronous twin byte for byte although the sources change in place
-right after each snapshot; buffers are reused and reallocated on a shape change; the writer thread
-blocks the trainer's signals; an OSError(512) on the first fsync is retried; pointers move only once
-every rank's files are durable, the next save waits for the in-flight one, and a failed or killed
-write never moves them. owned (full_state's gathered experts) is written without a copy. pinned()
+save() mirrors modded_train.save() on nested rank/model/data state (bf16/fp32/fp64, non-contiguous
+and 0-dim tensors, None grads, RNG state, Python scalars), next to a synchronous twin (cpu_copy,
+atomic_save) as the oracle. Checked: every async file, pointer and log row equals its synchronous
+twin byte for byte although the sources change in place right after each snapshot; buffers are
+reused and reallocated on a shape change; the writer thread blocks the trainer's signals; an
+OSError(512) on the first fsync is retried; pointers move only once every rank's files are durable,
+the next save waits for the in-flight one, and a failed or killed write never moves them. pinned()
 buffers equal cpu_copy's in bytes and strides, each registered once at its exact size and page
 aligned, and unregistered when freed (cudaHostRegister stubbed). Not covered: real registration,
 CUDA copies and modded_train's own call sites.
@@ -111,8 +111,7 @@ def worker(mode, tmp, rank):
             "seen": 1000 * k,
             "pool_ids": list(range(50 * k)),
         }
-        experts = {"blocks.1.mlp.up": r(2, n, 4, dtype=torch.bfloat16)}  # fresh gathers
-        return manager, model, experts, data, rng_state()
+        return manager, model, data, rng_state()
 
     def tensors(x):
         if isinstance(x, torch.Tensor):
@@ -127,28 +126,24 @@ def worker(mode, tmp, rank):
         if rank == 0:
             directory.mkdir(parents=True)
         dist.barrier()
-        manager, model, experts, data, rng = content(k)
+        manager, model, data, rng = content(k)
         host, write = (saver.snapshot, saver.add) if saver else (cpu_copy, atomic_save)
         write(
             {"manager": host(manager), "rng": rng, "data": data, "flops": step},
             directory / f"rank{rank}.pt",
         )
         if rank == 0:
-            own = saver.snapshot(experts, owned=True) if saver else cpu_copy(experts)
-            assert not saver or all(
-                own[n].data_ptr() == t.data_ptr() for n, t in experts.items()
-            )
             state = {
-                "model": host(model) | own,
+                "model": host(model),
                 "step": step,
                 "metrics": {"move_ce": 1 / k},
                 "inference": host({"yarn": manager["yarn"]}),
             }
             write(state, directory / "model.pt")
 
-        def commit(save=mc.durable_save):
+        def commit():
             assert all((directory / f"rank{i}.pt").exists() for i in range(2))
-            mc.publish(out, directory, step, 2, names, save)
+            mc.publish(out, directory, step, 2, names)
             removed = mc.prune(out, 2, directory)
             row = {"step": step, "directory": str(directory.relative_to(out))}
             with (out / "checkpoints.jsonl").open("a") as f:
@@ -159,7 +154,7 @@ def worker(mode, tmp, rank):
         else:
             dist.barrier()
             if rank == 0:
-                commit(atomic_save)
+                commit()
             dist.barrier()
         return manager, model
 
