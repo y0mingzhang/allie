@@ -7,10 +7,10 @@
       argparse and schedule checks, the pool through the frozen chessmix index, and
       parameters are counted on fake tensors. --dry-run prints the plan and the command
       and keeps nothing.
-  submit NAME [SBATCH ARGS]  sbatch bigrun.sbatch NAME, --signal from the margin
+  submit NAME [SBATCH ARGS]  sbatch NAME/bigrun.sbatch NAME, --signal from the margin
   task NAME                  one Slurm chunk (what bigrun.sbatch runs)
   eval NAME                  golden + original-val scores of last.pt -> result.json
-  refresh NAME               re-copy bigrun/preflight/health.py (trainer stays frozen)
+  refresh NAME               re-copy these tools from this checkout (trainer stays frozen)
 
 A chunk runs preflight.py, then supervises the trainer. After a crash, or a stall (none
 of the run's jsonl or checkpoint files grows for --stall-min; for 1.5 worst-case saves
@@ -71,7 +71,7 @@ HELD_OUT = ("2026-07",)
 PASS_TOKENS = ROOT / "results/recipe10x/data-v1-hist2"
 KEEP = ("lm_data.py", "lm_checkpoint.py", "chessmix.py", "chess_vocab.py")
 KEEP += ("board_encode.cpp", "move-table.json")
-TOOLS = ("bigrun.py", "preflight.py", "health.py")
+TOOLS = ("bigrun.py", "bigrun.sbatch", "preflight.py", "health.py")
 ROWS, TOKENS_PER_STEP = 512, 512 * 1024
 POLICY = "mover_rule+up4+noengine+otb_x4"
 SHIP = {"board": "conv", "mlp": "swiglu", "key_offset": False}
@@ -785,7 +785,7 @@ def submit(name, extra):
     cmd = ["sbatch", "--parsable", f"--job-name={name}"]
     cmd += [f"--output={study}/logs/%x-%j.out"]
     cmd += [f"--signal=B:USR1@{p['supervise']['margin_s']}", *extra]
-    cmd += [str(SELF / "bigrun.sbatch"), name]
+    cmd += [str(study / "bigrun.sbatch"), name]
     say(shlex.join(cmd))
     job = subprocess.check_output(cmd, text=True).strip()
     append(study / "jobs.jsonl", {"at": time.time(), "job": job, "cmd": cmd})

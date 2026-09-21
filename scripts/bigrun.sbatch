@@ -14,8 +14,9 @@
 #SBATCH --exclude=babel-q9-32,babel-x9-32
 #SBATCH --output=/home/yimingz3/src/allie/results/recipe10x/bigrun-v2/%x-%j.out
 
-# One chunk of the run planned in bigrun-v2/NAME. Submit with `bigrun.py submit NAME
-# [sbatch options]`, which adds --job-name, --output=NAME/logs and --signal=B:USR1@<margin>
-# from NAME/plan.json; the frozen copy NAME/bigrun.py supervises, requeues and scores.
+# One chunk of the run planned in bigrun-v2/NAME (this file is frozen there too). Submit
+# with `bigrun.py submit NAME [sbatch options]`, which adds --job-name, --output=NAME/logs
+# and --signal=B:USR1@<margin> from NAME/plan.json; the frozen NAME/bigrun.py supervises,
+# requeues and scores.
 exec /home/yimingz3/src/allie/.venv/bin/python \
     /home/yimingz3/src/allie/results/recipe10x/bigrun-v2/"${1:?usage: bigrun.sbatch NAME}"/bigrun.py task "$1"
