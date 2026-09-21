@@ -207,11 +207,11 @@ def check_qkv(rows, window):
     qkv, g, ve, vg = (x.detach() for x in leaves)
     with torch.no_grad():
         y, lse = ma.fwd_qkv(qkv, cos, sin, g, ve, vg, lo, hi, SCALE, True)
+        _, dl = ma._delta(dy, y)
         fw = bench(lambda _: ma.fwd_qkv(qkv, cos, sin, g, ve, vg, lo, hi, SCALE, True))
-        bw = bench(lambda _: ma.bwd_qkv(qkv, cos, sin, dy, y, g, ve, vg, lse, lo, hi, SCALE, True))
-        y, lse = ma.fwd_qkv(qkv, cos, sin, g, None, None, lo, hi, SCALE, True)
+        bw = bench(lambda _: ma.bwd_qkv(qkv, cos, sin, dy, g, ve, vg, lse, dl, lo, hi, SCALE, True))
         fw0 = bench(lambda _: ma.fwd_qkv(qkv, cos, sin, g, None, None, lo, hi, SCALE, True))
-        bw0 = bench(lambda _: ma.bwd_qkv(qkv, cos, sin, dy, y, g, None, None, lse, lo, hi, SCALE, True))
+        bw0 = bench(lambda _: ma.bwd_qkv(qkv, cos, sin, dy, g, None, None, lse, dl, lo, hi, SCALE, True))
     print(f"qkv-fused raw kernels ms: fwd {fw0:.3f} bwd {bw0:.3f}; with value embeddings fwd {fw:.3f} bwd {bw:.3f}", flush=True)
 
 
@@ -219,6 +219,9 @@ def timing(rows, windows, timed):
     n, row = rows.shape
     flex = mm.make_context(rows, *windows, backend="flex")
     tri = mm.make_context(rows, *windows, backend="triton")
+    delta = torch.compile(
+        lambda do, o: (do.float() * o.float()).sum(-1)[0].t().contiguous()
+    )
     for w in timed:
         (*qkv, g), do = inputs(n * row, 1)
         out = [f"window {w} ms:"]
@@ -231,14 +234,15 @@ def timing(rows, windows, timed):
         eager = bench(lambda o: torch.autograd.grad(o, qkv, do), run)
         with torch.no_grad():
             o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
+            dl = delta(do, o)
             f = bench(lambda _: ma.fwd(*qkv, None, lo, hi, SCALE))
-            b = bench(lambda _: ma.bwd(*qkv, do, o, None, lse, lo, hi, SCALE))
-            y, lse = ma.fwd(*qkv, g, lo, hi, SCALE)
+            d = bench(lambda _: delta(do, o))
+            b = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
             fg = bench(lambda _: ma.fwd(*qkv, g, lo, hi, SCALE))
-            bg = bench(lambda _: ma.bwd(*qkv, do, y, g, lse, lo, hi, SCALE))
+            bg = bench(lambda _: ma.bwd(*qkv, do, g, lse, dl, lo, hi, SCALE))
         out.append(
-            f"triton fwd {f:.3f} bwd {b:.3f} sum {f + b:.3f} (autograd bwd {eager:.3f};"
-            f" gated fwd {fg:.3f} bwd {bg:.3f})"
+            f"triton fwd {f:.3f} bwd {b:.3f} + delta {d:.3f} sum {f + b + d:.3f}"
+            f" (eager autograd bwd {eager:.3f}; gated fwd {fg:.3f} bwd {bg:.3f})"
         )
         try:
             m64 = mask64(flex.documents, w, row)
@@ -291,6 +295,7 @@ def sweep(rows, tri):
     defaults = ma.FWD, ma.BWD
     with torch.no_grad():
         o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
+        dl = (do.float() * o.float()).sum(-1)[0].t().contiguous()
         q, k, v = qkv
         vc = v.contiguous()
         ms = bench(lambda _: ma.fwd(q, k, vc, None, lo, hi, SCALE))
@@ -303,7 +308,7 @@ def sweep(rows, tri):
             )
         for cfg in bwds:
             ma.BWD = cfg
-            ms = bench(lambda _: ma.bwd(*qkv, do, o, None, lse, lo, hi, SCALE))
+            ms = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
             print(f"bwd {cfg}: {ms:.3f}", flush=True)
     ma.FWD, ma.BWD = defaults
 

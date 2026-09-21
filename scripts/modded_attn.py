@@ -114,21 +114,19 @@ def _fwd(Q, K, V, C, S, G, VE, VG, OUT, LSE, LO, T, qk_scale,
 
 
 @triton.jit
-def _bwd(Q, K, V, C, S, DY, Y, G, VE, VG, LSE, LO, HI, DQ, DK, DV, DG, DVE, DVG, T, qk_scale, scale,
-         SQ, SQH, SK, SKH, SV, SVH, SD, SDH, SY, SYH, SG, SGH, SE, SEH, SVG, SVGH, SC,
+def _bwd(Q, K, V, C, S, DY, G, VE, VG, LSE, DELTA, LO, HI, DQ, DK, DV, T, qk_scale, scale,
+         SQ, SQH, SK, SKH, SV, SVH, SD, SDH, SG, SGH, SE, SEH, SVG, SVGH, SC,
          SDQ, SDQH, SDK, SDKH, SDV, SDVH,
          H: tl.constexpr, D: tl.constexpr, B: tl.constexpr, BI: tl.constexpr, HF: tl.constexpr,
          GATED: tl.constexpr, NORM: tl.constexpr, ROPE: tl.constexpr, VEMB: tl.constexpr):
-    """dq (and the gate's grad) of block b's queries, then dk, dv (and the value embedding's grads) of
-    its keys. rowsum(dO * O) = rowsum(dy * y) comes from the gated output y, so no separate pass."""
     if HF:
         b0, h = tl.program_id(1) * B, tl.program_id(0)
     else:
         b0, h = tl.program_id(0) * B, tl.program_id(1)
     HALF: tl.constexpr = D // 2
-    Q, K, V, DY, Y, G = Q + h * SQH, K + h * SKH, V + h * SVH, DY + h * SDH, Y + h * SYH, G + h * SGH
-    VE, VG, DVE, DVG, DG = VE + h * SEH, VG + h * SVGH, DVE + h * SEH, DVG + h * SVGH, DG + h * SGH
-    LSE, DQ, DK, DV = LSE + h * T, DQ + h * SDQH, DK + h * SDKH, DV + h * SDVH
+    Q, K, V, DY, G = Q + h * SQH, K + h * SKH, V + h * SVH, DY + h * SDH, G + h * SGH
+    VE, VG, LSE, DELTA = VE + h * SEH, VG + h * SVGH, LSE + h * T, DELTA + h * T
+    DQ, DK, DV = DQ + h * SDQH, DK + h * SDKH, DV + h * SDVH
     rb = b0 + tl.arange(0, B)
     ri = tl.arange(0, BI)
     rd = tl.arange(0, D)
@@ -139,13 +137,10 @@ def _bwd(Q, K, V, C, S, DY, Y, G, VE, VG, LSE, LO, HI, DQ, DK, DV, DG, DVE, DVG,
     qoff = rb[:, None] * SQ + rh[None, :]
     qa, qb = _qk(Q, C, S, qoff, bcos, inb[:, None], NORM, ROPE, 1, HALF)
     do = tl.load(DY + rb[:, None] * SD + rd[None, :], inb[:, None], other=0.0)
-    y = tl.load(Y + rb[:, None] * SY + rd[None, :], inb[:, None], other=0.0)
-    delta = tl.sum(do.to(tl.float32) * y.to(tl.float32), 1)
     if GATED:
-        g = tl.load(G + rb * SG, inb, other=1.0).to(tl.float32)
-        do = (do.to(tl.float32) * g[:, None]).to(do.dtype)
-        tl.store(DG + rb * SG, tl.where(g == 0, 0.0, delta / g).to(DG.dtype.element_ty), inb)
+        do = (do.to(tl.float32) * tl.load(G + rb * SG, inb, other=0.0).to(tl.float32)[:, None]).to(do.dtype)
     lse = tl.load(LSE + rb, inb, other=0.0)
+    delta = tl.load(DELTA + rb, inb, other=0.0)
     lo = tl.load(LO + rb, inb, other=0)
     dqa = tl.zeros([B, HALF], tl.float32)
     dqb = tl.zeros([B, HALF], tl.float32)
@@ -168,8 +163,8 @@ def _bwd(Q, K, V, C, S, DY, Y, G, VE, VG, LSE, LO, HI, DQ, DK, DV, DG, DVE, DVG,
 
     koff = rb[:, None] * SK + rh[None, :]
     ka, kb = _qk(K, C, S, koff, bcos, inb[:, None], NORM, ROPE, 1, HALF)
-    eoff = rb[:, None] * SE + rd[None, :]
-    v = _v(V, VE, VG, rb[:, None] * SV + rd[None, :], eoff, rb * SVG, inb[:, None], inb, VEMB, 1)
+    v = _v(V, VE, VG, rb[:, None] * SV + rd[None, :], rb[:, None] * SE + rd[None, :], rb * SVG,
+           inb[:, None], inb, VEMB, 1)
     hi = tl.load(HI + rb, inb, other=-1)
     dka = tl.zeros([B, HALF], tl.float32)
     dkb = tl.zeros([B, HALF], tl.float32)
@@ -183,12 +178,10 @@ def _bwd(Q, K, V, C, S, DY, Y, G, VE, VG, LSE, LO, HI, DQ, DK, DV, DG, DVE, DVG,
                      - tl.load(LSE + m, inm, other=0.0)[None, :])
         pt = tl.where((m[None, :] >= rb[:, None]) & (m[None, :] <= hi[:, None]), pt, 0.0)
         dom = tl.load(DY + m[:, None] * SD + rd[None, :], inm[:, None], other=0.0)
-        ym = tl.load(Y + m[:, None] * SY + rd[None, :], inm[:, None], other=0.0)
-        dm = tl.sum(dom.to(tl.float32) * ym.to(tl.float32), 1)
         if GATED:
             dom = (dom.to(tl.float32) * tl.load(G + m * SG, inm, other=0.0).to(tl.float32)[:, None]).to(dom.dtype)
         dv = tl.dot(pt.to(dom.dtype), dom, dv)
-        dst = (pt * (tl.dot(v, tl.trans(dom)) - dm[None, :])).to(qta.dtype)
+        dst = (pt * (tl.dot(v, tl.trans(dom)) - tl.load(DELTA + m, inm, other=0.0)[None, :])).to(qta.dtype)
         dka = tl.dot(dst, tl.trans(qta), dka)
         dkb = tl.dot(dst, tl.trans(qtb), dkb)
     dka, dkb = _qk_grad(dka * scale, dkb * scale, K, C, S, koff, bcos, inb[:, None], NORM, ROPE, 1, HALF)
@@ -196,13 +189,6 @@ def _bwd(Q, K, V, C, S, DY, Y, G, VE, VG, LSE, LO, HI, DQ, DK, DV, DG, DVE, DVG,
     tl.store(DK + dkoff, dka.to(DK.dtype.element_ty), inb[:, None])
     tl.store(DK + dkoff + HALF, dkb.to(DK.dtype.element_ty), inb[:, None])
     tl.store(DV + rb[:, None] * SDV + rd[None, :], dv.to(DV.dtype.element_ty), inb[:, None])
-    if VEMB:  # dv is also the grad of v + vg * ve
-        vg = tl.load(VG + rb * SVG, inb, other=0.0).to(tl.float32)
-        tl.store(DVE + eoff, (dv * vg[:, None]).to(DVE.dtype.element_ty), inb[:, None])
-        ve = tl.load(VE + eoff, inb[:, None], other=0.0).to(tl.float32)
-        tl.store(DVG + rb * SVG, tl.sum(dv * ve, 1).to(DVG.dtype.element_ty), inb)
-
-
 def _grid(cfg, T, H):
     return (H, triton.cdiv(T, cfg[0])) if cfg[4] else (triton.cdiv(T, cfg[0]), H)
 
@@ -231,17 +217,14 @@ def _launch_fwd(q, k, v, cos, sin, g, ve, vg, lo, scale, norm):
     return y, lse
 
 
-def _launch_bwd(q, k, v, cos, sin, dy, y, g, ve, vg, lse, lo, hi, scale, norm, dq, dk, dv):
-    """Writes dq, dk, dv; returns the grads of g, ve, vg (empty when absent)."""
+def _launch_bwd(q, k, v, cos, sin, dy, g, ve, vg, lse, delta, lo, hi, scale, norm, dq, dk, dv):
     _, T, H, D = q.shape
-    grads = [None if x is None else _like(x, q) for x in (g, ve, vg)]
     b, bi, warps, stages, hf = BWD
-    _bwd[_grid(BWD, T, H)](q, k, v, *_or(q, cos, sin), dy, y, *_or(q, g, ve, vg), lse, lo, hi, dq, dk, dv,
-                           *_or(q, *grads), T, scale * LOG2E, scale,
-                           *_st(q, k, v, dy, y, g, ve, vg), 0 if cos is None else cos.stride(0),
-                           *_st(dq, dk, dv), H, D, b, bi, hf, g is not None, norm, cos is not None,
-                           ve is not None, num_warps=warps, num_stages=stages)
-    return [q.new_empty(0) if x is None else x for x in grads]
+    _bwd[_grid(BWD, T, H)](q, k, v, *_or(q, cos, sin), dy, *_or(q, g, ve, vg), lse, delta, lo, hi,
+                           dq, dk, dv, T, scale * LOG2E, scale, *_st(q, k, v, dy, g, ve, vg),
+                           0 if cos is None else cos.stride(0), *_st(dq, dk, dv),
+                           H, D, b, bi, hf, g is not None, norm, cos is not None, ve is not None,
+                           num_warps=warps, num_stages=stages)
 
 
 @torch.library.custom_op("allie_attn::fwd", mutates_args=())
@@ -256,22 +239,17 @@ def _(q, k, v, g, lo, hi, scale):
 
 
 @torch.library.custom_op("allie_attn::bwd", mutates_args=())
-def bwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dy: torch.Tensor, y: torch.Tensor,
-        g: Optional[torch.Tensor], lse: torch.Tensor, lo: torch.Tensor, hi: torch.Tensor,
-        scale: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def bwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dy: torch.Tensor, g: Optional[torch.Tensor],
+        lse: torch.Tensor, delta: torch.Tensor, lo: torch.Tensor, hi: torch.Tensor,
+        scale: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     dq, dk, dv = (torch.empty(x.shape, dtype=x.dtype, device=x.device) for x in (q, k, v))
-    dg = _launch_bwd(q, k, v, None, None, dy, y, g, None, None, lse, lo, hi, scale, False, dq, dk, dv)[0]
-    return dq, dk, dv, dg
+    _launch_bwd(q, k, v, None, None, dy, g, None, None, lse, delta, lo, hi, scale, False, dq, dk, dv)
+    return dq, dk, dv
 
 
 @bwd.register_fake
-def _(q, k, v, dy, y, g, lse, lo, hi, scale):
-    return q.new_empty(q.shape), k.new_empty(k.shape), v.new_empty(v.shape), _like(g, q)
-
-
-def _like(x, q):
-    """A grad buffer with x's strides (the kernel writes it with them), or an empty stand-in."""
-    return q.new_empty(0) if x is None else torch.empty_strided(x.shape, x.stride(), dtype=x.dtype, device=x.device)
+def _(q, k, v, dy, g, lse, delta, lo, hi, scale):
+    return q.new_empty(q.shape), k.new_empty(k.shape), v.new_empty(v.shape)
 
 
 @torch.library.custom_op("allie_attn::fwd_qkv", mutates_args=())
@@ -288,18 +266,29 @@ def _(qkv, cos, sin, g, ve, vg, lo, hi, scale, norm):
 
 
 @torch.library.custom_op("allie_attn::bwd_qkv", mutates_args=())
-def bwd_qkv(qkv: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, dy: torch.Tensor, y: torch.Tensor,
+def bwd_qkv(qkv: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, dy: torch.Tensor,
             g: Optional[torch.Tensor], ve: Optional[torch.Tensor], vg: Optional[torch.Tensor],
-            lse: torch.Tensor, lo: torch.Tensor, hi: torch.Tensor, scale: float,
-            norm: bool) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            lse: torch.Tensor, delta: torch.Tensor, lo: torch.Tensor, hi: torch.Tensor, scale: float,
+            norm: bool) -> torch.Tensor:
     dqkv = torch.empty(qkv.shape, dtype=qkv.dtype, device=qkv.device)
-    grads = _launch_bwd(*qkv.chunk(3, 2), cos, sin, dy, y, g, ve, vg, lse, lo, hi, scale, norm, *dqkv.chunk(3, 2))
-    return dqkv, *grads
+    _launch_bwd(*qkv.chunk(3, 2), cos, sin, dy, g, ve, vg, lse, delta, lo, hi, scale, norm, *dqkv.chunk(3, 2))
+    return dqkv
 
 
 @bwd_qkv.register_fake
-def _(qkv, cos, sin, dy, y, g, ve, vg, lse, lo, hi, scale, norm):
-    return qkv.new_empty(qkv.shape), _like(g, qkv), _like(ve, qkv), _like(vg, qkv)
+def _(qkv, cos, sin, dy, g, ve, vg, lse, delta, lo, hi, scale, norm):
+    return qkv.new_empty(qkv.shape)
+
+
+def _delta(dy, y):
+    """rowsum(dO * O) = rowsum(dy * y) for dO = dy * g, y = O * g: per (token, head) and as (H, T)."""
+    d = (dy.float() * y.float()).sum(-1)
+    return d, d[0].t().contiguous()
+
+
+def _gate_grad(g, d):
+    """The gate's grad rowsum(dy * O) = rowsum(dy * y) / g."""
+    return None if g is None else torch.where(g == 0, 0, d.view(g.shape) / g).to(g.dtype)
 
 
 def _setup(ctx, inputs, output):
@@ -309,8 +298,8 @@ def _setup(ctx, inputs, output):
 
 def _backward(ctx, dy, _):
     q, k, v, g, y, lse, lo, hi = ctx.saved_tensors
-    dq, dk, dv, dg = bwd(q, k, v, dy, y, g, lse, lo, hi, ctx.scale)
-    return dq, dk, dv, None if g is None else dg, None, None, None
+    d, delta = _delta(dy, y)
+    return *bwd(q, k, v, dy, g, lse, delta, lo, hi, ctx.scale), _gate_grad(g, d), None, None, None
 
 
 def _setup_qkv(ctx, inputs, output):
@@ -320,9 +309,12 @@ def _setup_qkv(ctx, inputs, output):
 
 def _backward_qkv(ctx, dy, _):
     qkv, cos, sin, g, ve, vg, y, lse, lo, hi = ctx.saved_tensors
-    dqkv, dg, dve, dvg = bwd_qkv(qkv, cos, sin, dy, y, g, ve, vg, lse, lo, hi, ctx.scale, ctx.norm)
-    none = lambda x, dx: None if x is None else dx  # noqa: E731
-    return dqkv, None, None, none(g, dg), none(ve, dve), none(vg, dvg), None, None, None, None
+    d, delta = _delta(dy, y)
+    dqkv = bwd_qkv(qkv, cos, sin, dy, g, ve, vg, lse, delta, lo, hi, ctx.scale, ctx.norm)
+    dv = dqkv.chunk(3, 2)[2]  # also the grad of v + vg * ve
+    dve = None if ve is None else dv * vg
+    dvg = None if ve is None else (dv.float() * ve.float()).sum(-1, keepdim=True).to(vg.dtype)
+    return dqkv, None, None, _gate_grad(g, d), dve, dvg, None, None, None, None
 
 
 fwd.register_autograd(_backward, setup_context=_setup)
