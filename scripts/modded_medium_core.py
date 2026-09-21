@@ -661,6 +661,8 @@ class NorMuon(torch.optim.Optimizer):
         self.world_size = dist.get_world_size(group) if dist.is_initialized() else 1
         # ZeRO-2 params whose broadcast from their owner waits for launch(), after the step's collectives
         self._deferred = [] if DEFER and group is None and self.world_size > 1 else None
+        # Reuse only optimizer-owned storage, after every gradient reduction has drained.
+        self._reuse_buffers = os.environ.get("NORMUON_REUSE_BUFFERS", "0") == "1"
         # custom sizing requires 8 GPUs and the upstream 16-layer matrices
         params = list(params)
         layout = dict(attn_gate=16, value_embed_gate=10, attn=16, mlp=32)
@@ -791,9 +793,8 @@ class NorMuon(torch.optim.Optimizer):
                 _drain()
                 for p in params:
                     p.fresh = True
-                # No collective remains for these rows. Clone only when this
-                # group is processed, rather than retaining every group's copy
-                # across the largest polar-express scratch allocation.
+                # No collective remains for these rows. After step(), fresh=True
+                # makes the next backward overwrite the consumed gradient rows.
                 group_infos.append(dict(grad_source=flat, reduce_future=_Done()))
                 continue
             if flat is not None:  # BF16 weights: FP32 grads already stacked
@@ -836,10 +837,12 @@ class NorMuon(torch.optim.Optimizer):
             info["reduce_future"].wait()
 
             params = group["params"]
-            grad_chunk = (
-                info.pop("grad_source").clone()
-                if "grad_source" in info else info["grad_chunk"]
-            )
+            if "grad_source" in info:
+                grad_chunk = info.pop("grad_source")
+                if not self._reuse_buffers:
+                    grad_chunk = grad_chunk.clone()
+            else:
+                grad_chunk = info["grad_chunk"]
             # BF16 weights: FP32 grads, momentum and update math on the FP32 master
             master = getattr(params[0], "master", False)
             chunk_size = group["chunk_size"]
@@ -940,7 +943,14 @@ class NorMuon(torch.optim.Optimizer):
             v_chunk = v_chunk.view(grad_shape)
 
             # # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
-            updated_params = torch.empty_like(grad_chunk, dtype=params[0].dtype)
+            flat = self._pflat.get(self._group_of[params[0]])
+            direct_publish = (
+                self._reuse_buffers and self._deferred is not None and group.get("zero2")
+            )
+            updated_params = (
+                flat[start_idx : start_idx + chunk_size]
+                if direct_publish else torch.empty_like(grad_chunk, dtype=params[0].dtype)
+            )
             if num_params > 0:
                 # Work on a stacked copy to avoid touching original params; BF16 weights update the
                 # persistent FP32 master of this rank's shard instead (ZeRO-1)
@@ -965,16 +975,17 @@ class NorMuon(torch.optim.Optimizer):
                 param_chunk = torch.zeros_like(v_chunk)
 
             updated_params[:num_params].copy_(param_chunk)
-            if num_params < chunk_size:
+            if num_params < chunk_size and not direct_publish:
                 updated_params[num_params:].zero_()
 
             # These workspaces are not inputs to the parameter collective.
             # In ZeRO-2 no group_infos entry owns them after this point.
             del grad_chunk, updated_grads, v_chunk
 
-            flat = self._pflat.get(self._group_of[params[0]])  # the params are its rows
             if self._deferred is not None and group.get("zero2"):  # owners broadcast in launch()
-                flat[start_idx : start_idx + chunk_size].copy_(updated_params)
+                # Only actual parameters are broadcast; padding rows stay untouched.
+                if not direct_publish:
+                    flat[start_idx : start_idx + chunk_size].copy_(updated_params)
                 self._deferred += params
                 continue
             stacked_params = (
