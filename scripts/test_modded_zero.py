@@ -1,11 +1,14 @@
-"""CPU tests of --bf16-weights (BF16 matrices + FP32 master shards) on gloo worlds 1/2/4. NCCL-only
-collectives (AVG reduce-scatter, all-gather-into-tensor) and the Triton Newton-Schulz kernels are
-replaced by torch equivalents.
+"""CPU tests of the optimizers' BF16 weights (FP32 master shards, ZeRO-2 grad reduction to the
+NorMuon owner, deferred owner broadcasts) on gloo worlds 1/2/4, MoE experts included. NCCL-only
+collectives (AVG reduce, reduce-scatter, all-gather-into-tensor) and the Triton Newton-Schulz
+kernels are replaced by torch equivalents; the model is never run forward (BF16-representable fake
+grads per rank).
 
-The BF16-weight path must equal the FP32-weight path bit for bit (FP32 init masters, FP32 grad
-accumulation and reduce-scatter); fake grads are BF16-representable so both see the same dW.
+Checked after every step, on every rank: each owned master's BF16 rounding is its param, every
+rank holds the same params; and a run saved at step 4 (model state and rank_state_dict), rebuilt
+and restored continues bit-identical to the uninterrupted run through the embed split.
 
-    TORCH_COMPILE_DISABLE=1 .venv/bin/python scripts/test_modded_zero.py
+    .venv/bin/python scripts/test_modded_zero.py
 """
 
 import os
@@ -20,28 +23,17 @@ import torch.multiprocessing as mp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import modded_medium as mm
 from modded_medium import Config, TrainingManager, create_model, core
-from modded_wsd import Schedule, install
+from modded_wsd import Schedule
 
-ZERO2 = bool(os.environ.get("ZERO2"))  # ZERO2=1: the BF16 path also reduces grads to owners in backward
-DEFER = bool(os.environ.get("DEFER"))  # DEFER=1 (with ZERO2): owners broadcast updated params, synced after
-ARCH = {}  # MOE=1: SwiGLU MoE experts (3D params) and shared experts join the masters
-if os.environ.get("MOE"):
-    ARCH = dict(mlp="swiglu", moe=[8, 2], moe_kernel="pad", moe_seq=1e-3, moe_update="prop")
-LAYERS, STEPS, SPLIT = (
-    10,
-    8,
-    5,
-)  # 10 layers: the attn group pads at world 4; split mid-run
+ARCH = dict(moe=[8, 2], moe_seq=1e-3)
+# 10 layers: the attn group pads at world 4; split mid-run
+LAYERS, STEPS, SPLIT = 10, 8, 5
+SCHEDULE = Schedule(warmup_steps=2, mtp_steps=0, split_step=SPLIT, batch_rows=8)
 
 
 class Done:
     def wait(self):
         pass
-
-    def get_future(self):
-        f = torch.futures.Future()
-        f.set_result(None)
-        return f
 
 
 def patch():
@@ -58,8 +50,7 @@ def patch():
     ):
         buf = inp.float().clone()
         all_reduce(buf, op)
-        mean = buf.chunk(dist.get_world_size())[dist.get_rank()]
-        out.copy_(mean)
+        out.copy_(buf.chunk(dist.get_world_size())[dist.get_rank()])
         return Done() if async_op else None
 
     def reduce_to(t, dst, op=dist.ReduceOp.SUM, group=None, async_op=False):
@@ -87,35 +78,26 @@ def patch():
             X = a * X + (b * A + c * A @ A) @ X
         return X.mT if G.size(-2) > G.size(-1) else X
 
-    dist.all_reduce, dist.reduce_scatter_tensor = all_reduce, reduce_scatter_tensor
-    dist.all_gather_into_tensor = all_gather_into_tensor
     bcast = dist.broadcast
-    dist.broadcast = lambda t, src, group=None, async_op=False: bcast(t.view(torch.uint8), src) or Done()
-    dist.reduce = reduce_to
+    dist.all_reduce, dist.reduce_scatter_tensor = all_reduce, reduce_scatter_tensor
+    dist.all_gather_into_tensor, dist.reduce = all_gather_into_tensor, reduce_to
+    dist.broadcast = lambda t, src, group=None, async_op=False: (
+        bcast(t.view(torch.uint8), src) or Done()
+    )
     core.polar_express = polar_express
 
 
-def matrices(model):
-    return [
-        p for p in model.parameters() if getattr(p, "label", None) in mm.MASTER_LABELS
-    ]
-
-
-def build(bf16):
+def build():
     torch.manual_seed(0)
     cfg = Config(
         width=64, head_dim=16, layers=LAYERS, max_tokens=1024, scheduled_steps=STEPS,
-        extension_steps=0, initial_batch_rows=8, bf16_weights=bf16, arch=ARCH,
-        zero2=bf16 and ZERO2,
+        ckpt="eager", arch=ARCH,
     )  # fmt: skip
     model = create_model(cfg, device="cpu")
-    core.DEFER = DEFER
-    manager = TrainingManager(model, cfg)
-    manager.split_step = SPLIT
-    return model, manager
+    return model, TrainingManager(model, cfg, SCHEDULE)
 
 
-def train(model, manager, steps, accum):
+def train(model, manager, steps, accum=2):
     """Per-rank BF16-representable fake gradients, identical for every model."""
     for step in steps:
         manager.advance_schedule(step)
@@ -132,105 +114,46 @@ def train(model, manager, steps, accum):
             loss.backward()
         manager.step_optimizers(step)
         core.sync_params()
+        check(manager)
 
 
-def shards(manager):
-    """(master, group params, first owned index) for every NorMuon group holding masters."""
-    return [
-        (g["master"], g["params"], dist.get_rank() * g["chunk_size"])
-        for g in manager.muon_opt.param_groups
-        if "master" in g
-    ]
-
-
-def rel(a, b):
-    return ((a.float() - b.float()).norm() / b.float().norm().clamp_min(1e-30)).item()
-
-
-def same(a, b, accum):
-    """Bit-equal, except ZeRO-2 with several micro-batches or > 2 ranks: it averages each micro-batch
-    over ranks before summing and reduces one param at a time (the reference sums, then reduce-scatters
-    the stacked group), a different FP32 summation order (~1e-11 here)."""
-    if ZERO2 and (accum > 1 or dist.get_world_size() > 2):
-        return torch.allclose(a.float(), b.float(), rtol=1e-5, atol=1e-7)
-    return torch.equal(a, b)
-
-
-def test_reference(accum):
-    """--bf16-weights is the FP32-weight optimizer bit for bit: masters equal the FP32 params and the
-    BF16 params equal BF16(FP32 params) after every step, on every rank; nothing switched group."""
-    ref, ref_mgr = build(False)
-    bf, bf_mgr = build(True)
-    ref_of = {id(p): q for p, q in zip(bf.parameters(), ref.parameters())}
-    keys = (
-        "lr",
-        "initial_lr",
-        "weight_decay",
-        "momentum",
-        "beta2",
-        "betas",
-        "eps",
-        "chunk_size",
-    )
-    for o, r in zip(bf_mgr.optimizers, ref_mgr.optimizers):
-        assert type(o) is type(r) and len(o.param_groups) == len(r.param_groups)
-        for g, h in zip(o.param_groups, r.param_groups):
-            assert [id(ref_of[id(p)]) for p in g["params"]] == [
-                id(q) for q in h["params"]
-            ]
-            assert {k: g.get(k) for k in keys} == {k: h.get(k) for k in keys}
-    assert {n for n, p in bf.named_parameters() if getattr(p, "master", False)} == {
-        n for n, p in bf.named_parameters() if p.label in mm.MASTER_LABELS
-    }
-    assert not any(
-        hasattr(p, "fp32") for p in bf.parameters()
-    )  # init stash handed over
-    for step in range(STEPS):
-        train(ref, ref_mgr, [step], accum)
-        train(bf, bf_mgr, [step], accum)
-        found = shards(bf_mgr)
-        owned = [
-            g for g in bf_mgr.muon_opt.param_groups
-            if getattr(g["params"][0], "master", False)
-            and dist.get_rank() * g["chunk_size"] < len(g["params"])
-        ]
-        assert len(found) == len(owned)  # every master group this rank owns a shard of
-        for master, params, lo in found:
-            assert master.dtype == torch.float32 and params[0].dtype == torch.bfloat16
-            for i, m in enumerate(master):
-                r = ref_of[id(params[lo + i])].detach()
-                assert same(m, r, accum), f"step {step}: master != FP32 param"
-        for p, q in zip(bf.parameters(), ref.parameters()):
-            assert same(p, q.to(p.dtype), accum), f"step {step}: {p.label}"
-        for g, h in zip(bf_mgr.muon_opt.param_groups, ref_mgr.muon_opt.param_groups):
-            for k in ("momentum_buffer", "second_momentum_buffer"):
-                assert g[k].dtype == h[k].dtype and same(g[k], h[k], accum), (
-                    k, g["params"][0].label, dist.get_rank(), (g[k].float() - h[k].float()).abs().max().item(),
-                    g[k].shape, h[k].shape,
-                )
-    for p in bf.parameters():
+def check(manager):
+    rank = dist.get_rank()
+    for g in manager.muon_opt.param_groups:
+        lo = rank * g["chunk_size"]
+        for i, m in enumerate(g.get("master", ())):
+            assert (
+                m.dtype == torch.float32 and g["params"][lo + i].dtype == torch.bfloat16
+            )
+            assert torch.equal(m.bfloat16(), g["params"][lo + i]), g["params"][0].label
+    for p in manager.model.parameters():
         every = [torch.empty_like(p) for _ in range(dist.get_world_size())]
         dist.all_gather(every, p.detach().contiguous())
         assert all(torch.equal(e, p) for e in every), f"ranks disagree on {p.label}"
 
 
-def test_resume(bf16=True, old=False):
-    """save at step 4, rebuild and load, continue: bit-identical to an uninterrupted run. old: a
-    checkpoint written before Config.bf16_weights existed (flag off) still resumes."""
-    full, full_mgr = build(bf16)
-    train(full, full_mgr, range(STEPS), 2)
-    part, part_mgr = build(bf16)
-    train(part, part_mgr, range(4), 2)
+def test_resume():
+    full, full_mgr = build()
+    assert {n for n, p in full.named_parameters() if getattr(p, "master", False)} == {
+        n for n, p in full.named_parameters() if p.label in mm.MASTER_LABELS
+    }
+    assert not any(hasattr(p, "fp32") for p in full.parameters())  # init stash gone
+    train(full, full_mgr, range(STEPS))
+    init = build()[0]
+    moved = {
+        p.label
+        for p, q in zip(full.parameters(), init.parameters())
+        if not torch.equal(p, q)
+    }
+    assert set(mm.MASTER_LABELS) <= moved, moved
+    part, part_mgr = build()
+    train(part, part_mgr, range(4))
     shared, local = mm.cpu_copy(part.state_dict()), part_mgr.rank_state_dict()
-    if old:
-        del local["config"]["bf16_weights"]
-    model, manager = build(bf16)
+    model, manager = build()
     model.load_state_dict(shared)
     manager.load_rank_state_dict(local)
-    assert all(m.dtype == torch.float32 for m, *_ in shards(manager)) and (
-        not bf16 or shards(manager)
-    )
-    train(model, manager, range(4, STEPS), 2)
+    train(model, manager, range(4, STEPS))
+    assert model.split_embed
     for p, q in zip(model.parameters(), full.parameters()):
         assert p.dtype == q.dtype and torch.equal(p, q), p.label
     for g, h in zip(manager.muon_opt.param_groups, full_mgr.muon_opt.param_groups):
@@ -239,88 +162,15 @@ def test_resume(bf16=True, old=False):
                 assert g[k].dtype == h[k].dtype and torch.equal(g[k], h[k]), k
 
 
-def test_distadam_master():
-    """DistAdam with BF16 master params (sharded and small): BF16 slice == BF16(master), master near
-    FP32 params fed the same grads, bit-identical resume from its state dict."""
-    world, rank = dist.get_world_size(), dist.get_rank()
-    torch.manual_seed(1)
-    init = [torch.randn(s).bfloat16().float() for s in ((8 * world, 16), (4, 8))]
-
-    def make(bf16):
-        ps = [
-            torch.nn.Parameter(x.clone().to(torch.bfloat16 if bf16 else x.dtype))
-            for x in init
-        ]
-        for p in ps:
-            p.label, p.master = "attn", bf16
-        return ps, core.DistAdam(
-            ps, ["attn"], lr=0.01, betas=(0.9, 0.95), weight_decay=0.1
-        )
-
-    def run(ps, opt, steps):
-        for step in steps:
-            opt.should_sync = True
-            g = torch.Generator().manual_seed(7 * step + rank)
-            xs = [(1e-2 * torch.randn(p.shape, generator=g)).bfloat16() for p in ps]
-            sum((p * x.to(p.dtype)).sum() for p, x in zip(ps, xs)).backward()
-            opt.step()
-            opt.zero_grad(set_to_none=True)
-
-    ref, ref_opt = make(False)
-    bf, bf_opt = make(True)
-    run(ref, ref_opt, range(6))
-    run(bf, bf_opt, range(6))
-    for p, q in zip(bf, ref):
-        m = bf_opt.state[p]["master"]
-        lo = 0 if p.numel() < 1024 else rank * len(m)
-        assert m.dtype == torch.float32 and torch.equal(
-            p[lo : lo + len(m)], m.bfloat16()
-        )
-        r = q.detach()[lo : lo + len(m)]
-        assert rel(m, r) < 1e-3, rel(
-            m, r
-        )  # the reference feeds FP32 grads to BF16 moments
-    state = mm.cpu_copy(bf_opt.state_dict())
-    again, again_opt = make(True)
-    with torch.no_grad():
-        for p, q in zip(again, bf):
-            p.copy_(q)
-    again_opt.load_state_dict(state)
-    for p, index in zip(again, state["param_groups"][0]["params"]):
-        again_opt.state[p] = mm.cpu_copy(
-            state["state"][index]
-        )  # as load_rank_state_dict
-    run(bf, bf_opt, range(6, 9))
-    run(again, again_opt, range(6, 9))
-    for p, q in zip(again, bf):
-        assert torch.equal(p, q)
-        assert torch.equal(again_opt.state[p]["master"], bf_opt.state[q]["master"])
-
-
 def worker(rank, world, port):
     dist.init_process_group(
         "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
     )
     torch.set_num_threads(1)
     patch()
-    install(
-        core,
-        Schedule(warmup_steps=2, mtp_steps=0, split_step=SPLIT, batch_rows=8),
-        -1,
-        STEPS,
-    )
-    for accum in (1, 3):
-        if rank == 0:
-            print(f"world {world} accum {accum}", flush=True)
-        test_reference(accum)
     test_resume()
-    test_resume(bf16=False, old=True)
-    test_distadam_master()
     if rank == 0:
-        print(
-            f"world {world}: ok; --bf16-weights bit-identical to FP32 weights ({STEPS} steps, 1 and 3 "
-            f"micro-batches, split at {SPLIT})"
-        )
+        print(f"world {world}: ok ({STEPS} steps, resume at 4, split at {SPLIT})")
     dist.destroy_process_group()
 
 

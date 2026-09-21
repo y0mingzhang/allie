@@ -1,11 +1,9 @@
-"""Board-state input (model track): causal board features per position, from the token rows.
+"""Board-state input: a CNN over the causal board state at every position, from the token rows.
 
 The C++ encoder is Codex's (results/recipe10x/board-lr-v1/source): for every position it gives the
 64 squares (0 empty, 1-6 white PNBRQK, 7-12 black), side to move, castling rights, en-passant file
-and an in-game flag, for the position after that token. Branches follow Codex's findings: one-hot
-matmul (not square lookups, whose backward was pathological under deterministic BF16), zero-init
-output, FP32 parameters and Adam state with a BF16 forward, LR multiplier 0.1, and the direct map's
-~67 active features scaled by 1/8 (board-input-v1).
+and an in-game flag, for the position after that token. The branch follows Codex's findings: one-hot
+inputs, zero-init output, FP32 parameters and Adam state with a BF16 forward, LR multiplier 0.1.
 """
 
 import ctypes
@@ -17,7 +15,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from modded_arch import BOARD_IN
 from torch import nn
 from torch.nn import functional as F
 
@@ -96,24 +93,6 @@ def meta(states):
     return F.pad(torch.cat((side, rights, ep), -1), (0, 5))
 
 
-def features(states, dtype):
-    """(T, 68) states -> (T, BOARD_IN) one-hot features, zero outside games."""
-    pieces = F.one_hot(states[:, :64].long(), 13).flatten(1)
-    f = torch.cat((pieces, meta(states)), -1).to(dtype)
-    return f * states[:, 67:68].to(dtype)
-
-
-class BoardDirect(nn.Module):
-    """Linear map of the one-hot board to the model width (an embedding of piece-on-square)."""
-
-    def __init__(self, width):
-        super().__init__()
-        self.weight = nn.Parameter(torch.zeros(BOARD_IN, width))
-
-    def forward(self, states, dtype):
-        return features(states, dtype) @ self.weight.type(dtype) / 8
-
-
 class Conv3(torch.autograd.Function):
     """3x3 same-padded conv on 8x8 boards. cuDNN's weight gradient for this shape (a reduction over
     every square of every board into a tiny kernel) picks a slow kernel, 14 of the encoder's 21 ms on
@@ -132,14 +111,22 @@ class Conv3(torch.autograd.Function):
         gx = torch.nn.grad.conv2d_input(x.shape, w, g, padding=1)
         (t, c), o = x.shape[:2], g.shape[1]
         c8, split = -c % 8, 1024  # GEMM alignment; row chunks
-        rows = -(-(t * 100) // split) * split  # all gradient rows, rounded up to whole chunks
-        extra = -(-(rows + 22) // 100) - t  # zero boards covering the rounding and the 22-row shift
-        xp = F.pad(x.permute(0, 2, 3, 1), (0, c8, 1, 1, 1, 1, 0, extra)).reshape(-1, c + c8)
+        rows = (
+            -(-(t * 100) // split) * split
+        )  # all gradient rows, rounded up to whole chunks
+        extra = (
+            -(-(rows + 22) // 100) - t
+        )  # zero boards covering the rounding and the 22-row shift
+        xp = F.pad(x.permute(0, 2, 3, 1), (0, c8, 1, 1, 1, 1, 0, extra)).reshape(
+            -1, c + c8
+        )
         gp = F.pad(g.permute(0, 2, 3, 1), (0, 0, 0, 2, 0, 2, 0, extra)).reshape(-1, o)
         gm = gp[:rows].view(split, -1, o).transpose(1, 2)
         gw = torch.stack(
             [
-                torch.bmm(gm, xp[10 * i + j : 10 * i + j + rows].view(split, -1, c + c8))
+                torch.bmm(
+                    gm, xp[10 * i + j : 10 * i + j + rows].view(split, -1, c + c8)
+                )
                 .to(torch.promote_types(x.dtype, torch.float32))
                 .sum(0)
                 for i in range(3)
@@ -184,8 +171,8 @@ class BoardConv(nn.Module):
         return (x @ self.output.type(dtype)) * states[:, 67:68].to(dtype)
 
 
-def build(kind, width):
-    net = BoardDirect(width) if kind == "direct" else BoardConv(width)
+def build(width):
+    net = BoardConv(width)
     for p in net.parameters():
         p.label, p.fp32_state = "board", True
         p.lr_mul = 0.1

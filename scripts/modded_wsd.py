@@ -1,7 +1,8 @@
-"""Absolute-step WSD controls; no dependency on total training horizon."""
+"""Absolute-step warmup-stable-decay schedule (modded_medium_core.TrainingManager): learning rate,
+Muon momentum and multi-token prediction weights; no dependency on the total training horizon."""
 
-from dataclasses import dataclass, asdict
 import math
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -13,15 +14,11 @@ class Schedule:
     plateau: float = 2.0
     final_lr: float = 0.1
     decay_shape: str = "linear"
-    momentum_warmup: bool = (
-        True  # Muon momentum 0.85 -> 0.95 over warmup_steps; False: 0.95
-    )
+    momentum_warmup: bool = True  # Muon momentum 0.85 -> 0.95 over warmup; else 0.95
 
     def validate(self):
         assert self.decay_shape in ("linear", "cosine")
-        assert (
-            self.warmup_steps > 0 and self.mtp_steps >= 0
-        )  # 0 = no multi-token prediction
+        assert self.warmup_steps > 0 and self.mtp_steps >= 0  # 0: no multi-token loss
         assert self.split_step >= self.mtp_steps and self.split_step % 2 == 1
         assert self.batch_rows > 0 and 0 < self.final_lr < self.plateau
 
@@ -51,24 +48,3 @@ class Schedule:
         if x < 1:
             return [1.0, 0.5 * (2 - 2 * x)]
         return [1.0]
-
-
-def install(core, schedule, decay_start, end_step):
-    import torch
-
-    schedule.validate()
-    core.get_bs = lambda step: schedule.batch_rows * 1024
-    core.get_ws = lambda step: (
-        11,
-        23,
-    )  # full history within each original1024-token row
-    core.get_lr = lambda step: schedule.lr(step, decay_start, end_step)
-    core.get_muon_momentum = schedule.momentum
-
-    def mtp(self):
-        return [
-            torch.tensor(schedule.mtp(s), device=core.device)
-            for s in range(core.args.num_iterations + 1)
-        ]
-
-    core.TrainingManager._build_mtp_schedule = mtp

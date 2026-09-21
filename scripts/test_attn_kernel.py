@@ -131,8 +131,8 @@ def grads(o, qkv, do):
 def check(rows, windows, what, gated=False):
     """Flex's gated path is the model's: its output times the gate, in BF16."""
     n, row = rows.shape
-    flex = mm.make_context(rows, *windows, backend="flex")
-    tri = mm.make_context(rows, *windows, backend="triton")
+    flex = mm.make_context(rows, *windows, backend="flex", board=False)
+    tri = mm.make_context(rows, *windows, backend="triton", board=False)
     for w in windows:
         (q, k, v, g), do = inputs(n * row, 0)
         wrt, g = ((q, k, v, g), g) if gated else ((q, k, v), None)
@@ -174,34 +174,73 @@ def check_qkv(rows, window):
     around Flex (BF16, eager) and around an FP32 per-row reference: y and grads of qkv, g, ve, vg."""
     n, row = rows.shape
     T = n * row
-    flex = mm.make_context(rows, window, window, backend="flex")
-    tri = mm.make_context(rows, window, window, backend="triton")
+    flex = mm.make_context(rows, window, window, backend="flex", board=False)
+    tri = mm.make_context(rows, window, window, backend="triton", board=False)
     gen = torch.Generator(device="cuda").manual_seed(3)
     rnd = lambda *s: torch.randn(*s, generator=gen, device="cuda")  # noqa: E731
     cos, sin = tables(T)
-    leaves = [x.bfloat16().requires_grad_() for x in
-              (rnd(1, T, 3 * H, D), rnd(1, T, H, 1).sigmoid(), rnd(1, T, H, D), 2 * rnd(1, T, H, 1).sigmoid())]
+    leaves = [
+        x.bfloat16().requires_grad_()
+        for x in (
+            rnd(1, T, 3 * H, D),
+            rnd(1, T, H, 1).sigmoid(),
+            rnd(1, T, H, D),
+            2 * rnd(1, T, H, 1).sigmoid(),
+        )
+    ]
     dy = rnd(1, T, H, D).bfloat16()
-    f = grads(model_path(*leaves[:1], cos, sin, *leaves[1:], lambda q, k, v: mm.attention(q, k, v, flex, window, SCALE)), leaves, dy)
-    t = grads(mm.attention_qkv(leaves[0], tri, window, SCALE, cos, sin, *leaves[1:], True), leaves, dy)
+    f = grads(
+        model_path(
+            *leaves[:1],
+            cos,
+            sin,
+            *leaves[1:],
+            lambda q, k, v: mm.attention(q, k, v, flex, window, SCALE),
+        ),
+        leaves,
+        dy,
+    )
+    t = grads(
+        mm.attention_qkv(leaves[0], tri, window, SCALE, cos, sin, *leaves[1:]),
+        leaves,
+        dy,
+    )
     ref = [[] for _ in range(5)]
     tt = torch.arange(row, device="cuda")
     for r in range(n):
         s = slice(r * row, (r + 1) * row)
         rl = [x[0, s].float().detach().requires_grad_() for x in leaves]
         d = flex.documents[s]
-        allow = (tt[None] <= tt[:, None]) & (tt[:, None] - tt[None] <= window) & (d[:, None] == d[None])
+        allow = (
+            (tt[None] <= tt[:, None])
+            & (tt[:, None] - tt[None] <= window)
+            & (d[:, None] == d[None])
+        )
 
         def attend(q, k, v):
             p = torch.einsum("bthd,bshd->bhts", q, k) * SCALE
-            return torch.einsum("bhts,bshd->bthd", p.masked_fill(~allow, -torch.inf).softmax(-1), v)
+            return torch.einsum(
+                "bhts,bshd->bthd", p.masked_fill(~allow, -torch.inf).softmax(-1), v
+            )
 
-        y = model_path(rl[0][None], cos[s].float(), sin[s].float(), *(x[None] for x in rl[1:]), attend)
-        for out, x in zip(ref, (y[0], *torch.autograd.grad(y, rl, dy[0, s].float()[None]))):
+        y = model_path(
+            rl[0][None],
+            cos[s].float(),
+            sin[s].float(),
+            *(x[None] for x in rl[1:]),
+            attend,
+        )
+        for out, x in zip(
+            ref, (y[0], *torch.autograd.grad(y, rl, dy[0, s].float()[None]))
+        ):
             out.append(x.detach())
     ref = [torch.cat(x)[None] for x in ref]
     print(f"real qkv-fused window {window} (y dqkv dgate dve dvgate max abs/rel err)")
-    for label, a, b in (("triton-flex", t, f), ("triton-fp32", t, ref), ("flex-fp32", f, ref)):
+    for label, a, b in (
+        ("triton-flex", t, f),
+        ("triton-fp32", t, ref),
+        ("flex-fp32", f, ref),
+    ):
         print(f"  {label:12s}", *(err(x, y) for x, y in zip(a, b)), flush=True)
     lo, hi = tri.short_mask
     qkv, g, ve, vg = (x.detach() for x in leaves)
@@ -209,16 +248,29 @@ def check_qkv(rows, window):
         y, lse = ma.fwd_qkv(qkv, cos, sin, g, ve, vg, lo, hi, SCALE, True)
         _, dl = ma._delta(dy, y)
         fw = bench(lambda _: ma.fwd_qkv(qkv, cos, sin, g, ve, vg, lo, hi, SCALE, True))
-        bw = bench(lambda _: ma.bwd_qkv(qkv, cos, sin, dy, g, ve, vg, lse, dl, lo, hi, SCALE, True))
-        fw0 = bench(lambda _: ma.fwd_qkv(qkv, cos, sin, g, None, None, lo, hi, SCALE, True))
-        bw0 = bench(lambda _: ma.bwd_qkv(qkv, cos, sin, dy, g, None, None, lse, dl, lo, hi, SCALE, True))
-    print(f"qkv-fused raw kernels ms: fwd {fw0:.3f} bwd {bw0:.3f}; with value embeddings fwd {fw:.3f} bwd {bw:.3f}", flush=True)
+        bw = bench(
+            lambda _: ma.bwd_qkv(
+                qkv, cos, sin, dy, g, ve, vg, lse, dl, lo, hi, SCALE, True
+            )
+        )
+        fw0 = bench(
+            lambda _: ma.fwd_qkv(qkv, cos, sin, g, None, None, lo, hi, SCALE, True)
+        )
+        bw0 = bench(
+            lambda _: ma.bwd_qkv(
+                qkv, cos, sin, dy, g, None, None, lse, dl, lo, hi, SCALE, True
+            )
+        )
+    print(
+        f"qkv-fused raw kernels ms: fwd {fw0:.3f} bwd {bw0:.3f}; with value embeddings fwd {fw:.3f} bwd {bw:.3f}",
+        flush=True,
+    )
 
 
 def timing(rows, windows, timed):
     n, row = rows.shape
-    flex = mm.make_context(rows, *windows, backend="flex")
-    tri = mm.make_context(rows, *windows, backend="triton")
+    flex = mm.make_context(rows, *windows, backend="flex", board=False)
+    tri = mm.make_context(rows, *windows, backend="triton", board=False)
     delta = torch.compile(
         lambda do, o: (do.float() * o.float()).sum(-1)[0].t().contiguous()
     )
@@ -258,7 +310,9 @@ def timing(rows, windows, timed):
             out.append(f"| flex64 failed: {type(e).__name__}: {str(e)[:200]}")
         print(*out, flush=True)
     for backend in ("flex", "triton"):
-        ms = bench(lambda _: mm.make_context(rows, *windows, backend=backend))
+        ms = bench(
+            lambda _: mm.make_context(rows, *windows, backend=backend, board=False)
+        )
         print(f"make_context {backend} {ms:.3f} ms", flush=True)
     return tri
 
@@ -324,7 +378,7 @@ def main():
         flush=True,
     )
     if "--sweep" in sys.argv:
-        sweep(rows, mm.make_context(rows, *WSD, backend="triton"))
+        sweep(rows, mm.make_context(rows, *WSD, backend="triton", board=False))
     check_qkv(rows, WSD[0])
     check(rows, WSD, "real")
     timing(rows, WSD, WSD[:1])

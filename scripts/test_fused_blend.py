@@ -1,7 +1,7 @@
-"""Gate of --fused-blend: modded_medium_core._fused_blend equals the eager residual
-blend it replaces bit for bit (output and the x, x0, x02 and FP32 lambda gradients),
-plain and under torch.utils.checkpoint, with its kernels eager and compiled; a tiny
---ckpt eager GPT gives identical logits and parameter gradients in every blend mode.
+"""modded_medium_core._fused_blend (the residual blend inside --ckpt eager's block checkpoints)
+equals the eager arithmetic it replaced bit for bit (output and the x, x0, x02 and FP32 lambda
+gradients), plain and under torch.utils.checkpoint, with its kernels eager and compiled; a tiny
+--ckpt eager GPT on real rows gives identical logits and parameter gradients with either blend.
 
 torch 2.8's CPU inductor drops emulate_precision_casts' rounding (CppVecOverrides
 .to_dtype rejects use_compute_types; the dtype-convert CSE cache maps a rounded value's
@@ -17,12 +17,14 @@ import os
 import sys
 import tempfile
 
+import numpy as np
 import torch
 import torch.distributed as dist
 from torch._dynamo.utils import counters
 from torch._inductor.codegen import cpp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+DATA = "/data/group_data/dei-group/yimingz3/allie/lichess_tokens_v2"
 
 
 def round_like_triton():
@@ -113,13 +115,17 @@ def test_blend(core, device):
     assert counters["stats"]["unique_graphs"] - graphs >= 16, "kernels did not compile"
 
 
-def gpt_case(mm, core, ckpt_blend, fused_blend):
+def gpt_case(mm, core, blend, rows):
+    core._fused_blend = blend
     torch.manual_seed(0)
     cfg = mm.Config(
-        width=64, head_dim=16, layers=8, max_tokens=1024, scheduled_steps=8,
-        extension_steps=0, initial_batch_rows=8, ckpt="eager", ckpt_blend=ckpt_blend,
-        fused_blend=fused_blend,
-    )  # fmt: skip
+        width=64,
+        head_dim=16,
+        layers=8,
+        max_tokens=1024,
+        scheduled_steps=8,
+        ckpt="eager",
+    )
     model = mm.create_model(cfg, device="cpu")
     # nonzero projections, embeddings and lambdas: every blend term carries signal
     with torch.no_grad():
@@ -133,8 +139,7 @@ def gpt_case(mm, core, ckpt_blend, fused_blend):
     for step in range(2):
         model.zero_grad(set_to_none=True)
         gen = torch.Generator().manual_seed(step)
-        rows = torch.randint(378, 2346, (1, 1025), generator=gen)
-        x, y = rows[:, :-1], rows[:, 1:]
+        x, y = rows[step : step + 1, :-1], rows[step : step + 1, 1:]
         ctx = mm.make_context(x, 128, 384, backend="dense")
         z = net(x.flatten(), y.flatten(), ctx, sched)
         (z.float() * torch.randn(z.shape, generator=gen)).sum().backward()
@@ -143,14 +148,18 @@ def gpt_case(mm, core, ckpt_blend, fused_blend):
 
 
 def test_gpt(mm, core):
-    want, want_grads = gpt_case(mm, core, False, False)
-    for ckpt_blend, fused_blend in ((False, True), (True, False), (True, True)):
-        z, grads = gpt_case(mm, core, ckpt_blend, fused_blend)
-        assert same(want, z), (ckpt_blend, fused_blend, "logits")
-        assert grads.keys() == want_grads.keys()
-        bad = [n for n in grads if not same(want_grads[n], grads[n])]
-        assert not bad, (ckpt_blend, fused_blend, bad)
-    print(f"GPT: every blend mode gives eager's logits and all {len(grads)} grads")
+    """--ckpt eager GPT on real rows: the fused blend in every block gives eager's logits and grads."""
+    from lm_data import Packed
+
+    rows = torch.as_tensor(Packed(DATA, "val").rows(np.arange(2)))
+    fused = core._fused_blend
+    want, want_grads = gpt_case(mm, core, torch.compiler.disable(eager_blend), rows)
+    z, grads = gpt_case(mm, core, fused, rows)
+    assert same(want, z), "logits"
+    assert grads.keys() == want_grads.keys()
+    bad = [n for n in grads if not same(want_grads[n], grads[n])]
+    assert not bad, bad
+    print(f"GPT: the fused blend gives eager's logits and all {len(grads)} grads")
 
 
 if __name__ == "__main__":
@@ -159,7 +168,9 @@ if __name__ == "__main__":
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = tempfile.mkdtemp()
     round_like_triton()
     torch.set_num_threads(4)
-    torch._dynamo.config.recompile_limit = 64  # one _blend_fwd graph per tested shape; training compiles two
+    torch._dynamo.config.recompile_limit = (
+        64  # one _blend_fwd graph per tested shape; training compiles two
+    )
     import modded_medium as mm
 
     test_blend(mm.core, device)
@@ -169,4 +180,4 @@ if __name__ == "__main__":
         )
         test_gpt(mm, mm.core)
         dist.destroy_process_group()
-    print(f"PASS --fused-blend bitwise eager on {device}")
+    print(f"PASS fused blend bitwise eager on {device}")
