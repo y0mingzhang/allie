@@ -8,15 +8,21 @@ claude: channel server loaded by Claude. Relays Codex's calls as channel
         notifications; `phone` starts or steers a turn on the Codex thread.
         Inert unless PHONE_A_FRIEND_THREAD names that thread.
 codex:  server loaded by Codex; `phone` pushes into Claude's channel.
+
+Claude subagents pass their id as `agent`; Codex replies with `to=<id>`, which lands in
+BOX/<id>.inbox (the subagent watches it) instead of the main session. BOX/log.jsonl keeps
+every message.
 """
 
 import base64
 import json
 import os
+import re
 import socket
 import struct
 import sys
 import threading
+import time
 
 ROLE = sys.argv[1]
 PEER = {"claude": "codex", "codex": "claude"}[ROLE]
@@ -24,6 +30,13 @@ THREAD = os.environ.get("PHONE_A_FRIEND_THREAD")
 LIVE = ROLE == "codex" or THREAD is not None
 ADDR = f"\0phone-a-friend-{os.getuid()}"
 DAEMON = os.path.expanduser("~/.codex/app-server-control/app-server-control.sock")
+BOX = os.path.expanduser("~/.cache/phone-a-friend")
+ROUTING = {
+    "claude": " Subagents: pass your agent id as `agent` so Codex can reply to you directly; its replies "
+    f"then land in {BOX}/<id>.inbox (watch it with Monitor), not in the main session.",
+    "codex": " A message headed 'Claude agent <id>' came from a Claude subagent: reply with "
+    "`to=<id>` to reach it directly. Omit `to` for Claude's main session.",
+}[ROLE]
 INSTRUCTIONS = (
     f"{PEER.capitalize()} is a peer agent, not the user, running in the same Slurm "
     f"controller on the same repo. Its messages arrive "
@@ -34,6 +47,7 @@ INSTRUCTIONS = (
     )
     + ". Use the phone tool to reply or to ask it something. Replies arrive the same way. "
     "Do not answer acknowledgements or pleasantries: stop when nothing is left to say."
+    + ROUTING
 )
 FOOTER = f"\n\n({PEER.capitalize()} cannot see your text output; answer with the phone-a-friend phone tool, or not at all.)"
 lock = threading.Lock()
@@ -77,7 +91,24 @@ def ws_recv(s, f):
                     return json.loads(msg)
 
 
-def phone_codex(text):
+def agent_id(x):
+    if x and not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", x):
+        raise ValueError(f"bad agent id {x!r}")
+    return x or None
+
+
+def log(sender, to, text):
+    os.makedirs(BOX, exist_ok=True)
+    with open(f"{BOX}/log.jsonl", "a") as f:
+        f.write(
+            json.dumps(
+                {"t": time.strftime("%FT%T%z"), "from": sender, "to": to, "text": text}
+            )
+            + "\n"
+        )
+
+
+def phone_codex(text, agent=None):
     with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(30)
         s.connect(DAEMON)
@@ -91,7 +122,8 @@ def phone_codex(text):
             raise ConnectionError("daemon refused websocket upgrade")
         while f.readline().strip():
             pass
-        text = f"[phone-a-friend] Claude says:\n{text}{FOOTER}"
+        who = f"Claude agent {agent}" if agent else "Claude"
+        text = f"[phone-a-friend] {who} says:\n{text}{FOOTER}"
         for req in (
             {
                 "id": 1,
@@ -115,11 +147,11 @@ def phone_codex(text):
         raise RuntimeError(m["error"]["message"])
 
 
-def phone_claude(text):
+def phone_claude(text, to=None):
     with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(30)
         s.connect(ADDR)
-        s.sendall(text.encode())
+        s.sendall((f"\0{to}\n" * bool(to) + text).encode())
         s.shutdown(socket.SHUT_WR)
         if s.recv(2) != b"ok":
             raise ConnectionError("channel dropped the message")
@@ -137,21 +169,34 @@ def listen():
         c, _ = srv.accept()
         with c:
             c.settimeout(30)
-            text = c.makefile("rb").read().decode() + FOOTER
-            emit(
-                {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/claude/channel",
-                    "params": {"content": text, "meta": {"sender": "codex"}},
-                }
-            )
+            raw = c.makefile("rb").read().decode()
+            to, text = raw[1:].split("\n", 1) if raw.startswith("\0") else ("", raw)
+            if re.fullmatch(r"[0-9A-Za-z_-]{1,64}", to):
+                os.makedirs(BOX, exist_ok=True)
+                with open(f"{BOX}/{to}.inbox", "a") as f:
+                    f.write(f"--- {time.strftime('%FT%T%z')} codex:\n{text}{FOOTER}\n")
+            else:
+                emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/claude/channel",
+                        "params": {
+                            "content": text + FOOTER,
+                            "meta": {"sender": "codex"},
+                        },
+                    }
+                )
             c.sendall(b"ok")
 
 
 def call(args):
     try:
-        (phone_codex if ROLE == "claude" else phone_claude)(args["message"])
-        return {"content": [{"type": "text", "text": f"delivered to {PEER}"}]}
+        peer = agent_id(args.get("agent" if ROLE == "claude" else "to"))
+        (phone_codex if ROLE == "claude" else phone_claude)(args["message"], peer)
+        tag = f"claude:{peer}" if peer else "claude"
+        log(*((tag, "codex") if ROLE == "claude" else ("codex", tag)), args["message"])
+        where = f"claude agent {peer}'s inbox" if peer and ROLE == "codex" else PEER
+        return {"content": [{"type": "text", "text": f"delivered to {where}"}]}
     except (OSError, RuntimeError, ValueError, struct.error) as e:
         return {
             "content": [{"type": "text", "text": f"{PEER} unreachable: {e!r}"}],
@@ -165,7 +210,24 @@ TOOL = {
     "immediately: it starts a turn, or joins the one in progress. Returns once delivered.",
     "inputSchema": {
         "type": "object",
-        "properties": {"message": {"type": "string"}},
+        "properties": {
+            "message": {"type": "string"},
+            **(
+                {
+                    "agent": {
+                        "type": "string",
+                        "description": "your agent id, if you are a subagent",
+                    }
+                }
+                if ROLE == "claude"
+                else {
+                    "to": {
+                        "type": "string",
+                        "description": "a Claude subagent's id; omit for the main session",
+                    }
+                }
+            ),
+        },
         "required": ["message"],
     },
 }
