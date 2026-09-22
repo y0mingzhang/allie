@@ -9,13 +9,18 @@ DEFAULTS = dict(
     # router init std, router Adam lr multiplier, bias update speed, sequence-wise balance loss weight
     moe_init=0.006,
     moe_router_lr_mul=0.1,
+    moe_router_wd=0.0,  # decoupled (AdamW) router weight decay: w -= lr * wd * w per Adam step
     moe_gamma=1e-2,
     moe_seq=1e-3,
+    moe_seq_raw=False,  # balance loss counts from the raw top-k (DeepSeek-V3 Eq. 18), not the biased one
     moe_update="prop",  # prop | sign
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     moe_shared=True,  # shared expert; off: routed experts take the whole active width
     moe_shared_frac=0.5,  # the shared expert's share of the active width (1 / (k + 1) = DeepSeek's uniform)
     moe_round=0,  # round shared and routed widths to multiples of this (0: exact split)
+    # FP32 masters and update math for the BF16 weights that have none: head, embeddings, gates
+    fp32_small_masters=False,
+    x0=True,  # off: drop the x0 re-injection, its blend weights held at 0 (screen-1 nox0)
 )
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.
@@ -25,7 +30,6 @@ SHIPPED = dict(
     key_offset=False,
     full_rope=False,
     mlp="swiglu",
-    x0=True,
     embed2=True,
     softcap=True,
     plain_init=False,
@@ -79,6 +83,8 @@ def moe_dims(width, arch):
         *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
         a["moe_update"],
         a["moe_score"],
+        a["moe_seq_raw"],
+        a["moe_router_wd"],
     )
 
 

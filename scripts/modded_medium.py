@@ -90,11 +90,12 @@ def game_blocks(docs, size=128):
 
 
 def make_context(
-    inputs, short_window, long_window, backend=None, host=None, board=True
+    inputs, short_window, long_window, backend=None, host=None, board=True, span=None
 ):
     """Inputs are complete original rows (or shorter rows for correctness tests); host is the
     same rows as a numpy array, if at hand, so the board states encode without a device sync.
-    board=False skips them (attention-only tests on synthetic rows)."""
+    board=False skips them (attention-only tests on synthetic rows). span: the longest game a row
+    can hold (default: the row)."""
     backend = backend or ATTENTION
     assert inputs.ndim == 2 and backend in ("flex", "dense", "triton")
     flat = inputs.flatten()
@@ -122,8 +123,8 @@ def make_context(
                 & (docs[q.clamp(max=length - 1)] == docs[k.clamp(max=length - 1)])
             )
 
-        # games never cross rows, so no allowed pair exceeds the window: blocks from game bounds
-        if window >= inputs.size(1) - 1:
+        # no game exceeds span tokens, so no allowed pair exceeds the window: blocks from game bounds
+        if window >= min(inputs.size(1), span or inputs.size(1)) - 1:
             if not blocks:
                 blocks.extend(game_blocks(docs))
             return _create_sparse_block_from_block_mask(
@@ -212,6 +213,7 @@ def create_model(cfg, device="cuda"):
         for p in block.parameters():
             p.block = i
     model.use_feats = cfg.feats
+    model.use_x0 = modded_arch.resolve(cfg.arch)["x0"]
     model.feat_embed.weight.lr_mul = cfg.input_lr_mul
     model.board = modded_board.build(cfg.width).to(device)
     # Follow upstream: BF16 embeddings/gates/head; the board stays FP32
@@ -220,12 +222,16 @@ def create_model(cfg, device="cuda"):
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
         dist.broadcast(p.detach(), 0)
+    small = modded_arch.resolve(cfg.arch)["fp32_small_masters"]
+    masters = MASTER_LABELS + ("attn_gate", "value_embed_gate") * small
     for p in model.parameters():
-        if getattr(p, "label", None) in MASTER_LABELS:
+        if getattr(p, "label", None) in masters:
             # the FP32 init seeds NorMuon's master shards (it drops it) from host memory, so the
             # GPU never holds the FP32 model next to the BF16 one
-            p.fp32, p.master, p.main_grad = p.data.cpu(), True, None
+            p.fp32, p.master, p.main_grad = p.data.float().cpu(), True, None
             p.data = p.data.bfloat16()
+        elif small and p.dtype == torch.bfloat16:  # DistAdam: FP32 moments, master
+            p.fp32_state = p.adam_master = True
     if torch.device(device).type == "cuda":
         torch.cuda.synchronize()
     return model
