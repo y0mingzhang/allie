@@ -220,12 +220,16 @@ def create_model(cfg, device="cuda"):
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
         dist.broadcast(p.detach(), 0)
+    small = modded_arch.resolve(cfg.arch)["fp32_small_masters"]
+    masters = MASTER_LABELS + ("attn_gate", "value_embed_gate") * small
     for p in model.parameters():
-        if getattr(p, "label", None) in MASTER_LABELS:
+        if getattr(p, "label", None) in masters:
             # the FP32 init seeds NorMuon's master shards (it drops it) from host memory, so the
             # GPU never holds the FP32 model next to the BF16 one
-            p.fp32, p.master, p.main_grad = p.data.cpu(), True, None
+            p.fp32, p.master, p.main_grad = p.data.float().cpu(), True, None
             p.data = p.data.bfloat16()
+        elif small and p.dtype == torch.bfloat16:  # DistAdam: FP32 moments, master
+            p.fp32_state = p.adam_master = True
     if torch.device(device).type == "cuda":
         torch.cuda.synchronize()
     return model

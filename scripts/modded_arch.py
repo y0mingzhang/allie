@@ -17,6 +17,8 @@ DEFAULTS = dict(
     moe_shared=True,  # shared expert; off: routed experts take the whole active width
     moe_shared_frac=0.5,  # the shared expert's share of the active width (1 / (k + 1) = DeepSeek's uniform)
     moe_round=0,  # round shared and routed widths to multiples of this (0: exact split)
+    # FP32 masters and update math for the BF16 weights that have none: head, embeddings, gates
+    fp32_small_masters=False,
 )
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.

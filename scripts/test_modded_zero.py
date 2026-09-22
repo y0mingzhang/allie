@@ -6,7 +6,8 @@ grads per rank).
 
 Checked after every step, on every rank: each owned master's BF16 rounding is its param, every
 rank holds the same params; and a run saved at step 4 (model state and rank_state_dict), rebuilt
-and restored continues bit-identical to the uninterrupted run through the embed split.
+and restored continues bit-identical to the uninterrupted run through the embed split. Run twice:
+as shipped, and with fp32_small_masters (FP32 masters for every other BF16 weight too).
 
     .venv/bin/python scripts/test_modded_zero.py
 """
@@ -87,11 +88,11 @@ def patch():
     core.polar_express = polar_express
 
 
-def build():
+def build(arch):
     torch.manual_seed(0)
     cfg = Config(
         width=64, head_dim=16, layers=LAYERS, max_tokens=1024, scheduled_steps=STEPS,
-        ckpt="eager", arch=ARCH,
+        ckpt="eager", arch=arch,
     )  # fmt: skip
     model = create_model(cfg, device="cpu")
     return model, TrainingManager(model, cfg, SCHEDULE)
@@ -126,30 +127,45 @@ def check(manager):
                 m.dtype == torch.float32 and g["params"][lo + i].dtype == torch.bfloat16
             )
             assert torch.equal(m.bfloat16(), g["params"][lo + i]), g["params"][0].label
+    world = dist.get_world_size()
+    for p, st in manager.adam_opt.state.items():
+        if "master" in st:
+            n = p.size(0) // world
+            rows = p if p.numel() < 1024 else p[rank * n : (rank + 1) * n]
+            assert torch.equal(st["master"].bfloat16(), rows), p.label
     for p in manager.model.parameters():
         every = [torch.empty_like(p) for _ in range(dist.get_world_size())]
         dist.all_gather(every, p.detach().contiguous())
         assert all(torch.equal(e, p) for e in every), f"ranks disagree on {p.label}"
 
 
-def test_resume():
-    full, full_mgr = build()
+def test_resume(arch):
+    small = arch.get("fp32_small_masters", False)
+    labels = mm.MASTER_LABELS + ("attn_gate", "value_embed_gate") * small
+    full, full_mgr = build(arch)
     assert {n for n, p in full.named_parameters() if getattr(p, "master", False)} == {
-        n for n, p in full.named_parameters() if p.label in mm.MASTER_LABELS
+        n for n, p in full.named_parameters() if p.label in labels
     }
+    bare = [
+        p.label
+        for p in full.parameters()
+        if p.dtype == torch.bfloat16 and not hasattr(p, "master")
+        and "master" not in full_mgr.adam_opt.state.get(p, {})
+    ]  # fmt: skip
+    assert bool(bare) != small, bare
     assert not any(hasattr(p, "fp32") for p in full.parameters())  # init stash gone
     train(full, full_mgr, range(STEPS))
-    init = build()[0]
+    init = build(arch)[0]
     moved = {
         p.label
         for p, q in zip(full.parameters(), init.parameters())
         if not torch.equal(p, q)
     }
     assert set(mm.MASTER_LABELS) <= moved, moved
-    part, part_mgr = build()
+    part, part_mgr = build(arch)
     train(part, part_mgr, range(4))
     shared, local = mm.cpu_copy(part.state_dict()), part_mgr.rank_state_dict()
-    model, manager = build()
+    model, manager = build(arch)
     model.load_state_dict(shared)
     manager.load_rank_state_dict(local)
     train(model, manager, range(4, STEPS))
@@ -160,6 +176,11 @@ def test_resume():
         for k in ("master", "momentum_buffer", "second_momentum_buffer"):
             if k in g:
                 assert g[k].dtype == h[k].dtype and torch.equal(g[k], h[k]), k
+    for p, q in zip(model.parameters(), full.parameters()):
+        a, b = manager.adam_opt.state.get(p, {}), full_mgr.adam_opt.state.get(q, {})
+        assert a.keys() == b.keys(), p.label
+        for k in a.keys() - {"step"}:
+            assert a[k].dtype == b[k].dtype and torch.equal(a[k], b[k]), (p.label, k)
 
 
 def worker(rank, world, port):
@@ -168,9 +189,12 @@ def worker(rank, world, port):
     )
     torch.set_num_threads(1)
     patch()
-    test_resume()
-    if rank == 0:
-        print(f"world {world}: ok ({STEPS} steps, resume at 4, split at {SPLIT})")
+    for arch in (ARCH, ARCH | dict(fp32_small_masters=True)):
+        test_resume(arch)
+        if rank == 0:
+            print(
+                f"world {world} {arch}: ok ({STEPS} steps, resume at 4, split at {SPLIT})"
+            )
     dist.destroy_process_group()
 
 

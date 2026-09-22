@@ -774,13 +774,17 @@ class DistAdam(torch.optim.Optimizer):
             param_groups.append(dict(params=params_by_label[None]))
         super().__init__(param_groups, defaults)
         # init state: small params (numel < 1024) use full-sized state, others use sharded
+        rank = dist.get_rank() if dist.is_initialized() else 0
         for p in params:
-            chunk = p if p.numel() < 1024 else p[: p.size(0) // self.world_size]
+            n = p.size(0) // self.world_size
+            chunk = p if p.numel() < 1024 else p[rank * n : (rank + 1) * n]
             dtype = torch.float32 if getattr(p, "fp32_state", False) else torch.bfloat16
             exp_avg = torch.zeros_like(chunk, dtype=dtype, device=p.device)
             self.state[p] = dict(
                 step=0, exp_avg=exp_avg, exp_avg_sq=torch.zeros_like(exp_avg)
             )
+            if getattr(p, "adam_master", False):  # FP32 copy of this rank's rows
+                self.state[p]["master"] = chunk.float()
         # DistributedAdam implementation by @vagrawal, @akash5474
         self.should_sync = (
             False  # set for the last micro-batch of the steps this optimizer takes
@@ -825,8 +829,9 @@ class DistAdam(torch.optim.Optimizer):
         lm_head_state = self.state[lm_head]
         embed_state = self.state[embed]
         embed_state["step"] = lm_head_state["step"]
-        embed_state["exp_avg"] = lm_head_state["exp_avg"].clone()
-        embed_state["exp_avg_sq"] = lm_head_state["exp_avg_sq"].clone()
+        for k in ("exp_avg", "exp_avg_sq", "master"):
+            if k in lm_head_state:
+                embed_state[k] = lm_head_state[k].clone()
         embed.data.copy_(lm_head.data)
 
     @torch.compile
@@ -873,10 +878,14 @@ class DistAdam(torch.optim.Optimizer):
                 update = exp_avg.div(denom).mul_(step_size)
                 # lr as weight decay schedule
                 eff_weight_decay = lr * wd * getattr(param, "wd_mul", 1.0)
-                mask = (update * p_slice) > 0
-                update.addcmul_(p_slice, mask, value=eff_weight_decay * lr)
+                master = state.get("master")
+                w = p_slice if master is None else master
+                mask = (update * w) > 0
+                update.addcmul_(w, mask, value=eff_weight_decay * lr)
 
-                p_slice.add_(other=update, alpha=-1.0)
+                w.add_(other=update, alpha=-1.0)
+                if master is not None:
+                    p_slice.copy_(master)
 
                 if not is_small:
                     all_gather_futures.append(
