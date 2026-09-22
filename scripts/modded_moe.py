@@ -117,30 +117,32 @@ def counts(keys, e):
 
 
 def qb_margins(s, bias, idx):
-    """x = cutoff - (s + bias), the cutoff being the k-th best biased score of the other experts (the
-    best unrouted one for a routed expert, the worst routed one for the rest): with the other biases
-    fixed, the token routes to expert j under bias + d iff x_j < d_j. K3 takes the (k+1)-th best for
-    both, which undercounts what an expert can gain."""
+    """x = alpha - (s + bias), alpha the token's (k+1)-th best biased score (Kimi K3): with alpha fixed,
+    the token routes to expert j under bias + d iff x_j < d_j."""
     b = s + bias
-    sel = torch.zeros_like(b, dtype=torch.bool).scatter_(1, idx, True)
-    out = b.masked_fill(sel, float("-inf")).amax(1, keepdim=True)
-    return torch.where(sel, out, b.gather(1, idx).amin(1, keepdim=True)) - b
+    alpha = b.scatter(1, idx, float("-inf")).amax(1, keepdim=True)
+    return alpha - b
+
+
+def qb_bin(x):
+    """modded_smoe's QB bin of each margin."""
+    sm, n = modded_smoe, modded_smoe.QB_LEVELS
+    a = x.abs().view(torch.int32).clamp(sm.QB_LO, sm.QB_HI)
+    level = (a - sm.QB_LO) >> (23 - sm.QB_MANT)
+    return torch.where(x < 0, n - 1 - level, n + level).long()
 
 
 def qb_counts(s, bias, idx):
     """Per expert, the counts of qb_margins over tokens in modded_smoe's QB bins, [E, QB_BINS]."""
-    sm, (e, n) = modded_smoe, (s.shape[1], modded_smoe.QB_LEVELS)
-    x = qb_margins(s, bias, idx)
-    a = x.abs().view(torch.int32).clamp(sm.QB_LO, sm.QB_HI)
-    level = (a - sm.QB_LO) >> (23 - sm.QB_MANT)
-    key = torch.where(x < 0, n - 1 - level, n + level).long()
-    key += 2 * n * torch.arange(e, device=s.device)
-    return torch.bincount(key.flatten(), minlength=2 * n * e).view(e, 2 * n)
+    e, nb = s.shape[1], modded_smoe.QB_BINS
+    key = qb_bin(qb_margins(s, bias, idx)) + nb * torch.arange(e, device=s.device)
+    return torch.bincount(key.flatten(), minlength=nb * e).view(e, nb)
 
 
 @functools.cache
 def qb_edges(device):
-    """The QB bins' edges, ascending: bin i holds x in [edges[i], edges[i + 1])."""
+    """The QB bins' edges, ascending: bin i holds x in [edges[i], edges[i + 1]) for x >= 0, in
+    (edges[i], edges[i + 1]] for x < 0."""
     sm = modded_smoe
     up = torch.arange(1, sm.QB_LEVELS + 1, dtype=torch.int32) << (23 - sm.QB_MANT)
     up = (up + sm.QB_LO).view(torch.float32).double()
@@ -182,6 +184,7 @@ class MoE(nn.Module):
         super().__init__()
         assert update in ("sign", "prop", "quantile")
         assert score in ("sigmoid", "sqrtsoftplus")
+        assert update != "quantile" or score == "sigmoid"  # the QB bins end at |x| = 16
         assert topk < experts
         self.experts, self.topk, self.score = experts, topk, score
         # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *

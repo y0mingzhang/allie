@@ -523,9 +523,10 @@ def route(s, bias, k, stats, rows=8, warps=4):
 
 
 # Quantile Balancing bins (modded_moe.qb_*): |x| in [2^-24, 16) by its FP32 bits' exponent and top
-# QB_MANT mantissa bits, a log scale of 2^QB_MANT bins per octave (bin width <= 2^-QB_MANT |x|, the
-# first 6e-8, half an ulp of 1.0), mirrored for x < 0: bin QB_LEVELS + level for x >= 0, else
-# QB_LEVELS - 1 - level. |x| below 2^-24 counts as 2^-24, above 16 as 16.
+# QB_MANT mantissa bits, a log scale of 2^QB_MANT bins per octave (bin width <= 2^-QB_MANT |x|),
+# mirrored for x < 0: bin QB_LEVELS + level for x >= 0, else QB_LEVELS - 1 - level. |x| below 2^-24
+# counts as 2^-24 (the two centre bins span 1.0625 x 2^-24 = 6.3e-8, about half an ulp of 1.0), 16 or
+# above as just below 16 (sigmoid scores keep |x| below 1 + the bias range).
 QB_MANT = 4
 QB_LEVELS = 28 << QB_MANT
 QB_BINS = 2 * QB_LEVELS
@@ -549,9 +550,7 @@ def _qb_hist(S, BIAS, IDX, HIST, T, reps, E: tl.constexpr, EP: tl.constexpr, K: 
         i = tl.load(IDX + rows.to(tl.int64) * K + j, live, other=-1).to(tl.int32)
         sel = sel | (lanes[None, :] == i[:, None]).to(tl.int32)
     sel = sel != 0
-    out = tl.max(tl.where(sel | ~alive, float("-inf"), b), 1)
-    inn = tl.min(tl.where(sel, b, float("inf")), 1)
-    x = tl.where(sel, out[:, None], inn[:, None]) - b
+    x = tl.max(tl.where(sel | ~alive, float("-inf"), b), 1)[:, None] - b
     a = tl.minimum(tl.maximum(tl.abs(x).to(tl.int32, bitcast=True), LO), HI)
     level = (a - LO) >> (23 - MANT)
     key = tl.where(x < 0, LEVELS - 1 - level, LEVELS + level)
