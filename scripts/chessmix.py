@@ -379,6 +379,7 @@ def resolve(name):
     """A policy name: POLICIES key, table:NAME, or coolNN:NAME (control until NN% of training, then NAME)."""
     if name.startswith("cool"):
         pct, rest = name[4:].split(":", 1)
+        assert 0 < int(pct) < 100 and not rest.startswith("cool"), name
         return cooldown(resolve(rest), int(pct) / 100)
     return (
         table(name.removeprefix("table:"))

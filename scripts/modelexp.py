@@ -282,11 +282,13 @@ def tables(w, runs):
     out = {}
     for r in runs:
         for k in r["policy"].split("+"):
-            k = k.split(":", 1)[1] if k.startswith("cool") else k  # coolNN:table:NAME
+            cool, k = k.split(":", 1) if k.startswith("cool") else (None, k)
             if not k.startswith("table:"):
                 continue
             raw = (RECIPES / f"{k[6:]}.json").read_bytes()
             t, pin = json.loads(raw), json.loads(w["pin"].read_text())
+            if t["kind"] == "anneal":  # a late table: only after its own start
+                assert cool and float(t["args"]["start"]) == int(cool[4:]) / 100, k
             assert t["pin_digest"] == pin["sha256"], f"{k} is not on the wave's pin"
             assert set(pin["inventory"]) <= set(t["weights"]), f"{k} misses buckets"
             assert r["final_tokens"] == t["training_tokens"], f"{k}: final_tokens"
