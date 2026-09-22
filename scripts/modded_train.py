@@ -129,7 +129,7 @@ def continuation(shared, local, args, config, output, pointer):
     assert args["wsd_decay_start"] == -1 or args["wsd_decay_start"] >= shared["step"], (
         "Cannot change past LR updates"
     )
-    assert shared["tokens"] == local["data"]["seen"] * 1024
+    assert shared["tokens"] == local["data"]["seen"] * args["row_tokens"]
     assert shared["step"] <= shared["args"]["wsd_end_step"]
     assert local["manager"]["schedule_step"] == shared["step"] - 1
     assert Path(pointer).resolve().parent != Path(output).resolve()
@@ -162,7 +162,13 @@ def main():
     p.add_argument("--head-dim", type=int, default=64)
     p.add_argument("--steps", type=int, default=4700, help="Scheduled steps")
     p.add_argument("--initial-batch-rows", type=int, default=32, help="Global rows")
-    p.add_argument("--micro-batch", type=int, default=8)
+    p.add_argument("--micro-batch", type=int, default=8, help="Rows per micro-batch")
+    p.add_argument(
+        "--row-tokens",
+        type=int,
+        default=1024,
+        help="Training row length; --initial-batch-rows stays in 1024-token rows",
+    )
     p.add_argument("--lr-scale", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--eval-every", type=int, default=500)
@@ -269,7 +275,8 @@ def main():
     torch.utils.deterministic.fill_uninitialized_memory = False
     modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
     torch.backends.cuda.matmul.allow_tf32 = True
-    assert a.initial_batch_rows % (a.micro_batch * world) == 0
+    assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
+    assert a.micro_batch * a.row_tokens % 1024 == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
     assert a.keep_checkpoints == 0 or a.keep_checkpoints >= 2
     assert a.name and all(c.isalnum() or c in "-_" for c in a.name)
@@ -281,7 +288,7 @@ def main():
         width=a.width,
         layers=a.layers,
         head_dim=a.head_dim,
-        max_tokens=a.micro_batch * 1024,
+        max_tokens=a.micro_batch * a.row_tokens,
         scheduled_steps=a.steps,
         lr_scale=a.lr_scale,
         feats=a.clock_feats,
@@ -296,11 +303,13 @@ def main():
     manager = TrainingManager(model, cfg, schedule, a.wsd_decay_start, a.wsd_end_step)
     net = torch.compile(model, dynamic=False, fullgraph=a.ckpt != "eager")
     from chessmix import (
+        ROW,
         Prefetch,
         Sampler,
     )  # its data dependencies only where it samples
 
     kw = dict(pool_frac=a.mix_pool_frac, aux=aux, feats=bool(a.clock_feats))
+    kw["row"] = a.row_tokens + 1
     if a.mix_stores:
         kw["stores"] = a.mix_stores.split(",")
     if a.mix_history:
@@ -308,7 +317,12 @@ def main():
     if a.mix_months:
         kw["months"] = a.mix_months.split(",")
     train = Prefetch(
-        Sampler(a.mix, a.seed, total_rows=a.steps * a.initial_batch_rows, **kw)
+        Sampler(
+            a.mix,
+            a.seed,
+            total_rows=a.steps * a.initial_batch_rows * 1024 // a.row_tokens,
+            **kw,
+        )
     )
     val = Packed(a.data, "val")
     val_idx = np.random.default_rng(20260910).choice(
@@ -344,6 +358,8 @@ def main():
         )
         for key in SAME:
             assert shared["args"][key] == vars(a)[key], f"Resume changes {key}"
+        old_row = shared["args"].get("row_tokens", 1024)
+        assert old_row == a.row_tokens, "Resume changes row_tokens"
         assert shared["source_sha256"] == source_hashes, (
             "Resume requires the frozen training source"
         )
@@ -477,7 +493,7 @@ def main():
                     step=step,
                     best_move_ce=best,
                     metrics=metrics,
-                    tokens=train.seen * 1024,
+                    tokens=train.seen * a.row_tokens,
                     useful_training_flops=total_flops.item(),
                     inference=saver.snapshot(inference),
                     continuation_provenance=continuation_provenance,
@@ -534,8 +550,8 @@ def main():
             )
             prof.__enter__()
         manager.advance_schedule(index)
-        accum = manager.batch_size // (world * a.micro_batch * 1024)
-        assert accum > 0 and accum * world * a.micro_batch * 1024 == manager.batch_size
+        accum = manager.batch_size // (world * a.micro_batch * a.row_tokens)
+        assert accum * world * a.micro_batch * a.row_tokens == manager.batch_size > 0
         for micro in range(accum):
             rows = train.batch(a.micro_batch, rank, world)
             flops_local += useful_flops(
@@ -544,7 +560,11 @@ def main():
             data = to_gpu(rows)
             x, y = data[:, :-1], data[:, 1:]
             context = make_context(
-                x, manager.ws_short * 128, manager.ws_long * 128, host=rows[:, :-1]
+                x,
+                manager.ws_short * 128,
+                manager.ws_long * 128,
+                host=rows[:, :-1],
+                span=ROW,
             )
             if micro == accum - 1:
                 manager.activate_hooks(index)
@@ -576,7 +596,7 @@ def main():
             (loss * (world / 8)).backward()
             primary_sum += primary.detach()
             count_sum += count
-            window_tokens += rows.shape[0] * world * 1024
+            window_tokens += rows.shape[0] * world * a.row_tokens
         manager.step_optimizers(index)
         step = index + 1
         saver.poll()
@@ -619,7 +639,7 @@ def main():
                 dict(
                     step=step,
                     train_ce=(stats[0] / stats[1]).item(),
-                    tokens=train.seen * 1024,
+                    tokens=train.seen * a.row_tokens,
                     tokens_per_second=window_tokens / dt,
                     sampler_wait=(train.waited - wait0) / dt,
                     seconds=elapsed_prior + time.monotonic() - start,
@@ -669,14 +689,16 @@ def main():
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
             if rank == 0:
-                metrics = evaluate(net, manager, vrows, a.micro_batch)
+                metrics = evaluate(
+                    net, manager, vrows, a.micro_batch * a.row_tokens // 1024
+                )
                 best = min(best, metrics["move_ce"])
                 append(
                     "validation.jsonl",
                     dict(
                         step=step,
                         seconds=elapsed_prior + time.monotonic() - start,
-                        tokens=train.seen * 1024,
+                        tokens=train.seen * a.row_tokens,
                         useful_training_flops=total_flops.item(),
                         **metrics,
                     ),
@@ -713,7 +735,7 @@ def main():
                     stop_reason=stop_reason,
                     best_move_ce=best,
                     seconds=elapsed_prior + time.monotonic() - start,
-                    tokens_processed=train.seen * 1024,
+                    tokens_processed=train.seen * a.row_tokens,
                 ),
                 indent=2,
             )

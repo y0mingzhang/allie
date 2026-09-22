@@ -117,7 +117,7 @@ def counts(keys, e):
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
-        gamma=1e-3, seq=0.0, update="sign", score="sigmoid",
+        gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0,
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
@@ -125,8 +125,9 @@ class MoE(nn.Module):
         self.experts, self.topk, self.score = experts, topk, score
         # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
         # clamp((mean - load) / mean, -1, 1) x the rebalance() scale, which settles instead of
-        # cycling at +-gamma once balanced), sequence-wise balance loss weight
-        self.gamma, self.update, self.seq = gamma, update, seq
+        # cycling at +-gamma once balanced), sequence-wise balance loss weight, its counts from the
+        # raw top-k of the scores instead of the bias-adjusted selection
+        self.gamma, self.update, self.seq, self.seq_raw = gamma, update, seq, seq_raw
         bound = 3**0.5 * 0.5 * dim**-0.5  # the dense MLP's c_fc init
         self.router = nn.Parameter(torch.randn(experts, dim) * init)
         # one 3D tensor per layer for all experts (per-expert tensors cost a kernel each per step);
@@ -147,6 +148,7 @@ class MoE(nn.Module):
             router_lr_mul,
             0.0,
         )
+        self.router.decoupled_wd = router_wd
         # NorMuon stacks a label's params and orthogonalizes each expert matrix
         self.up.label, self.down.label, self.down.lr_mul = "moe_up", "moe", 2.0
         self.register_buffer(
@@ -211,14 +213,15 @@ class MoE(nn.Module):
             out = out + F.linear(shared, self.shared_down.T.type_as(h))
         out = out.view(shape)
         if self.training and self.seq:
-            # DeepSeek-V3's sequence-wise balance loss, one 1024-token row = one sequence: per row
+            # DeepSeek-V3's sequence-wise balance loss, 1024 tokens (a row) = one sequence: per row
             # sum_i f_i P_i with f_i = e / k * share of the row's routes to expert i and P_i = its
             # mean normalised affinity. The trainer's objective is a SUM over tokens (x world / 8),
             # so each row's penalty is weighted by its 1024 input tokens (seq = weight per input
             # token, scored or not; masking only changes which tokens carry the CE): the total is
             # additive over rows, hence independent of how rows are split into micro-batches
             assert t % 1024 == 0
-            sel = torch.zeros_like(s).scatter_(1, idx, 1.0).view(-1, 1024, e).mean(1)
+            top = torch.topk(s.detach(), k, dim=-1).indices if self.seq_raw else idx
+            sel = torch.zeros_like(s).scatter_(1, top, 1.0).view(-1, 1024, e).mean(1)
             prob = (s / s.sum(-1, keepdim=True)).view(-1, 1024, e).mean(1)
             loss = (
                 self.seq

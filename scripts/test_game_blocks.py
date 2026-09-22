@@ -1,5 +1,6 @@
 """make_context's block-level flex masks vs the dense create_block_mask they replace: every BlockMask
-tensor (values, dtype, shape, strides) must match, on real validation rows and edge cases.
+tensor (values, dtype, shape, strides) must match, on real validation rows and edge cases, and on
+--row-tokens rows longer than the windows whose games keep at most 1025 tokens (span).
 
     TORCH_COMPILE_DISABLE=1 .venv/bin/python scripts/test_game_blocks.py         # CPU, eager reference
     <runtime python> scripts/test_game_blocks.py --device cuda                   # GPU, compiled reference
@@ -62,9 +63,9 @@ def same(a, b, what):
             assert torch.equal(x, y), (what, f)
 
 
-def check(rows, windows, device, what):
+def check(rows, windows, device, what, span=None):
     x = torch.as_tensor(rows, device=device)
-    ctx = make_context(x, *windows, board=False)
+    ctx = make_context(x, *windows, board=False, span=span)
     compiled = device == "cuda"
     for mask, w in ((ctx.short_mask, windows[0]), (ctx.long_mask, windows[1])):
         same(mask, reference(x, w, compiled), f"{what} window {w}")
@@ -123,6 +124,11 @@ def main():
             ):
                 check(rows, windows, device, f"synthetic {count}x{length} {windows}")
                 n += 1
+    for count in (1, 3):
+        rows = synthetic(rng, count, 4096)
+        rows[:, ::1025] = BOS  # games of at most 1025 tokens
+        check(rows, train_windows, device, f"span 1025 {count}x4096", span=1025)
+        n += 1
     print(
         f"{n} cases on {device}: every BlockMask tensor identical to create_block_mask"
     )
