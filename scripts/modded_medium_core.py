@@ -412,7 +412,7 @@ def _finish(item):
     work, p, g = item
     work.wait()
     if p.main_grad is not None:  # this rank owns p: accumulate into its FP32 row
-        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g.float())
+        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g)
     p.fresh = False
 
 
