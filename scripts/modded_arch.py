@@ -13,7 +13,7 @@ DEFAULTS = dict(
     moe_gamma=1e-2,
     moe_seq=1e-3,
     moe_seq_raw=False,  # balance loss counts from the raw top-k (DeepSeek-V3 Eq. 18), not the biased one
-    moe_update="prop",  # prop | sign
+    moe_update="prop",  # prop | sign | quantile (Kimi K3's Quantile Balancing: moe_gamma unused)
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     moe_shared=True,  # shared expert; off: routed experts take the whole active width
     moe_shared_frac=0.5,  # the shared expert's share of the active width (1 / (k + 1) = DeepSeek's uniform)
@@ -59,7 +59,7 @@ def resolve(arch):
         f"retired arch switches {retired}: this code builds only {shipped}"
     )
     out = DEFAULTS | {k: v for k, v in arch.items() if k in DEFAULTS}
-    assert out["moe_update"] in ("sign", "prop")
+    assert out["moe_update"] in ("sign", "prop", "quantile")
     assert out["moe_score"] in ("sigmoid", "sqrtsoftplus")
     return out
 
