@@ -213,6 +213,7 @@ def create_model(cfg, device="cuda"):
         for p in block.parameters():
             p.block = i
     model.use_feats = cfg.feats
+    model.use_x0 = modded_arch.resolve(cfg.arch)["x0"]
     model.feat_embed.weight.lr_mul = cfg.input_lr_mul
     model.board = modded_board.build(cfg.width).to(device)
     # Follow upstream: BF16 embeddings/gates/head; the board stays FP32

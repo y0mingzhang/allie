@@ -1241,6 +1241,7 @@ class GPT(nn.Module):
         self.x0_lambdas.label = "x0_lambdas"
         self.x0_lambdas.lr_mul = 5.0
         self.x0_lambdas.wd_mul = 0.0
+        self.use_x0 = True
 
         pad = (
             -num_layers * 3 - 5
@@ -1321,6 +1322,8 @@ class GPT(nn.Module):
         # set lambdas
         resid_lambdas = self.scalars[: 1 * self.num_layers]
         x0_lambdas = self.x0_lambdas.view(-1, 2)
+        if not self.use_x0:  # drop x0 re-injection; keep the x02 column
+            x0_lambdas = torch.stack((x0_lambdas[:, 0] * 0, x0_lambdas[:, 1]), 1)
         sa_lambdas = self.scalars[1 * self.num_layers : 3 * self.num_layers].view(-1, 2)
         smear_lambda = self.scalars[3 * self.num_layers]
         backout_lambda = self.scalars[3 * self.num_layers + 1]
