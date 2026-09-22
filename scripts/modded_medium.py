@@ -90,11 +90,12 @@ def game_blocks(docs, size=128):
 
 
 def make_context(
-    inputs, short_window, long_window, backend=None, host=None, board=True
+    inputs, short_window, long_window, backend=None, host=None, board=True, span=None
 ):
     """Inputs are complete original rows (or shorter rows for correctness tests); host is the
     same rows as a numpy array, if at hand, so the board states encode without a device sync.
-    board=False skips them (attention-only tests on synthetic rows)."""
+    board=False skips them (attention-only tests on synthetic rows). span: the longest game a row
+    can hold (default: the row)."""
     backend = backend or ATTENTION
     assert inputs.ndim == 2 and backend in ("flex", "dense", "triton")
     flat = inputs.flatten()
@@ -122,8 +123,8 @@ def make_context(
                 & (docs[q.clamp(max=length - 1)] == docs[k.clamp(max=length - 1)])
             )
 
-        # games never cross rows, so no allowed pair exceeds the window: blocks from game bounds
-        if window >= inputs.size(1) - 1:
+        # no game exceeds span tokens, so no allowed pair exceeds the window: blocks from game bounds
+        if window >= min(inputs.size(1), span or inputs.size(1)) - 1:
             if not blocks:
                 blocks.extend(game_blocks(docs))
             return _create_sparse_block_from_block_mask(

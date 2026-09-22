@@ -212,7 +212,7 @@ class MoE(nn.Module):
             out = out + F.linear(shared, self.shared_down.T.type_as(h))
         out = out.view(shape)
         if self.training and self.seq:
-            # DeepSeek-V3's sequence-wise balance loss, one 1024-token row = one sequence: per row
+            # DeepSeek-V3's sequence-wise balance loss, 1024 tokens (a row) = one sequence: per row
             # sum_i f_i P_i with f_i = e / k * share of the row's routes to expert i and P_i = its
             # mean normalised affinity. The trainer's objective is a SUM over tokens (x world / 8),
             # so each row's penalty is weighted by its 1024 input tokens (seq = weight per input

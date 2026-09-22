@@ -4,7 +4,8 @@ A policy maps a shard's game columns (and training progress) to a sampling weigh
 loss masks. The sampler draws buckets with probability proportional to games x weight cap, takes
 each drawn bucket's next pre-shuffled games and accepts each with probability weight / cap, so
 games are drawn exactly in proportion to their weight. Accepted games are shuffled, tokenized on
-the fly and packed into 1025-token rows like the original corpus: the overflowing game is truncated.
+the fly and packed into 1025-token rows like the original corpus (or longer rows, where each game
+keeps at most 1025 tokens as in the original rows): the overflowing game is truncated.
 """
 
 import copy
@@ -468,11 +469,12 @@ class Sampler:
         history=None,
         feats=False,
         months=None,
+        row=ROW,
     ):
         self.init = {
             k: v for k, v in locals().items() if k != "self"
         }  # to rebuild elsewhere
-        self.aux, self.last = aux, {}
+        self.aux, self.last, self.row = aux, {}, row
         self.feats = feats
         self.channels = ["tokens", "mask"] + ["time", "wdl"] * aux + ["feat"] * feats
         self.policy, self.fn, self.total_rows, self.chunk = (
@@ -638,15 +640,15 @@ class Sampler:
         cols = [[] for _ in self.channels]
         for r in range(n * world):
             parts, size = [[] for _ in cols], 0
-            while size < ROW:
+            while size < self.row:
                 if not self.pool:
                     self.pool = self._accepted((self.seen + r) / self.total_rows)
                 game = self.pool.pop()
                 for p, x in zip(parts, game):
-                    p.append(x)
-                size += len(game[0])
+                    p.append(x[:ROW])
+                size += min(len(game[0]), ROW)
             for col, p in zip(cols, parts):
-                col.append(np.concatenate(p)[:ROW])
+                col.append(np.concatenate(p)[: self.row])
         rows, *rest = (np.stack(c) for c in cols)
         self.seen += n * world
         part = slice(rank * n, (rank + 1) * n)
