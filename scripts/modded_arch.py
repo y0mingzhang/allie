@@ -11,6 +11,7 @@ DEFAULTS = dict(
     moe_router_lr_mul=0.1,
     moe_gamma=1e-2,
     moe_seq=1e-3,
+    moe_seq_raw=False,  # balance loss counts from the raw top-k (DeepSeek-V3 Eq. 18), not the biased one
     moe_update="prop",  # prop | sign
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     moe_shared=True,  # shared expert; off: routed experts take the whole active width
@@ -79,6 +80,7 @@ def moe_dims(width, arch):
         *(a[k] for k in ("moe_init", "moe_router_lr_mul", "moe_gamma", "moe_seq")),
         a["moe_update"],
         a["moe_score"],
+        a["moe_seq_raw"],
     )
 
 
