@@ -14,6 +14,7 @@ import json
 import math
 import multiprocessing as mp
 import queue
+import re
 import sys
 import threading
 import time
@@ -375,12 +376,28 @@ def table(name):
     return lambda g, p: (w[g.code], True, True)
 
 
+COOL = re.compile(r"cool(\d+)(?:\(([^()]+)\))?:(.+)")
+
+
+def cool(name):
+    """coolNN:AFTER or coolNN(BEFORE):AFTER as (NN / 100, BEFORE or None, AFTER); None if not a cooldown name."""
+    m = COOL.fullmatch(name)
+    if not m:
+        assert not name.startswith("cool"), name
+        return None
+    start, before, after = int(m[1]) / 100, m[2], m[3]
+    assert 0 < start < 1 and not any(
+        (x or "").startswith("cool") for x in (before, after)
+    ), name
+    return start, before, after
+
+
 def resolve(name):
-    """A policy name: POLICIES key, table:NAME, or coolNN:NAME (control until NN% of training, then NAME)."""
-    if name.startswith("cool"):
-        pct, rest = name[4:].split(":", 1)
-        assert 0 < int(pct) < 100 and not rest.startswith("cool"), name
-        return cooldown(resolve(rest), int(pct) / 100)
+    """A policy name: POLICIES key, table:NAME, or coolNN[(BEFORE)]:AFTER (BEFORE, control by default, until NN% of
+    training, then AFTER)."""
+    if c := cool(name):
+        start, before, after = c
+        return cooldown(resolve(after), start, resolve(before) if before else control)
     return (
         table(name.removeprefix("table:"))
         if name.startswith("table:")
@@ -389,9 +406,8 @@ def resolve(name):
 
 
 def marks(name):
-    if name.startswith("cool"):
-        return 0.0, int(name[4:].split(":", 1)[0]) / 100
-    return PHASES.get(name, (0.0,))
+    c = cool(name)
+    return (0.0, c[0]) if c else PHASES.get(name, (0.0,))
 
 
 def phase(policy, p):
