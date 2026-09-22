@@ -7,7 +7,8 @@ grads per rank).
 Checked after every step, on every rank: each owned master's BF16 rounding is its param, every
 rank holds the same params; and a run saved at step 4 (model state and rank_state_dict), rebuilt
 and restored continues bit-identical to the uninterrupted run through the embed split. Run twice:
-as shipped, and with fp32_small_masters (FP32 masters for every other BF16 weight too).
+as shipped, and with fp32_small_masters (FP32 masters for every other BF16 weight too) and router
+weight decay (moe_router_wd), whose shrink with zero gradients is checked alone.
 
     .venv/bin/python scripts/test_modded_zero.py
 """
@@ -153,6 +154,8 @@ def test_resume(arch):
         and "master" not in full_mgr.adam_opt.state.get(p, {})
     ]  # fmt: skip
     assert bool(bare) != small, bare
+    wd = arch.get("moe_router_wd", 0.0)
+    assert all(m.router.decoupled_wd == wd for m in full_mgr.moe)
     assert not any(hasattr(p, "fp32") for p in full.parameters())  # init stash gone
     train(full, full_mgr, range(STEPS))
     init = build(arch)[0]
@@ -183,13 +186,26 @@ def test_resume(arch):
             assert a[k].dtype == b[k].dtype and torch.equal(a[k], b[k]), (p.label, k)
 
 
+def test_decoupled(lr=0.01, wd=0.1):
+    p = torch.nn.Parameter(
+        torch.randn(64, 32, generator=torch.Generator().manual_seed(0))
+    )
+    p.label, p.lr_mul, p.wd_mul, p.decoupled_wd = "router", 0.5, 0.0, wd
+    opt = core.DistAdam([p], ["router"], lr=lr)
+    opt.should_sync, w = True, p.detach().clone()
+    (0 * p).sum().backward()
+    opt.step()
+    assert torch.equal(p, w * (1 - 0.5 * lr * wd))
+
+
 def worker(rank, world, port):
     dist.init_process_group(
         "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
     )
     torch.set_num_threads(1)
     patch()
-    for arch in (ARCH, ARCH | dict(fp32_small_masters=True)):
+    test_decoupled()
+    for arch in (ARCH, ARCH | dict(fp32_small_masters=True, moe_router_wd=0.1)):
         test_resume(arch)
         if rank == 0:
             print(

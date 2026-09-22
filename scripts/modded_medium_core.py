@@ -883,6 +883,8 @@ class DistAdam(torch.optim.Optimizer):
                 mask = (update * w) > 0
                 update.addcmul_(w, mask, value=eff_weight_decay * lr)
 
+                if getattr(param, "decoupled_wd", 0.0):  # AdamW: w -= lr * wd * w
+                    w.mul_(1 - lr * param.decoupled_wd)
                 w.add_(other=update, alpha=-1.0)
                 if master is not None:
                     p_slice.copy_(master)

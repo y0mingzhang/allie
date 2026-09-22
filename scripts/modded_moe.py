@@ -117,7 +117,7 @@ def counts(keys, e):
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
-        gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False,
+        gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0,
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop") and score in ("sigmoid", "sqrtsoftplus")
@@ -148,6 +148,7 @@ class MoE(nn.Module):
             router_lr_mul,
             0.0,
         )
+        self.router.decoupled_wd = router_wd
         # NorMuon stacks a label's params and orthogonalizes each expert matrix
         self.up.label, self.down.label, self.down.lr_mul = "moe_up", "moe", 2.0
         self.register_buffer(

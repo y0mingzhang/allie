@@ -9,6 +9,7 @@ DEFAULTS = dict(
     # router init std, router Adam lr multiplier, bias update speed, sequence-wise balance loss weight
     moe_init=0.006,
     moe_router_lr_mul=0.1,
+    moe_router_wd=0.0,  # decoupled (AdamW) router weight decay: w -= lr * wd * w per Adam step
     moe_gamma=1e-2,
     moe_seq=1e-3,
     moe_seq_raw=False,  # balance loss counts from the raw top-k (DeepSeek-V3 Eq. 18), not the biased one
@@ -83,6 +84,7 @@ def moe_dims(width, arch):
         a["moe_update"],
         a["moe_score"],
         a["moe_seq_raw"],
+        a["moe_router_wd"],
     )
 
 
