@@ -10,7 +10,7 @@ swiglu_hidden).
 """
 
 import contextlib
-import math
+import functools
 
 import torch
 import torch.distributed as dist
@@ -116,12 +116,6 @@ def counts(keys, e):
     return ends.diff(prepend=ends.new_zeros(1))
 
 
-# Quantile Balancing histogram: per expert, QB_BINS bins over x in [-QB_SPAN, QB_SPAN], asinh-spaced
-# around 0 (the current bias): width QB_EPS * 2A / QB_BINS = 3e-8 at 0, 3.4% of |x| beyond ~1e-5
-QB_BINS, QB_EPS, QB_SPAN = 1024, 1e-6, 16.0
-_QB_A = math.asinh(QB_SPAN / QB_EPS)
-
-
 def qb_margins(s, bias, idx):
     """x = cutoff - (s + bias), the cutoff being the k-th best biased score of the other experts (the
     best unrouted one for a routed expert, the worst routed one for the rest): with the other biases
@@ -133,34 +127,51 @@ def qb_margins(s, bias, idx):
     return torch.where(sel, out, b.gather(1, idx).amin(1, keepdim=True)) - b
 
 
-def qb_counts(s, bias, idx, bins=QB_BINS):
-    """Per expert, a histogram of qb_margins over tokens."""
-    e = s.shape[1]
-    u = torch.asinh(qb_margins(s, bias, idx) / QB_EPS) * (bins / (2 * _QB_A)) + bins / 2
-    first = bins * torch.arange(e, device=s.device)
-    key = u.floor_().clamp_(0, bins - 1).long() + first
-    return torch.bincount(key.flatten(), minlength=e * bins).view(e, bins)
+def qb_counts(s, bias, idx):
+    """Per expert, the counts of qb_margins over tokens in modded_smoe's QB bins, [E, QB_BINS]."""
+    sm, (e, n) = modded_smoe, (s.shape[1], modded_smoe.QB_LEVELS)
+    x = qb_margins(s, bias, idx)
+    a = x.abs().view(torch.int32).clamp(sm.QB_LO, sm.QB_HI)
+    level = (a - sm.QB_LO) >> (23 - sm.QB_MANT)
+    key = torch.where(x < 0, n - 1 - level, n + level).long()
+    key += 2 * n * torch.arange(e, device=s.device)
+    return torch.bincount(key.flatten(), minlength=2 * n * e).view(e, 2 * n)
+
+
+@functools.cache
+def qb_edges(device):
+    """The QB bins' edges, ascending: bin i holds x in [edges[i], edges[i + 1])."""
+    sm = modded_smoe
+    up = torch.arange(1, sm.QB_LEVELS + 1, dtype=torch.int32) << (23 - sm.QB_MANT)
+    up = (up + sm.QB_LO).view(torch.float32).double()
+    return torch.cat((-up.flip(0), up.new_zeros(1), up)).to(device)
 
 
 def qb_shift(hist, k):
-    """The d_j putting k / e of each expert's counted tokens below it: each bin's CDF step linear in
-    the bin's asinh coordinate (exact at bin edges, so the error is within one bin)."""
-    e, bins = hist.shape
+    """The d_j putting k / e of each expert's counted tokens below it, the CDF linear within a bin
+    (exact at bin edges, so the error is within one bin)."""
+    e = hist.shape[0]
     # integer cumsum: a float one has no deterministic CUDA kernel
     h, cum = hist.double(), hist.long().cumsum(1).double()
     q = cum[:, -1:] * (k / e)
-    j = torch.searchsorted(cum, q).clamp_(max=bins - 1)
+    j = torch.searchsorted(cum, q).clamp_(max=hist.shape[1] - 1)
     hj = h.gather(1, j)
     frac = ((q - cum.gather(1, j) + hj) / hj.clamp(min=1)).clamp_(0, 1)
-    return QB_EPS * torch.sinh((j + frac - bins / 2) * (2 * _QB_A / bins)).squeeze(1)
+    edges = qb_edges(hist.device)
+    lo, hi = edges[j], edges[j + 1]
+    return (lo + frac * (hi - lo)).squeeze(1)
 
 
 @torch.library.custom_op("allie_moe::qb_book", mutates_args={"hist"})
 def qb_book(
     hist: torch.Tensor, s: torch.Tensor, bias: torch.Tensor, idx: torch.Tensor
 ) -> None:
-    if STATS_REPS:
-        hist.add_(qb_counts(s, bias, idx, hist.shape[1]), alpha=STATS_REPS)
+    if not STATS_REPS:
+        return
+    if s.is_cuda:
+        modded_smoe.qb_hist(s, bias, idx, hist, STATS_REPS)
+    else:
+        hist.add_(qb_counts(s, bias, idx), alpha=STATS_REPS)
 
 
 class MoE(nn.Module):
@@ -211,7 +222,7 @@ class MoE(nn.Module):
             "stats", torch.tensor([1.0, 1, 0, 0, 0, 0, 0]), persistent=False
         )
         if update == "quantile":  # qb_counts over a step's micro-batches
-            hist = torch.zeros(experts, QB_BINS, dtype=torch.int32)
+            hist = torch.zeros(experts, modded_smoe.QB_BINS, dtype=torch.int32)
             self.register_buffer("hist", hist, persistent=False)
 
     def forward(self, x):
