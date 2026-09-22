@@ -675,6 +675,7 @@ class Sampler:
             rng=snap["rng"],
             cursor=snap["cursor"],
             seen=snap["seen"],
+            row=self.row,
             pool_lens=[len(g[0]) for g in pool],
             **{
                 f"pool_{k}": np.concatenate([g[j] for g in pool] or [[]]).tolist()
@@ -685,6 +686,8 @@ class Sampler:
     def load_state_dict(self, state):
         if state["policy"] != self.policy:
             raise ValueError("Checkpoint mixing policy differs")
+        if state.get("row", ROW) != self.row:
+            raise ValueError("Checkpoint row length differs")
         self._index(
             state["months"], state["pool_frac"], state.get("history")
         )  # resume on the checkpoint's own pool
