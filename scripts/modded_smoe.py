@@ -520,3 +520,52 @@ def route(s, bias, k, stats, rows=8, warps=4):
         bool(stats), rows, num_warps=warps,
     )  # fmt: skip
     return idx, val, top
+
+
+# Quantile Balancing bins (modded_moe.qb_*): |x| in [2^-24, 16) by its FP32 bits' exponent and top
+# QB_MANT mantissa bits, a log scale of 2^QB_MANT bins per octave (bin width <= 2^-QB_MANT |x|),
+# mirrored for x < 0: bin QB_LEVELS + level for x >= 0, else QB_LEVELS - 1 - level. |x| below 2^-24
+# counts as 2^-24 (the two centre bins span 1.0625 x 2^-24 = 6.3e-8, about half an ulp of 1.0), 16 or
+# above as just below 16 (sigmoid scores keep |x| below 1 + the bias range).
+QB_MANT = 4
+QB_LEVELS = 28 << QB_MANT
+QB_BINS = 2 * QB_LEVELS
+QB_LO, QB_HI = 0x33800000, 0x41800000 - 1  # FP32 bits of 2^-24, of 16 minus an ulp
+
+
+# fmt: off
+@triton.jit
+def _qb_hist(S, BIAS, IDX, HIST, T, reps, E: tl.constexpr, EP: tl.constexpr, K: tl.constexpr,
+             MANT: tl.constexpr, LEVELS: tl.constexpr, LO: tl.constexpr, HI: tl.constexpr,
+             BT: tl.constexpr):
+    """HIST += reps x modded_moe.qb_counts, by integer atomics: deterministic."""
+    rows = tl.program_id(0) * BT + tl.arange(0, BT)
+    lanes = tl.arange(0, EP)
+    live = rows < T
+    alive = live[:, None] & (lanes < E)[None, :]
+    s = tl.load(S + rows[:, None].to(tl.int64) * E + lanes[None, :], alive, other=0.0)
+    b = s + tl.load(BIAS + lanes, lanes < E, other=0.0)[None, :]
+    sel = tl.zeros((BT, EP), tl.int32)
+    for j in tl.static_range(K):
+        i = tl.load(IDX + rows.to(tl.int64) * K + j, live, other=-1).to(tl.int32)
+        sel = sel | (lanes[None, :] == i[:, None]).to(tl.int32)
+    sel = sel != 0
+    x = tl.max(tl.where(sel | ~alive, float("-inf"), b), 1)[:, None] - b
+    a = tl.minimum(tl.maximum(tl.abs(x).to(tl.int32, bitcast=True), LO), HI)
+    level = (a - LO) >> (23 - MANT)
+    key = tl.where(x < 0, LEVELS - 1 - level, LEVELS + level)
+    add = tl.zeros((BT, EP), tl.int32) + reps
+    tl.atomic_add(HIST + lanes[None, :] * (2 * LEVELS) + key, add, alive, sem="relaxed")
+# fmt: on
+
+
+def qb_hist(s, bias, idx, hist, reps):
+    """hist += reps x modded_moe.qb_counts(s, bias, idx) for contiguous FP32 s (T, E), int32 hist."""
+    t, e = s.shape
+    assert s.is_contiguous() and idx.is_contiguous() and hist.dtype == torch.int32
+    assert hist.shape == (e, QB_BINS) and s.dtype == bias.dtype == torch.float32
+    ep = triton.next_power_of_2(e)
+    bt = max(1, 1024 // ep)
+    _qb_hist[(triton.cdiv(t, bt),)](
+        s, bias, idx, hist, t, reps, e, ep, idx.shape[1], QB_MANT, QB_LEVELS, QB_LO, QB_HI, bt
+    )  # fmt: skip
