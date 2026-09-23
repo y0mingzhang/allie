@@ -1,0 +1,36 @@
+"""Final scaling sweep (user GO 2026-09-22 ~20:00 ET): isoFLOPs of S16 and dense at 1e17 / 3e17 / 1e18 on the final
+bundle, one study per budget (sweep-BUDGET-RECIPE), plus the pre-launch check (sweep-check-RECIPE).
+S16 = MoE 256 experts, top-16, shared expert 1/4 of the active MLP, routed experts (3/4 of it) / 16, every width a
+multiple of 16 (moe_round 16), sigmoid scores + Kimi K3 quantile balancing, moe_seq 1e-3, router LR x0.1. Dense = the
+ship recipe. Both: fp32 small masters, 16384-token rows (micro-batch 1 row, 524288 tokens per step), x0 on, clock-input
+LR x5, RECIPE on the v4 pool (inv4 pin, history mode, 75B final_tokens, pool_frac = the run's tokens / 75B), seed 42,
+FLOP-matched steps. Ladder a..h; grid and adaptive rule: moe-knobs/SWEEP-PLAN.md. Frozen from branch sweep (main 570f88b
++ data-recipe-3e17 45fbbc6); RECIPE filled by moe-knobs/sweep-plan/freeze.py."""
+
+import modelexp as mx
+from modelexp import MOE, variants, wave
+
+RECIPE = None  # (label, chessmix policy), filled by freeze.py
+INV = "/home/yimingz3/src/allie/results/recipe10x/data-recipe-inv4"
+LADDER = dict(
+    a=(10, 448), b=(12, 512), c=(14, 640), d=(16, 768), e=(18, 896), f=(20, 1024), g=(22, 1152), h=(24, 1280)
+)
+GRID = {"1e17": ("abcd", "abcd", "dei1"), "3e17": ("cdef", "cdef", "l40s4"), "1e18": ("defg", "efgh", "l40s4")}
+mx.LANES["l40s4"] = (1, 4, "preempt", "gpu:L40S:4", None, 24, 200, 8)
+FIX = dict(fp32_small_masters=True)
+FAMILY = dict(
+    s16=MOE(256, 16, moe_shared_frac=0.25, moe_round=16, moe_update="quantile", **FIX), dense=dict(arch=FIX)
+)
+DATA = dict(policy=RECIPE[1], history=True, final_tokens=75e9, tag=RECIPE[0], micro_batch=1)
+DATA |= dict(extra_args=["--row-tokens", 16384])
+arm = lambda fam, x, **kw: {f"{fam}-{LADDER[x][0]}x{LADDER[x][1]}": DATA | kw | FAMILY[fam] | dict(zip(("layers", "width"), LADDER[x]))}
+PIN = dict(pin=f"{INV}/data-pin.json", history=f"{INV}/history-counts.json")
+for b, (s, dn, lane) in GRID.items():
+    arms = {k: v for x in s for k, v in arm("s16", x).items()} | {k: v for x in dn for k, v in arm("dense", x).items()}
+    wave(f"sw{b}", f"sweep-{b}-{RECIPE[0]}", "sw", variants(b, arms), f"final scaling sweep {b}, recipe {RECIPE[0]}", lane, **PIN)
+# pre-launch checks: the largest 1e18 size of each family in two legs, 128 and 256 steps (a resume between them; past MTP /
+# the embed split), then scored; swchk3 on babel 4 x L40S, swchkh on orchard 4 x H100 (orun.sh with OLEGS=128,256; its own
+# names: a run name never runs on both clusters)
+check = arm("s16", "g", stop_after=[128, 256]) | arm("dense", "h", stop_after=[128, 256])
+wave("swchk3", f"sweep-check3-{RECIPE[0]}", "swchk3", variants("1e18", check), "sweep pre-launch check", "l40s4", **PIN)
+wave("swchkh", f"sweep-checkh-{RECIPE[0]}", "swchkh", variants("1e18", check), "sweep pre-launch check, H100", "l40s4", **PIN)

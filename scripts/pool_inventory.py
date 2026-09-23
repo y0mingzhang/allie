@@ -23,6 +23,13 @@ recipe INVENTORY {disk|full} TOKENS LABEL KIND [KEY=VALUE ...]
       hand cells= otb= engine= relative weights per format x Elo band (cells =
                               fmt:w,w,w,w/... over <1400, 1400-2000, 2000-2400, >=2400),
                               OTB x otb, engine a fixed share
+      topup base= p= [elo= otb=]  control (base: a replay of control on this pool, its realized
+                              passes per bucket) with every human game whose stronger player
+                              is >= elo (2400) raised to p passes, OTB games only if otb=1;
+                              p=0: control as a table
+      anneal base= start= [elo=]  the late table of coolNN:table:NAME (start = NN / 100): every
+                              human game whose stronger player is >= elo (2400) reaches one
+                              pass over the run, the rest control-shaped
     Elo is the stronger player's (bucket max-Elo bin centre); OTB games fall in their
     format's cells.
 """
@@ -276,6 +283,52 @@ def hand(pool, total, cells, otb=1.0, engine=0.0):
     return w
 
 
+def realized(pool, base, minpool, base_sha256):
+    """Control's realized passes per code from its replay; buckets retaining fewer than minpool games take the
+    supply-weighted passes of their source x format x 200-Elo cell."""
+    raw = Path(base).read_bytes()
+    assert base_sha256 in (None, hashlib.sha256(raw).hexdigest()), "base replay changed"
+    rep = json.loads(raw)["buckets"]
+    get = lambda k, d: np.array(
+        [rep.get(str(c), {}).get(k, d) for c in pool.code], float
+    )
+    seen, ok = get("passes", np.nan), get("pool", 0) >= int(minpool)
+    cell = pool.src * 10000 + pool.fmt * 100 + pool.code // 100 % 100 // 2
+    for k in np.unique(cell[~ok]):
+        m = (cell == k) & ok
+        fill = (
+            np.average(seen[m], weights=pool.supply[m]) if pool.supply[m].sum() else 0.0
+        )
+        seen[(cell == k) & ~ok] = fill
+    return seen
+
+
+def fit(pool, total, w):
+    """w(c) at the scale c whose run draws exactly its tokens."""
+    return w(
+        bisect(lambda c: pool.supply @ w(c) / pool.drawn(total, w(c)), 1.0, 0.0, 5.0)
+    )
+
+
+def topup(pool, total, base, p, minpool=200, base_sha256=None, elo=2400, otb=0):
+    """Control with every human game (OTB only if otb) whose stronger player is >= elo raised to p expected passes, never
+    below control's own; the rest, engine included, keeps control's weights, scaled to fit the run."""
+    seen, p = realized(pool, base, minpool, base_sha256), float(p)
+    top = (pool.code // 100 % 100 * 100 >= int(elo)) & ~pool.engine & (p > 0)
+    top &= pool.otb | (not int(otb))
+    return fit(pool, total, lambda c: np.where(top, np.maximum(p, seen), c * seen))
+
+
+def anneal(pool, total, base, start, minpool=200, base_sha256=None, elo=2400):
+    """The late table of coolNN:table:NAME, start = NN / 100: after control's first start of the run, every human game
+    whose stronger player is >= elo reaches one pass over the whole run (never fewer than control's), the rest keeps
+    control's shape, scaled to fit the last 1 - start."""
+    seen, s = realized(pool, base, minpool, base_sha256), float(start)
+    top = (pool.code // 100 % 100 * 100 >= int(elo)) & ~pool.engine
+    late = np.maximum(seen, (1 - s * seen) / (1 - s))
+    return fit(pool, total, lambda c: np.where(top, late, c * seen))
+
+
 def summary(pool, w, total):
     n = pool.games * w * pool.tok
     T = n.sum()
@@ -308,7 +361,9 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
     raw = Path(inv_path).read_bytes()
     pool, total = Pool(json.loads(raw), basis), float(tokens)
     args = dict(x.split("=", 1) for x in kv)
-    w = dict(passcap=passcap, elo=elo, hand=hand)[kind](pool, total, **args)
+    w = dict(passcap=passcap, elo=elo, hand=hand, topup=topup, anneal=anneal)[kind](
+        pool, total, **args
+    )
     keep = pool.games > 0
     assert np.isfinite(w).all() and (w >= 0).all()
     got = pool.supply @ w / pool.drawn(total, w)
