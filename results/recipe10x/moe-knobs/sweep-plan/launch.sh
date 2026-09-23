@@ -25,4 +25,6 @@ race 1e17 "-A dippolit -p dei-group --qos=dei_group_qos --gres=gpu:A6000:1 --com
 if [ $where = orchard ]; then
 	.venv/bin/python $R/orchard/omake.py sweep-1e18-$label --gpus 4
 	ssh orchard "cd ~/allie/src && sbatch --parsable --array=0-$(($(runs $R/sweep-1e18-$label) - 1))%8 -J sw1e18 -o ~/allie/src/logs/%x-%A_%a.out orun.sh sweep-1e18-$label"
+	nohup $R/moe-knobs/sweep-plan/autoscore.sh sweep-1e18-$label > /dev/null 2>&1 &
+	echo "autoscore pid $!"
 fi
