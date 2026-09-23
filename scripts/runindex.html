@@ -36,31 +36,43 @@ body { background: var(--ground); color: var(--ink); font: 15px/1.5 var(--text);
 main { max-width: 1280px; margin: 0 auto; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
-.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--ground); padding-block: 14px 10px; display: grid; gap: 10px; max-width: 1280px; margin: 0 auto; }
-.bar .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.bar h1 { margin: 0; font: 650 22px/1 var(--display); font-stretch: 85%; letter-spacing: -.01em; }
-.bar .fresh { color: var(--muted); font-size: 13px; }
-.bar .fresh b { font-weight: 600; color: var(--ink); }
-.pulse { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 13.5px; color: var(--muted); }
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--ground); padding-block: 14px 0; display: grid; gap: 8px; max-width: 1280px; margin: 0 auto; }
+.top .row { display: flex; justify-content: space-between; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+.top .id { display: flex; align-items: baseline; gap: 6px 14px; flex-wrap: wrap; }
+.top h1 { margin: 0; font: 650 22px/1 var(--display); font-stretch: 85%; letter-spacing: -.01em; }
+.top .fresh { color: var(--muted); font-size: 13px; }
+.top .fresh b { font-weight: 600; color: var(--ink); }
+.pulse { display: flex; gap: 4px 16px; flex-wrap: wrap; font-size: 13.5px; color: var(--muted); }
 .pulse b { color: var(--ink); font: 600 14px var(--mono); }
+.pulse .warnc b { color: var(--warn); }
+.switch { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.switch i { width: 30px; height: 18px; border-radius: 999px; background: var(--line); position: relative; flex: none; }
+.switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--raise); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.switch[aria-pressed="true"] { color: var(--ink); }
+.switch[aria-pressed="true"] i { background: var(--ink); }
+.switch[aria-pressed="true"] i::after { transform: translateX(12px); background: var(--ground); }
 .tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; border-bottom: 1px solid var(--line); }
 .tabs button { flex: none; background: none; border: 0; border-bottom: 2px solid transparent; padding: 7px 10px 8px; font-weight: 600; font-size: 14.5px; color: var(--muted); cursor: pointer; }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
-.tabs button .n { font: 500 11.5px var(--mono); color: var(--faint); margin-left: 4px; }
 .view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; padding-top: 18px; }
 .view > *, .card, .grid2 > *, .grid3 > * { min-width: 0; }
-.lede { display: grid; gap: 4px; }
-.lede h2 { margin: 0; font: 620 24px/1.15 var(--display); font-stretch: 88%; letter-spacing: -.012em; text-wrap: balance; }
-.lede h2 b { font-weight: 680; }
-.lede p { margin: 0; color: var(--muted); font-size: 14px; max-width: 80ch; }
+.lede { display: grid; gap: 6px; }
+.lede h2 { margin: 0; font: 620 25px/1.15 var(--display); font-stretch: 88%; letter-spacing: -.012em; text-wrap: balance; }
+.lede h2 b { font-weight: 700; }
+.lede p { margin: 0; color: var(--muted); font-size: 14px; max-width: 78ch; }
 h3 { margin: 0; font: 620 17px/1.2 var(--display); font-stretch: 90%; }
 .sect { display: grid; gap: 10px; }
-.sect > header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.sect > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
 .sect > header p { margin: 0; color: var(--muted); font-size: 13px; }
 .muted { color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 12px 36px; }
+.stat { display: grid; gap: 3px; min-width: 0; }
+.stat b { font: 650 28px/1 var(--display); font-stretch: 85%; }
+.stat b small { font: 500 14px var(--mono); color: var(--muted); }
+.stat span { color: var(--muted); font-size: 12.5px; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
 .controls input[type="search"], .controls select { background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; max-width: 100%; }
-.controls input[type="search"] { width: 280px; }
+.controls input[type="search"] { width: 260px; }
 .chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .chips button { background: var(--raise); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 13px; cursor: pointer; }
 .chips button[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
@@ -73,33 +85,36 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
 .t th button { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
 .t th[aria-sort] button { color: var(--ink); }
 .t td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
-.t td.num, .t th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
-.t td.wrap { white-space: normal; min-width: 250px; }
+.t td.num, .t th.num { text-align: right; }
+.t td.num { font-family: var(--mono); font-size: 12.5px; }
+.t td.wrap { white-space: normal; min-width: 240px; }
 .t td .rn { display: flex; gap: 8px; align-items: start; }
-.t td .rn input { margin: 2px 0 0; }
+.t td .rn input { margin: 3px 0 0; }
 .t tr.on td { background: color-mix(in srgb, var(--info) 8%, var(--raise)); }
 @media (min-width: 700px) {
   .t td:first-child, .t th:first-child { position: sticky; left: 0; z-index: 1; }
   .t td:first-child { background: var(--raise); }
   .t tr.on td:first-child { background: color-mix(in srgb, var(--info) 8%, var(--raise)); }
 }
-.nm { background: none; border: 0; padding: 0; font: 500 12.5px var(--mono); color: var(--ink); cursor: pointer; text-align: left; text-decoration: underline dotted var(--faint) 1.5px; text-underline-offset: 3px; }
-.sub { color: var(--muted); font-size: 11.5px; font-family: var(--text); }
-.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--c) 14%, var(--raise)); color: var(--c); }
+.nm { background: none; border: 0; padding: 0; font: 550 13.5px/1.35 var(--text); color: var(--ink); cursor: pointer; text-align: left; text-decoration: none; }
+.nm:hover { text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+.t td .nm { white-space: normal; min-width: 180px; display: block; }
+.sub { color: var(--muted); font-size: 12px; font-family: var(--text); }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--c) 14%, var(--raise)); color: var(--c); white-space: nowrap; }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
 .pill.hollow { background: transparent; box-shadow: inset 0 0 0 1px var(--faint); color: var(--muted); }
 .pill.hollow::before { background: var(--faint); }
 .fam { display: inline-flex; align-items: center; gap: 6px; }
 .fam::before { content: ""; width: 9px; height: 9px; border-radius: 3px; background: var(--c); }
-.est { font: 600 10px var(--text); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; margin-left: 4px; vertical-align: 1px; }
 .good { color: var(--ok); }
 .worse { color: var(--bad); }
 .warnc { color: var(--warn); }
 .prog { display: block; height: 3px; background: var(--line); border-radius: 2px; margin-top: 4px; min-width: 60px; }
 .prog i { display: block; height: 100%; border-radius: 2px; background: var(--ok); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .card { background: var(--raise); border-radius: 12px; padding: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card > header { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
 .card h3 { font-size: 15.5px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .tile { background: var(--raise); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; align-content: start; }
 .tile .k { color: var(--muted); font-size: 12.5px; }
 .tile .v { font: 650 26px/1 var(--display); font-stretch: 85%; }
@@ -111,12 +126,13 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
 .chart .gl { stroke: var(--line); stroke-width: 1; }
 .chart .ax { stroke: var(--faint); stroke-width: 1; }
 .chart .tk { fill: var(--muted); font: 11px var(--mono); }
+.chart .rl { fill: var(--muted); font: 600 10.5px var(--text); }
 .chart .al { fill: var(--muted); font: 11.5px var(--text); }
 .chart .ref { stroke: var(--faint); stroke-dasharray: 3 4; stroke-width: 1.2; }
 .chart .reft { fill: var(--muted); font: 11px var(--text); }
 .chart .dl { font: 600 11.5px var(--text); fill: var(--ink); }
 .chart .hair { stroke: var(--faint); stroke-width: 1; }
-.chart .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--ground); border-radius: 8px; padding: 7px 9px; font-size: 12px; line-height: 1.35; max-width: 280px; z-index: 3; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.chart .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--ground); border-radius: 8px; padding: 7px 9px; font-size: 12px; line-height: 1.35; max-width: 290px; z-index: 3; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 .chart .tip b { font-weight: 600; }
 .chart .tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
@@ -125,7 +141,7 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
 .legend i.dash { border-top-style: dashed; }
 .legend i.dot { width: 9px; height: 9px; border: 0; border-radius: 50%; background: var(--c); }
 .legend i.ring { width: 9px; height: 9px; border: 1.5px solid var(--c); border-radius: 50%; }
-.empty { color: var(--muted); font-size: 14px; background: var(--raise); border-radius: 12px; padding: 18px; margin: 0; }
+.empty { color: var(--muted); font-size: 14px; background: var(--raise); border-radius: 12px; padding: 16px 18px; margin: 0; }
 .alerts { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .alerts li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; background: var(--raise); border-radius: 10px; padding: 8px 12px; font-size: 13.5px; }
 .sev { font: 600 11px var(--text); padding: 2px 7px; border-radius: 999px; color: var(--raise); background: var(--c); white-space: nowrap; }
@@ -134,35 +150,74 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
 .heat td { border-radius: 6px; padding: 6px 8px; text-align: right; font-family: var(--mono); min-width: 74px; white-space: nowrap; }
 .heat td small { display: block; color: var(--muted); font-size: 10.5px; }
 .selbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.selbar .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--raise); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font: 500 12px var(--mono); }
-.selbar .chip::before { content: ""; width: 10px; height: 3px; border-radius: 2px; background: var(--c); }
+.selbar .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--raise); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; max-width: 100%; }
+.selbar .chip::before { content: ""; flex: none; width: 10px; height: 3px; border-radius: 2px; background: var(--c); }
 .selbar select { background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; max-width: 100%; }
 .selbar .chip button { background: none; border: 0; cursor: pointer; color: var(--muted); padding: 0 6px; font-size: 14px; line-height: 1; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13.5px; margin: 0; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; font-size: 13.5px; margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .mono { font-family: var(--mono); font-size: 12.5px; }
 dialog.sheet { border: 0; border-radius: 16px; padding: 0; max-width: min(720px, calc(100vw - 24px)); width: 100%; background: var(--ground); color: var(--ink); box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
 dialog.sheet::backdrop { background: rgba(10, 14, 22, .45); }
 .sheet .in { padding: 18px; display: grid; gap: 14px; max-height: calc(100vh - 48px); overflow-y: auto; }
-.sheet .top { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
-.sheet .top h3 { font: 600 15px var(--mono); overflow-wrap: anywhere; }
+.sheet .head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+.sheet .head h3 { font: 620 19px/1.2 var(--display); font-stretch: 88%; text-wrap: balance; }
 .btn { background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, max(340px, calc(50% - 12px))), 1fr)); gap: 12px; }
 .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, max(300px, calc(33.3% - 12px))), 1fr)); gap: 12px; }
 .note { font-size: 12.5px; color: var(--muted); margin: 0; max-width: 90ch; }
-.foot { color: var(--muted); font-size: 12.5px; padding-top: 28px; max-width: 90ch; }
-@media (max-width: 600px) {
-  .lede h2 { font-size: 20px; }
+details.more { border-top: 1px solid var(--line); }
+details.more > summary { cursor: pointer; list-style: none; padding-block: 12px 2px; display: flex; gap: 4px 10px; align-items: baseline; flex-wrap: wrap; font: 620 16px/1.2 var(--display); font-stretch: 90%; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); margin-right: 4px; align-self: center; }
+details.more[open] > summary::before { transform: rotate(45deg) translate(-2px, -2px); }
+details.more > summary span { font: 400 13px var(--text); color: var(--muted); }
+details.more > .in { display: grid; gap: 12px; padding-top: 10px; }
+.pgroups { display: grid; gap: 16px; }
+.pgroup > summary { cursor: pointer; list-style: none; font-size: 14px; display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; padding-bottom: 6px; }
+.pgroup > summary::-webkit-details-marker { display: none; }
+.pgroup > summary::before { content: ""; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); align-self: center; margin-right: 2px; }
+.pgroup[open] > summary::before { transform: rotate(45deg) translate(-2px, -1px); }
+.pgroup > summary b { font-weight: 600; }
+.pgroup > summary span { color: var(--muted); font-size: 12.5px; }
+.plist { background: var(--raise); border-radius: 12px; }
+.pr { display: grid; grid-template-columns: 10px minmax(0, 1fr) minmax(90px, 150px) 38px minmax(170px, 240px); gap: 4px 12px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.pr:first-child { border-top: 0; }
+.pr .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.pr .pb { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.pr .pb i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+.pr.scored .pb i, .pr.scoring .pb i { background: var(--muted); }
+.pr.stopped .pb i, .pr.failed .pb i { background: var(--warn); }
+.pr .pct { font: 500 12px var(--mono); color: var(--muted); text-align: right; }
+.pr .st { color: var(--muted); font-size: 12.5px; }
+.pr.running .st, .pr.scored .st { color: var(--ink); }
+.pr.failed .st { color: var(--bad); }
+.pr .st .warnc { font-weight: 600; }
+.foot { margin-top: 28px; }
+#rfocus:empty { display: none; }
+.tile .pill { justify-self: start; }
+.foot summary { font-size: 13px; }
+.foot p { color: var(--muted); font-size: 12.5px; margin: 0; }
+@media (max-width: 640px) {
+  .lede h2 { font-size: 21px; }
+  .stat b { font-size: 24px; }
   .controls input[type="search"] { width: 100%; }
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .heat td { min-width: 58px; padding: 5px 5px; }
+  .pr { grid-template-columns: 10px minmax(0, 1fr) 38px; }
+  .pr .nm { grid-column: 2 / 4; }
+  .pr .pb { grid-column: 2; }
+  .pr .st { grid-column: 2 / 4; }
 }
-@media (prefers-reduced-motion: no-preference) { .tabs button, .chips button { transition: background .12s, color .12s; } }
+@media (prefers-reduced-motion: no-preference) {
+  .tabs button, .chips button { transition: background .12s, color .12s; }
+  .switch i, .switch i::after { transition: background .15s, transform .15s; }
+}
 </style>
 
-<div class="bar">
-  <div class="row"><h1>Allie Runs</h1><span class="fresh" id="fresh"></span></div>
+<div class="top">
+  <div class="row"><div class="id"><h1>Allie Runs</h1><span class="fresh" id="fresh"></span></div><button class="switch" id="early" aria-pressed="false"><i></i>Show earlier runs</button></div>
   <div class="pulse" id="pulse"></div>
   <nav class="tabs" role="tablist" aria-label="Views" id="tabs"></nav>
 </div>
@@ -175,17 +230,18 @@ const D = JSON.parse(document.getElementById("data").textContent || "{}");
 const RUNS = (D.runs && D.runs.runs) || [], CUR = D.curves || {}, SW = D.sweep || {}, CP = D.compute || {};
 const BY = Object.fromEntries(RUNS.map(r => [r.name, r]));
 const GEN = D.runs && D.runs.generated, NOW = Date.now() / 1000, TZ = "America/Los_Angeles", TOK = 524288 / 1e9;
-const VIEWS = [["runs", "Runs"], ["results", "Results"], ["curves", "Curves"], ["moe", "MoE health"], ["speed", "Speed"], ["data", "Data"], ["sweep", "Sweep"], ["compute", "Compute"]];
+const VIEWS = [["sweep", "Sweep"], ["runs", "Runs"], ["curves", "Curves"], ["results", "Results"], ["moe", "MoE health"], ["speed", "Speed"], ["data", "Data"], ["compute", "Compute"]];
 const STATUS = {
   running: ["Training", "var(--ok)"], queued: ["Queued", "var(--info)"], scoring: ["Scoring", "var(--sweep)"], scored: ["Scored", "var(--muted)"],
-  stopped: ["Stopped", "var(--warn)"], failed: ["Failed", "var(--bad)"], planned: ["Planned", null], "not run": ["Not run", null],
+  stopped: ["Stopped", "var(--warn)"], failed: ["Failed", "var(--bad)"], planned: ["Planned", null], "not run": ["Never ran", null],
 };
-const ORDER = ["running", "queued", "scoring", "stopped", "failed", "scored", "planned", "not run"];
 const RANK = { running: 0, queued: 1, scoring: 2, stopped: 3, failed: 3, scored: 3, planned: 4, "not run": 5 };
-const TRACK = { sweep: ["Sweep", "var(--sweep)"], check: ["Checks", "var(--check)"], model: ["Model", "var(--model)"], data: ["Data", "var(--data)"], other: ["Other", "var(--muted)"] };
 const FAM = { S16: "var(--s1)", dense: "var(--s2)", "MoE (older)": "var(--s3)" };
+const FAMN = { S16: "MoE", dense: "Dense", "MoE (older)": "MoE, older design" };
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8].map(i => `var(--s${i})`);
 const GPUC = { L40S: "var(--s1)", A6000: "var(--s3)", H100: "var(--s7)", "RTX PRO 6000": "var(--s2)", "RTX 6000 Ada": "var(--s4)" };
+const WAIT = { QOSMaxGRESPerUser: "our GPU cap", BeginTime: "its staggered start", Resources: "free GPUs", JobHeldUser: "a hold", Dependency: "an earlier job", ReqNodeNotAvail: "a node", Priority: "its turn in the queue" };
+const SEV = { nan: "var(--bad)", diverging: "var(--bad)", stalled: "var(--bad)", spike: "var(--warn)", starved: "var(--warn)", "data-bound": "var(--warn)", orun: "var(--warn)" };
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -195,32 +251,43 @@ const sg = (v, d = 4) => ok(v) ? (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs
 const pc = (v, d = 1) => ok(v) ? (100 * v).toFixed(d) + "%" : "—";
 const big = v => !ok(v) ? "—" : v >= 1e9 ? (v / 1e9).toFixed(v >= 1e10 ? 1 : 2) + "B" : v >= 1e6 ? (v / 1e6).toFixed(0) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "K" : String(Math.round(v));
 const cmx = v => ok(v) ? v.toFixed(2) + "×" : "—";
+const bud = v => { const e = Math.floor(Math.log10(v) + 1e-9); return Math.round(v / 10 ** e) + "e" + e; };
 const tf = new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const hf = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric" });
+const cf = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
+const wf = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit" });
+const df = new Intl.DateTimeFormat("en-US", { timeZone: TZ, year: "numeric", month: "numeric", day: "numeric" });
 const hourOf = t => +new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hourCycle: "h23" }).format(new Date(t * 1000));
 const when = t => ok(t) ? tf.format(new Date(t * 1000)) : "—";
+const clock = t => !ok(t) ? "—" : (df.format(new Date(t * 1000)) === df.format(new Date(NOW * 1000)) ? cf : wf).format(new Date(t * 1000));
 const ago = t => { if (!ok(t)) return "—"; const s = NOW - t; return s < 90 ? "just now" : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
+const inH = t => { const s = t - NOW; return s < 120 ? "any minute" : s < 5400 ? `in ${Math.round(s / 60)} min` : `in ${(s / 3600).toFixed(1)} h`; };
 const store = {
   get(k, d) { try { const v = localStorage.getItem("allie-runs." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("allie-runs." + k, JSON.stringify(v)); } catch { } },
 };
 const pill = s => { const [t, c] = STATUS[s] || [s, null]; return c ? `<span class="pill" style="--c:${c}">${t}</span>` : `<span class="pill hollow">${esc(t)}</span>`; };
-const fam = r => `<span class="fam" style="--c:${FAM[r.family] || "var(--faint)"}">${esc(r.family)}</span>`;
-const open = n => `<button class="nm" data-open="${esc(n)}">${esc(n)}</button>`;
+const fam = r => `<span class="fam" style="--c:${FAM[r.family] || "var(--faint)"}">${esc(FAMN[r.family] || r.family)}</span>`;
+const nm = n => (BY[n] || {}).title || n;
+const open = n => `<button class="nm" data-open="${esc(n)}" title="${esc(n)}">${esc(nm(n))}</button>`;
 const active = r => ["running", "queued", "scoring"].includes(r.status);
-const SEV = { nan: "var(--bad)", diverging: "var(--bad)", stalled: "var(--bad)", spike: "var(--warn)", starved: "var(--warn)", "data-bound": "var(--warn)" };
+const cur = r => r.track === "sweep" || r.track === "check";
+const PREF = { scored: 0, scoring: 1, running: 2, queued: 3, stopped: 4, failed: 5, planned: 6, "not run": 7 };
+const SWEEP = Object.values(RUNS.filter(r => r.track === "sweep").reduce((a, r) => {  // one run per point: a copy that ran beats a planned one
+  const k = [r.budget, r.family, r.layers, r.width, r.seed].join("|"); if (!a[k] || PREF[r.status] < PREF[a[k].status]) a[k] = r; return a;
+}, {}));
 
 const S = {
-  tab: (location.hash || "").slice(1) || store.get("tab", "runs"),
-  q: "", track: store.get("track", "all"), st: store.get("st", "all"), sort: store.get("sort", ["status", 1]),
-  rtrack: store.get("rtrack", "all"), metric: store.get("metric", "ce"), x: store.get("x", "tok"),
+  tab: location.hash.slice(1) || "sweep", early: store.get("early", false), cols: store.get("cols", false), open: store.get("open", {}),
+  q: "", track: "all", st: "all", sort: store.get("sort", ["status", 1]), rtrack: "all", metric: store.get("metric", "ce"), x: store.get("x", "tok"),
   sm: store.get("sm", "macro"), parity: "all", more: {}, focus: null, dfocus: null, mfocus: null, heat: "imb", sel: [],
 };
-if (!VIEWS.some(v => v[0] === S.tab)) S.tab = "runs";
+const vis = r => S.early || cur(r);
+const tabs = () => VIEWS.filter(([k]) => k !== "data" || S.early);
+if (!tabs().some(v => v[0] === S.tab)) S.tab = "sweep";
 (function initSel() {
-  const saved = store.get("sel", null);
-  const pick = (saved || []).filter(n => BY[n]);
-  const dflt = RUNS.filter(r => r.status === "running").map(r => r.name);
+  const pick = (store.get("sel", null) || []).filter(n => BY[n]);
+  const dflt = RUNS.filter(r => r.status === "running" && cur(r)).map(r => r.name);
   const recent = RUNS.filter(r => r.res).sort((a, b) => (b.res.t || 0) - (a.res.t || 0)).map(r => r.name);
   (pick.length ? pick : dflt.length ? dflt : recent).slice(0, 4).forEach(n => select(n, true));
 })();
@@ -230,7 +297,28 @@ function select(n, on) {
   if (!on && i >= 0) S.sel.splice(i, 1);
   store.set("sel", S.sel.map(x => x.name));
 }
-const color = n => { const x = S.sel.find(x => x.name === n); return x ? SLOTS[x.slot] : "var(--faint)"; };
+const selv = () => S.sel.filter(x => BY[x.name] && vis(BY[x.name]));
+const details = (k, summary, body, dflt = false) => `<details class="more" data-k="${k}" ${(S.open[k] ?? dflt) ? "open" : ""}><summary>${summary}</summary><div class="in">${body}</div></details>`;
+const moreBtn = () => `<button class="btn" data-cols aria-pressed="${S.cols}">${S.cols ? "Fewer columns" : "More columns"}</button>`;
+
+/* ---------------------------------------------------------------- run progress, in words */
+const endStep = r => Math.max(...(r.stop_after && r.stop_after.length ? r.stop_after : [r.steps || 1]));
+const frac = r => ["scored", "scoring"].includes(r.status) ? 1 : r.step ? Math.min(1, r.step / endStep(r)) : 0;
+const waitWhy = r => { const rs = (r.jobs || []).filter(j => j.state === "PENDING").map(j => j.reason), k = Object.keys(WAIT).find(x => rs.includes(x)) || rs.find(x => x && x !== "None"); return k ? WAIT[k] || k : ""; };
+function state(r) {
+  switch (r.status) {
+    case "running": return r.eta ? `done ~${clock(r.eta)} <span class="muted">(${inH(r.eta)})</span>` : "starting";
+    case "queued": { const w = waitWhy(r); return w ? `waiting for ${esc(w)}` : "waiting in the queue"; }
+    case "scoring": return "trained, being scored";
+    case "scored": return r.res ? `scored: macro <b>${f(r.res.macro, 4)}</b>` : "scored";
+    case "planned": return "not submitted yet";
+    case "stopped": return `stopped at ${pc(frac(r), 0)}`;
+    case "failed": return r.fail_reason && /out of memory|OOM/i.test(r.fail_reason) ? "failed: out of GPU memory" : "failed";
+    default: return "never ran";
+  }
+}
+const alertTxt = r => (r.alerts || []).length ? ` <span class="warnc" title="${esc(r.alerts.map(a => a.text).join("; "))}">· ${r.alerts.length} alert${r.alerts.length > 1 ? "s" : ""}</span>` : "";
+const prow = r => `<div class="pr ${esc(r.status.replace(" ", ""))}"><span class="dot" style="--c:${FAM[r.family] || "var(--faint)"}"></span>${open(r.name)}<span class="pb" title="step ${r.step || 0} of ${endStep(r)}"><i style="width:${(100 * frac(r)).toFixed(1)}%"></i></span><span class="pct">${r.status === "running" || r.status === "stopped" ? pc(frac(r), 0) : ""}</span><span class="st">${state(r)}${alertTxt(r)}</span></div>`;
 
 /* ---------------------------------------------------------------- charts */
 function niceTicks(lo, hi, n) {
@@ -252,22 +340,26 @@ function timeTicks(lo, hi) {
 }
 const sci = v => { if (v === 0) return "0"; const e = Math.floor(Math.log10(Math.abs(v))), m = v / Math.pow(10, e); return (Math.abs(m - 1) < 1e-9 ? "" : +m.toFixed(1) + "×") + "1e" + e; };
 const tick = v => Math.abs(v) >= 1e5 || (Math.abs(v) < 1e-3 && v !== 0) ? sci(v) : +v.toPrecision(4) + "";
-const tickN = v => v >= 1e9 ? +(v / 1e9).toPrecision(3) + "B" : v >= 1e6 ? +(v / 1e6).toPrecision(3) + "M" : tick(v);
+const tickN = v => v >= 1e9 ? +(v / 1e9).toPrecision(3) + "B" : v >= 1e6 ? +(v / 1e6).toPrecision(3) + "M" : v >= 1e4 ? +(v / 1e3).toPrecision(3) + "K" : tick(v);
 
 function legend(series) {
   const named = series.filter(s => s.name && !s.nolegend);
   if (named.length < 2) return "";
   return `<div class="legend">${named.map(s => `<span><i class="${s.line === false ? (s.hollow ? "ring" : "dot") : s.dash ? "dash" : ""}" style="--c:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
 }
+/* o.rug: marks below the plot for runs without a value yet, one row per o.rugRows label; a ring whose arc is
+   the run's progress. With no points at all the chart is only that band and the x axis. */
 function chart(box, o) {
   const series = o.series.map(s => ({ ...s, ok: (s.pts || []).filter(p => ok(p[0]) && ok(p[1]) && (!o.xlog || p[0] > 0) && (!o.ylog || p[1] > 0)) }));
-  const all = series.flatMap(s => s.ok);
-  if (!all.length && !(o.rug || []).length) { box.innerHTML = `<p class="empty">${esc(o.empty || "No data yet.")}</p>`; return; }
-  const W = Math.max(260, Math.floor(box.getBoundingClientRect().width || 600)), H = o.h || (W < 520 ? 210 : 250);
+  const all = series.flatMap(s => s.ok), rug = o.rug || [];
+  if (!all.length && !rug.length) { box.innerHTML = `<p class="empty">${esc(o.empty || "No data yet.")}</p>`; return; }
+  const strip = !all.length, rb = rug.length ? 14 + 13 * ((o.rugRows || [""]).length - 1) + 10 : 0;
+  const W = Math.max(260, Math.floor(box.getBoundingClientRect().width || 600));
   const direct = o.direct !== false && series.filter(s => s.name && s.line !== false).length > 1 && series.length <= 4 && W >= 620;
-  const m = { l: 52, r: direct ? 112 : 16, t: 12, b: o.xlabel ? 40 : 26 };
+  const m = { l: o.ml || 52, r: direct ? 112 : 16, t: strip ? 2 : 12, b: (o.xlabel ? 40 : 26) + rb };
+  const H = strip ? m.t + m.b : o.h || (W < 520 ? 210 : 250);
   const tx = o.xlog ? Math.log10 : v => v, ty = o.ylog ? Math.log10 : v => v;
-  const xs = all.map(p => tx(p[0])).concat((o.rug || []).map(p => tx(p.x)), (o.extraX || []).map(tx));
+  const xs = all.map(p => tx(p[0])).concat(rug.map(p => tx(p.x)), (o.extraX || []).map(tx));
   let x0 = Math.min(...xs), x1 = Math.max(...xs);
   if (o.x0 != null) x0 = Math.min(x0, tx(o.x0)); if (o.x1 != null) x1 = Math.max(x1, tx(o.x1));
   const cut = o.ytrim ? x0 + o.ytrim * (x1 - x0) : -Infinity;
@@ -278,20 +370,23 @@ function chart(box, o) {
   if (x1 - x0 < 1e-12) { const d = o.time ? 3600 : o.xlog ? .3 : Math.abs(x0) * .05 || 1; x0 -= d; x1 += d; }
   if (y1 - y0 < 1e-12) { const d = o.ylog ? .1 : Math.abs(y0) * .02 || 1; y0 -= d; y1 += d; }
   const py = (y1 - y0) * .07; y0 -= py; y1 += py;
-  if (o.xlog || o.xpad) { const px = (x1 - x0) * .04; x0 -= px; x1 += px; }
+  if (o.xlog || o.xpad) { const px = (x1 - x0) * .06; x0 -= px; x1 += px; }
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
   const X = v => m.l + (tx(v) - x0) / (x1 - x0) * iw, Y = v => m.t + ih - (ty(v) - y0) / (y1 - y0) * ih;
+  const RY = row => m.t + ih + 13 + 13 * (row || 0);
   const xt = o.time ? timeTicks(x0, x1) : o.xlog ? logTicks(x0, x1) : niceTicks(x0, x1, W < 520 ? 4 : 6);
-  const yt = o.ylog ? logTicks(y0, y1) : niceTicks(y0, y1, H < 200 ? 3 : 5);
+  const yt = strip ? [] : o.ylog ? logTicks(y0, y1) : niceTicks(y0, y1, H < 200 ? 3 : 5);
   const xf = o.xfmt || (o.time ? t => hf.format(new Date(t * 1000)) : tick), yf = o.yfmt || tick;
   const clip = "clip" + (++CLIPS);
   let g = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.title || "chart")}"><defs><clipPath id="${clip}"><rect x="${m.l - 6}" y="${m.t - 6}" width="${iw + 12}" height="${ih + 12}"/></clipPath></defs>`;
   for (const v of yt) g += `<line class="gl" x1="${m.l}" x2="${W - m.r}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="tk" x="${m.l - 6}" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${esc(yf(v))}</text>`;
   g += `<line class="ax" x1="${m.l}" x2="${W - m.r}" y1="${m.t + ih}" y2="${m.t + ih}"/>`;
-  for (const v of xt) g += `<text class="tk" x="${X(v).toFixed(1)}" y="${m.t + ih + 15}" text-anchor="middle">${esc(xf(v))}</text>`;
+  for (const v of xt) g += `<text class="tk" x="${X(v).toFixed(1)}" y="${m.t + ih + rb + 15}" text-anchor="middle">${esc(xf(v))}</text>`;
   if (o.xlabel) g += `<text class="al" x="${m.l + iw / 2}" y="${H - 4}" text-anchor="middle">${esc(o.xlabel)}</text>`;
-  for (const v of o.vlines || []) if (tx(v.x) >= x0 && tx(v.x) <= x1) g += `<line class="ref" x1="${X(v.x)}" x2="${X(v.x)}" y1="${m.t}" y2="${m.t + ih}"/><text class="reft" x="${X(v.x) + 4}" y="${m.t + 11}">${esc(v.label || "")}</text>`;
-  for (const v of o.hlines || []) if (ty(v.y) >= y0 && ty(v.y) <= y1) g += `<line class="ref" x1="${m.l}" x2="${W - m.r}" y1="${Y(v.y)}" y2="${Y(v.y)}"/><text class="reft" x="${W - m.r - 4}" y="${Y(v.y) - 4}" text-anchor="end">${esc(v.label || "")}</text>`;
+  if (!strip) {
+    for (const v of o.vlines || []) if (tx(v.x) >= x0 && tx(v.x) <= x1) g += `<line class="ref" x1="${X(v.x)}" x2="${X(v.x)}" y1="${m.t}" y2="${m.t + ih}"/><text class="reft" x="${X(v.x) + 4}" y="${m.t + 11}">${esc(v.label || "")}</text>`;
+    for (const v of o.hlines || []) if (ty(v.y) >= y0 && ty(v.y) <= y1) g += `<line class="ref" x1="${m.l}" x2="${W - m.r}" y1="${Y(v.y)}" y2="${Y(v.y)}"/><text class="reft" x="${W - m.r - 4}" y="${Y(v.y) - 4}" text-anchor="end">${esc(v.label || "")}</text>`;
+  }
   g += `<g clip-path="url(#${clip})">`;
   for (const s of series) {
     if (s.line !== false) {
@@ -306,22 +401,28 @@ function chart(box, o) {
     if (s.marker || s.line === false) for (const p of s.ok) g += `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="${s.r || 4.5}" style="fill:${s.hollow ? "var(--raise)" : s.color};stroke:${s.hollow ? s.color : "var(--raise)"};stroke-width:${s.hollow ? 1.8 : 2}"/>`;
   }
   g += `</g>`;
-  for (const p of o.rug || []) g += `<circle cx="${X(p.x).toFixed(1)}" cy="${m.t + ih - 6}" r="4" style="fill:var(--raise);stroke:${p.color};stroke-width:1.8"/>`;
+  if (rug.length) (o.rugRows || []).forEach((t, i) => g += `<text class="rl" x="${m.l - 8}" y="${RY(i) + 3.5}" text-anchor="end">${esc(t)}</text>`);
+  for (const p of rug) {
+    const cx = X(p.x).toFixed(1), cy = RY(p.row), a = 2 * Math.PI * 4.5 * (p.frac || 0);
+    g += `<circle cx="${cx}" cy="${cy}" r="4.5" style="fill:var(--raise);stroke:${p.frac ? "var(--line)" : p.color};stroke-width:1.6;stroke-dasharray:${p.planned ? "2 2" : "none"}"/>`;
+    if (a > 0) g += `<circle cx="${cx}" cy="${cy}" r="4.5" transform="rotate(-90 ${cx} ${cy})" style="fill:none;stroke:${p.color};stroke-width:2.2;stroke-dasharray:${a.toFixed(2)} 40"/>`;
+  }
   if (direct) {
     const ends = series.filter(s => s.name && s.line !== false && s.ok.length).map(s => ({ s, y: Y(s.ok[s.ok.length - 1][1]) })).sort((a, b) => a.y - b.y);
     for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 13);
     for (const e of ends) g += `<text class="dl" x="${W - m.r + 6}" y="${(e.y + 4).toFixed(1)}">${esc(e.s.short || e.s.name).slice(0, 16)}</text>`;
   }
-  g += `<line class="hair" x1="0" x2="0" y1="${m.t}" y2="${m.t + ih}" visibility="hidden"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent"/></svg>`;
+  g += `<line class="hair" x1="0" x2="0" y1="${m.t}" y2="${m.t + ih}" visibility="hidden"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih + rb}" fill="transparent"/></svg>`;
   box.innerHTML = legend(series) + `<div class="chart">${g}<div class="tip" hidden></div></div>`;
   const svg = $("svg", box), tip = $(".tip", box), hair = $(".hair", box), wrap = $(".chart", box);
+  const invX = px => { const v = x0 + (px - m.l) / iw * (x1 - x0); return o.xlog ? Math.pow(10, v) : v; };
   const hover = ev => {
     const r = svg.getBoundingClientRect(), k = W / r.width, mx = (ev.clientX - r.left) * k, my = (ev.clientY - r.top) * k;
     let rows = [], at = null;
     if (o.mode === "xy") {
       let best = null;
       for (const s of series) for (const p of s.ok) { const d = Math.hypot(X(p[0]) - mx, Y(p[1]) - my); if (d < 28 && (!best || d < best.d)) best = { d, s, p }; }
-      for (const p of o.rug || []) { const d = Math.hypot(X(p.x) - mx, m.t + ih - 6 - my); if (d < 20 && (!best || d < best.d)) best = { d, s: { color: p.color, name: p.label }, p: [p.x, null, p.tip] }; }
+      for (const p of rug) { const d = Math.hypot(X(p.x) - mx, RY(p.row) - my); if (d < 14 && (!best || d < best.d)) best = { d, s: { color: p.color, name: p.label }, p: [p.x, null, p.tip] }; }
       if (best) { at = X(best.p[0]); rows = [`<span class="sw" style="background:${best.s.color}"></span>${best.p[2] || `<b>${esc(best.s.name || "")}</b> ${esc(yf(best.p[1]))}`}`]; }
     } else {
       let bx = null;
@@ -330,13 +431,12 @@ function chart(box, o) {
     }
     if (at == null || !rows.length) { tip.hidden = true; hair.setAttribute("visibility", "hidden"); return; }
     hair.setAttribute("x1", at); hair.setAttribute("x2", at); hair.setAttribute("visibility", o.mode === "xy" ? "hidden" : "visible");
-    tip.innerHTML = (o.mode === "xy" ? "" : `<div style="opacity:.7">${esc((o.tipx || xf)(o.tipxval ? o.tipxval(at) : invX(at)))}</div>`) + rows.join("<br>");
+    tip.innerHTML = (o.mode === "xy" ? "" : `<div style="opacity:.7">${esc((o.tipx || xf)(invX(at)))}</div>`) + rows.join("<br>");
     tip.hidden = false;
     const tw = tip.offsetWidth, px = at / k;
     tip.style.left = Math.max(0, Math.min(r.width - tw, px + 12 > r.width - tw ? px - tw - 12 : px + 12)) + "px";
     tip.style.top = Math.max(0, my / k - 10) + "px";
   };
-  const invX = px => { const v = x0 + (px - m.l) / iw * (x1 - x0); return o.xlog ? Math.pow(10, v) : v; };
   wrap.addEventListener("pointermove", hover);
   wrap.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); });
 }
@@ -345,66 +445,193 @@ function charts(el, specs) { for (const [id, o] of specs) { const box = $("#" + 
 
 /* ---------------------------------------------------------------- shell */
 function renderShell() {
-  const running = RUNS.filter(r => r.status === "running"), queued = RUNS.filter(r => r.status === "queued");
-  const alerts = RUNS.filter(r => active(r) && (r.alerts || []).length).length;
-  const sp = SW.points || [], scored = sp.filter(p => ok(p.macro)).length;
-  const pools = CP.pools || {}, used = Object.values(pools).reduce((a, p) => a + (p.used || 0), 0), cap = Object.values(pools).reduce((a, p) => a + (p.cap || 0), 0);
-  $("#fresh").innerHTML = GEN ? `Index <b>${esc(ago(GEN))}</b> · ${esc(when(GEN))} PT` : "No index yet";
+  const vr = RUNS.filter(vis), sw = SWEEP;
+  const alerts = vr.filter(r => active(r) && (r.alerts || []).length).length;
+  $("#fresh").innerHTML = GEN ? `updated <b>${esc(ago(GEN))}</b> · ${esc(when(GEN))} PT` : "No index yet";
   $("#pulse").innerHTML = [
-    `<span><b>${running.length}</b> training</span>`, `<span><b>${queued.length}</b> queued</span>`,
-    `<span>sweep <b>${sp.length ? `${scored}/${sp.length}` : "not frozen"}</b>${sp.length ? " scored" : ""}</span>`,
-    `<span><b>${used}</b> of ${cap} GPUs in use</span>`, `<span><b>${alerts}</b> active runs with alerts</span>`,
+    `<span><b>${vr.filter(r => r.status === "running").length}</b> training</span>`, `<span><b>${vr.filter(r => r.status === "queued").length}</b> queued</span>`,
+    sw.length ? `<span>sweep <b>${sw.filter(r => r.status === "scored").length}/${sw.length}</b> scored</span>` : "",
+    alerts ? `<span class="warnc"><b>${alerts}</b> ${alerts > 1 ? "runs" : "run"} with alerts</span>` : "",
   ].join("");
-  const counts = { runs: RUNS.filter(r => r.status !== "not run").length, results: RUNS.filter(r => r.res).length, sweep: sp.length || "", compute: used };
-  $("#tabs").innerHTML = VIEWS.map(([k, t]) => `<button role="tab" id="tab-${k}" aria-selected="${S.tab === k}" data-tab="${k}">${t}${counts[k] !== undefined && counts[k] !== "" ? `<span class="n">${counts[k]}</span>` : ""}</button>`).join("");
+  const e = $("#early"); e.setAttribute("aria-pressed", S.early); e.title = S.early ? "Showing the model and data rounds before the sweep" : "Only the isoFLOP sweep and its checks are shown";
+  $("#tabs").innerHTML = tabs().map(([k, t]) => `<button role="tab" id="tab-${k}" aria-selected="${S.tab === k}" data-tab="${k}">${t}</button>`).join("");
 }
-function go(tab) { S.tab = tab; store.set("tab", tab); try { history.replaceState(null, "", "#" + tab); } catch { } renderShell(); render(); }
+function go(tab) { S.tab = tab; try { history.replaceState(null, "", "#" + tab); } catch { } renderShell(); render(); }
 function render() {
   const el = $("#main");
-  const fn = { runs: vRuns, results: vResults, curves: vCurves, moe: vMoe, speed: vSpeed, data: vData, sweep: vSweep, compute: vCompute }[S.tab];
+  const fn = { sweep: vSweep, runs: vRuns, results: vResults, curves: vCurves, moe: vMoe, speed: vSpeed, data: vData, compute: vCompute }[S.tab];
   el.innerHTML = `<section class="view" id="v-${S.tab}" role="tabpanel" aria-labelledby="tab-${S.tab}"></section>` + foot();
   fn($("section", el));
 }
 function foot() {
-  return `<p class="foot">Built from results/runindex (scripts/runindex.py: plans, run logs, scores and replays read incrementally; orchard runs through a log mirror). Times in Pacific. Golden macro = mean move CE over 16 format × Elo cells of held-out July 2026 games; expert = the four ≥2400 cells; B = their mean. Local CM = compute multiplier on the frozen isoflop-v1 golden law shifted through the paired control (moe-knobs/knobs.py). MFU = useful training FLOPs per second over GPUs × dense BF16 datasheet peak.</p>`;
+  return `<details class="more foot" data-k="about" ${S.open.about ? "open" : ""}><summary>How these numbers are made</summary><div class="in"><p>Built every 10 minutes from the run logs, plans, scores and queues (scripts/runindex.py; orchard runs through a log mirror). Times are Pacific. Golden macro = mean move cross-entropy over 16 format × Elo cells of held-out July 2026 games; expert = the four ≥2400 cells; lower is better. MoE in the sweep = 256 experts, top-16, shared expert 1/4 of the active MLP. Compute multiplier = how much more compute the other family needs for the same loss. MFU = useful training FLOPs per second over the GPUs' dense BF16 peak. Run ids (hover a name, or open it) are the directory names under results/pretrain.</p></div></details>`;
 }
 function chipsHtml(key, opts, cur) { return `<div class="chips" role="group">${opts.map(([v, t]) => `<button data-chip="${key}" data-v="${esc(v)}" aria-pressed="${cur === v}">${esc(t)}</button>`).join("")}</div>`; }
 function segHtml(key, opts, cur) { return `<div class="seg" role="group">${opts.map(([v, t]) => `<button data-seg="${key}" data-v="${esc(v)}" aria-pressed="${cur === v}">${esc(t)}</button>`).join("")}</div>`; }
+const alertList = rs => { const al = rs.flatMap(r => (r.alerts || []).map(a => ({ ...a, run: r.name }))); return al.length ? `<ul class="alerts">${al.map(a => `<li><span class="sev" style="--c:${SEV[a.kind] || "var(--muted)"}">${esc(a.kind)}</span><span>${open(a.run)} <span class="muted">${esc(a.text)}</span></span></li>`).join("")}</ul>` : ""; };
+
+/* ---------------------------------------------------------------- sweep */
+const BUDGETS = ["1e17", "3e17", "1e18"];
+function quad(pts) {
+  const n = pts.length; if (n < 3) return null;
+  let s = [0, 0, 0, 0, 0], t = [0, 0, 0];
+  for (const [x, y] of pts) { const l = Math.log10(x); s[0]++; s[1] += l; s[2] += l * l; s[3] += l ** 3; s[4] += l ** 4; t[0] += y; t[1] += l * y; t[2] += l * l * y; }
+  const M = [[s[4], s[3], s[2]], [s[3], s[2], s[1]], [s[2], s[1], s[0]]], det = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d = det(M); if (Math.abs(d) < 1e-12) return null;
+  const col = (i, v) => M.map((r, j) => r.map((x, k) => k === i ? v[j] : x));
+  const tt = [t[2], t[1], t[0]], a = det(col(0, tt)) / d, b = det(col(1, tt)) / d, c = det(col(2, tt)) / d;
+  return l => a * l * l + b * l + c;
+}
+const lawLoss = (p, n, dd) => p.E + p.A * Math.pow(n / 1e7, -p.alpha) + p.B * Math.pow(dd / 1e8, -p.beta);
+function tokensAt(bp) {  // D(N) along a budget's planned sizes, log-linear between them
+  const q = bp.map(p => [Math.log(p.n), Math.log(p.d)]).sort((a, b) => a[0] - b[0]);
+  return n => { const l = Math.log(n); let i = q.findIndex(x => x[0] >= l); i = Math.min(Math.max(i < 0 ? q.length - 1 : i, 1), q.length - 1); const [a, b] = [q[i - 1], q[i]]; return Math.exp(a[1] + (l - a[0]) * (b[1] - a[1]) / (b[0] - a[0] || 1)); };
+}
+function sweepCM(M) {  // the node-week multiplier: the model track's readout (shared loss floor) first, else this page's fit
+  const ro = M.readout && M.readout.rows && M.readout.rows["node-week"], x = ro && (ro.shared || ro.separate), b = M.cm && M.cm.boot;
+  const out = x && ok(x.cm) ? { x: x.cm, lo: (x.noise || [])[0], hi: (x.noise || [])[1], src: `the model track's readout of ${M.readout.runs} runs (${when(M.readout.t)} PT)` }
+    : M.cm && ok(M.cm.node_week) ? { x: M.cm.node_week, lo: b && (b.p5 ?? b.p2), hi: b && (b.p95 ?? b.p97), src: "this page's fit with separate loss floors" } : null;
+  if (out) out.tight = ok(out.lo) && ok(out.hi) && out.hi / out.lo <= 2;
+  return out;
+}
+function bestPair(M) {
+  const mins = fm => (((M.minima || {})[fm] || {}).minima || []).filter(m => m.interior);
+  const d = mins("dense");
+  return mins("S16").map(a => ({ a, b: d.find(x => x.budget === a.budget) })).filter(x => x.b).map(x => ({ b: bud(x.a.budget), d: x.a.loss_opt - x.b.loss_opt, m: x.a.loss_opt, z: x.b.loss_opt })).pop();
+}
+function vSweep(el) {
+  const sw = SWEEP, k = S.sm, M = SW[k] || {}, laws = M.laws || {};
+  const by = s => sw.filter(r => r.status === s);
+  const scored = by("scored"), run = by("running"), q = by("queued"), plan = by("planned");
+  const next = run.filter(r => ok(r.eta)).sort((a, b) => a.eta - b.eta)[0];
+  const gpus = run.reduce((a, r) => a + (r.world || 0), 0), cm = sweepCM(M), pair = bestPair(M);
+  const cmText = c => c.x >= 1 ? `MoE matches dense with <b>${cmx(c.x)}</b> less compute at a node-week` : `Dense matches MoE with <b>${cmx(1 / c.x)}</b> less compute at a node-week`;
+  const range = c => ok(c.lo) ? `90% range ${cmx(c.lo)}–${cmx(c.hi)}, from ${c.src}` : `from ${c.src}`;
+  const lead = !sw.length ? "The sweep is not frozen yet"
+    : cm && (cm.tight || !pair) ? cmText(cm)
+    : pair ? `At ${pair.b} FLOPs the best MoE size ${pair.d < 0 ? "beats" : "trails"} the best dense size by <b>${f(Math.abs(pair.d), 3)}</b> in loss`
+    : scored.length ? `<b>${scored.length}</b> of ${sw.length} sweep runs scored` : `Sweep under way: <b>${run.length}</b> training, none scored yet`;
+  const why = cm && (cm.tight || !pair) ? `${cm.tight ? "" : "Not pinned down yet: "}${range(cm)}. `
+    : pair ? `Golden ${k === "macro" ? "macro" : "expert"} ${f(pair.m, 4)} vs ${f(pair.z, 4)} at the bottom of each curve. ${cm ? `The fit puts the node-week multiplier at ${cmx(cm.x)}, not pinned down yet (${range(cm)}). ` : "The node-week multiplier needs six scored runs over two budgets per family. "}` : "";
+  const stats = [
+    [`${scored.length}<small>/${sw.length}</small>`, "runs scored"],
+    [String(run.length), `training on ${gpus} GPUs${q.length ? ` · ${q.length} queued` : ""}${plan.length ? ` · ${plan.length} not submitted` : ""}`],
+    next ? [clock(next.eta), `next run done: ${esc(next.short)}`] : [q.length ? "—" : "0", q.length ? "next run: waiting for GPUs" : "runs left to train"],
+  ];
+  const groups = BUDGETS.map(b => {
+    const rs = sw.filter(r => r.budget === b).sort((x, y) => (x.family === "dense") - (y.family === "dense") || x.law_n - y.law_n || x.seed - y.seed);
+    if (!rs.length) return "";
+    const hw = [...new Set(rs.map(r => `${r.world || "?"} × ${r.gpu || "?"}`))].join(", ");
+    const eta = rs.every(r => r.status === "running" || r.status === "scored" || r.status === "scoring") ? Math.max(...rs.map(r => r.eta || 0)) : null;
+    const k = "pg-" + b, on = S.open[k] ?? rs.some(r => r.status !== "planned");
+    return `<details class="pgroup" data-k="${k}" ${on ? "open" : ""}><summary><b>${b} FLOPs</b> <span>${rs.filter(r => r.status === "scored").length} of ${rs.length} scored · ${esc(hw)} per run${eta ? ` · all trained ~${clock(eta)}` : rs.every(r => r.status === "planned") ? " · not submitted yet" : ""}</span></summary><div class="plist">${rs.map(prow).join("")}</div></details>`;
+  }).join("");
+  const checks = RUNS.filter(r => r.track === "check");
+  const al = alertList(sw.filter(active));
+  el.innerHTML = `<div class="lede"><h2>${lead}</h2><p>${why}The final isoFLOP sweep: MoE (256 experts, top-16) and dense models trained at four or five sizes on the same compute budget. Each curve's lowest point is that budget's best size; lower loss is better.</p></div>
+    <div class="stats">${stats.map(([v, t]) => `<div class="stat"><b>${v}</b><span>${t}</span></div>`).join("")}</div>
+    ${al ? `<div class="sect"><header><h3>Needs a look</h3></header>${al}</div>` : ""}
+    <div class="sect"><header><h3>IsoFLOP curves</h3>${segHtml("sm", [["macro", "Golden macro"], ["expert", "Expert (≥2400)"]], k)}</header>
+      <div class="legend"><span><i class="dot" style="--c:var(--s1)"></i>MoE</span><span><i class="dot" style="--c:var(--s2)"></i>Dense</span><span><i class="ring" style="--c:var(--faint)"></i>not scored yet (the arc fills as it trains)</span></div>
+      <div class="grid3">${BUDGETS.map(b => `<div class="card"><header><h3>${b} FLOPs</h3><span class="note">${isoNote(b)}</span></header><div id="iso-${b}"></div></div>`).join("")}</div></div>
+    <div class="sect"><header><h3>Progress</h3><p>Training ETA from each run's current speed (Pacific time)</p></header><div class="pgroups">${groups || `<p class="empty">No sweep runs planned yet.</p>`}</div></div>
+    ${details("fit", `Fit details <span>best loss and size per budget, the compute multiplier, the L(N, D) law</span>`, fitBody(M, laws))}
+    ${checks.length ? details("checks", `Pre-launch checks <span>${checks.filter(r => r.status === "scored").length} of ${checks.length} passed · the largest 1e18 size per family, two short legs with a resume</span>`, `<div class="plist">${checks.map(prow).join("")}</div>`) : ""}`;
+  const famS = [["S16", "var(--s1)", 0], ["dense", "var(--s2)", 1]];
+  const ROWS = ["MoE", "Dense", "MoE seed 2", "Dense seed 2"], row = r => (r.family === "dense") + 2 * (r.seed !== 42);
+  const specs = BUDGETS.map(b => {
+    const bp = sw.filter(r => r.budget === b), ser = [];
+    const val = r => r.res ? (k === "macro" ? r.res.macro : r.res.expert) : null, D = bp.length > 1 ? tokensAt(bp.map(r => ({ n: r.law_n, d: r.tokens_plan }))) : null;
+    for (const [fm, col] of famS) {
+      const sc = bp.filter(r => r.family === fm && ok(val(r))).map(r => [r.law_n, val(r), `<b>${esc(r.title)}</b><br>${k === "macro" ? "golden macro" : "expert"} ${f(val(r), 4)} · ${esc(r.sub)}`]);
+      ser.push({ name: FAMN[fm], nolegend: true, color: col, line: false, pts: sc });
+      const qd = quad(sc);
+      if (qd) { const lo = Math.log10(Math.min(...sc.map(p => p[0]))), hi = Math.log10(Math.max(...sc.map(p => p[0]))); ser.push({ name: fm + " parabola", nolegend: true, nohover: true, color: col, width: 1.5, opacity: .55, pts: Array.from({ length: 30 }, (_, i) => { const l = lo - .06 + (hi - lo + .12) * i / 29; return [Math.pow(10, l), qd(l)]; }) }); }
+      if (laws[fm] && D) { const ns = bp.map(r => r.law_n), lo = Math.log10(Math.min(...ns)) - .06, hi = Math.log10(Math.max(...ns)) + .06; ser.push({ name: fm + " law", nolegend: true, nohover: true, color: col, dash: "2 4", width: 1.5, pts: Array.from({ length: 30 }, (_, i) => { const n = Math.pow(10, lo + (hi - lo) * i / 29); return [n, lawLoss(laws[fm], n, D(n))]; }) }); }
+    }
+    const un = bp.filter(r => !ok(val(r))), two = un.some(r => r.seed !== 42), rows = ROWS.slice(0, two ? 4 : 2);
+    const rug = un.map(r => ({ x: r.law_n, row: row(r), color: FAM[r.family] || "var(--faint)", frac: frac(r), planned: r.status === "planned", label: r.title, tip: `<b>${esc(r.title)}</b><br>${esc(STATUS[r.status] ? STATUS[r.status][0] : r.status)}${r.status === "running" ? ` · ${pc(frac(r), 0)}${r.eta ? ` · done ~${esc(clock(r.eta))}` : ""}` : ""}` }));
+    return ["iso-" + b, { series: ser, rug, rugRows: rows, ml: two ? 78 : 52, xlog: true, mode: "xy", xfmt: tickN, yfmt: v => f(v, 3), xlabel: "model size N = 12 · layers · width²", h: 240, direct: false, empty: "Not planned yet." }];
+  });
+  charts(el, [...specs, ...fitCharts(M, laws, k)]);
+}
+function isoNote(b) {
+  const rs = SWEEP.filter(r => r.budget === b);
+  if (!rs.length) return "not frozen";
+  const n = s => rs.filter(r => r.status === s).length;
+  return [`${n("scored")}/${rs.length} scored`, n("running") && `${n("running")} training`, n("queued") && `${n("queued")} queued`, n("planned") && `${n("planned")} not submitted`].filter(Boolean).join(" · ");
+}
+function fitBody(M, laws) {
+  const ro = M.readout;
+  const roTable = ro ? `<div style="overflow-x:auto"><table class="t"><thead><tr><th>At</th><th class="num">CM, shared floor</th><th class="num">90% range</th><th class="num">CM, separate floors</th></tr></thead><tbody>${Object.entries(ro.rows).map(([b, x]) => `<tr><td>${esc(b)}</td><td class="num">${cmx((x.shared || {}).cm)}</td><td class="num">${(x.shared || {}).noise ? `${cmx(x.shared.noise[0])}–${cmx(x.shared.noise[1])}` : "—"}</td><td class="num">${cmx((x.separate || {}).cm)}</td></tr>`).join("")}</tbody></table></div><p class="note">From ${esc(ro.file)} (moe-knobs/sweep-plan/readout.py), ${ro.runs} runs, ${esc(when(ro.t))} PT.</p>` : "";
+  return `<div class="grid2">
+    <div class="card"><h3>Best loss per budget</h3><p class="note">Parabola minima (filled), the best measured size where the curve has no minimum inside the grid (rings), the fitted law (lines); dashed grey = the old dense law, for orientation.</p><div id="sw-lstar"></div></div>
+    <div class="card"><h3>Best model size per budget</h3><p class="note">N* from each family's L(N, D) fit; points = parabola minima.</p><div id="sw-nstar"></div></div>
+    <div class="card"><h3>MoE over dense: compute multiplier</h3><p class="note">Dense compute needed to match MoE's best loss${M.cm ? "; bars at a node-week = bootstrap 16–84% (thick) and 5–95% (thin)" : ""}.</p><div id="sw-cm"></div>${roTable}</div>
+    <div class="card"><h3>L(N, D) fit and residuals</h3>${lawTable(laws)}<div id="sw-res"></div></div></div>${SW.error ? `<p class="note">Fit unavailable: ${esc(SW.error)}</p>` : ""}`;
+}
+function fitCharts(M, laws, k) {
+  const pts = SWEEP.filter(r => r.res), val = r => k === "macro" ? r.res.macro : r.res.expert;
+  const famS = [["S16", "var(--s1)"], ["dense", "var(--s2)"]], ref = SW.reference, cm = M.cm, boot = cm && cm.boot;
+  const mins = fm => ((M.minima || {})[fm] || {}).minima || [];
+  const bestAt = (fm, b) => pts.filter(r => r.family === fm && +r.budget === b).sort((x, y) => val(x) - val(y))[0];
+  const clipC = p => p[0] >= 3e16 && p[0] <= 1e20;
+  const lstar = [...famS.flatMap(([fm, col]) => [
+    { name: FAMN[fm] + " minima", color: col, line: false, pts: mins(fm).filter(m => m.interior).map(m => [m.budget, m.loss_opt, `<b>${FAMN[fm]}</b> ${bud(m.budget)}: ${f(m.loss_opt, 4)} at N ${tickN(m.n_opt)}`]) },
+    { name: FAMN[fm] + " best measured", color: col, line: false, hollow: true, pts: mins(fm).filter(m => !m.interior).map(m => bestAt(fm, m.budget)).filter(Boolean).map(r => [+r.budget, val(r), `<b>${esc(r.title)}</b>: best measured ${f(val(r), 4)}; no minimum inside the grid`]) },
+    ...(laws[fm] ? [{ name: FAMN[fm] + " law", color: col, pts: laws[fm].c.map((c, i) => [c, laws[fm].loss[i]]).filter(clipC) }] : [])]),
+    ...(ref && k === "macro" ? [{ name: "old dense law", color: "var(--faint)", dash: "5 4", pts: ref.c.map((c, i) => [c, ref.loss[i]]).filter(clipC) }] : [])];
+  const nstar = [...famS.flatMap(([fm, col]) => [{ name: FAMN[fm] + " minima", color: col, line: false, pts: mins(fm).filter(m => m.interior).map(m => [m.budget, m.n_opt, `<b>${FAMN[fm]}</b> ${bud(m.budget)}: N* ${tickN(m.n_opt)}`]) },
+    ...(laws[fm] ? [{ name: FAMN[fm] + " law", color: col, pts: laws[fm].c.map((c, i) => [c, laws[fm].nopt[i]]).filter(clipC) }] : [])]),
+    ...(ref ? [{ name: "old dense law", color: "var(--faint)", dash: "5 4", pts: ref.c.map((c, i) => [c, ref.n[i]]).filter(clipC) }] : [])];
+  const cms = cm ? [{ name: "MoE over dense", color: "var(--s1)", pts: cm.c.map((c, i) => [c, cm.value[i]]).filter(p => p[0] >= 3e16 && p[0] <= 1e21), err: boot ? [[SW.node_week_c, boot.p16, boot.p84]] : [] }, ...(boot ? [{ name: "95%", nolegend: true, color: "var(--s1)", line: false, r: 0, pts: [], err: [[SW.node_week_c, boot.p5 ?? boot.p2, boot.p95 ?? boot.p97]] }] : []), { name: "node-week", nolegend: true, color: "var(--s1)", line: false, pts: [[SW.node_week_c, cm.node_week]] }] : [];
+  const res = M.residuals || [];
+  return [
+    ["sw-lstar", { series: lstar, xlog: true, mode: "xy", xfmt: sci, xlabel: "compute C = N · D", h: 230, empty: "Needs three scored sizes at one budget.", direct: false }],
+    ["sw-nstar", { series: nstar, xlog: true, ylog: true, mode: "xy", xfmt: sci, yfmt: tickN, xlabel: "compute C = N · D", h: 230, empty: "Needs the sweep fit.", direct: false }],
+    ["sw-cm", { series: cms, xlog: true, ylog: true, xfmt: sci, xlabel: "compute C = N · D", yfmt: v => +v.toPrecision(2) + "×", tipfmt: v => cmx(v), tipx: sci, vlines: SW.node_week_c ? [{ x: SW.node_week_c, label: "node-week" }] : [], hlines: [{ y: 1, label: "parity" }], h: 230, empty: "Needs both families fitted: six scored runs over two budgets each.", direct: false }],
+    ["sw-res", { series: famS.map(([fm, col]) => ({ name: FAMN[fm], color: col, line: false, pts: res.filter(x => x.family === fm).map(x => [x.n, x.r, `<b>${FAMN[fm]}</b> ${bud(x.budget)} N ${tickN(x.n)}: ${sg(x.r)}`]) })), xlog: true, mode: "xy", xfmt: tickN, yfmt: v => sg(v, 3), hlines: [{ y: 0 }], xlabel: "N (fit − measured)", h: 190, empty: "Residuals appear with the fit.", direct: false }],
+  ];
+}
+function lawTable(laws) {
+  const fams = Object.keys(laws);
+  if (!fams.length) return `<p class="note">L(N, D) = E + A (N/1e7)^−α + B (D/1e8)^−β, fitted per family once it has six scored runs over two budgets.</p>`;
+  return `<div style="overflow-x:auto"><table class="t"><thead><tr><th>Family</th><th class="num">E</th><th class="num">A</th><th class="num">α</th><th class="num">B</th><th class="num">β</th><th class="num">RMSE</th><th class="num">runs</th></tr></thead><tbody>${fams.map(fm => { const p = laws[fm]; return `<tr><td>${esc(FAMN[fm] || fm)}</td><td class="num">${f(p.E, 3)}</td><td class="num">${f(p.A, 3)}</td><td class="num">${f(p.alpha, 3)}</td><td class="num">${f(p.B, 3)}</td><td class="num">${f(p.beta, 3)}</td><td class="num">${f(p.rmse, 4)}</td><td class="num">${p.points}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
 
 /* ---------------------------------------------------------------- runs */
 const TRACKS = [["all", "All"], ["sweep", "Sweep"], ["check", "Checks"], ["model", "Model"], ["data", "Data"]];
-const STS = [["all", "All"], ["active", "Active"], ["scored", "Scored"], ["stopped", "Stopped"], ["planned", "Planned"], ["notrun", "Never ran"]];
-function inTrack(r, t) { return t === "all" || r.track === t; }
+const STS = [["all", "All"], ["active", "Active"], ["scored", "Scored"], ["stopped", "Stopped or failed"]];
 function inStatus(r, s) {
   if (s === "all") return r.status !== "not run";
   if (s === "active") return active(r);
   if (s === "stopped") return r.status === "stopped" || r.status === "failed";
-  if (s === "notrun") return r.status === "not run";
   return r.status === s;
 }
-function matches(r) { const q = S.q.trim().toLowerCase(); return !q || [r.name, r.round, r.recipe, r.arch, r.model, r.family, r.gpu].some(x => String(x || "").toLowerCase().includes(q)); }
-const statusCell = r => pill(r.status)
-  + (r.status === "running" && r.steps ? `<span class="prog" title="step ${r.step || 0} of ${r.steps}"><i style="width:${Math.min(100, 100 * (r.step || 0) / r.steps)}%"></i></span>` : "")
-  + ((r.alerts || []).length ? `<div class="sub warnc" title="${esc(r.alerts.map(a => a.text).join("; "))}">${r.alerts.length} alert${r.alerts.length > 1 ? "s" : ""}</div>` : "");
+function matches(r) { const q = S.q.trim().toLowerCase(); return !q || [r.title, r.name, r.round, r.sub, r.model, r.recipe_words, r.gpu].some(x => String(x || "").toLowerCase().includes(q)); }
+const nameCell = (r, box = true) => `<div class="rn">${box ? `<input type="checkbox" data-sel="${esc(r.name)}" ${S.sel.some(x => x.name === r.name) ? "checked" : ""} aria-label="Overlay ${esc(r.title)} in the charts">` : ""}<div>${open(r.name)}<div class="sub">${esc(r.sub)}</div></div></div>`;
+const statusCell = r => pill(r.status) + (r.status === "running" ? `<span class="prog" title="step ${r.step || 0} of ${endStep(r)}"><i style="width:${(100 * frac(r)).toFixed(1)}%"></i></span>` : "") + ((r.alerts || []).length ? `<div class="sub warnc" title="${esc(r.alerts.map(a => a.text).join("; "))}">${r.alerts.length} alert${r.alerts.length > 1 ? "s" : ""}</div>` : "");
+/* [key, header, cell, sort key, class, only with more columns] */
 const COLS = [
-  ["name", "Run", r => `<div class="rn"><input type="checkbox" data-sel="${esc(r.name)}" ${S.sel.some(x => x.name === r.name) ? "checked" : ""} aria-label="Overlay ${esc(r.name)} in the charts"><div>${open(r.name)}<div class="sub">${esc(r.round)}</div></div></div>`, r => r.name],
+  ["name", "Run", r => nameCell(r), r => r.title],
   ["status", "Status", statusCell, r => RANK[r.status]],
-  ["family", "Family", fam, r => r.family],
-  ["model", "Model", r => esc(r.model) + (r.params_planned ? `<span class="est" title="from the plan's shape; the trainer's count replaces it at start">est.</span>` : ""), r => r.params_active],
-  ["arch", "Architecture", r => `<span class="sub" style="font-size:12.5px;color:var(--ink)">${esc(r.arch)}</span>`, r => r.arch],
-  ["budget", "Budget", r => `<span class="mono">${esc(r.budget)}</span>`, r => +r.budget, "num"],
-  ["tokens", "Tokens", r => big(r.tokens_plan) + (r.status === "running" || r.status === "stopped" ? `<div class="sub">${f(100 * (r.step || 0) / r.steps, 0)}% done</div>` : ""), r => r.tokens_plan, "num"],
-  ["tpp", "Tok / active param", r => f(r.tpp, 1), r => r.tpp, "num"],
-  ["recipe", "Recipe", r => `<span class="mono">${esc(r.recipe || "—")}</span>`, r => r.recipe],
-  ["seed", "Seed", r => r.seed, r => r.seed, "num"],
+  ["state", "Where it is", r => state(r), r => r.eta || (r.res ? r.res.t : 0) || 0],
   ["gpu", "GPUs", r => r.gpu ? `${r.world || "?"} × ${esc(r.gpu)}` : "—", r => (r.gpu || "") + (r.world || 0)],
-  ["queue", "Queue", r => esc(r.queue || "—"), r => r.queue],
-  ["start", "Start", r => when(r.t_start), r => r.t_start || 0, "num"],
-  ["end", "End", r => when(r.t_done), r => r.t_done || 0, "num"],
-  ["gpuh", "GPU-h", r => f(r.gpu_h, 1), r => r.gpu_h || 0, "num"],
-  ["restarts", "Restarts", r => r.restarts ? `<span class="warnc">${r.restarts}</span>` : "0", r => r.restarts, "num"],
-  ["control", "Paired control", r => r.control ? open(r.control) : "—", r => r.control],
+  ["model", "Model", r => esc(r.model) + (r.params_planned ? ` <span class="sub" title="from the plan's shape; the trainer's count replaces it at start">(est.)</span>` : ""), r => r.params_active, "", 1],
+  ["arch", "Architecture", r => `<span class="sub" style="font-size:12.5px;color:var(--ink)">${esc(r.arch)}</span>`, r => r.arch, "wrap", 1],
+  ["budget", "Budget", r => `<span class="mono">${esc(r.budget)}</span>`, r => +r.budget, "num", 1],
+  ["tokens", "Tokens", r => big(r.tokens_plan), r => r.tokens_plan, "num", 1],
+  ["tpp", "Tokens / active param", r => f(r.tpp, 1), r => r.tpp, "num", 1],
+  ["recipe", "Data recipe", r => esc(r.recipe_words || "—"), r => r.recipe_words, "", 1],
+  ["seed", "Seed", r => r.seed, r => r.seed, "num", 1],
+  ["queue", "Queue", r => esc(r.queue || "—"), r => r.queue, "", 1],
+  ["start", "Start", r => when(r.t_start), r => r.t_start || 0, "num", 1],
+  ["end", "End", r => when(r.t_done), r => r.t_done || 0, "num", 1],
+  ["gpuh", "GPU-h", r => f(r.gpu_h, 1), r => r.gpu_h || 0, "num", 1],
+  ["restarts", "Restarts", r => r.restarts ? `<span class="warnc">${r.restarts}</span>` : "0", r => r.restarts, "num", 1],
+  ["control", "Paired control", r => r.control ? open(r.control) : "—", r => r.control, "", 1],
 ];
+const shown = cols => cols.filter(c => S.cols || !c[5]);
 function sortRows(rows, [key, dir], cols) {
   const c = cols.find(c => c[0] === key); if (!c || !c[3]) return rows;
   return rows.slice().sort((a, b) => { const x = c[3](a), y = c[3](b); return (x < y ? -1 : x > y ? 1 : (b.t_start || 0) - (a.t_start || 0)) * dir; });
@@ -413,18 +640,18 @@ function table(rows, cols, sortKey, on, key) {
   const all = rows.length, cut = key && !S.more[key] && all > 16;
   if (cut) rows = rows.slice(0, 12);
   const head = cols.map(c => `<th class="${c[4] || ""}" ${sortKey && sortKey[0] === c[0] ? `aria-sort="${sortKey[1] > 0 ? "ascending" : "descending"}"` : ""}>${c[3] ? `<button data-sort="${c[0]}">${esc(c[1])}${sortKey && sortKey[0] === c[0] ? (sortKey[1] > 0 ? " ↑" : " ↓") : ""}</button>` : esc(c[1])}</th>`).join("");
-  const body = rows.map(r => `<tr class="${on && on(r) ? "on" : ""}">${cols.map(c => `<td class="${c[4] || ""} ${c[0] === "arch" ? "wrap" : ""}">${c[2](r)}</td>`).join("")}</tr>`).join("");
+  const body = rows.map(r => `<tr class="${on && on(r) ? "on" : ""}">${cols.map(c => `<td class="${c[4] || ""}">${c[2](r)}</td>`).join("")}</tr>`).join("");
   const more = cut ? `<tr><td colspan="${cols.length}"><button class="btn" data-more="${key}">Show all ${all}</button></td></tr>` : "";
   return `<div class="tablewrap"><table class="t"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}" class="muted">Nothing matches.</td></tr>`}${more}</tbody></table></div>`;
 }
 function vRuns(el) {
-  const rows = sortRows(RUNS.filter(r => inTrack(r, S.track) && inStatus(r, S.st) && matches(r)), S.sort, COLS);
-  const act = RUNS.filter(active), gpus = act.filter(r => r.status === "running").reduce((a, r) => a + (r.world || 0), 0);
-  const lead = act.length ? `<b>${act.filter(r => r.status === "running").length}</b> runs training on ${gpus} GPUs, <b>${act.filter(r => r.status === "queued").length}</b> queued, ${act.filter(r => r.status === "scoring").length} awaiting a score` : "Nothing is training right now";
-  el.innerHTML = `<div class="lede"><h2>${lead}</h2><p>Every run planned since Sep 21: model and data rounds, the sweep and its pre-launch checks, on babel and orchard. Tick a run to overlay it in Curves, MoE health and Speed; click its name for details.</p></div>
-    <div class="controls"><input type="search" id="q" placeholder="Filter: name, round, recipe, GPU…" value="${esc(S.q)}" aria-label="Filter runs">${chipsHtml("track", TRACKS, S.track)}${chipsHtml("st", STS, S.st)}</div>
-    <div id="runtable">${table(rows, COLS, S.sort, r => S.sel.some(x => x.name === r.name))}</div>
-    <p class="note">${rows.length} of ${RUNS.length} plan entries shown. "est." = parameter count from the plan's shape until the trainer reports its own. Restarts = trainer starts − 1 (preemptions, requeues, crashes). GPU-h = GPUs × logged training seconds (excludes queue, staging, lost work and scoring).</p>`;
+  const vr = RUNS.filter(vis), cols = shown(COLS);
+  const rows = sortRows(vr.filter(r => (!S.early || S.track === "all" || r.track === S.track) && inStatus(r, S.st) && matches(r)), S.sort, cols);
+  const run = vr.filter(r => r.status === "running"), gpus = run.reduce((a, r) => a + (r.world || 0), 0), q = vr.filter(r => r.status === "queued").length;
+  const lead = run.length ? `<b>${run.length}</b> runs training on ${gpus} GPUs${q ? `, <b>${q}</b> queued` : ""}` : "Nothing is training right now";
+  el.innerHTML = `<div class="lede"><h2>${lead}</h2><p>${S.early ? "Every run planned since Sep 21: the sweep, its checks, and the model and data rounds before it." : "The isoFLOP sweep and its pre-launch checks. Earlier model and data rounds are behind the switch at the top."} Tick a run to overlay it in Curves, MoE health and Speed; click a name for its details.</p></div>
+    <div class="controls"><input type="search" id="q" placeholder="Filter by name, size, GPU…" value="${esc(S.q)}" aria-label="Filter runs">${S.early ? chipsHtml("track", TRACKS, S.track) : ""}${chipsHtml("st", STS, S.st)}${moreBtn()}</div>
+    ${table(rows, cols, S.sort, r => S.sel.some(x => x.name === r.name), "runs")}`;
 }
 
 /* ---------------------------------------------------------------- run sheet */
@@ -432,24 +659,24 @@ function sheet(n) {
   const r = BY[n]; if (!r) return;
   const res = r.res, d = r.delta, e = r.eff || {};
   const kv = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
-  const jobs = (r.jobs || []).map(j => `${esc(j.aid || j.id)} ${esc(j.state)} ${esc(j.part || j.cluster)}${j.reason && j.reason !== "None" ? " (" + esc(j.reason) + ")" : ""}`).join("<br>") || "—";
-  $("#sheetin").innerHTML = `<div class="top"><div><h3>${esc(r.name)}</h3><div class="sub">${esc(r.round)} · ${esc(r.study)}</div></div><button class="btn" id="closesheet">Close</button></div>
-    <div class="controls">${pill(r.status)} ${fam(r)} <button class="btn" data-sel-toggle="${esc(r.name)}">${S.sel.some(x => x.name === r.name) ? "Remove from charts" : "Overlay in charts"}</button></div>
+  const jobs = (r.jobs || []).map(j => `${esc(j.aid || j.id)} ${esc(j.state.toLowerCase())} on ${esc(j.part || j.cluster)}${j.reason && j.reason !== "None" ? " (" + esc(WAIT[j.reason] || j.reason) + ")" : ""}`).join("<br>") || "—";
+  $("#sheetin").innerHTML = `<div class="head"><div><h3>${esc(r.title)}</h3><div class="sub"><span class="mono">${esc(r.name)}</span> · ${esc(r.round)}</div></div><button class="btn" id="closesheet">Close</button></div>
+    <div class="controls">${pill(r.status)} <span class="sub" style="font-size:13px">${state(r)}</span> <button class="btn" data-sel-toggle="${esc(r.name)}">${S.sel.some(x => x.name === r.name) ? "Remove from charts" : "Overlay in charts"}</button></div>
     <dl class="kv">${[
       kv("Model", esc(r.model) + (r.params_planned ? " (estimate)" : "")), kv("Architecture", esc(r.arch)),
-      kv("Budget / tokens", `${esc(r.budget)} · ${big(r.tokens_plan)} tokens (${f(r.tpp, 1)} per active param) · ${r.steps} steps`),
-      kv("Progress", r.step ? `step ${r.step} of ${r.steps}, ${big(r.tokens)} tokens, train CE ${f(r.train_ce, 4)}` : "not started"),
-      kv("Recipe", `<span class="mono">${esc(r.recipe || "—")}</span> · pool fraction ${f(r.pool_frac, 4)} · seed ${r.seed}`),
+      kv("Budget", `${esc(r.budget)} FLOPs · ${big(r.tokens_plan)} tokens (${f(r.tpp, 1)} per active param) · ${r.steps} steps`),
+      kv("Progress", r.step ? `step ${r.step} of ${endStep(r)}, ${big(r.tokens)} tokens, train CE ${f(r.train_ce, 4)}${r.eta ? ` · done ~${clock(r.eta)} PT` : ""}` : "not started"),
+      kv("Data recipe", `${esc(r.recipe_words || "—")} <span class="mono">(${esc(r.recipe || "—")})</span> · seed ${r.seed}`),
       kv("Hardware", `${r.world || "?"} × ${esc(r.gpu || "?")} · ${esc(r.queue || "—")} (${esc(r.cluster)})`),
       kv("Time (PT)", `start ${when(r.t_start)} · end ${when(r.t_done)} · last log ${ago(r.t_last)}`),
-      kv("Cost", `${f(r.gpu_h, 1)} training GPU-h · ${r.restarts} restarts · ${r.failures} failure receipts${r.fail_reason ? `<br><span class="mono">${esc(String(r.fail_reason).slice(0, 240))}</span>` : ""}`),
+      kv("Cost", `${f(r.gpu_h, 1)} training GPU-h · ${r.restarts} restarts · ${r.failures} failures${r.fail_reason ? `<br><span class="mono">${esc(String(r.fail_reason).slice(0, 240))}</span>` : ""}`),
       kv("Jobs now", jobs),
-      kv("Speed", `${big(e.tps)} tok/s · MFU ${pc(e.mfu)} · peak ${f(e.mem, 1)} GB · sampler_wait ${f(e.sw, 3)} (p90 ${f(e.sw90, 3)}) · checkpoint stall ${f(e.stall, 1)} s over ${e.ckpt_n || 0}`),
-      kv("Golden eval", res ? `macro <b>${f(res.macro, 4)}</b> · expert <b>${f(res.expert, 4)}</b> · B ${f(res.B, 4)}` : "not scored"),
-      kv("Paired control", r.control ? open(r.control) + (d ? `<br>ΔB ${sg(d.B)} · Δmacro ${sg(d.macro)} · Δexpert ${sg(d.expert)} · ${d.better}/16 cells better${d.cm ? ` · local CM ${cmx(d.cm.macro)} / ${cmx(d.cm.expert_macro)}` : ""}` : "") : "—"),
+      kv("Speed", `${big(e.tps)} tokens/s · MFU ${pc(e.mfu)} · peak ${f(e.mem, 1)} GB · data wait ${f(e.sw, 3)} of step time · checkpoint stall ${f(e.stall, 1)} s over ${e.ckpt_n || 0}`),
+      kv("Golden eval", res ? `macro <b>${f(res.macro, 4)}</b> · expert <b>${f(res.expert, 4)}</b>` : "not scored"),
+      kv("Paired control", r.control ? open(r.control) + (d ? `<br>Δ macro ${sg(d.macro)} · Δ expert ${sg(d.expert)} · ${d.better}/16 cells better${d.cm ? ` · compute multiplier ${cmx(d.cm.macro)}` : ""}` : "") : "—"),
       kv("Files", `<span class="mono">results/pretrain/${esc(r.name)}<br>results/recipe10x/${esc(r.study)}</span>`),
     ].join("")}</dl>
-    ${(r.alerts || []).length ? `<ul class="alerts">${r.alerts.map(a => `<li><span class="sev" style="--c:${SEV[a.kind] || "var(--muted)"}">${esc(a.kind)}</span>${esc(a.text)}</li>`).join("")}</ul>` : ""}`;
+    ${alertList([r])}`;
   const dlg = $("#sheet"); if (!dlg.open) dlg.showModal();
 }
 
@@ -459,31 +686,31 @@ function diverge(v, span) {
   const t = Math.max(-1, Math.min(1, v / (span || 1e-9)));
   return `background:color-mix(in oklab, ${t < 0 ? "var(--neg)" : "var(--pos)"} ${Math.round(Math.abs(t) * 62)}%, var(--mid))`;
 }
-const RCOLS = [
-  ["name", "Run", r => `${open(r.name)}<div class="sub">${esc(r.round)}</div>`, r => r.name],
-  ["model", "Model", r => `${fam(r)} <span class="sub">${esc(r.model)}</span>`, r => r.params_active],
-  ["macro", "Macro", r => f(r.res.macro, 4), r => r.res.macro, "num"],
-  ["expert", "Expert", r => f(r.res.expert, 4), r => r.res.expert, "num"],
-  ["B", "B", r => f(r.res.B, 4), r => r.res.B, "num"],
-  ["dB", "ΔB", r => dcell(r, "B"), r => r.delta ? r.delta.B : 9, "num"],
-  ["dm", "Δ macro", r => dcell(r, "macro"), r => r.delta ? r.delta.macro : 9, "num"],
-  ["de", "Δ expert", r => dcell(r, "expert"), r => r.delta ? r.delta.expert : 9, "num"],
-  ["cm", "Local CM macro / expert", r => r.delta && r.delta.cm ? `${cmx(r.delta.cm.macro)} / ${cmx(r.delta.cm.expert_macro)}` : "—", r => r.delta && r.delta.cm ? r.delta.cm.macro || 0 : 0, "num"],
-  ["better", "Cells better", r => r.delta ? `${r.delta.better}/16` : "—", r => r.delta ? r.delta.better : -1, "num"],
-  ["control", "Paired control", r => r.control ? open(r.control) : "—", r => r.control],
-  ["when", "Scored", r => when(r.res.t), r => r.res.t || 0, "num"],
-];
 const dcell = (r, k) => r.delta ? `<span class="${r.delta[k] < 0 ? "good" : r.delta[k] > 0 ? "worse" : ""}">${sg(r.delta[k])}</span>` : "—";
+const RCOLS = [
+  ["name", "Run", r => nameCell(r, false), r => r.title],
+  ["macro", "Golden macro", r => f(r.res.macro, 4), r => r.res.macro, "num"],
+  ["expert", "Expert", r => f(r.res.expert, 4), r => r.res.expert, "num"],
+  ["dm", "Δ macro vs control", r => dcell(r, "macro"), r => r.delta ? r.delta.macro : 9, "num"],
+  ["when", "Scored", r => when(r.res.t), r => r.res.t || 0, "num"],
+  ["model", "Model", r => `${fam(r)} <span class="sub">${esc(r.model)}</span>`, r => r.params_active, "", 1],
+  ["B", "B", r => f(r.res.B, 4), r => r.res.B, "num", 1],
+  ["dB", "ΔB", r => dcell(r, "B"), r => r.delta ? r.delta.B : 9, "num", 1],
+  ["de", "Δ expert", r => dcell(r, "expert"), r => r.delta ? r.delta.expert : 9, "num", 1],
+  ["cm", "Compute multiplier macro / expert", r => r.delta && r.delta.cm ? `${cmx(r.delta.cm.macro)} / ${cmx(r.delta.cm.expert_macro)}` : "—", r => r.delta && r.delta.cm ? r.delta.cm.macro || 0 : 0, "num", 1],
+  ["better", "Cells better", r => r.delta ? `${r.delta.better}/16` : "—", r => r.delta ? r.delta.better : -1, "num", 1],
+  ["control", "Paired control", r => r.control ? open(r.control) : "—", r => r.control, "", 1],
+];
 function vResults(el) {
-  const all = RUNS.filter(r => r.res && inTrack(r, S.rtrack) && matches(r));
-  const rows = sortRows(all, store.get("rsort", ["when", -1]), RCOLS);
-  const withd = all.filter(r => r.delta).sort((a, b) => (b.res.t || 0) - (a.res.t || 0));
-  const last = withd[0], best = withd.slice().sort((a, b) => a.delta.B - b.delta.B)[0];
-  const focus = BY[S.focus] && BY[S.focus].res ? BY[S.focus] : last || rows[0];
-  el.innerHTML = `<div class="lede"><h2>${last ? `Latest paired result: <b>${sg(last.delta.B)}</b> B for ${esc(last.v)} (${esc(last.round)}, ${esc(ago(last.res.t))})` : "No paired results yet"}</h2><p>Golden macro / expert / B per scored run, deltas against its paired control (data arms: the control arm at the same budget, seed and pool; model arms: the round's base; sweep S16: the dense run of the same shape). Negative = better. ${best ? `Best since Sep 21: ${sg(best.delta.B)} B, ${esc(best.name)}.` : ""} Click a name for the run, a row's cells button for its 16 cells.</p></div>
-    <div class="controls"><input type="search" id="q" placeholder="Filter results…" value="${esc(S.q)}" aria-label="Filter results">${chipsHtml("rtrack", TRACKS, S.rtrack)}</div>
+  const all = RUNS.filter(r => r.res && vis(r) && (!S.early || S.rtrack === "all" || r.track === S.rtrack) && matches(r));
+  const cols = shown(RCOLS), sk = store.get("rsort", ["when", -1]), rows = sortRows(all, sk, cols);
+  const last = all.filter(r => r.delta).sort((a, b) => (b.res.t || 0) - (a.res.t || 0))[0];
+  const focus = BY[S.focus] && BY[S.focus].res ? BY[S.focus] : null;
+  const lead = last ? `Latest: ${esc(last.title)} scored <b>${f(last.res.macro, 4)}</b>, ${sg(last.delta.macro)} vs ${esc(nm(last.control))}` : all.length ? `<b>${all.length}</b> scored ${all.length > 1 ? "runs" : "run"}, none paired yet` : "No scored runs yet";
+  el.innerHTML = `<div class="lede"><h2>${lead}</h2><p>Golden loss per scored run and its difference from the paired control (sweep MoE: the dense run of the same shape; data arms: the control mix at the same budget and seed; model arms: the round's base). Negative = better. Press “cells” for the 16 format × Elo cells.${S.early ? "" : " Earlier rounds' results are behind the switch at the top."}</p></div>
+    <div class="controls"><input type="search" id="q" placeholder="Filter results…" value="${esc(S.q)}" aria-label="Filter results">${S.early ? chipsHtml("rtrack", TRACKS, S.rtrack) : ""}${moreBtn()}</div>
     <div id="rfocus"></div>
-    ${table(rows, [["pick", "", r => `<button class="btn" data-focus="${esc(r.name)}" aria-pressed="${focus && focus.name === r.name}" style="padding:2px 8px">cells</button>`], ...RCOLS], store.get("rsort", ["when", -1]), r => focus && r.name === focus.name, "results")}`;
+    ${table(rows, [["pick", "", r => `<button class="btn" data-focus="${esc(r.name)}" aria-pressed="${focus && focus.name === r.name}" style="padding:2px 8px">cells</button>`], ...cols], sk, r => focus && r.name === focus.name, "results")}`;
   if (focus) cellsPanel($("#rfocus", el), focus);
 }
 function cellsPanel(box, r) {
@@ -491,8 +718,8 @@ function cellsPanel(box, r) {
   const span = d ? Math.max(0.004, ...Object.values(d.cells).map(Math.abs)) : 0;
   const grid = `<table class="heat"><thead><tr><th></th>${bands.map(b => `<th>${esc(b.replace(">=", "≥"))}</th>`).join("")}${d ? "<th>Δ format</th>" : ""}</tr></thead><tbody>${fmts.map(fm => `<tr><th>${fm}</th>${bands.map(b => { const k = fm + "/" + b, dv = d && d.cells[k]; return `<td style="${d ? diverge(dv, span) : ""}">${d ? sg(dv) : f(c[k], 4)}<small>${f(c[k], 4)}</small></td>`; }).join("")}${d ? `<td style="${diverge(d.formats[fm], span)}">${sg(d.formats[fm])}</td>` : ""}</tr>`).join("")}${d ? `<tr><th>Δ band</th>${bands.map(b => `<td style="${diverge(d.bands[b], span)}">${sg(d.bands[b])}</td>`).join("")}<td></td></tr>` : ""}</tbody></table>`;
   const pp = d && d.perply, bins = pp && pp.bins ? Object.keys(pp.bins) : [];
-  const cells = `<div class="card"><header><h3>${esc(r.name)}</h3><p class="note">${d ? `Δ vs ${esc(r.control)} (big number) over its own loss (small); blue = better, red = worse, scale ±${f(span, 4)}` : "No paired control scored: losses shown"}${bins.length ? "" : ". No per-ply scoring for this pair."}</p></header><div style="overflow-x:auto">${grid}</div></div>`;
-  box.innerHTML = bins.length ? `<div class="grid2">${cells}<div class="card"><header><h3>Per-ply CE vs control</h3><p class="note">Δ move CE by game ply (data-recipe-r7/perply); negative = better</p></header><div id="pp"></div></div></div>` : cells;
+  const cells = `<div class="card"><header><h3>${esc(r.title)}</h3><button class="btn" data-focus="">Close</button></header><p class="note">${d ? `Δ vs ${esc(nm(r.control))} (big number) over its own loss (small); blue = better, red = worse, scale ±${f(span, 4)}` : "No paired control scored: losses shown"}</p><div style="overflow-x:auto">${grid}</div></div>`;
+  box.innerHTML = bins.length ? `<div class="grid2">${cells}<div class="card"><h3>Per-ply loss vs control</h3><p class="note">Δ move CE by game ply; negative = better</p><div id="pp"></div></div></div>` : cells;
   if (bins.length) {
     const ser = [["bins", "all movers", "var(--s1)"], ["expert", "≥2400 movers", "var(--s2)"], ["rest", "rest", "var(--s3)"]].filter(([k]) => pp[k]).map(([k, n, col]) => ({ name: n, color: col, marker: true, pts: bins.map((b, i) => [i, pp[k][b]]) }));
     chart($("#pp", box), { series: ser, xfmt: i => bins[Math.round(i)] || "", hlines: [{ y: 0, label: "control" }], tipx: i => "ply " + (bins[Math.round(i)] || ""), tipfmt: v => sg(v), yfmt: v => sg(v, 3), h: 220 });
@@ -501,70 +728,72 @@ function cellsPanel(box, r) {
 
 /* ---------------------------------------------------------------- curves */
 const METRICS = [
-  ["ce", "Train CE", c => c.s.map((s, i) => [s, c.ce[i]])],
-  ["move", "Held-out move CE", c => c.val.map(v => [v[0], v[1]])],
+  ["ce", "Train loss", c => c.s.map((s, i) => [s, c.ce[i]])],
+  ["move", "Held-out loss", c => c.val.map(v => [v[0], v[1]])],
   ["e24", "Expert ≥2400", c => c.val.map(v => [v[0], v[2]])],
-  ["e26", "Expert ≥2600", c => c.val.map(v => [v[0], v[3]])],
   ["tce", "Time CE", c => c.s.map((s, i) => [s, c.tce[i]])],
-  ["wce", "WDL CE", c => c.s.map((s, i) => [s, c.wce[i]])],
-  ["lr", "LR (schedule)", c => c.lr],
+  ["wce", "Result CE", c => c.s.map((s, i) => [s, c.wce[i]])],
+  ["lr", "Learning rate", c => c.lr],
 ];
 function selectedPicker() {
   const groups = {};
-  RUNS.filter(r => CUR[r.name] && (CUR[r.name].s || []).length).forEach(r => (groups[r.round] = groups[r.round] || []).push(r));
-  const opts = Object.entries(groups).map(([g, rs]) => `<optgroup label="${esc(g)}">${rs.map(r => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join("")}</optgroup>`).join("");
-  return `<div class="selbar">${S.sel.map(x => `<span class="chip" style="--c:${SLOTS[x.slot]}">${esc(x.name)}<button data-unsel="${esc(x.name)}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("")}
+  RUNS.filter(r => vis(r) && CUR[r.name] && (CUR[r.name].s || []).length).forEach(r => (groups[r.round] = groups[r.round] || []).push(r));
+  const opts = Object.entries(groups).map(([g, rs]) => `<optgroup label="${esc(g)}">${rs.map(r => `<option value="${esc(r.name)}">${esc(r.title)}</option>`).join("")}</optgroup>`).join("");
+  return `<div class="selbar">${selv().map(x => `<span class="chip" style="--c:${SLOTS[x.slot]}" title="${esc(x.name)}">${esc(nm(x.name))}<button data-unsel="${esc(x.name)}" aria-label="Remove ${esc(nm(x.name))}">×</button></span>`).join("")}
     <select id="addrun" aria-label="Add a run"><option value="">+ add run${S.sel.length >= 8 ? " (8 max)" : ""}</option>${opts}</select>
     <button class="btn" data-preset="running">Training now</button><button class="btn" data-preset="clear">Clear</button></div>`;
 }
 const xOf = s => S.x === "tok" ? s * TOK : s;
 const xLabel = () => S.x === "tok" ? "tokens seen (B)" : "optimizer step";
+const tipX = v => S.x === "tok" ? f(v, 2) + "B tokens" : "step " + Math.round(v);
 function vCurves(el) {
-  const m = METRICS.find(x => x[0] === S.metric) || METRICS[0];
-  const ser = S.sel.map(x => ({ name: x.name, short: BY[x.name] ? BY[x.name].v : x.name, color: SLOTS[x.slot], marker: ["move", "e24", "e26"].includes(m[0]), pts: CUR[x.name] ? m[2](CUR[x.name]).map(p => [xOf(p[0]), p[1]]) : [] }));
-  const al = S.sel.flatMap(x => (BY[x.name] && BY[x.name].alerts || []).map(a => ({ ...a, run: x.name })));
-  const allAct = RUNS.filter(r => active(r) && (r.alerts || []).length && !S.sel.some(x => x.name === r.name)).flatMap(r => r.alerts.map(a => ({ ...a, run: r.name })));
-  el.innerHTML = `<div class="lede"><h2>Overlay up to 8 runs</h2><p>Train CE is logged every 25 steps (window mean); the y-axis starts after the first 6% of the x-range so warm-up does not flatten the rest. Held-out CE exists only where the trainer evaluated (the current recipe evaluates once, at the end). LR is each run's frozen schedule, a multiplier on the base rate.</p></div>
+  const m = METRICS.find(x => x[0] === S.metric) || METRICS[0], sel = selv();
+  const ser = sel.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], marker: ["move", "e24"].includes(m[0]), pts: CUR[x.name] ? m[2](CUR[x.name]).map(p => [xOf(p[0]), p[1]]) : [] }));
+  const al = alertList(RUNS.filter(r => vis(r) && (active(r) || sel.some(x => x.name === r.name)) && (r.alerts || []).length));
+  el.innerHTML = `<div class="lede"><h2>${sel.length ? `Training curves of <b>${sel.length}</b> ${sel.length > 1 ? "runs" : "run"}` : "Pick runs to compare"}</h2><p>Train loss is logged every 25 steps; the y-axis skips the first 6% so warm-up does not flatten the rest. Held-out loss exists only where the trainer evaluated (the current recipe evaluates once, at the end).</p></div>
     ${selectedPicker()}
     <div class="controls">${segHtml("metric", METRICS.map(x => [x[0], x[1]]), S.metric)}${segHtml("x", [["tok", "Tokens"], ["step", "Step"]], S.x)}</div>
     <div class="card"><div id="curve"></div></div>
-    <div class="sect"><header><h3>Alerts</h3><p>NaN, divergence (train CE > 0.15 above its low), spikes (> 0.1 over the 8-row median), stalls (no train row in 30 min while running), starvation, data-bound</p></header>
-    ${al.length || allAct.length ? `<ul class="alerts">${[...al, ...allAct].map(a => `<li><span class="sev" style="--c:${SEV[a.kind] || "var(--muted)"}">${esc(a.kind)}</span><span>${open(a.run)} ${esc(a.text)}</span></li>`).join("")}</ul>` : `<p class="empty">No alerts on the selected or active runs.</p>`}</div>`;
-  charts(el, [["curve", { series: ser, xlabel: xLabel(), ytrim: ["ce", "tce", "wce"].includes(m[0]) ? 0.06 : 0, empty: S.sel.length ? `No ${m[1]} points for the selected runs yet.` : "Pick runs above.", tipx: v => S.x === "tok" ? f(v, 2) + "B tokens" : "step " + Math.round(v), tipfmt: v => f(v, 4), h: 320 }]]);
+    ${al ? `<div class="sect"><header><h3>Alerts</h3><p>NaN, divergence, loss spikes, stalls, expert starvation, data-bound</p></header>${al}</div>` : ""}`;
+  charts(el, [["curve", { series: ser, xlabel: xLabel(), ytrim: ["ce", "tce", "wce"].includes(m[0]) ? 0.06 : 0, empty: sel.length ? `No ${m[1].toLowerCase()} points for the selected runs yet.` : "Pick runs above.", tipx: tipX, tipfmt: v => f(v, 4), h: 320 }]]);
 }
 
 /* ---------------------------------------------------------------- moe */
-const HM = [["starved", "Starved share", v => pc(v, 1)], ["imb", "Max imbalance", v => f(v, 2)], ["minload", "Min load", v => f(v, 3)], ["bias", "Bias range", v => f(v, 3)], ["margin", "Router margin", v => f(v, 4)]];
+const HM = [["starved", "Starved experts", v => pc(v, 1)], ["imb", "Max imbalance", v => f(v, 2)], ["minload", "Min load", v => f(v, 3)], ["bias", "Bias range", v => f(v, 3)], ["margin", "Router margin", v => f(v, 4)]];
 function vMoe(el) {
-  const moe = RUNS.filter(r => r.health && r.status !== "not run");
+  const moe = RUNS.filter(r => r.health && r.status !== "not run" && vis(r));
+  const starvedNow = r => Math.max(...["even", "odd"].map(p => ((r.health.now || {})[p] || {}).starved || 0));
   const flagged = moe.filter(r => r.health.reached && (r.alerts || []).some(a => a.kind === "starved"));
-  const hv = (h, k, par, fmt) => h && h[k] && h[k][par] ? fmt(h[k][par].starved) : "—";
-  const cols = [
-    ["name", "Run", r => `${open(r.name)}<div class="sub">${esc(r.round)}</div>`, r => r.name],
+  const hv = (h, k, par) => h && h[k] && h[k][par] ? pc(h[k][par].starved) : "—";
+  const cols = shown([
+    ["name", "Run", r => nameCell(r, false), r => r.title],
     ["status", "Status", r => pill(r.status), r => RANK[r.status]],
-    ["design", "Experts", r => `${r.experts} / top-${r.topk}`, r => r.experts, "num"],
-    ["s5e", "Starved @500 even", r => hv(r.health, "at500", "even", v => pc(v)), r => ((r.health.at500 || {}).even || {}).starved || 0, "num"],
-    ["s5o", "@500 odd", r => hv(r.health, "at500", "odd", v => pc(v)), r => ((r.health.at500 || {}).odd || {}).starved || 0, "num"],
-    ["sne", "Now even", r => hv(r.health, "now", "even", v => pc(v)), r => ((r.health.now || {}).even || {}).starved || 0, "num"],
-    ["sno", "Now odd", r => hv(r.health, "now", "odd", v => pc(v)), r => ((r.health.now || {}).odd || {}).starved || 0, "num"],
+    ["now", "Starved now", r => pc(starvedNow(r)), starvedNow, "num"],
     ["peak", "Peak starved", r => pc(r.health.peak_starved), r => r.health.peak_starved || 0, "num"],
-    ["imb", "Peak imbalance", r => f(r.health.peak_imb, 2), r => r.health.peak_imb || 0, "num"],
-    ["ml", "Min load now", r => f(((r.health.now || {}).even || (r.health.now || {}).odd || {}).minload, 3), r => 0, "num"],
-    ["flag", "Bar", r => !r.health.reached ? `<span class="muted">step 500 not reached</span>` : (r.alerts || []).some(a => a.kind === "starved") ? `<span class="warnc">${esc(r.alerts.filter(a => a.kind === "starved").map(a => a.text).join("; "))}</span>` : `<span class="good">clear</span>`, r => (r.alerts || []).some(a => a.kind === "starved") ? 0 : 1],
-  ];
-  const selMoe = S.sel.filter(x => BY[x.name] && BY[x.name].health && CUR[x.name] && CUR[x.name].moe);
-  const focus = BY[S.mfocus] && CUR[S.mfocus] && CUR[S.mfocus].layers ? S.mfocus : (selMoe[0] || {}).name || (moe.find(r => r.status === "running") || moe[0] || {}).name;
-  el.innerHTML = `<div class="lede"><h2><b>${flagged.length}</b> of ${moe.length} MoE runs trip the step-500 bar</h2><p>Starved = experts under 0.1 × the mean load, as a share of all routed experts. The router's Adam steps on odd steps only, so every number is shown for even- and odd-step log rows separately. Sweep bar: > 5% starved or rising after step 500.</p></div>
-    <div class="sect"><header><h3>Over training, selected runs</h3>${segHtml("parity", [["all", "All rows"], ["even", "Even steps"], ["odd", "Odd steps"]], S.parity)}</header>
-    ${selectedPicker()}<div class="grid3">${HM.map(([k, t]) => `<div class="card"><h3>${t}</h3><div id="m-${k}"></div></div>`).join("")}</div></div>
-    <div class="sect"><header><h3>Per layer: ${focus ? esc(focus) : "no MoE run"}</h3><div class="controls">${segHtml("heat", [["imb", "Imbalance (max / mean)"], ["starved", "Starved experts"]], S.heat)}<select id="mfocus" aria-label="Run for the per-layer view">${moe.filter(r => CUR[r.name] && CUR[r.name].layers).map(r => `<option ${r.name === focus ? "selected" : ""}>${esc(r.name)}</option>`).join("")}</select></div></header><div class="card" id="layers"></div></div>
-    <div class="sect"><header><h3>All MoE runs</h3><p>Active first; sort by any column</p></header>${table(sortRows(moe, store.get("msort", ["status", 1]), cols), cols, store.get("msort", ["status", 1]), r => r.name === focus, "moe")}</div>`;
+    ["flag", "Step-500 bar", r => !r.health.reached ? `<span class="muted">not reached</span>` : (r.alerts || []).some(a => a.kind === "starved") ? `<span class="warnc">${esc(r.alerts.filter(a => a.kind === "starved").map(a => a.text).join("; "))}</span>` : `<span class="good">clear</span>`, r => (r.alerts || []).some(a => a.kind === "starved") ? 0 : 1],
+    ["design", "Experts", r => `${r.experts} / top-${r.topk}`, r => r.experts, "num", 1],
+    ["s5e", "@500 even", r => hv(r.health, "at500", "even"), r => ((r.health.at500 || {}).even || {}).starved || 0, "num", 1],
+    ["s5o", "@500 odd", r => hv(r.health, "at500", "odd"), r => ((r.health.at500 || {}).odd || {}).starved || 0, "num", 1],
+    ["sne", "Now even", r => hv(r.health, "now", "even"), r => ((r.health.now || {}).even || {}).starved || 0, "num", 1],
+    ["sno", "Now odd", r => hv(r.health, "now", "odd"), r => ((r.health.now || {}).odd || {}).starved || 0, "num", 1],
+    ["imb", "Peak imbalance", r => f(r.health.peak_imb, 2), r => r.health.peak_imb || 0, "num", 1],
+  ]);
+  const selMoe = selv().filter(x => BY[x.name].health && CUR[x.name] && CUR[x.name].moe);
+  const focus = BY[S.mfocus] && vis(BY[S.mfocus]) && CUR[S.mfocus] && CUR[S.mfocus].layers ? S.mfocus : (selMoe[0] || {}).name || (moe.find(r => r.status === "running") || moe[0] || {}).name;
+  const sk = store.get("msort", ["status", 1]);
+  const box = k => `<div class="card"><h3>${HM.find(h => h[0] === k)[1]}</h3><div id="m-${k}"></div></div>`;
+  el.innerHTML = `<div class="lede"><h2>${moe.length ? `<b>${flagged.length}</b> of ${moe.length} MoE runs trip the starvation bar` : "No MoE runs with router logs"}</h2><p>A starved expert gets under a tenth of the mean load. The bar: more than 5% of experts starved, or starvation rising, after step 500.</p></div>
+    <div class="sect"><header><h3>Over training</h3>${segHtml("parity", [["all", "All steps"], ["even", "Even"], ["odd", "Odd"]], S.parity)}</header>
+    ${selectedPicker()}<div class="grid2">${box("starved")}${box("imb")}</div>
+    ${details("moemore", `More router metrics <span>minimum load, bias range, router margin; the router steps on odd steps only, so even and odd rows differ</span>`, `<div class="grid3">${box("minload")}${box("bias")}${box("margin")}</div>`)}</div>
+    ${details("layers", `Per layer: ${focus ? esc(nm(focus)) : "no MoE run"}`, `<div class="controls">${segHtml("heat", [["imb", "Imbalance (max / mean)"], ["starved", "Starved experts"]], S.heat)}<select id="mfocus" aria-label="Run for the per-layer view">${moe.filter(r => CUR[r.name] && CUR[r.name].layers).map(r => `<option value="${esc(r.name)}" ${r.name === focus ? "selected" : ""}>${esc(r.title)}</option>`).join("")}</select></div><div class="card" id="layers"></div>`)}
+    <div class="sect"><header><h3>All MoE runs</h3>${moreBtn()}</header>${table(sortRows(moe, sk, cols), cols, sk, r => r.name === focus, "moe")}</div>`;
   const par = s => S.parity === "all" || (s % 2 === 0) === (S.parity === "even");
   charts(el, HM.map(([k, t, fm]) => ["m-" + k, {
-    series: selMoe.map(x => ({ name: x.name, short: BY[x.name].v, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => par(s) ? [xOf(s), CUR[x.name].moe[k][i]] : [null, null]).filter(p => p[0] != null) })),
-    empty: "Select MoE runs to compare.", yfmt: k === "starved" ? v => pc(v, 0) : tick, tipfmt: fm, tipx: v => S.x === "tok" ? f(v, 2) + "B tokens" : "step " + Math.round(v), h: 200, direct: false, xlabel: xLabel(),
+    series: selMoe.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => par(s) ? [xOf(s), CUR[x.name].moe[k][i]] : [null, null]).filter(p => p[0] != null) })),
+    empty: "Select MoE runs to compare.", yfmt: k === "starved" ? v => pc(v, 0) : tick, tipfmt: fm, tipx: tipX, h: 200, direct: false, xlabel: xLabel(),
   }]));
-  layersPanel($("#layers", el), focus);
+  const lb = $("#layers", el); if (lb && lb.closest("details").open) layersPanel(lb, focus);
 }
 function layersPanel(box, n) {
   const L = n && CUR[n] && CUR[n].layers;
@@ -580,62 +809,61 @@ function layersPanel(box, n) {
   }
   [0, Math.floor(L.s.length / 2), L.s.length - 1].forEach(i => g += `<text class="tk" x="${60 + i * cw + cw / 2}" y="${H - 8}" text-anchor="middle">${L.s[i]}</text>`);
   g += `</svg>`;
-  box.innerHTML = `<div class="legend" style="margin-bottom:6px"><span>rows = MoE layers (1 = first MoE layer), columns = logged steps; darker = ${key === "imb" ? `more imbalanced (${f(lo, 1)}× to ${f(hi, 2)}× and above)` : `more starved experts (0 to ${hi} and above)`}; the scale tops out at the 95th percentile; hover a cell for its value</span></div><div class="chart">${g}</div>`;
+  box.innerHTML = `<div class="legend" style="margin-bottom:6px"><span>rows = MoE layers, columns = logged steps; darker = ${key === "imb" ? `more imbalanced (${f(lo, 1)}× to ${f(hi, 2)}× and above)` : `more starved experts (0 to ${hi} and above)`}; hover a cell for its value</span></div><div class="chart">${g}</div>`;
 }
 
 /* ---------------------------------------------------------------- speed */
 function vSpeed(el) {
-  const rows = RUNS.filter(r => r.eff && ok(r.eff.tps) && r.status !== "not run");
-  const run = rows.filter(r => r.status === "running");
-  const medMfu = run.map(r => r.eff.mfu).filter(ok).sort((a, b) => a - b)[Math.floor(run.filter(r => ok(r.eff.mfu)).length / 2)];
+  const rows = RUNS.filter(r => vis(r) && r.eff && ok(r.eff.tps) && r.status !== "not run");
+  const run = rows.filter(r => r.status === "running"), mf = run.map(r => r.eff.mfu).filter(ok).sort((a, b) => a - b), medMfu = mf[Math.floor(mf.length / 2)];
   const bound = rows.filter(r => active(r) && r.eff.sw > 0.1);
-  const cols = [
-    ["name", "Run", r => `${open(r.name)}<div class="sub">${esc(r.round)}</div>`, r => r.name],
+  const cols = shown([
+    ["name", "Run", r => nameCell(r, false), r => r.title],
     ["status", "Status", r => pill(r.status), r => RANK[r.status]],
     ["gpu", "GPUs", r => `${r.world || "?"} × ${esc(r.gpu || "?")}`, r => r.gpu],
     ["tps", "Tokens / s", r => big(r.eff.tps), r => r.eff.tps || 0, "num"],
     ["mfu", "MFU", r => pc(r.eff.mfu), r => r.eff.mfu || 0, "num"],
     ["mem", "Peak memory", r => ok(r.eff.mem) ? f(r.eff.mem, 1) + " GB" : "—", r => r.eff.mem || 0, "num"],
-    ["sw", "sampler_wait med / p90 / last", r => `<span class="${r.eff.sw > 0.1 ? "worse" : ""}">${f(r.eff.sw, 3)}</span> / ${f(r.eff.sw90, 3)} / ${f(r.eff.swlast, 3)}`, r => r.eff.sw || 0, "num"],
-    ["stall", "Checkpoint stall", r => r.eff.ckpt_n ? `${f(r.eff.stall, 1)} s <span class="sub">${pc(r.eff.stall_frac, 2)} of ${r.eff.ckpt_n}</span>` : "—", r => r.eff.stall_frac || 0, "num"],
-    ["smax", "Worst stall", r => ok(r.eff.stall_max) ? f(r.eff.stall_max, 1) + " s" : "—", r => r.eff.stall_max || 0, "num"],
-    ["dur", "Save to durable", r => ok(r.eff.durable) ? f(r.eff.durable, 1) + " s" : "—", r => r.eff.durable || 0, "num"],
-    ["restarts", "Restarts", r => r.restarts ? `<span class="warnc">${r.restarts}</span>` : "0", r => r.restarts, "num"],
-  ];
-  const sel = S.sel.filter(x => CUR[x.name] && (CUR[x.name].s || []).length);
-  const mk = (k, tr) => sel.map(x => ({ name: x.name, short: BY[x.name].v, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => [xOf(s), tr(CUR[x.name][k][i], BY[x.name])]) }));
-  const pre = CP.preempted || {};
-  el.innerHTML = `<div class="lede"><h2>${run.length ? `Training runs sit at a median <b>${pc(medMfu)}</b> MFU` : "No run is training"}${bound.length ? `; <b>${bound.length}</b> active ${bound.length > 1 ? "runs are" : "run is"} data-bound` : ""}</h2><p>Steady-state medians (after the first quarter of steps). sampler_wait = share of step time spent waiting on the data sampler (> 0.1 = data-bound). Checkpoint stall = time the training loop blocks per save; saving to durable storage runs in the background. Preempted or requeued incarnations since Sep 21: ${Object.entries(pre).map(([t, n]) => `${esc(t)} ${n}`).join(", ") || "none"}.</p></div>
+    ["sw", "Data wait med / p90 / last", r => `<span class="${r.eff.sw > 0.1 ? "worse" : ""}">${f(r.eff.sw, 3)}</span> / ${f(r.eff.sw90, 3)} / ${f(r.eff.swlast, 3)}`, r => r.eff.sw || 0, "num", 1],
+    ["stall", "Checkpoint stall", r => r.eff.ckpt_n ? `${f(r.eff.stall, 1)} s <span class="sub">${pc(r.eff.stall_frac, 2)} of ${r.eff.ckpt_n}</span>` : "—", r => r.eff.stall_frac || 0, "num", 1],
+    ["smax", "Worst stall", r => ok(r.eff.stall_max) ? f(r.eff.stall_max, 1) + " s" : "—", r => r.eff.stall_max || 0, "num", 1],
+    ["dur", "Save to durable", r => ok(r.eff.durable) ? f(r.eff.durable, 1) + " s" : "—", r => r.eff.durable || 0, "num", 1],
+    ["restarts", "Restarts", r => r.restarts ? `<span class="warnc">${r.restarts}</span>` : "0", r => r.restarts, "num", 1],
+  ]);
+  const sel = selv().filter(x => CUR[x.name] && (CUR[x.name].s || []).length), sk = store.get("ssort", ["status", 1]);
+  const mk = (k, tr) => sel.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => [xOf(s), tr(CUR[x.name][k][i], BY[x.name])]) }));
+  el.innerHTML = `<div class="lede"><h2>${run.length ? `Training runs sit at a median <b>${pc(medMfu)}</b> MFU` : "No run is training"}${bound.length ? `; <b>${bound.length}</b> ${bound.length > 1 ? "runs wait" : "run waits"} on data` : ""}</h2><p>Steady-state medians after the first quarter of steps. Data-bound = more than a tenth of each step spent waiting for the data sampler.</p></div>
     ${selectedPicker()}
-    <div class="grid3"><div class="card"><h3>Tokens / s</h3><div id="sp-tps"></div></div><div class="card"><h3>MFU</h3><div id="sp-mfu"></div></div><div class="card"><h3>sampler_wait</h3><div id="sp-sw"></div></div></div>
-    <div class="sect"><header><h3>All runs</h3><p>Active first; sort by any column</p></header>${table(sortRows(rows, store.get("ssort", ["status", 1]), cols), cols, store.get("ssort", ["status", 1]), r => S.sel.some(x => x.name === r.name), "speed")}</div>`;
-  const tipx = v => S.x === "tok" ? f(v, 2) + "B tokens" : "step " + Math.round(v), xlabel = xLabel();
+    <div class="grid2"><div class="card"><h3>Tokens / s</h3><div id="sp-tps"></div></div><div class="card"><h3>MFU</h3><div id="sp-mfu"></div></div></div>
+    ${details("spmore", `Data wait <span>share of step time waiting for the sampler, per selected run</span>`, `<div class="card"><div id="sp-sw"></div></div>`)}
+    <div class="sect"><header><h3>All runs</h3>${moreBtn()}</header>${table(sortRows(rows, sk, cols), cols, sk, r => S.sel.some(x => x.name === r.name), "speed")}</div>`;
+  const xlabel = xLabel();
   charts(el, [
-    ["sp-tps", { xlabel, series: mk("tps", v => v), yfmt: tickN, tipfmt: v => big(v) + " tok/s", tipx, h: 200, direct: false, empty: "Select runs to compare." }],
-    ["sp-mfu", { xlabel, series: mk("fps", (v, r) => ok(v) && r.peak ? v / r.peak : null), yfmt: v => pc(v, 0), tipfmt: v => pc(v), tipx, h: 200, direct: false, empty: "Select runs to compare." }],
-    ["sp-sw", { xlabel, series: mk("sw", v => v), hlines: [{ y: 0.1, label: "data-bound" }], tipfmt: v => f(v, 3), tipx, h: 200, direct: false, empty: "Select runs to compare." }],
+    ["sp-tps", { xlabel, series: mk("tps", v => v), yfmt: tickN, tipfmt: v => big(v) + " tok/s", tipx: tipX, h: 200, direct: false, empty: "Select runs to compare." }],
+    ["sp-mfu", { xlabel, series: mk("fps", (v, r) => ok(v) && r.peak ? v / r.peak : null), yfmt: v => pc(v, 0), tipfmt: v => pc(v), tipx: tipX, h: 200, direct: false, empty: "Select runs to compare." }],
+    ["sp-sw", { xlabel, series: mk("sw", v => v), hlines: [{ y: 0.1, label: "data-bound" }], tipfmt: v => f(v, 3), tipx: tipX, h: 200, direct: false, empty: "Select runs to compare." }],
   ]);
 }
 
 /* ---------------------------------------------------------------- data */
 const MIXF = ["ultrabullet", "bullet", "blitz", "rapid", "classical", "correspondence", "other", "engine"];
 function vData(el) {
-  const rows = RUNS.filter(r => r.replay).sort((a, b) => RANK[a.status] - RANK[b.status] || (b.t_start || 0) - (a.t_start || 0));
+  const rows = RUNS.filter(r => r.replay && vis(r)).sort((a, b) => RANK[a.status] - RANK[b.status] || (b.t_start || 0) - (a.t_start || 0));
   const focus = BY[S.dfocus] && BY[S.dfocus].replay ? BY[S.dfocus] : rows[0];
-  const cols = [
+  const cols = shown([
     ["pick", "", r => `<button class="btn" data-dfocus="${esc(r.name)}" aria-pressed="${focus && focus.name === r.name}" style="padding:2px 8px">mix</button>`],
-    ["name", "Run", r => `${open(r.name)}<div class="sub">${esc(r.round)}</div>`, r => r.name],
-    ["status", "Status", r => pill(r.status)],
-    ["recipe", "Recipe", r => `<span class="mono">${esc(r.recipe)}</span>`, r => r.recipe],
+    ["name", "Run", r => nameCell(r, false), r => r.title],
     ["rep", "Repeated rows", r => pc(r.replay.repeats / r.replay.seen, 2), r => r.replay.repeats / r.replay.seen, "num"],
     ["maxp", "Max passes", r => f(r.replay.max_passes, 2), r => r.replay.max_passes, "num"],
-    ["wrap", "Buckets past 1 pass", r => r.replay.wrapped_buckets ?? "—", r => r.replay.wrapped_buckets, "num"],
-    ["cov", "Replay covers", r => r.replay.repeats_observed_only ? `<span class="warnc">prefix</span>` : "whole run", r => r.replay.repeats_observed_only ? 0 : 1],
     ["dB", "ΔB", r => dcell(r, "B"), r => r.delta ? r.delta.B : 9, "num"],
-  ];
-  el.innerHTML = `<div class="lede"><h2>${rows.length ? `<b>${rows.length}</b> data runs have a sampler replay` : "No sampler replays yet"}</h2><p>The data track's replay (replay.py) re-draws each run's rows: realized repeats and passes per format × Elo band (stronger player), against the recipe table's plan at the 75B-token big-run scale. Passes are per unique game in the pool the run samples from.</p></div>
+    ["status", "Status", r => pill(r.status), null, "", 1],
+    ["recipe", "Recipe", r => esc(r.recipe_words), r => r.recipe_words, "", 1],
+    ["wrap", "Buckets past 1 pass", r => r.replay.wrapped_buckets ?? "—", r => r.replay.wrapped_buckets, "num", 1],
+    ["cov", "Replay covers", r => r.replay.repeats_observed_only ? `<span class="warnc">prefix</span>` : "whole run", r => r.replay.repeats_observed_only ? 0 : 1, "", 1],
+  ]);
+  el.innerHTML = `<div class="lede"><h2>${rows.length ? `<b>${rows.length}</b> data runs have a sampler replay` : "No sampler replays yet"}</h2><p>The data track's replay re-draws each run's rows: how often games repeat, by format and Elo band of the stronger player, against the recipe's plan.</p></div>
     <div id="mix" class="sect"></div>
-    ${table(rows, cols, null, r => focus && r.name === focus.name, "data")}`;
+    <div class="sect"><header><h3>All replays</h3>${moreBtn()}</header>${table(rows, cols, null, r => focus && r.name === focus.name, "data")}</div>`;
   if (focus) mixPanel($("#mix", el), focus);
 }
 function mixPanel(box, r) {
@@ -647,113 +875,40 @@ function mixPanel(box, r) {
   const share = (src, fm) => bands.reduce((a, b) => a + ((src[fm + "/" + b] || {}).share || 0), 0);
   const bshare = (src, b) => MIXF.reduce((a, fm) => a + ((src[fm + "/" + b] || {}).share || 0), 0);
   const bar = (label, a, p) => `<div style="display:grid;grid-template-columns:110px 1fr 118px;gap:8px;align-items:center;font-size:12.5px"><span>${esc(label)}</span><span style="display:grid;gap:2px"><span class="meter" style="height:7px"><i style="width:${100 * a}%;background:var(--s1)"></i></span><span class="meter" style="height:7px"><i style="width:${100 * p}%;background:var(--s2)"></i></span></span><span class="mono">${pc(a, 1)} / ${pc(p, 1)}</span></div>`;
-  const hasPlan = Object.keys(plan).length;
   const pm = r.plan_mix || {};
-  box.innerHTML = `<div class="card"><h3>Passes by format × Elo: ${esc(r.name)}</h3><p class="note">Big = realized passes (replay); small = the recipe plan's passes, and the share of the cell's rows that repeat a game. ${r.plan_mix ? `Plan: table ${esc(pm.table)}${ok(pm.otb_share) ? `; OTB is ${pc(pm.otb_share, 1)} of planned tokens, spread over its games' formats` : ""}.` : "No recipe table (a rule-based mix)."}</p><div style="overflow-x:auto">${grid}</div></div>
-    <div class="card"><h3>Token share: realized vs plan</h3><div class="legend"><span><i style="--c:var(--s1)"></i>realized (replay)</span><span><i style="--c:var(--s2)"></i>plan${hasPlan ? "" : " (none)"}</span></div>
+  box.innerHTML = `<div class="card"><h3>Passes by format × Elo: ${esc(r.title)}</h3><p class="note">Big = realized passes; small = the recipe's planned passes, and the share of the cell's rows that repeat a game.</p><div style="overflow-x:auto">${grid}</div></div>
+    ${details("mixshare", `Token share: realized vs plan`, `<div class="card"><div class="legend"><span><i style="--c:var(--s1)"></i>realized</span><span><i style="--c:var(--s2)"></i>plan${Object.keys(plan).length ? "" : " (none)"}</span></div>
     <div class="grid2"><div style="display:grid;gap:6px;align-content:start"><h3>By format</h3>${fmts.map(fm => bar(fm, share(rp, fm), fm === "engine" ? pm.engine_share || 0 : share(plan, fm))).join("")}</div>
-    <div style="display:grid;gap:6px;align-content:start"><h3>By Elo band (all formats)</h3>${bands.map(b => bar(b.replace(">=", "≥"), bshare(rp, b), bshare(plan, b))).join("")}</div></div></div>`;
-}
-
-/* ---------------------------------------------------------------- sweep */
-const BUDGETS = ["1e17", "3e17", "1e18"];
-function quad(pts) {
-  const n = pts.length; if (n < 3) return null;
-  let s = [0, 0, 0, 0, 0], t = [0, 0, 0];
-  for (const [x, y] of pts) { const l = Math.log10(x); s[0]++; s[1] += l; s[2] += l * l; s[3] += l ** 3; s[4] += l ** 4; t[0] += y; t[1] += l * y; t[2] += l * l * y; }
-  const M = [[s[4], s[3], s[2]], [s[3], s[2], s[1]], [s[2], s[1], s[0]]], det = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-  const d = det(M); if (Math.abs(d) < 1e-12) return null;
-  const col = (i, v) => M.map((r, j) => r.map((x, k) => k === i ? v[j] : x));
-  const tt = [t[2], t[1], t[0]], a = det(col(0, tt)) / d, b = det(col(1, tt)) / d, c = det(col(2, tt)) / d;
-  return l => a * l * l + b * l + c;
-}
-const lawLoss = (p, n, dd) => p.E + p.A * Math.pow(n / 1e7, -p.alpha) + p.B * Math.pow(dd / 1e8, -p.beta);
-function vSweep(el) {
-  const pts = SW.points || [], k = S.sm, M = SW[k] || {}, laws = M.laws || {};
-  const scored = pts.filter(p => ok(p[k]));
-  const checks = RUNS.filter(r => r.track === "check");
-  const cm = M.cm, boot = cm && cm.boot;
-  const lead = !pts.length ? "The sweep is not frozen yet" : cm ? `S16 over dense at a node-week: <b>${cmx(cm.node_week)}</b>${boot ? ` (68%: ${cmx(boot.p16)}–${cmx(boot.p84)})` : ""}` : `<b>${scored.length}</b> of ${pts.length} sweep points scored`;
-  el.innerHTML = `<div class="lede" style="order:-2"><h2>${lead}</h2><p>IsoFLOP sweep of S16 (MoE, 256 experts, top-16, shared expert 1/4) and dense at 1e17 / 3e17 / 1e18, one GPU type per budget. N = the law's size, 12 × layers × width²; D = tokens; C = N × D. Filled = scored golden ${k === "macro" ? "macro" : "expert macro"}; rings along the bottom = runs not scored yet. ${pts.length ? "" : "launch.sh freezes sweep-{1e17,3e17,1e18}-RECIPE once the data recipe is decided; the points appear here as soon as the plans exist."}</p></div>
-    <div class="controls">${segHtml("sm", [["macro", "Golden macro"], ["expert", "Expert macro"]], k)}</div>
-    <div class="grid3">${BUDGETS.map(b => `<div class="card"><h3>${b}</h3><p class="note">${iso(b)}</p><div id="iso-${b}"></div></div>`).join("")}</div>
-    <div class="grid2">
-      <div class="card"><h3>Best loss per budget</h3><p class="note">Interior parabola minima (filled), the best measured size where the parabola has no interior minimum (rings), and the fitted law's compute-optimal loss (lines); dashed = the frozen isoflop-v1 dense law (old bundle) for orientation.</p><div id="sw-lstar"></div></div>
-      <div class="card"><h3>Compute-optimal size N*(C)</h3><p class="note">From each family's L(N, D) fit; points = interior parabola minima.</p><div id="sw-nstar"></div></div>
-      <div class="card"><h3>S16 vs dense compute multiplier</h3><p class="note">Dense compute needed to match S16's compute-optimal loss, from the two fits (dmix_fit.multiplier); bar = bootstrap 16–84% (thin: 2.5–97.5%) at a node-week (${sci(+(SW.node_week_c || 0).toPrecision(2))} N·D ≈ 5e20 training FLOPs).</p><div id="sw-cm"></div></div>
-      <div class="card"><h3>L(N, D) fit and residuals</h3>${lawTable(laws)}<div id="sw-res"></div></div>
-    </div>
-    <div class="sect" id="checks" style="order:${pts.length ? 9 : -1}"><header><h3>Pre-launch checks</h3><p>Largest 1e18 size per family, two legs (128 then 256 steps, a resume between), then scored</p></header>
-    ${table(checks, [["name", "Run", r => `${open(r.name)}<div class="sub">${esc(r.round)}</div>`], ["status", "Status", r => pill(r.status)], ["model", "Model", r => `${fam(r)} <span class="sub">${esc(r.model)}</span>`], ["step", "Step", r => r.step ? `${r.step} / ${(r.stop_after || []).slice(-1)[0] || r.steps}` : "—", null, "num"], ["tps", "Tokens / s", r => big((r.eff || {}).tps), null, "num"], ["mem", "Peak memory", r => ok((r.eff || {}).mem) ? f(r.eff.mem, 1) + " GB" : "—", null, "num"], ["restarts", "Restarts", r => r.restarts, null, "num"], ["jobs", "Queue", r => esc((r.jobs || []).map(j => `${j.part || j.cluster} ${j.state.toLowerCase()}${j.reason && j.reason !== "None" ? " (" + j.reason + ")" : ""}`).join(", ") || "—")], ["al", "Alerts", r => esc((r.alerts || []).map(a => a.text).join("; ") || "—")]])}</div>`;
-  const famS = [["S16", "var(--s1)"], ["dense", "var(--s2)"]];
-  const specs = BUDGETS.map(b => {
-    const bp = pts.filter(p => p.budget === b), ser = [], C = +b;
-    for (const [fm, col] of famS) {
-      const sc = bp.filter(p => p.family === fm && ok(p[k])).map(p => [p.n, p[k], `<b>${esc(fm)} ${esc(p.shape)}</b> ${f(p[k], 4)}<br>N ${tickN(p.n)} · D ${big(p.d)} · ${esc(p.status)}`]);
-      ser.push({ name: fm, color: col, line: false, pts: sc });
-      const q = quad(sc);
-      if (q) { const lo = Math.log10(Math.min(...sc.map(p => p[0]))), hi = Math.log10(Math.max(...sc.map(p => p[0]))); ser.push({ name: fm + " parabola", nolegend: true, nohover: true, color: col, width: 1.5, opacity: .55, pts: Array.from({ length: 30 }, (_, i) => { const l = lo - .08 + (hi - lo + .16) * i / 29; return [Math.pow(10, l), q(l)]; }) }); }
-      if (laws[fm]) ser.push({ name: fm + " law", nolegend: true, nohover: true, color: col, dash: "2 4", width: 1.5, pts: Array.from({ length: 30 }, (_, i) => { const n = Math.pow(10, 7 + 2.2 * i / 29); return [n, lawLoss(laws[fm], n, C / n)]; }).filter(p => bp.length && p[0] > Math.min(...bp.map(x => x.n)) / 1.6 && p[0] < Math.max(...bp.map(x => x.n)) * 1.6) });
-    }
-    const rug = bp.filter(p => !ok(p[k])).map(p => ({ x: p.n, color: FAM[p.family] || "var(--faint)", label: p.name, tip: `<b>${esc(p.family)} ${esc(p.shape)}</b> ${esc(p.status)}${p.step ? ` · step ${p.step}/${p.steps}` : ""}${ok(p.train_ce) ? ` · train CE ${f(p.train_ce, 3)}` : ""}` }));
-    return ["iso-" + b, { series: ser, rug, xlog: true, mode: "xy", xfmt: tickN, xlabel: "N = 12 · layers · width²", h: 230, direct: false, empty: "Not planned yet." }];
-  });
-  const ref = SW.reference;
-  const mins = fm => ((M.minima || {})[fm] || {}).minima || [];
-  const bestAt = (fm, b) => pts.filter(p => p.family === fm && +p.budget === b && ok(p[k])).sort((x, y) => x[k] - y[k])[0];
-  const edge = fm => mins(fm).filter(m => !m.interior).map(m => bestAt(fm, m.budget)).filter(Boolean);
-  const lstar = [...famS.flatMap(([fm, col]) => [{ name: fm + " minima", color: col, line: false, pts: mins(fm).filter(m => m.interior).map(m => [m.budget, m.loss_opt, `<b>${fm}</b> ${m.budget.toPrecision(2)}: ${f(m.loss_opt, 4)} at N ${tickN(m.n_opt)} (parabola minimum)`]) },
-    { name: fm + " best measured (optimum not bracketed)", color: col, line: false, hollow: true, pts: edge(fm).map(p => [+p.budget, p[k], `<b>${fm}</b> ${esc(p.budget)}: best measured ${f(p[k], 4)} at ${esc(p.shape)}; the parabola has no interior minimum`]) },
-    ...(laws[fm] ? [{ name: fm + " law", color: col, pts: laws[fm].c.map((c, i) => [c, laws[fm].loss[i]]).filter(p => p[0] >= 3e16 && p[0] <= 1e20) }] : [])]),
-    ...(ref && k === "macro" ? [{ name: "isoflop-v1 dense (old bundle)", color: "var(--faint)", dash: "5 4", pts: ref.c.map((c, i) => [c, ref.loss[i]]).filter(p => p[0] >= 3e16 && p[0] <= 1e20) }] : [])];
-  const nstar = [...famS.flatMap(([fm, col]) => [{ name: fm + " minima", color: col, line: false, pts: mins(fm).filter(m => m.interior).map(m => [m.budget, m.n_opt, `<b>${fm}</b> ${m.budget.toPrecision(2)}: N* ${tickN(m.n_opt)}`]) },
-    ...(laws[fm] ? [{ name: fm + " law", color: col, pts: laws[fm].c.map((c, i) => [c, laws[fm].nopt[i]]).filter(p => p[0] >= 3e16 && p[0] <= 1e20) }] : [])]),
-    ...(ref ? [{ name: "isoflop-v1 dense (old bundle)", color: "var(--faint)", dash: "5 4", pts: ref.c.map((c, i) => [c, ref.n[i]]).filter(p => p[0] >= 3e16 && p[0] <= 1e20) }] : [])];
-  const cms = cm ? [{ name: "S16 over dense", color: "var(--s1)", pts: cm.c.map((c, i) => [c, cm.value[i]]).filter(p => p[0] >= 3e16 && p[0] <= 1e21), err: boot ? [[SW.node_week_c, boot.p16, boot.p84]] : [] }, ...(boot ? [{ name: "95%", nolegend: true, color: "var(--s1)", line: false, r: 0, pts: [], err: [[SW.node_week_c, boot.p2, boot.p97]], width: 1 }] : []), { name: "node-week", nolegend: true, color: "var(--s1)", line: false, pts: [[SW.node_week_c, cm.node_week]] }] : [];
-  const res = (M.residuals || []).map(x => x);
-  charts(el, [...specs,
-    ["sw-lstar", { series: lstar, xlog: true, mode: "xy", xfmt: sci, xlabel: "C = N · D", tipx: sci, h: 230, empty: "Waiting for ≥ 3 scored sizes per budget.", direct: false }],
-    ["sw-nstar", { series: nstar, xlog: true, ylog: true, mode: "xy", xfmt: sci, yfmt: tickN, xlabel: "C = N · D", h: 230, empty: "Waiting for the sweep fit.", direct: false }],
-    ["sw-cm", { series: cms, xlog: true, xfmt: sci, xlabel: "C = N · D", yfmt: v => f(v, 1) + "×", tipfmt: v => cmx(v), tipx: sci, vlines: SW.node_week_c ? [{ x: SW.node_week_c, label: "node-week" }] : [], hlines: [{ y: 1, label: "parity" }], h: 230, empty: "Needs both families fitted (≥ 6 scored points over ≥ 2 budgets each).", direct: false }],
-    ["sw-res", { series: famS.map(([fm, col]) => ({ name: fm, color: col, line: false, pts: res.filter(x => x.family === fm).map(x => [x.n, x.r, `<b>${fm}</b> ${sci(x.budget)} N ${tickN(x.n)}: ${sg(x.r)}`]) })), xlog: true, mode: "xy", xfmt: tickN, yfmt: v => sg(v, 3), hlines: [{ y: 0 }], xlabel: "N (fit − measured)", h: 190, empty: "Residuals appear with the fit.", direct: false }],
-  ]);
-}
-function iso(b) {
-  const bp = (SW.points || []).filter(p => p.budget === b), by = fm => bp.filter(p => p.family === fm);
-  if (!bp.length) return "not frozen";
-  return ["S16", "dense"].map(fm => `${fm}: ${by(fm).filter(p => ok(p[S.sm])).length}/${by(fm).length} scored`).join(" · ");
-}
-function lawTable(laws) {
-  const fams = Object.keys(laws);
-  if (!fams.length) return `<p class="note">L(N, D) = E + A (N/1e7)^−α + B (D/1e8)^−β, refit per family (isoflop_fit.additive) once a family has ≥ 6 scored points over ≥ 2 budgets.</p>`;
-  return `<div style="overflow-x:auto"><table class="t"><thead><tr><th>Family</th><th class="num">E</th><th class="num">A</th><th class="num">α</th><th class="num">B</th><th class="num">β</th><th class="num">RMSE</th><th class="num">points</th></tr></thead><tbody>${fams.map(fm => { const p = laws[fm]; return `<tr><td>${esc(fm)}</td><td class="num">${f(p.E, 3)}</td><td class="num">${f(p.A, 3)}</td><td class="num">${f(p.alpha, 3)}</td><td class="num">${f(p.B, 3)}</td><td class="num">${f(p.beta, 3)}</td><td class="num">${f(p.rmse, 4)}</td><td class="num">${p.points}</td></tr>`; }).join("")}</tbody></table></div>`;
+    <div style="display:grid;gap:6px;align-content:start"><h3>By Elo band</h3>${bands.map(b => bar(b.replace(">=", "≥"), bshare(rp, b), bshare(plan, b))).join("")}</div></div></div>`)}`;
 }
 
 /* ---------------------------------------------------------------- compute */
-const POOLS = [["general", "babel general", "normal QOS, not preemptible"], ["preempt", "babel preempt", "preemptible"], ["dei-group", "babel dei-group", "A6000, capped at 8 while a labmate waits"], ["orchard", "orchard", "H100, preemptible"]];
+const POOLS = [["general", "babel general", "not preemptible"], ["preempt", "babel preempt", "preemptible"], ["dei-group", "babel dei-group", "A6000; 8 while a labmate waits"], ["orchard", "orchard", "H100, preemptible"]];
 function vCompute(el) {
-  const p = CP.pools || {}, gh = CP.gpu_h || {}, bud = CP.budget || {};
+  const p = CP.pools || {}, gh = CP.gpu_h || {}, bud = CP.budget || {}, gov = CP.governor || {};
+  const flags = Object.values((CP.flags || []).reduce((a, x) => {  // one line per pool, reason and idle GPUs
+    const m = x.text.match(/^.*? \(\S+\) waits on (.*?) while (.*)$/), k = m ? `${x.pool}|${m[1]}|${m[2]}` : x.text;
+    (a[k] = a[k] || { pool: x.pool, n: 0, m, text: x.text }).n++; return a;
+  }, {})).map(g => ({ pool: g.pool, text: g.m ? `${g.n} ${g.n > 1 ? "jobs wait" : "job waits"} for ${WAIT[g.m[1]] || g.m[1]} while ${g.m[2]}` : g.text }));
   const tot = t => Object.values(gh[t] || {}).reduce((a, v) => a + v, 0);
-  const flags = CP.flags || [];
   const used = Object.values(p).reduce((a, x) => a + (x.used || 0), 0), cap = Object.values(p).reduce((a, x) => a + (x.cap || 0), 0);
   const tiles = POOLS.map(([k, name, note]) => {
     const x = p[k] || { used: 0, cap: 0, pending: 0, held: 0 }, full = x.used >= x.cap && x.cap;
     const extra = k === "dei-group" ? `<span class="pill" style="--c:${CP.labmate ? "var(--warn)" : "var(--ok)"}">${CP.labmate ? `labmate waiting (${(CP.dei_waiting || []).length})` : "no labmate waiting"}</span>` : k === "orchard" ? `<span class="sub">mirror ${ago(CP.orchard_at)}</span>` : "";
-    return `<div class="tile"><span class="k">${esc(name)} · ${esc(note)}</span><span class="v">${x.used}<small> / ${x.cap} GPUs</small></span><div class="meter"><i style="width:${x.cap ? 100 * Math.min(1, x.used / x.cap) : 0}%;background:${full ? "var(--ok)" : "var(--info)"}"></i></div><span class="sub">${x.pending} GPUs pending · ${x.held} held</span>${extra}</div>`;
+    return `<div class="tile"><span class="k">${esc(name)} · ${esc(note)}</span><span class="v">${x.used}<small> / ${x.cap} GPUs</small></span><div class="meter"><i style="width:${x.cap ? 100 * Math.min(1, x.used / x.cap) : 0}%;background:${full ? "var(--ok)" : "var(--info)"}"></i></div><span class="sub">${x.pending} pending · ${x.held} held</span>${extra}</div>`;
   }).join("");
   const tracks = [["sweep", "Sweep"], ["model", "Model (excl. sweep)"], ["data", "Data"], ["other", "Other"]].filter(([t]) => tot(t) || bud[t]);
   const types = [...new Set(Object.values(gh).flatMap(o => Object.keys(o)))];
   const ghRows = tracks.map(([t, n]) => { const T = tot(t), B = bud[t], scale = Math.max(T, B || 0) || 1; return `<div style="display:grid;gap:4px"><div style="display:flex;justify-content:space-between;gap:8px;font-size:13.5px"><span>${esc(n)}</span><span class="mono">${f(T, 0)}${B ? ` of ~${B}` : ""} GPU-h</span></div><div class="meter" style="height:10px">${Object.entries(gh[t] || {}).map(([g, v]) => `<i title="${esc(g)} ${f(v, 1)} GPU-h" style="width:${100 * v / scale}%;background:${GPUC[g] || "var(--faint)"}"></i>`).join("")}</div></div>`; }).join("");
   const jobs = Object.entries(p).flatMap(([k, x]) => (x.jobs || []).map(j => ({ ...j, pool: k })));
-  const jcols = [["aid", "Job", j => `<span class="mono">${esc(j.aid)}</span>`], ["name", "Name", j => esc(j.name)], ["track", "Track", j => esc(j.track)], ["state", "State", j => esc(j.state.toLowerCase())], ["pool", "Pool", j => esc(j.pool)], ["gpus", "GPUs", j => `${j.gpus} × ${esc(j.gpu || "?")}`, null, "num"], ["reason", "Reason", j => esc(j.reason && j.reason !== "None" ? j.reason : "—")], ["elapsed", "Elapsed", j => `<span class="mono">${esc(j.elapsed)}</span>`, null, "num"], ["node", "Node", j => `<span class="mono">${esc(j.node || "—")}</span>`]];
-  const gov = CP.governor || {};
-  el.innerHTML = `<div class="lede"><h2><b>${used}</b> of ${cap} GPUs in use${flags.length ? ` · <span class="warnc">${flags.length} waiting while GPUs idle</span>` : ""}</h2><p>Our jobs per pool against our caps, from the compute log (a snapshot every 10 min: babel squeue / sinfo, the dei governor's state, orchard squeue through the mirror). Snapshot ${esc(ago(CP.at))}. GPU-h since Sep 21 from sacct (every incarnation, queue excluded), by job name: sw* = sweep, mk / qb / perf / audit ... = model, dr / dc3 / dt / perply = data.</p></div>
+  const jcols = [["aid", "Job", j => `<span class="mono">${esc(j.aid)}</span>`], ["name", "Name", j => esc(j.name)], ["track", "Track", j => esc(j.track)], ["state", "State", j => esc(j.state.toLowerCase())], ["pool", "Pool", j => esc(j.pool)], ["gpus", "GPUs", j => `${j.gpus} × ${esc(j.gpu || "?")}`, null, "num"], ["reason", "Waiting for", j => esc(j.reason && j.reason !== "None" ? WAIT[j.reason] || j.reason : "—")], ["elapsed", "Elapsed", j => `<span class="mono">${esc(j.elapsed)}</span>`, null, "num"], ["node", "Node", j => `<span class="mono">${esc(j.node || "—")}</span>`]];
+  el.innerHTML = `<div class="lede"><h2><b>${used}</b> of ${cap} GPUs in use${(CP.flags || []).length ? ` · <span class="warnc">${CP.flags.length} waiting while GPUs idle</span>` : ""}</h2><p>Our jobs per pool against our caps, from a queue snapshot every 10 minutes (${esc(ago(CP.at))}).</p></div>
     <div class="cards">${tiles}</div>
-    <div class="sect"><header><h3>Approved work waiting while GPUs sit idle</h3><p>Pending (not held) jobs whose GPU type has idle GPUs in that partition and fits under our cap</p></header>${flags.length ? `<ul class="alerts">${flags.map(x => `<li><span class="sev" style="--c:var(--warn)">${esc(x.pool)}</span>${esc(x.text)}</li>`).join("")}</ul>` : `<p class="empty">Nothing approved is waiting on idle GPUs.</p>`}</div>
-    <div class="sect"><header><h3>Our GPUs in use, last 48 h</h3><p>Dashed = cap (dei drops to 8 while a labmate waits)</p></header><div class="grid2">${POOLS.map(([k, n], i) => `<div class="card"><h3>${esc(n)}</h3><div id="cs-${i}"></div></div>`).join("")}</div></div>
-    <div class="grid2"><div class="card"><h3>GPU-hours by track since Sep 21</h3><p class="note">Against the soft planning targets (model ~570, data ~300; sweep ~230 = SWEEP-PLAN estimate with orchard).</p><div class="legend">${types.map(g => `<span><i class="dot" style="--c:${GPUC[g] || "var(--faint)"}"></i>${esc(g)}</span>`).join("")}</div><div style="display:grid;gap:10px">${ghRows}</div></div>
-    <div class="card"><h3>dei governor</h3><dl class="kv"><dt>Process</dt><dd>${gov.alive ? `<span class="good">running</span>` : `<span class="worse">not running</span>`}</dd><dt>Holding</dt><dd class="mono">${esc((gov.held || []).join(", ") || "nothing")}</dd><dt>Labmates waiting</dt><dd class="mono">${esc((CP.dei_waiting || []).map(x => `${x.user} ${x.id} (${x.reason})`).join(", ") || "none")}</dd><dt>Last log</dt><dd class="mono" style="font-size:11.5px">${(gov.log || []).map(esc).join("<br>") || "—"}</dd></dl></div></div>
-    <div class="sect"><header><h3>Our jobs now</h3></header>${table(jobs, jcols)}</div>`;
+    ${flags.length ? `<div class="sect"><header><h3>Approved work waiting while GPUs sit idle</h3></header><ul class="alerts">${flags.map(x => `<li><span class="sev" style="--c:var(--warn)">${esc(x.pool)}</span>${esc(x.text)}</li>`).join("")}</ul></div>` : ""}
+    ${details("c48", `Our GPUs in use, last 48 h <span>dashed = cap</span>`, `<div class="grid2">${POOLS.map(([k, n], i) => `<div class="card"><h3>${esc(n)}</h3><div id="cs-${i}"></div></div>`).join("")}</div>`)}
+    ${details("cgh", `GPU-hours by track since Sep 21 <span>and the dei governor</span>`, `<div class="grid2"><div class="card"><p class="note">Against soft planning targets (model ~570, data ~300, sweep ~230).</p><div class="legend">${types.map(g => `<span><i class="dot" style="--c:${GPUC[g] || "var(--faint)"}"></i>${esc(g)}</span>`).join("")}</div><div style="display:grid;gap:10px">${ghRows}</div></div>
+    <div class="card"><h3>dei governor</h3><dl class="kv"><dt>Process</dt><dd>${gov.alive ? `<span class="good">running</span>` : `<span class="worse">not running</span>`}</dd><dt>Holding</dt><dd class="mono">${esc((gov.held || []).join(", ") || "nothing")}</dd><dt>Labmates waiting</dt><dd class="mono">${esc((CP.dei_waiting || []).map(x => `${x.user} ${x.id} (${x.reason})`).join(", ") || "none")}</dd><dt>Last log</dt><dd class="mono" style="font-size:11.5px">${(gov.log || []).map(esc).join("<br>") || "—"}</dd></dl></div></div>`)}
+    ${details("cjobs", `Our jobs now <span>${jobs.length} in the queues</span>`, table(jobs, jcols))}`;
   const ser = CP.series || [];
   charts(el, POOLS.map(([k], i) => ["cs-" + i, { series: [{ name: k, color: "var(--s1)", pts: ser.map(s => [s[0], s[1 + i]]) }], hlines: [{ y: k === "dei-group" ? 16 : (p[k] || {}).cap || 0, label: "cap" }, ...(k === "dei-group" && ser.some(s => s[5]) ? [{ y: 8, label: "labmate cap" }] : [])], time: true, y0: 0, extraY: [k === "dei-group" ? 16 : (p[k] || {}).cap || 1], x0: NOW - 48 * 3600, x1: NOW, tipfmt: v => v + " GPUs", tipx: t => when(t), h: 150, direct: false, empty: "The compute log starts with the first snapshot." }]));
 }
@@ -762,16 +917,18 @@ function vCompute(el) {
 document.addEventListener("click", ev => {
   const t = ev.target.closest("button, input[type=checkbox]"); if (!t) return;
   const d = t.dataset;
+  if (t.id === "early") { S.early = !S.early; store.set("early", S.early); if (!tabs().some(v => v[0] === S.tab)) S.tab = "sweep"; renderShell(); return render(); }
   if (d.tab) return go(d.tab);
   if (d.open) return sheet(d.open);
   if (t.id === "closesheet") return $("#sheet").close();
   if (d.selToggle) { select(d.selToggle, !S.sel.some(x => x.name === d.selToggle)); sheet(d.selToggle); return render(); }
   if (d.sel) { select(d.sel, t.checked); return render(); }
   if (d.unsel) { select(d.unsel, false); return render(); }
-  if (d.preset) { if (d.preset === "clear") { S.sel = []; store.set("sel", []); } else RUNS.filter(r => r.status === "running").slice(0, 8).forEach(r => select(r.name, true)); return render(); }
-  if (d.chip) { S[d.chip] = d.v; store.set(d.chip, d.v); return render(); }
+  if (d.preset) { if (d.preset === "clear") { S.sel = []; store.set("sel", []); } else RUNS.filter(r => r.status === "running" && vis(r)).slice(0, 8).forEach(r => select(r.name, true)); return render(); }
+  if ("cols" in d) { S.cols = !S.cols; store.set("cols", S.cols); return render(); }
+  if (d.chip) { S[d.chip] = d.v; return render(); }
   if (d.seg) { S[d.seg] = d.v; store.set(d.seg, d.v); return render(); }
-  if (d.focus) { S.focus = d.focus; return render(); }
+  if ("focus" in d) { S.focus = d.focus || null; return render(); }
   if (d.more) { S.more[d.more] = true; return render(); }
   if (d.dfocus) { S.dfocus = d.dfocus; return render(); }
   if (d.sort) {
@@ -780,6 +937,11 @@ document.addEventListener("click", ev => {
     if (key === "sort") S.sort = next; store.set(key, next); return render();
   }
 });
+document.addEventListener("toggle", ev => {  // charts drawn while closed get their real width on open
+  const k = ev.target.dataset && ev.target.dataset.k; if (!k || !!S.open[k] === ev.target.open) return;
+  S.open[k] = ev.target.open; store.set("open", S.open);
+  if (ev.target.open && $("[id^='sw-'], [id^='cs-'], [id^='m-'], #sp-sw, #layers", ev.target)) render();
+}, true);
 document.addEventListener("change", ev => {
   if (ev.target.id === "addrun" && ev.target.value) { select(ev.target.value, true); render(); }
   if (ev.target.id === "mfocus") { S.mfocus = ev.target.value; render(); }
@@ -791,6 +953,6 @@ let qt; document.addEventListener("input", ev => {
 });
 $("#sheet").addEventListener("click", ev => { if (ev.target.id === "sheet") $("#sheet").close(); });
 let lastW = innerWidth, rt; addEventListener("resize", () => { if (Math.abs(innerWidth - lastW) < 8) return; lastW = innerWidth; clearTimeout(rt); rt = setTimeout(render, 150); });
-addEventListener("hashchange", () => { const t = location.hash.slice(1); if (VIEWS.some(v => v[0] === t) && t !== S.tab) go(t); });
+addEventListener("hashchange", () => { const t = location.hash.slice(1); if (tabs().some(v => v[0] === t) && t !== S.tab) go(t); });
 renderShell(); render();
 </script>

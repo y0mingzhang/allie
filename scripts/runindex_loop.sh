@@ -11,7 +11,7 @@ exec 9> "$O/loop.lock"
 flock -n 9 || { echo "runindex loop already running" >&2; exit 1; }
 renice -n 19 -p $$ > /dev/null
 ionice -c 3 -p $$ 2> /dev/null
-export CUDA_VISIBLE_DEVICES= PYTHONDONTWRITEBYTECODE=1
+export CUDA_VISIBLE_DEVICES= PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1  # the fit is faster on one thread
 step() { timeout "$@" 9>&- || echo "$(date -Is) failed ($?): ${*:2}"; }
 while :; do
 	t=$(date +%s)

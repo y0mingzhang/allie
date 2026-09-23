@@ -38,6 +38,7 @@ ROOT = Path("/home/yimingz3/src/allie")
 R, P = ROOT / "results/recipe10x", ROOT / "results/pretrain"
 OUT = ROOT / "results/runindex"
 MIRROR = OUT / "orchard"
+FIT = ROOT / "scripts/isoflop_fit.py"
 GOV = Path("/data/group_data/dei-group/yimingz3/allie/controller/dei-governor")
 RACES = Path("/data/group_data/dei-group/yimingz3/allie/race")
 PHASE = time.mktime(time.strptime("2026-09-21", "%Y-%m-%d"))  # studies / GPU-h since
@@ -212,14 +213,41 @@ def skipped(layers, width, dims):
 # ------------------------------------------------------------------ studies
 
 LABELS = (
-    (r"sweep-check3-(.+)", "check", "pre-launch check, babel ({})"),
-    (r"sweep-checkh-(.+)", "check", "pre-launch check, orchard ({})"),
-    (r"sweep-(\d+e\d+)-(.+)", "sweep", "sweep {} ({})"),
-    (r"moe-knobs/r(\w+?)-\d+e\d+d?", "model", "model round {}"),
-    (r"data-recipe-3e17w?", "data", "data 3e17 confirm"),
-    (r"data-recipe-r(\w+?)(?:-.*)?", "data", "data round {}"),
-    (r"data-recipe-(.+)", "data", "data {}"),
-    (r"moe-v1-(.+)", "model", "moe-v1 {}"),
+    (r"sweep-check3-.+", "check", "Pre-launch check (babel)"),
+    (r"sweep-checkh-.+", "check", "Pre-launch check (H100)"),
+    (
+        r"sweep-(\d+e\d+)[a-z]*-.+",
+        "sweep",
+        "Sweep {}",
+    ),  # 1e17s = seed 43, 1e18ck = act. ckpt
+    (r"moe-knobs/r2[gjk]-\d+e\d+", "model", "Router test"),
+    (r"moe-knobs/r(\d+)\w*?-\d+e\d+d?", "model", "Model round {}"),
+    (r"data-recipe-3e17w?", "data", "Data confirm"),
+    (r"data-recipe-t\d+b?", "data", "Data regime test"),
+    (r"data-recipe-r(\d+)\w*(?:-.*)?", "data", "Data round {}"),
+    (r"data-recipe-(.+)", "data", "Data {}"),
+    (r"moe-v1-(.+)", "model", "MoE v1 {}"),
+)
+# plan arm codes in words (variant()); unknown codes show as they are
+MODEL_V = dict(
+    base="base", dense="dense", g3="coarser experts", g12="finer experts",
+    s64="64 experts", s256="256 experts", sh25="shared expert 1/4", sh0="no shared expert",
+    S="finer, shared 1/4", C="finer, shared 1/4, wider experts",
+    g001="router gamma 0.001", g003="router gamma 0.003",
+)  # fmt: skip
+DATA_V = dict(
+    control="control mix", hand="hand-set mix", base="old base rule", passcap="pass-capped mix",
+    ctab="control as a table", noengine="no engine games", pre2108d2="pre-2021-08 at half weight",
+    otb3="strong OTB ×3", anneal80="late anneal to strong games", c8anneal80="Elo ramp + late anneal",
+    fixA="fp32 masters + 16K rows", fixB="fixes + input LR 75", fixC="fixes + no x0",
+    **{"mover_rule+up4+noengine+otb_x4": "old base rule"},
+)  # fmt: skip
+RAMPS = dict(
+    flat="flat Elo",
+    sinf="flat Elo",
+    s100="steeper ramp",
+    s200="Elo ramp",
+    s400="gentler ramp",
 )
 PLAN_DROP = ("months", "stores", "extra_args", "baseline", "group", "arch")
 
@@ -234,6 +262,43 @@ def label(key):
 
 def recipe(policy):
     return re.sub(r"table:([\w.]+?)-[0-9a-f]{12}", r"\1", policy) if policy else None
+
+
+def recipe_words(v):
+    """A data recipe code in words: c8s200f0v4 -> 'Elo ramp' (cap 8 and natural format shares are the
+    defaults), s400 -> 'gentler ramp, equal formats', c1s200f0 -> 'Elo ramp, 1-pass cap'."""
+    if (v := v or "") in DATA_V:
+        return DATA_V[v]
+    if m := re.fullmatch(r"cool(\d+)(?:\((.+)\))?:(.+)", v):
+        return f"{recipe_words(m[2] or 'control')}, then {recipe_words(m[3])}"
+    v = re.sub(r"v4$", "", v.replace("_", ""))
+    if m := re.fullmatch(r"(?:c(\d+))?(flat|sinf|s\d+)(?:f(\d+))?", v):
+        cap, slope, flat = m.groups()
+        out = [RAMPS.get(slope, f"Elo slope {slope[1:]}")]
+        out += (
+            [f"{cap}-pass cap" if cap == "1" else f"cap {cap}"]
+            if cap and cap != "8"
+            else []
+        )
+        out += {"0": [], "05": ["half-equal formats"]}.get(flat, ["equal formats"])
+        return ", ".join(out)
+    if m := re.fullmatch(r"top(\d)", v):
+        return f"≥2400 games to {m[1]} pass{'es' * (m[1] != '1')}"
+    return DATA_V.get(v, v)
+
+
+def variant(track, key, v):
+    """A plan arm in words: g12 -> 'finer experts', d9x576 -> '9 layers × 576', c8s100f0v4 -> 'steeper ramp'."""
+    if track != "model":
+        return recipe_words(v)
+    if m := re.fullmatch(r"r(base|C)", v):
+        return f"{MODEL_V[m[1]]} + {'V4 router' if '/r2j-' in key else 'new router'}"
+    if m := re.fullmatch(r"e(\d+)k(\d+)", v):
+        return f"{m[1]} experts top-{m[2]}"
+    if m := re.fullmatch(r"(d|G|base|dense)(\d+)x(\d+)", v):
+        what = dict(d="", G="finer experts, ", base="base, ", dense="dense, ")[m[1]]
+        return f"{what}{m[2]} layers × {m[3]}"
+    return MODEL_V.get(v, v)
 
 
 def plan_summary(d, key, plan, mtime):
@@ -551,7 +616,8 @@ def derive(pr, c, study):
     tags = c.get("incof") or {}
     one = not tags and not c.get("rcfg")
     inc = lambda x: 0 if one else tags.get(str(x["step"]))
-    mine = [x for x in tr if inc(x) is not None and inc(x) == inc(last)] if last else []
+    ref = next((x for x in reversed(tr) if inc(x) is not None), None)  # train.log lags
+    mine = [x for x in tr if inc(x) is not None and inc(x) == inc(ref)] if ref else []
     rate = med(x["tokens_per_second"] for x in mine)
     fast = lambda x: rate is None or x["tokens_per_second"] >= 0.5 * rate
     steady = [x for x in mine if x["step"] > steps / 4 and fast(x)] or mine[2:] or mine
@@ -923,6 +989,31 @@ def words(pr, r):
     return model, f"{arch}, {e} experts, top-{k}, shared expert {sh}"
 
 
+def names(pr, r, study):
+    """(title, chart label, line under the title). Sweep: 'MoE 0.13B active / 0.93B total · 1e18',
+    'Dense 0.19B · 1e18'; checks: 'Pre-launch check (babel) · MoE ...'; earlier runs: 'ROUND · ARM ·
+    BUDGET' (data screens are all 1e17: no budget). Seed 43 = '(seed 2)'."""
+    b = lambda n: f"{n / 1e9:#.2g}".rstrip(".") + "B"
+    seed = f" (seed {pr['seed'] - 41})" if pr["seed"] != 42 else ""
+    fam = "MoE" if pr["moe"] else "Dense"
+    size = f"{fam} {b(r['params_active'])}"
+    full = f"{size} active / {b(r['params_total'])} total" if pr["moe"] else size
+    shape = f"{pr['layers']} layers × {pr['width']}"
+    match study["track"]:
+        case "sweep":
+            return (
+                f"{full} · {pr['budget']}{seed}",
+                f"{size} {pr['budget']}{seed}",
+                shape,
+            )
+        case "check":
+            return f"{study['round']} · {full}", f"check {size}", shape
+    arm = variant(study["track"], study["key"], pr["v"])
+    at = [] if study["track"] == "data" and pr["budget"] == "1e17" else [pr["budget"]]
+    title, short = " · ".join([study["round"], arm, *at]), " ".join([arm, *at])
+    return title + seed, short + seed, r["model"]
+
+
 def control_of(r, runs):
     """The paired control. A data arm: the 'control' arm with the same budget, seed, pool
     tag, shape, steps and MoE design (its own study's, else the latest such study planned
@@ -1062,6 +1153,7 @@ def index():
             rec = record(pr, study, f, curves, now)
             runs.append(assemble(pr, study, dict(rec), jobs, ids, ev, listing, now))
             ST["runs"][pr["name"]]["final"] = runs[-1]["status"] == "scored"
+    reruns(runs)
     deltas(runs)
     for r in runs:
         r.pop("_mtime")
@@ -1069,6 +1161,16 @@ def index():
     save(OUT / "curves.json", {k: v for k, v in curves.items() if k in seen})
     save(OUT / "sweep.json", sweep(runs))
     save(OUT / "compute.json", compute_summary())
+
+
+def reruns(runs):
+    """A repeat of a title among runs that ran (a study rerun on other hardware) gets ' (rerun)'."""
+    seen = {}
+    for r in sorted(runs, key=lambda r: r["_mtime"]):
+        if r["status"] in ("planned", "not run"):
+            continue
+        n = seen[r["title"]] = seen.get(r["title"], 0) + 1
+        r["title"] += "" if n == 1 else " (rerun)" if n == 2 else f" (rerun {n - 1})"
 
 
 def assemble(pr, study, r, jobs, ids, ev, listing, now):
@@ -1105,8 +1207,16 @@ def assemble(pr, study, r, jobs, ids, ev, listing, now):
     js = list(jobs.get(name, []))
     js += [ids[j] for j in r["job_ids"] if j in ids and ids[j] not in js]
     r["model"], r["arch"] = words(pr, r)
+    r["title"], r["short"], r["sub"] = names(pr, r, study)
+    r["recipe_words"] = r["recipe"] and recipe_words(r["recipe"])
     r["tpp"] = r["tokens_plan"] / r["params_active"] if r["params_active"] else None
     r["status"] = status(pr, r, js, now)
+    end, tps = max(pr.get("stop_after") or [pr["steps"]]), r["eff"]["tps"]
+    r["eta"] = (
+        r["t_last"] + (end - r["step"]) * BATCH / tps
+        if r["status"] == "running" and r["step"] and r["t_last"] and tps
+        else None
+    )
     keep = (
         "id",
         "aid",
@@ -1137,7 +1247,7 @@ def assemble(pr, study, r, jobs, ids, ev, listing, now):
         r["cluster"] = "babel"
     k = gpu_key(r["gpu"])
     r["gpu"] = GPUS.get(k, r["gpu"])
-    r["world"] = r["world"] or study["gpus"]
+    r["world"] = r["world"] or study["gpus"] and max(1, study["gpus"] // study["pack"])
     r["peak"] = PEAK[k] * r["world"] if k and r["world"] else None
     r["eff"] = r["eff"] | dict(
         mfu=r["eff"]["fps"] / r["peak"] if r["eff"]["fps"] and r["peak"] else None
@@ -1165,13 +1275,15 @@ def assemble(pr, study, r, jobs, ids, ev, listing, now):
 def sweep(runs):
     """isoFLOP points (law N = 12 layers width^2, D = tokens, C = N D), per-budget
     parabola minima, the L(N, D) refit per family (isoflop_fit.additive), N*(C), and the
-    S16-over-dense CM, at a node-week with bootstrap errors (200 resamples)."""
+    S16-over-dense CM, at a node-week with bootstrap errors (200 resamples); the model track's
+    readout rides along."""
     pts = [r for r in runs if r["track"] == "sweep"]
     res = lambda r, k: (r.get("res") or {}).get(k)
     out = dict(
         points=[
             dict(
                 name=r["name"],
+                title=r["title"],
                 family=r["family"],
                 budget=r["budget"],
                 n=r["law_n"],
@@ -1235,11 +1347,39 @@ def sweep(runs):
         if not ok:
             continue
         key = json.dumps({f: a.tolist() for f, a in ok.items()})
+        key += hashlib.sha256(FIT.read_bytes()).hexdigest()  # a fixed fit refits
         if (ST["fits"].get(metric) or {}).get("key") != key:
             ST["fits"][metric] = dict(
                 key=key, out=refit(ok, grid, cnw, nopt, fit, dmix_fit, np)
             )
         m |= ST["fits"][metric]["out"]
+    for metric, m in readout().items():
+        out[metric]["readout"] = m
+    return out
+
+
+def readout():
+    """The model track's sweep readout (moe-knobs/sweep-plan/readout.py --out), per metric: its CM
+    of MoE over dense (shared and separate loss floors, 90% noise ranges) at each budget and the
+    node-week, the runs it read and when. The page leads with it when it exists."""
+    fs = sorted(R.glob("sweep-readout-*.json"), key=lambda p: p.stat().st_mtime)
+    x = jload(fs[-1]) if fs else None
+    out = {}
+    for m in (x or {}).get("metrics", []):
+        cm = next((v for f, v in m.get("cm", {}).items() if f != x.get("ref")), None)
+        rows = {
+            b: dict(c=v.get("c"), **{k: v[k] for k in ("shared", "separate", "isoflop") if k in v})
+            for b, v in (cm or {}).items()
+            if isinstance(v, dict) and "c" in v
+        }  # fmt: skip
+        key = {"macro": "macro", "expert_macro": "expert"}.get(m.get("metric"))
+        if key and rows:
+            out[key] = dict(
+                file=fs[-1].name,
+                t=fs[-1].stat().st_mtime,
+                runs=len(x.get("runs", [])),
+                rows=rows,
+            )
     return out
 
 
@@ -1284,7 +1424,13 @@ def refit(ok, grid, cnw, nopt, fit, dmix_fit, np):
     if boot:
         q = lambda f: boot[min(len(boot) - 1, int(f * len(boot)))]
         out["cm"]["boot"] = dict(
-            n=len(boot), p16=q(0.16), p84=q(0.84), p2=q(0.025), p97=q(0.975)
+            n=len(boot),
+            p16=q(0.16),
+            p84=q(0.84),
+            p5=q(0.05),
+            p95=q(0.95),
+            p2=q(0.025),
+            p97=q(0.975),
         )
     return out
 
