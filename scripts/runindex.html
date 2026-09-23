@@ -149,6 +149,8 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
 .heat th { color: var(--muted); font-weight: 600; font-size: 11.5px; padding: 2px 6px; text-align: left; white-space: nowrap; }
 .heat td { border-radius: 6px; padding: 6px 8px; text-align: right; font-family: var(--mono); min-width: 74px; white-space: nowrap; }
 .heat td small { display: block; color: var(--muted); font-size: 10.5px; }
+.tg { background: var(--line); border: 0; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.tg[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
 .lchips { display: grid; gap: 6px; }
 .lrow { display: flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; }
 .lrow > span { font-size: 12px; font-weight: 600; color: var(--muted); width: 46px; flex: none; }
@@ -286,7 +288,7 @@ const SWEEP = Object.values(RUNS.filter(r => r.track === "sweep").reduce((a, r) 
 const S = {
   tab: location.hash.slice(1) || "sweep", early: store.get("early", false), cols: store.get("cols", false), open: store.get("open", {}),
   q: "", track: "all", st: "all", sort: store.get("sort", ["status", 1]), rtrack: "all", metric: store.get("metric", "ce"), x: store.get("x", "tok"),
-  cmode: store.get("cmode", "budget"), cb: store.get("cb", "1e17"), coff: store.get("coff", []),
+  xlog: store.get("xlog", false), ylog: store.get("ylog", false), cmode: store.get("cmode", "budget"), cb: store.get("cb", "1e17"), coff: store.get("coff", []),
   sm: store.get("sm", "macro"), parity: "all", more: {}, focus: null, dfocus: null, mfocus: null, heat: "imb", sel: [],
 };
 const vis = r => S.early || cur(r);
@@ -335,9 +337,9 @@ function niceTicks(lo, hi, n) {
   const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toPrecision(12));
   return out;
 }
-function logTicks(lo, hi) {
+function logTicks(lo, hi, max = 7) {
   const out = []; for (let d = Math.floor(lo); d <= Math.ceil(hi); d++) for (const m of [1, 2, 5]) { const v = m * Math.pow(10, d), l = Math.log10(v); if (l >= lo - 1e-9 && l <= hi + 1e-9) out.push(v); }
-  return out.length > 7 ? out.filter(v => Math.abs(Math.log10(v) % 1) < 1e-9) : out;
+  return out.length > max ? out.filter(v => Math.abs(Math.log10(v) % 1) < 1e-9) : out;
 }
 function timeTicks(lo, hi) {
   const span = (hi - lo) / 3600, step = [1, 2, 3, 6, 12, 24].find(s => span / s <= 6) || 24, out = [];
@@ -382,8 +384,8 @@ function chart(box, o) {
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
   const X = v => m.l + (tx(v) - x0) / (x1 - x0) * iw, Y = v => m.t + ih - (ty(v) - y0) / (y1 - y0) * ih;
   const RY = row => m.t + ih + 13 + 13 * (row || 0);
-  const xt = o.time ? timeTicks(x0, x1) : o.xlog ? logTicks(x0, x1) : niceTicks(x0, x1, W < 520 ? 4 : 6);
-  const yt = strip ? [] : o.ylog ? logTicks(y0, y1) : niceTicks(y0, y1, H < 200 ? 3 : 5);
+  const xt = o.time ? timeTicks(x0, x1) : o.xlog ? logTicks(x0, x1, W < 520 ? 7 : 11) : niceTicks(x0, x1, W < 520 ? 4 : 6);
+  const yt = strip ? [] : o.ylog ? (y1 - y0 < 1 ? niceTicks(10 ** y0, 10 ** y1, H < 200 ? 3 : 5) : logTicks(y0, y1)) : niceTicks(y0, y1, H < 200 ? 3 : 5);
   const xf = o.xfmt || (o.time ? t => hf.format(new Date(t * 1000)) : tick), yf = o.yfmt || tick;
   const clip = "clip" + (++CLIPS);
   let g = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.title || "chart")}"><defs><clipPath id="${clip}"><rect x="${m.l - 6}" y="${m.t - 6}" width="${iw + 12}" height="${ih + 12}"/></clipPath></defs>`;
@@ -754,6 +756,8 @@ function selectedPicker() {
 const xOf = (s, r) => S.x === "tok" ? s * TOK : S.x === "frac" ? 100 * s / endStep(r) : s;
 const xLabel = () => ({ tok: "tokens seen (B)", frac: "share of training (%)" })[S.x] || "optimizer step";
 const tipX = v => S.x === "tok" ? f(v, 2) + "B tokens" : S.x === "frac" ? f(v, 0) + "% of training" : "step " + Math.round(v);
+const tokFmt = v => v >= 1 ? +v.toPrecision(3) + "B" : +(v * 1e3).toPrecision(3) + "M";  // tokens axis in B
+const togHtml = (key, label) => `<button class="tg" data-tog="${key}" aria-pressed="${!!S[key]}">${label}</button>`;
 const SHAPES = ["10x448", "12x512", "14x640", "16x768", "18x896", "20x1024", "22x1152", "24x1280"];  // the sweep's size ladder: one colour per size
 const sizeColor = r => SLOTS[SHAPES.indexOf(`${r.layers}x${r.width}`)] || "var(--faint)";
 const dashOf = r => r.family === "dense" ? "6 4" : null;
@@ -765,7 +769,7 @@ function budgetLegend(live) {
 }
 function vCurves(el) {
   if (!BUDGETS.includes(S.cb)) S.cb = "1e17";
-  const m = METRICS.find(x => x[0] === S.metric) || METRICS[0], byB = S.cmode !== "pick", marker = ["move", "e24"].includes(m[0]);
+  const m = METRICS.find(x => x[0] === S.metric) || METRICS[0], lossy = m[0] !== "lr", xl = S.x === "tok" && S.xlog, yl = lossy && S.ylog, byB = S.cmode !== "pick", marker = ["move", "e24"].includes(m[0]);
   const pts = r => CUR[r.name] ? m[2](CUR[r.name]).map(p => [xOf(p[0], r), p[1]]) : [];
   const all = SWEEP.filter(r => r.budget === S.cb).sort((a, b) => (a.family === "dense") - (b.family === "dense") || a.law_n - b.law_n || a.seed - b.seed);
   const live = all.filter(r => CUR[r.name] && (CUR[r.name].s || []).length), on = live.filter(r => !S.coff.includes(r.name)), sel = selv();
@@ -779,11 +783,11 @@ function vCurves(el) {
   el.innerHTML = `<div class="lede"><h2>${head}</h2><p>${lede}</p></div>
     <div class="controls">${segHtml("cmode", [["budget", "Same compute budget"], ["pick", "Pick runs"]], byB ? "budget" : "pick")}${byB ? segHtml("cb", BUDGETS.map(b => [b, b + " FLOPs"]), S.cb) : ""}</div>
     ${byB ? budgetLegend(live) : selectedPicker()}
-    <div class="controls">${segHtml("metric", METRICS.map(x => [x[0], x[1]]), S.metric)}${segHtml("x", [["tok", "Tokens"], ["step", "Step"], ["frac", "% of training"]], S.x)}</div>
+    <div class="controls">${segHtml("metric", METRICS.map(x => [x[0], x[1]]), S.metric)}${segHtml("x", [["tok", "Tokens"], ["step", "Step"], ["frac", "% of training"]], S.x)}${S.x === "tok" ? togHtml("xlog", "Log tokens") : ""}${lossy ? togHtml("ylog", "Log loss") : ""}</div>
     <div class="card"><div id="curve"></div></div>
     ${al ? `<div class="sect"><header><h3>Alerts</h3><p>NaN, divergence, loss spikes, stalls, expert starvation, data-bound</p></header>${al}</div>` : ""}`;
   const none = byB ? (live.length ? "All lines are off: tap a name above." : "Curves appear once these runs start training.") : sel.length ? `No ${m[1].toLowerCase()} points for the selected runs yet.` : "Pick runs above.";
-  charts(el, [["curve", { series: ser, xlabel: xLabel(), ytrim: ["ce", "tce", "wce"].includes(m[0]) ? 0.06 : 0, yq: ["ce", "tce", "wce"].includes(m[0]) ? 0.95 : 0, empty: none, tipx: tipX, tipfmt: v => f(v, 4), h: 340 }]]);
+  charts(el, [["curve", { series: ser, xlog: xl, ylog: yl, xfmt: xl ? tokFmt : null, xlabel: xl ? "tokens seen (log scale)" : xLabel(), ytrim: ["ce", "tce", "wce"].includes(m[0]) ? 0.06 : 0, yq: ["ce", "tce", "wce"].includes(m[0]) ? 0.95 : 0, empty: none, tipx: tipX, tipfmt: v => f(v, 4), h: 340 }]]);
 }
 
 /* ---------------------------------------------------------------- moe */
@@ -953,6 +957,7 @@ document.addEventListener("click", ev => {
   if (d.sel) { select(d.sel, t.checked); return render(); }
   if (d.unsel) { select(d.unsel, false); return render(); }
   if (d.preset) { if (d.preset === "clear") { S.sel = []; store.set("sel", []); } else RUNS.filter(r => r.status === "running" && vis(r)).slice(0, 8).forEach(r => select(r.name, true)); return render(); }
+  if (d.tog) { S[d.tog] = !S[d.tog]; store.set(d.tog, S[d.tog]); return render(); }
   if (d.ctog) { S.coff = S.coff.includes(d.ctog) ? S.coff.filter(n => n !== d.ctog) : [...S.coff, d.ctog]; store.set("coff", S.coff); return render(); }
   if (d.call) { const names = SWEEP.filter(r => r.budget === S.cb).map(r => r.name); S.coff = d.call === "none" ? [...new Set([...S.coff, ...names])] : S.coff.filter(n => !names.includes(n)); store.set("coff", S.coff); return render(); }
   if ("cols" in d) { S.cols = !S.cols; store.set("cols", S.cols); return render(); }
