@@ -34,6 +34,9 @@ for rel in "$@"; do
   while [ $(jobs -rp | wc -l) -ge ${STREAMS:-4} ]; do sleep 2; done  # throttle without reaping: wait PID below gets every status
 done
 for p in "${pids[@]}"; do wait $p || fails=$((fails + 1)); done
-gcloud storage cat "$D/**.tar.json" 2>/dev/null | $PY -c "import json, sys; rows = [json.loads(l) for l in sys.stdin]; print(json.dumps(dict(objects=len(rows), bytes=sum(r['bytes'] for r in rows), rows=sorted(rows, key=lambda r: r['path'])), indent=1))" > $LOCAL/MANIFEST.json && gcloud storage cp -q $LOCAL/MANIFEST.json $D/MANIFEST.json || { echo "manifest FAILED"; fails=$((fails + 1)); }
+# every step checked: an empty or failed listing must not become an empty manifest
+gcloud storage cat "$D/**.tar.json" > $LOCAL/tarjson.txt 2>/dev/null && [ -s $LOCAL/tarjson.txt ] \
+  && $PY -c "import json, sys; rows = [json.loads(l) for l in sys.stdin]; print(json.dumps(dict(objects=len(rows), bytes=sum(r['bytes'] for r in rows), rows=sorted(rows, key=lambda r: r['path'])), indent=1))" < $LOCAL/tarjson.txt > $LOCAL/MANIFEST.json \
+  && gcloud storage cp -q $LOCAL/MANIFEST.json $D/MANIFEST.json || { echo "manifest FAILED"; fails=$((fails + 1)); }
 echo "$(date) done: $(grep -m1 objects $LOCAL/MANIFEST.json) $(grep -m1 '"bytes"' $LOCAL/MANIFEST.json | tail -1), $fails failed"
 exit $((fails > 0))
