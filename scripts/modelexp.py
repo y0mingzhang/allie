@@ -279,13 +279,21 @@ def tables(w, runs):
     wave: the table's pin is the wave's and covers it, its basis matches the run's history
     mode (disk: no history; full: history counts of the same pin) and final_tokens is the
     table's token count, so the run's passes per bucket are the table's weights."""
+    import chessmix  # the cooldown grammar; planning runs from scripts/, next to it
+
     out = {}
     for r in runs:
+        parts = []  # (policy name, the cooldown start it runs after, None if it is not a late phase)
         for k in r["policy"].split("+"):
-            if not k.startswith("table:"):
+            c = chessmix.cool(k)
+            parts += [(c[1], None), (c[2], c[0])] if c else [(k, None)]
+        for k, start in parts:
+            if not (k or "").startswith("table:"):
                 continue
             raw = (RECIPES / f"{k[6:]}.json").read_bytes()
             t, pin = json.loads(raw), json.loads(w["pin"].read_text())
+            if t["kind"] == "anneal":  # a late table: only after its own start
+                assert start is not None and float(t["args"]["start"]) == start, k
             assert t["pin_digest"] == pin["sha256"], f"{k} is not on the wave's pin"
             assert set(pin["inventory"]) <= set(t["weights"]), f"{k} misses buckets"
             assert r["final_tokens"] == t["training_tokens"], f"{k}: final_tokens"

@@ -15,6 +15,7 @@ import json
 import math
 import multiprocessing as mp
 import queue
+import re
 import sys
 import threading
 import time
@@ -329,6 +330,17 @@ def sources(srcs, k):
     )
 
 
+def dated(before, k):
+    """control, with games from Lichess months before `before` (YYYY-MM) weighted k times."""
+    assert 0 <= k <= 1, "bucket caps are control's"
+    return lambda g, p: (
+        control(g, p)[0]
+        * (k if g.src == 0 and getattr(g, "month", before) < before else 1),
+        True,
+        True,
+    )
+
+
 def cooldown(policy, start, before=control):
     """before until training progress start, then policy (list its name in PHASES)."""
     return lambda g, p: before(g, p) if p < start else policy(g, p)
@@ -343,6 +355,7 @@ POLICIES = dict(
     **{f"{n}_x{k}": sources(s, k) for n, s in EXT for k in (2, 4, 10, 30)},
     **{f"{n}_d{k}": sources(s, 1 / k) for n, s in EXT for k in (2, 3, 10)},
     **{f"no{n}": sources(s, 0) for n, s in EXT},
+    pre2108_d2=dated("2021-08", 0.5),
 )
 # policy -> the training progress marks where its weights change (cooldown policies)
 PHASES = {}
@@ -364,7 +377,28 @@ def table(name):
     return lambda g, p: (w[g.code], True, True)
 
 
+COOL = re.compile(r"cool(\d+)(?:\(([^()]+)\))?:(.+)")
+
+
+def cool(name):
+    """coolNN:AFTER or coolNN(BEFORE):AFTER as (NN / 100, BEFORE or None, AFTER); None if not a cooldown name."""
+    m = COOL.fullmatch(name)
+    if not m:
+        assert not name.startswith("cool"), name
+        return None
+    start, before, after = int(m[1]) / 100, m[2], m[3]
+    assert 0 < start < 1 and not any(
+        (x or "").startswith("cool") for x in (before, after)
+    ), name
+    return start, before, after
+
+
 def resolve(name):
+    """A policy name: POLICIES key, table:NAME, or coolNN[(BEFORE)]:AFTER (BEFORE, control by default, until NN% of
+    training, then AFTER)."""
+    if c := cool(name):
+        start, before, after = c
+        return cooldown(resolve(after), start, resolve(before) if before else control)
     return (
         table(name.removeprefix("table:"))
         if name.startswith("table:")
@@ -372,9 +406,13 @@ def resolve(name):
     )
 
 
+def marks(name):
+    c = cool(name)
+    return (0.0, c[0]) if c else PHASES.get(name, (0.0,))
+
+
 def phase(policy, p):
-    marks = {x for k in policy.split("+") for x in PHASES.get(k, (0.0,))}
-    return max(x for x in marks if x <= p)
+    return max(x for k in policy.split("+") for x in marks(k) if x <= p)
 
 
 def compose(name):
