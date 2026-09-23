@@ -108,9 +108,12 @@ def additive(data, shared, starts=None):
             for be in (0.3, 0.8)
         ]
         starts = [np.r_[g, g[1:]] if shared else np.r_[g, g] for g in grid]
+    # the objective is ~1e-5, so its projected gradient is under L-BFGS-B's default gtol:
+    # unscaled, a warm start (bootstrap) stops where it began and the spread is 5-15x too narrow
+    f = lambda t: 1e6 * objective(t, data, shared)
+    opts = dict(ftol=1e-15, gtol=1e-12)
     fits = [
-        minimize(objective, s, args=(data, shared), method="L-BFGS-B", bounds=bounds)
-        for s in starts
+        minimize(f, s, method="L-BFGS-B", bounds=bounds, options=opts) for s in starts
     ]
     return min(fits, key=lambda m: m.fun).x
 
