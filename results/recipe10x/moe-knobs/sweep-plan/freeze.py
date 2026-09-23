@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path("/home/yimingz3/src/allie")
 HERE = Path(__file__).resolve().parent
-COMMIT = "890aa38"  # branch sweep
+COMMIT = "166d17ae63932f1e43cbdebc4af6f4c3755e02ae"  # branch sweep: main 570f88b + data-recipe-3e17 45fbbc6 + the bug-fleet watchdog fix
 RECIPES = dict(c8s200f0v4="table:c8s200f0v4-fcfbf8858a28", control="control")
 STUDY = dict(sw1e17="sweep-1e17", sw3e17="sweep-3e17", sw1e18="sweep-1e18", swchk3="sweep-check3", swchkh="sweep-checkh")
 
