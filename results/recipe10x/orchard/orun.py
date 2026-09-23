@@ -6,12 +6,13 @@ final run dir to babel results/pretrain/<name> for scoring. Run = plan[SLURM_ARR
 Tests: OLEGS="200,400" trains --stop-after legs with a requeue between them; OKILL_STEP=K requeues the job (as a
 preemption does: SIGTERM, then SIGKILL after 30 s) OKILL_DELAY s after the first published checkpoint >= K, once."""
 
-import base64, hashlib, json, os, shutil, subprocess, sys, threading, time
+import base64, hashlib, json, math, os, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import torch
 
 BUCKET = "gs://cmu-gpucloud-yimingz3"
+DATA = ("v1", "v1-f0.19")  # GCS data prefixes in order of preference: whole months, then the f <= 0.19 subset
 study = Path.home() / "allie/studies" / sys.argv[1]
 spec = json.loads((study / "orchard/args.json").read_text())
 plan = json.loads((study / "plan.json").read_text())
@@ -63,15 +64,21 @@ def stage():
     def one(rel):
         if (store / rel / ".staged").exists():
             return 0
-        meta = json.loads(gs("cat", f"{BUCKET}/data/v1/{rel}.tar.json").stdout)
+        for pre in DATA:  # the whole month, else a subset (oupload.sh SUBSET): check_staged() tests it covers the run
+            r = gs("cat", f"{BUCKET}/data/{pre}/{rel}.tar.json", check=False)
+            if r.returncode == 0:
+                break
+        else:
+            raise FileNotFoundError(f"{rel} is in none of {DATA}")
+        meta = json.loads(r.stdout)
         tar = LOCAL / "dl" / f"{rel}.tar"
         tar.parent.mkdir(parents=True, exist_ok=True)
-        gs("cp", f"{BUCKET}/data/v1/{rel}.tar", tar)  # crc32c-validated
+        gs("cp", f"{BUCKET}/data/{pre}/{rel}.tar", tar)  # crc32c-validated
         assert tar.stat().st_size == meta["bytes"], rel
         (store / rel).mkdir(parents=True, exist_ok=True)
         subprocess.run(["tar", "-xf", tar, "-C", store], check=True)
         tar.unlink()
-        (store / rel / ".staged").touch()
+        (store / rel / ".staged").write_text(json.dumps(dict(prefix=pre, subset_f=meta.get("subset_f"))) + "\n")
         return meta["bytes"]
 
     t = time.time()
@@ -317,6 +324,35 @@ def verify_pin():
 
 
 verify_pin()
+
+
+def check_staged():
+    """Every shard the run's sampler can open is on local disk: chessmix._index at the run's pool_frac and history
+    counts (per bucket the first ceil(min(1, scale) x games) games, 50000 per shard)."""
+    a = run["args"]
+    months = [store / m[len(spec["store"]) + 1 :] for m in a[a.index("--mix-months") + 1].split(",")]
+    f = float(a[a.index("--mix-pool-frac") + 1])
+    hist = json.loads((study / "history-counts.json").read_text())["counts"] if "--mix-history" in a else None
+    buckets = [(m, b) for m in months for b in json.loads((m / "buckets.json").read_text())]
+    games = {}
+    for _, b in buckets:
+        games[b["code"]] = games.get(b["code"], 0) + b["games"]
+    scale = {c: f * hist.get(str(c), 0) / n for c, n in games.items()} if hist else dict.fromkeys(games, f)
+    missing, n = [], 0
+    for m, b in buckets:
+        left = math.ceil(min(1, scale[b["code"]]) * b["games"])
+        for k, s in enumerate(b["shards"]):
+            rows = min(50000, b["games"] - k * 50000, left)
+            if rows <= 0:
+                break
+            n += 1
+            missing += [str(m / s)] * (not (m / s).is_file())
+            left -= rows
+    assert not missing, f"{len(missing)} of {n} shards the sampler can open are not staged, e.g. {missing[:3]}"
+    log(f"staged shards cover the run: {n} shards at pool_frac {f}")
+
+
+check_staged()
 args = [
     a.replace(spec["study"], str(study)).replace(spec["store"], str(store))
     for a in run["args"]
