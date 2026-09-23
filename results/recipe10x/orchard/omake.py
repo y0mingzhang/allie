@@ -26,7 +26,7 @@ args = {
     for r in runs
 }
 for r in runs:
-    oargs.check(args[r["name"]]["args"], r)
+    oargs.check(args[r["name"]]["args"], r, str(study), "/data/group_data/dei-group/yimingz3/allie")
 o = study / "orchard"
 o.mkdir(exist_ok=True)
 old = (

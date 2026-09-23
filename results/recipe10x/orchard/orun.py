@@ -33,7 +33,8 @@ run = spec["runs"][name]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import oargs
 
-oargs.check(run["args"], next(r for r in plan["runs"] if r["name"] == name))
+assert Path(spec["study"]).name == study.name, f"args.json is for {spec['study']}"
+oargs.check(run["args"], next(r for r in plan["runs"] if r["name"] == name), spec["study"], spec["store"])
 # an array task's SLURM_JOB_ID can equal the array's id (the last task gets it), which squeue/scontrol take as every task
 aid = os.environ.get("SLURM_ARRAY_JOB_ID")
 job = f"{aid}_{os.environ['SLURM_ARRAY_TASK_ID']}" if aid else os.environ["SLURM_JOB_ID"]
