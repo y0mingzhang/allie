@@ -103,19 +103,15 @@ same speed; the pre-launch check measures it.
     seeds and adaptive sizes add ~3 h.
   - babel only: ~1.5-2 days.
 
-## 4. Prep status (2026-09-22 20:55 ET)
-- Codex:
-  - plans, data, rounding and FLOP matching CLEAR (20:15);
-  - orchard provenance fixes CLEAR (20:25): sweep 48e85c6 (orun strict hashes + oargs argv binding; deployed).
-- Launch: `sweep-plan/launch.sh LABEL [orchard|babel]`, with LABEL = c8s200f0v4 or control. It freezes the three studies
-  and races every run: 1e17 on dei A6000, 3e17 on L40S, 1e18 on orchard + autoscore or on babel L40S.
-- Babel pre-launch check: sweep-check3-c8s200f0v4 (legs 128 -> 256 with a resume, then scored), queued; it starts when
-  general frees.
-- Orchard v4 upload: paused at 20:37 (8 of 58 months done). It slowed the data confirm runs (control 430K -> 222K tok/s).
-  - Full rest: ~625 GB, ~6.4 h at 27 MB/s.
-  - Subset, not built: 145 GB for f <= 0.113, 187 GB for f <= 0.19, ~1.5-1.9 h.
-  - Or 1e18 on babel.
-  - The H100 check (sweep-checkh) waits on the data.
-- NFS: every babel run opens >= ~220 GB of shards (small buckets' shard-0000s), so stagger starts, co-locate runs for the
-  page cache, and watch sampler_wait.
+## 4. Prep status (2026-09-22 21:08 ET)
+- Codex CLEAR (21:06): plans, orchard provenance, subset path and uploader. The sweep freezes from sweep 166d17a (main 570f88b
+  + data-recipe-3e17 45fbbc6 + the bug-fleet watchdog fix 1901e9d #1); score_handback.py has the fleet's #2 fix.
+- Launch: `sweep-plan/launch.sh LABEL [orchard|babel]`, LABEL = c8s200f0v4 or control. Stagger the babel starts (1e17 on
+  the two dei A6000 nodes), watch sampler_wait per run, log it in the readout.
+- Babel check: sweep-check3-c8s200f0v4 (legs 128 -> 256 with a resume, then scored), races swchk3-c8-*-b, waiting on general.
+- Orchard data: the subset for f <= 0.19 of the 50 v4 months not on GCS (177 GB). It is one manual oupload.sh submission after
+  the confirm control arm ends, 3 streams, scancel by hand if the winner arm's sampler_wait stays > 0.1.
+  - Ready when `osubcheck.py subset-f019 v1-f0.19 0.19 cb8317cc...` reports 50 of 50.
+  - orun.py stages whole months (data/v1), else the subset, and asserts every shard the run can open is staged.
+- Then the H100 check (sweep-checkh-c8s200f0v4 via omake + orun.sh with OLEGS=128,256, OBABEL_DEST=none), then 1e18 + seeds.
 - Held old-bundle runs: all 5 cancelled by main.
