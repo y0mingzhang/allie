@@ -504,15 +504,21 @@ def run(cmd, env, log, watch=None, limit=None):
         )
     CHILDREN[p] = known = {}
     start = last = time.monotonic()
-    size = lambda: watch.stat().st_size if watch and watch.exists() else 0
-    seen, gaps = size(), []
+
+    def size(old):
+        try:
+            return watch.stat().st_size if watch else 0
+        except OSError:  # missing, or a transient NFS error (errno 512)
+            return old
+
+    seen, gaps = size(0), []
     try:
         while p.poll() is None:
             known |= {q: started(q) for q in tree(p.pid)}
             time.sleep(2)
             now = time.monotonic()
-            if size() != seen:
-                seen, gaps, last = size(), gaps + [now - last], now
+            if (n := size(seen)) != seen:
+                seen, gaps, last = n, gaps + [now - last], now
             stall = max(1800, 20 * sorted(gaps)[len(gaps) // 2]) if gaps else 1800
             if watch and now - last > stall or limit and now - start > limit:
                 raise TimeoutError(f"{cmd[:4]}... no progress in {now - last:.0f} s")
