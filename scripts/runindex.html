@@ -149,6 +149,12 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
 .heat th { color: var(--muted); font-weight: 600; font-size: 11.5px; padding: 2px 6px; text-align: left; white-space: nowrap; }
 .heat td { border-radius: 6px; padding: 6px 8px; text-align: right; font-family: var(--mono); min-width: 74px; white-space: nowrap; }
 .heat td small { display: block; color: var(--muted); font-size: 10.5px; }
+.lchips { display: grid; gap: 6px; }
+.lrow { display: flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; }
+.lrow > span { font-size: 12px; font-weight: 600; color: var(--muted); width: 46px; flex: none; }
+.lchip { display: inline-flex; align-items: center; gap: 6px; background: var(--raise); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 7px; font-size: 12.5px; cursor: pointer; }
+.lchip[aria-pressed="false"] { background: transparent; color: var(--faint); text-decoration: line-through; text-decoration-color: var(--faint); }
+.lchip[aria-pressed="false"] svg { opacity: .3; }
 .selbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .selbar .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--raise); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; max-width: 100%; }
 .selbar .chip::before { content: ""; flex: none; width: 10px; height: 3px; border-radius: 2px; background: var(--c); }
@@ -280,6 +286,7 @@ const SWEEP = Object.values(RUNS.filter(r => r.track === "sweep").reduce((a, r) 
 const S = {
   tab: location.hash.slice(1) || "sweep", early: store.get("early", false), cols: store.get("cols", false), open: store.get("open", {}),
   q: "", track: "all", st: "all", sort: store.get("sort", ["status", 1]), rtrack: "all", metric: store.get("metric", "ce"), x: store.get("x", "tok"),
+  cmode: store.get("cmode", "budget"), cb: store.get("cb", "1e17"), coff: store.get("coff", []),
   sm: store.get("sm", "macro"), parity: "all", more: {}, focus: null, dfocus: null, mfocus: null, heat: "imb", sel: [],
 };
 const vis = r => S.early || cur(r);
@@ -366,6 +373,7 @@ function chart(box, o) {
   const ys = all.filter(p => tx(p[0]) >= cut).map(p => ty(p[1])).concat((o.extraY || []).map(ty));
   series.forEach(s => (s.err || []).forEach(e => { if (ok(e[1])) ys.push(ty(e[1])); if (ok(e[2])) ys.push(ty(e[2])); }));
   let y0 = ys.length ? Math.min(...ys) : 0, y1 = ys.length ? Math.max(...ys) : 1;
+  if (o.yq && ys.length > 20) { const q = ys.slice().sort((a, b) => a - b)[Math.floor(o.yq * (ys.length - 1))]; y1 = Math.min(y1, q + .15 * (q - y0)); }  // warm-up spikes leave the top
   if (o.y0 != null) y0 = Math.min(y0, ty(o.y0)); if (o.y1 != null) y1 = Math.max(y1, ty(o.y1));
   if (x1 - x0 < 1e-12) { const d = o.time ? 3600 : o.xlog ? .3 : Math.abs(x0) * .05 || 1; x0 -= d; x1 += d; }
   if (y1 - y0 < 1e-12) { const d = o.ylog ? .1 : Math.abs(y0) * .02 || 1; y0 -= d; y1 += d; }
@@ -743,19 +751,39 @@ function selectedPicker() {
     <select id="addrun" aria-label="Add a run"><option value="">+ add run${S.sel.length >= 8 ? " (8 max)" : ""}</option>${opts}</select>
     <button class="btn" data-preset="running">Training now</button><button class="btn" data-preset="clear">Clear</button></div>`;
 }
-const xOf = s => S.x === "tok" ? s * TOK : s;
-const xLabel = () => S.x === "tok" ? "tokens seen (B)" : "optimizer step";
-const tipX = v => S.x === "tok" ? f(v, 2) + "B tokens" : "step " + Math.round(v);
+const xOf = (s, r) => S.x === "tok" ? s * TOK : S.x === "frac" ? 100 * s / endStep(r) : s;
+const xLabel = () => ({ tok: "tokens seen (B)", frac: "share of training (%)" })[S.x] || "optimizer step";
+const tipX = v => S.x === "tok" ? f(v, 2) + "B tokens" : S.x === "frac" ? f(v, 0) + "% of training" : "step " + Math.round(v);
+const SHAPES = ["10x448", "12x512", "14x640", "16x768", "18x896", "20x1024", "22x1152", "24x1280"];  // the sweep's size ladder: one colour per size
+const sizeColor = r => SLOTS[SHAPES.indexOf(`${r.layers}x${r.width}`)] || "var(--faint)";
+const dashOf = r => r.family === "dense" ? "6 4" : null;
+const plain = r => r.title.replace(" · " + r.budget, "");
+function budgetLegend(live) {
+  const chip = r => `<button class="lchip" data-ctog="${esc(r.name)}" aria-pressed="${!S.coff.includes(r.name)}" title="${esc(r.name)}"><svg width="22" height="8" aria-hidden="true"><line x1="1" x2="21" y1="4" y2="4" style="stroke:${sizeColor(r)};stroke-width:2.5;stroke-dasharray:${dashOf(r) || "none"};opacity:${r.seed !== 42 ? .6 : 1}"/></svg>${esc(plain(r))}</button>`;
+  const row = (t, rs) => rs.length ? `<div class="lrow"><span>${t}</span>${rs.map(chip).join("")}</div>` : "";
+  return `<div class="lchips">${row("MoE", live.filter(r => r.family !== "dense"))}${row("Dense", live.filter(r => r.family === "dense"))}<div class="lrow"><span></span><button class="btn" data-call="all">All lines</button><button class="btn" data-call="none">None</button></div></div>`;
+}
 function vCurves(el) {
-  const m = METRICS.find(x => x[0] === S.metric) || METRICS[0], sel = selv();
-  const ser = sel.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], marker: ["move", "e24"].includes(m[0]), pts: CUR[x.name] ? m[2](CUR[x.name]).map(p => [xOf(p[0]), p[1]]) : [] }));
-  const al = alertList(RUNS.filter(r => vis(r) && (active(r) || sel.some(x => x.name === r.name)) && (r.alerts || []).length));
-  el.innerHTML = `<div class="lede"><h2>${sel.length ? `Training curves of <b>${sel.length}</b> ${sel.length > 1 ? "runs" : "run"}` : "Pick runs to compare"}</h2><p>Train loss is logged every 25 steps; the y-axis skips the first 6% so warm-up does not flatten the rest. Held-out loss exists only where the trainer evaluated (the current recipe evaluates once, at the end).</p></div>
-    ${selectedPicker()}
-    <div class="controls">${segHtml("metric", METRICS.map(x => [x[0], x[1]]), S.metric)}${segHtml("x", [["tok", "Tokens"], ["step", "Step"]], S.x)}</div>
+  if (!BUDGETS.includes(S.cb)) S.cb = "1e17";
+  const m = METRICS.find(x => x[0] === S.metric) || METRICS[0], byB = S.cmode !== "pick", marker = ["move", "e24"].includes(m[0]);
+  const pts = r => CUR[r.name] ? m[2](CUR[r.name]).map(p => [xOf(p[0], r), p[1]]) : [];
+  const all = SWEEP.filter(r => r.budget === S.cb).sort((a, b) => (a.family === "dense") - (b.family === "dense") || a.law_n - b.law_n || a.seed - b.seed);
+  const live = all.filter(r => CUR[r.name] && (CUR[r.name].s || []).length), on = live.filter(r => !S.coff.includes(r.name)), sel = selv();
+  const ser = byB ? on.map(r => ({ name: plain(r), nolegend: true, short: r.short, color: sizeColor(r), dash: dashOf(r), opacity: r.seed !== 42 ? .6 : 1, marker, pts: pts(r) }))
+    : sel.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], marker, pts: pts(BY[x.name]) }));
+  const al = alertList(byB ? live.filter(r => (r.alerts || []).length) : RUNS.filter(r => vis(r) && (active(r) || sel.some(x => x.name === r.name)) && (r.alerts || []).length));
+  const wait = all.length - live.length;
+  const head = byB ? (live.length ? `<b>${live.length}</b> ${live.length > 1 ? "runs" : "run"} at ${S.cb} FLOPs` : `No run at ${S.cb} FLOPs has started`) : sel.length ? `Training curves of <b>${sel.length}</b> ${sel.length > 1 ? "runs" : "run"}` : "Pick runs to compare";
+  const lede = byB ? `Every sweep run at one compute budget: MoE solid, dense dashed, one colour per model size (the same in every budget; seed 2 fainter). Tap a name to drop or add its line; “% of training” lines up the sizes' learning-rate schedules.${wait ? ` ${wait} more ${wait > 1 ? "have" : "has"} not started.` : ""}`
+    : "Any runs, up to 8. Train loss is logged every 25 steps; the y-axis skips the first 6% so warm-up does not flatten the rest. Held-out loss exists only where the trainer evaluated (once, at the end).";
+  el.innerHTML = `<div class="lede"><h2>${head}</h2><p>${lede}</p></div>
+    <div class="controls">${segHtml("cmode", [["budget", "Same compute budget"], ["pick", "Pick runs"]], byB ? "budget" : "pick")}${byB ? segHtml("cb", BUDGETS.map(b => [b, b + " FLOPs"]), S.cb) : ""}</div>
+    ${byB ? budgetLegend(live) : selectedPicker()}
+    <div class="controls">${segHtml("metric", METRICS.map(x => [x[0], x[1]]), S.metric)}${segHtml("x", [["tok", "Tokens"], ["step", "Step"], ["frac", "% of training"]], S.x)}</div>
     <div class="card"><div id="curve"></div></div>
     ${al ? `<div class="sect"><header><h3>Alerts</h3><p>NaN, divergence, loss spikes, stalls, expert starvation, data-bound</p></header>${al}</div>` : ""}`;
-  charts(el, [["curve", { series: ser, xlabel: xLabel(), ytrim: ["ce", "tce", "wce"].includes(m[0]) ? 0.06 : 0, empty: sel.length ? `No ${m[1].toLowerCase()} points for the selected runs yet.` : "Pick runs above.", tipx: tipX, tipfmt: v => f(v, 4), h: 320 }]]);
+  const none = byB ? (live.length ? "All lines are off: tap a name above." : "Curves appear once these runs start training.") : sel.length ? `No ${m[1].toLowerCase()} points for the selected runs yet.` : "Pick runs above.";
+  charts(el, [["curve", { series: ser, xlabel: xLabel(), ytrim: ["ce", "tce", "wce"].includes(m[0]) ? 0.06 : 0, yq: ["ce", "tce", "wce"].includes(m[0]) ? 0.95 : 0, empty: none, tipx: tipX, tipfmt: v => f(v, 4), h: 340 }]]);
 }
 
 /* ---------------------------------------------------------------- moe */
@@ -790,7 +818,7 @@ function vMoe(el) {
     <div class="sect"><header><h3>All MoE runs</h3>${moreBtn()}</header>${table(sortRows(moe, sk, cols), cols, sk, r => r.name === focus, "moe")}</div>`;
   const par = s => S.parity === "all" || (s % 2 === 0) === (S.parity === "even");
   charts(el, HM.map(([k, t, fm]) => ["m-" + k, {
-    series: selMoe.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => par(s) ? [xOf(s), CUR[x.name].moe[k][i]] : [null, null]).filter(p => p[0] != null) })),
+    series: selMoe.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => par(s) ? [xOf(s, BY[x.name]), CUR[x.name].moe[k][i]] : [null, null]).filter(p => p[0] != null) })),
     empty: "Select MoE runs to compare.", yfmt: k === "starved" ? v => pc(v, 0) : tick, tipfmt: fm, tipx: tipX, h: 200, direct: false, xlabel: xLabel(),
   }]));
   const lb = $("#layers", el); if (lb && lb.closest("details").open) layersPanel(lb, focus);
@@ -831,7 +859,7 @@ function vSpeed(el) {
     ["restarts", "Restarts", r => r.restarts ? `<span class="warnc">${r.restarts}</span>` : "0", r => r.restarts, "num", 1],
   ]);
   const sel = selv().filter(x => CUR[x.name] && (CUR[x.name].s || []).length), sk = store.get("ssort", ["status", 1]);
-  const mk = (k, tr) => sel.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => [xOf(s), tr(CUR[x.name][k][i], BY[x.name])]) }));
+  const mk = (k, tr) => sel.map(x => ({ name: nm(x.name), nolegend: true, short: BY[x.name].short, color: SLOTS[x.slot], pts: CUR[x.name].s.map((s, i) => [xOf(s, BY[x.name]), tr(CUR[x.name][k][i], BY[x.name])]) }));
   el.innerHTML = `<div class="lede"><h2>${run.length ? `Training runs sit at a median <b>${pc(medMfu)}</b> MFU` : "No run is training"}${bound.length ? `; <b>${bound.length}</b> ${bound.length > 1 ? "runs wait" : "run waits"} on data` : ""}</h2><p>Steady-state medians after the first quarter of steps. Data-bound = more than a tenth of each step spent waiting for the data sampler.</p></div>
     ${selectedPicker()}
     <div class="grid2"><div class="card"><h3>Tokens / s</h3><div id="sp-tps"></div></div><div class="card"><h3>MFU</h3><div id="sp-mfu"></div></div></div>
@@ -925,6 +953,8 @@ document.addEventListener("click", ev => {
   if (d.sel) { select(d.sel, t.checked); return render(); }
   if (d.unsel) { select(d.unsel, false); return render(); }
   if (d.preset) { if (d.preset === "clear") { S.sel = []; store.set("sel", []); } else RUNS.filter(r => r.status === "running" && vis(r)).slice(0, 8).forEach(r => select(r.name, true)); return render(); }
+  if (d.ctog) { S.coff = S.coff.includes(d.ctog) ? S.coff.filter(n => n !== d.ctog) : [...S.coff, d.ctog]; store.set("coff", S.coff); return render(); }
+  if (d.call) { const names = SWEEP.filter(r => r.budget === S.cb).map(r => r.name); S.coff = d.call === "none" ? [...new Set([...S.coff, ...names])] : S.coff.filter(n => !names.includes(n)); store.set("coff", S.coff); return render(); }
   if ("cols" in d) { S.cols = !S.cols; store.set("cols", S.cols); return render(); }
   if (d.chip) { S[d.chip] = d.v; return render(); }
   if (d.seg) { S[d.seg] = d.v; store.set(d.seg, d.v); return render(); }
