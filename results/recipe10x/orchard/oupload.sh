@@ -24,9 +24,16 @@ one() {
   gcloud storage cp -q $f $D/$rel.tar || { echo "$rel: upload FAILED"; return 1; }
   printf '{"path": "%s", "source": "%s/%s", "bytes": %s, "sha256": "%s", "files": %s, "buckets_sha256": "%s", "stats_sha256": "%s", "markers": "%s", "uploaded": "%s", "job": "%s", "subset_f": %s}\n' \
     $rel $G $rel $bytes $sha $got "$hb" "$hs" "$(ox "ls $G/$rel | grep complete | tr '\n' ' '")" "$(date -Is)" $SLURM_JOB_ID "${SUBSET_F:-null}" > $f.json
-  gcloud storage cp -q $f.json $D/$rel.tar.json && rm -f $f $f.n $f.json
+  gcloud storage cp -q $f.json $D/$rel.tar.json || { echo "$rel: metadata upload FAILED"; return 1; }
+  rm -f $f $f.n $f.json
   echo "$rel: $((bytes / 1000000)) MB, $got files, pull $((t1 - t0))s, upload $(( $(date +%s) - t1 ))s"
 }
-for rel in "$@"; do one $rel & while [ $(jobs -rp | wc -l) -ge ${STREAMS:-4} ]; do wait -n; done; done; wait
-gcloud storage cat "$D/**.tar.json" 2>/dev/null | $PY -c "import json, sys; rows = [json.loads(l) for l in sys.stdin]; print(json.dumps(dict(objects=len(rows), bytes=sum(r['bytes'] for r in rows), rows=sorted(rows, key=lambda r: r['path'])), indent=1))" > $LOCAL/MANIFEST.json && gcloud storage cp -q $LOCAL/MANIFEST.json $D/MANIFEST.json
-echo "$(date) done: $(grep -m1 objects $LOCAL/MANIFEST.json) $(grep -m1 '"bytes"' $LOCAL/MANIFEST.json | tail -1)"
+fails=0 pids=()
+for rel in "$@"; do
+  one $rel & pids+=($!)
+  while [ $(jobs -rp | wc -l) -ge ${STREAMS:-4} ]; do sleep 2; done  # throttle without reaping: wait PID below gets every status
+done
+for p in "${pids[@]}"; do wait $p || fails=$((fails + 1)); done
+gcloud storage cat "$D/**.tar.json" 2>/dev/null | $PY -c "import json, sys; rows = [json.loads(l) for l in sys.stdin]; print(json.dumps(dict(objects=len(rows), bytes=sum(r['bytes'] for r in rows), rows=sorted(rows, key=lambda r: r['path'])), indent=1))" > $LOCAL/MANIFEST.json && gcloud storage cp -q $LOCAL/MANIFEST.json $D/MANIFEST.json || { echo "manifest FAILED"; fails=$((fails + 1)); }
+echo "$(date) done: $(grep -m1 objects $LOCAL/MANIFEST.json) $(grep -m1 '"bytes"' $LOCAL/MANIFEST.json | tail -1), $fails failed"
+exit $((fails > 0))
