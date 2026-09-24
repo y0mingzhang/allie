@@ -1153,6 +1153,8 @@ class Block(nn.Module):
         self.layer_idx = layer_idx
         # MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
         self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim)
+        if isinstance(self.mlp, MoE):  # a checkpointed block's recompute keeps expanded briefly
+            self.mlp.remat = not (CKPT == "eager" and layer_idx < CKPT_LAYERS)
 
     def forward(self, x: Tensor, attn_args: AttnArgs, blend=None):
         if blend is None:

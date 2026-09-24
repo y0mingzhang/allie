@@ -10,7 +10,8 @@ gradients, the load buffer after every micro-batch, the rebalanced bias and the 
 implementation runs in its own process.
 
 kernels: modded_smoe.routed (output, input, weight and gate grads, and the no-grad path) against an
-FP32 torch reference on ragged shapes with empty experts.
+FP32 torch reference on ragged shapes with empty experts; its grads with expanded recomputed equal
+those with it saved, bit for bit.
 
 topk: modded_smoe.route against torch.topk (CUDA; CPU: aten_topk, an emulation of ATen's kernels)
 on live, tie-heavy and special (+-0, +-inf, NaN, subnormal) scores.
@@ -246,6 +247,11 @@ def kernels(a):
             leaves[3],
         )
         y.backward(dy)
+        kept = [v.clone().requires_grad_() for v in (x, up, down, gates)]
+        modded_smoe.routed(
+            kept[0], kept[1].transpose(1, 2), kept[2], k, flat[order], order, offsets, kept[3], False
+        ).backward(dy)
+        remat = all(torch.equal(u.grad, v.grad) for u, v in zip(leaves, kept))
         with torch.no_grad():
             y0 = modded_smoe.routed(
                 x, up.transpose(1, 2), down, k, flat[order], order, offsets, gates
@@ -260,9 +266,10 @@ def kernels(a):
             )
         ]
         exact = torch.equal(y0, y.detach())
-        good = max(errs) < 2e-2 and exact
+        good = max(errs) < 2e-2 and exact and remat
         print(
-            f"  E{e} d{d} h{h} k{k} T{t}: rel err out/dx/dup/ddown/dgates {errs}, no-grad == grad {exact}"
+            f"  E{e} d{d} h{h} k{k} T{t}: rel err out/dx/dup/ddown/dgates {errs}, no-grad == grad {exact},"
+            f" remat == saved {remat}"
         )
         ok &= good
     print(f"{'PASS' if ok else 'FAIL'} routed kernels vs FP32 reference ({DEV})")

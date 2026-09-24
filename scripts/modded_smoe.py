@@ -5,7 +5,7 @@ routed() runs the experts of T tokens' k routes, sorted by expert (order: the ro
 slot, in expert order; se: their experts; offsets: cumulative routes per expert):
   forward   up:        pre = x[route // k] @ up[e] (BF16, sorted rows), y = silu(a) * b, a | b = pre
             scatter:   y @ down[e] into route order, then the gated combine over each token's k slots
-  backward  dgates:    expanded @ grad (bmm)
+  backward  dgates:    expanded @ grad (bmm), expanded recomputed by the scatter unless saved
             down_wgrad: y^T @ (gate * grad[route // k]), per expert
             dx:        d pre = SwiGLU backward at pre of (gate * grad[route // k]) @ down[e]^T
             up_wgrad:  x[route // k]^T @ d pre, per expert
@@ -364,32 +364,34 @@ def combine(expanded, gates):
 
 class Routed(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, up_t, down, k, se, order, offsets, gates):
+    def forward(ctx, x, up_t, down, k, se, order, offsets, gates, remat):
         pre, y = up(x, up_t, order, offsets, k)
         expanded = scatter(y, down, se, order).view(*gates.shape, down.shape[-1])
-        ctx.save_for_backward(
-            x, up_t, down, se, order, offsets, gates, pre, y, expanded
-        )
+        saved = x, up_t, down, se, order, offsets, gates, pre, y
+        ctx.save_for_backward(*saved, *(() if remat else (expanded,)))
         ctx.k = k
         return combine(expanded, gates)
 
     @staticmethod
     def backward(ctx, grad):
-        x, up_t, down, se, order, offsets, gates, pre, y, expanded = ctx.saved_tensors
+        x, up_t, down, se, order, offsets, gates, pre, y, *kept = ctx.saved_tensors
+        expanded = kept[0] if kept else scatter(y, down, se, order).view(*gates.shape, -1)
         dgates = (expanded @ grad.unsqueeze(-1)).squeeze(-1)
+        del expanded, kept
         ddown = down_wgrad(grad, y, gates, order, offsets)
         dpre = dx(grad, down.permute(0, 2, 1), gates, order, offsets, pre)
         dup = up_wgrad(dpre, x, order, offsets, ctx.k)
         dh = scatter(dpre, up_t.permute(0, 2, 1), se, order)
         dh = dh.view(x.shape[0], ctx.k, dh.shape[-1]).sum(-2)
-        return dh, dup, ddown, None, None, None, None, dgates
+        return dh, dup, ddown, None, None, None, None, dgates, None
 
 
-def routed(x, up_t, down, k, se, order, offsets, gates):
+def routed(x, up_t, down, k, se, order, offsets, gates, remat=True):
     """Routed SwiGLU experts, combined: x [T, D], up_t [E, D, 2H] (the up weight transposed), down
-    [E, H, D], gates [T, k] BF16."""
+    [E, H, D], gates [T, k] BF16. remat: the backward reruns the down scatter (bit for bit) for
+    the gates' grad instead of saving its [T, k, D] output."""
     if torch.is_grad_enabled():
-        return Routed.apply(x, up_t, down, k, se, order, offsets, gates)
+        return Routed.apply(x, up_t, down, k, se, order, offsets, gates, remat)
     y = up(x, up_t, order, offsets, k, save=False)[1]
     return combine(scatter(y, down, se, order).view(*gates.shape, -1), gates)
 

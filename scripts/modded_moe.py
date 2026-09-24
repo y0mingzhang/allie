@@ -227,6 +227,7 @@ class MoE(nn.Module):
         if update == "quantile":  # qb_counts over a step's micro-batches
             hist = torch.zeros(experts, modded_smoe.QB_BINS, dtype=torch.int32)
             self.register_buffer("hist", hist, persistent=False)
+        self.remat = True  # modded_smoe.routed's: False where a checkpoint recomputes the layer
 
     def forward(self, x):
         shape, d = x.shape, x.shape[-1]
@@ -258,6 +259,7 @@ class MoE(nn.Module):
             order,
             count.cumsum(0),
             w.type_as(h),
+            self.remat,
         )
         if self.training:
             with torch.no_grad():
