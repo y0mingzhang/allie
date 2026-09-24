@@ -1187,6 +1187,36 @@ class ForwardScheduleConfig:
     ws_long: int
 
 
+def header_features(tokens: Tensor, same_previous: Tensor, n: int):
+    """Per-token features of each game's header, on the positions predicting its moves (from
+    the header's last token on; zeros elsewhere and where the header is not a game's): mover's
+    and opponent's Elo (linear, Elo / 4000), with n = 2 also the base time and increment (raw
+    seconds, log like the clock features); each value as 8 sin, 8 cos, itself and a presence
+    flag, padded to 128 columns."""
+    t = tokens.numel()
+    pos = torch.arange(t, device=tokens.device)
+    start = torch.where(same_previous, 0, pos).cummax(0).values
+    h = start[:, None] + torch.arange(11, device=tokens.device)
+    h = tokens[h.clamp(max=t - 1)]
+    game = (h[:, 0] == 2348) & (pos >= start + 10)
+    d = h[:, 3:11].view(t, 2, 4)
+    place = torch.tensor([1000, 100, 10, 1], device=tokens.device)
+    elo = (d * place).sum(-1).masked_fill((d > 9).any(-1), 0)
+    white = (pos - start) % 2 == 0
+    cols = [elo[:, 0].where(white, elo[:, 1]), elo[:, 1].where(white, elo[:, 0])]
+    v = [c / 4000 for c in cols]
+    ok = [game & (c > 0) for c in cols]
+    if n == 2:
+        i, inc = h[:, 1] - 192, h[:, 2] - 10
+        base = torch.where(i < 5, 15 * i, torch.where(i == 5, 90, (i - 4) * 60))
+        v += [torch.log1p(base.clamp(min=0)) / 10, torch.log1p(inc.clamp(min=0)) / 10]
+        ok += [game & (i >= 0) & (i < 185), game & (inc >= 0) & (inc < 181)]
+    v, ok = torch.stack(v, 1).float()[..., None], torch.stack(ok, 1)[..., None]
+    w = torch.pi * 2.0 ** torch.arange(8, device=tokens.device)
+    f = torch.cat((torch.sin(v * w), torch.cos(v * w), v, torch.ones_like(v)), -1)
+    return F.pad((f * ok).flatten(1), (0, 128 - 18 * v.shape[1]))
+
+
 class GPT(nn.Module):
     def __init__(
         self,
@@ -1299,6 +1329,7 @@ class GPT(nn.Module):
         self.feat_embed.weight.lr_mul = 75.0
         self.feat_embed.weight.wd_mul = 5.0
         self.board = None  # modded_board branch, added at every position
+        self.header_feats = 0  # header_features on every move position (header_embed)
 
     def train(
         self, mode=True
@@ -1356,6 +1387,9 @@ class GPT(nn.Module):
             f = (f * (t >= 0)[..., None]).flatten(1)  # absent values (-1) give zeros
             f = F.pad(f, (0, 64 - f.shape[1]))
             x = x + f.type_as(x) @ self.feat_embed.weight.type_as(x)
+        if self.header_feats:
+            f = header_features(input_seq, seqlens.same_previous, self.header_feats)
+            x = x + f.type_as(x) @ self.header_embed.weight.type_as(x)
         x = x + self.board(seqlens.board, x.dtype)
         ve = [value_embed(input_seq) for value_embed in self.value_embeds]
         # 012 ... 012 structure on token value embeddings by @YouJiacheng, improved on @leloykun's U-net structure

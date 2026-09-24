@@ -21,6 +21,9 @@ DEFAULTS = dict(
     # FP32 masters and update math for the BF16 weights that have none: head, embeddings, gates
     fp32_small_masters=False,
     x0=True,  # off: drop the x0 re-injection, its blend weights held at 0 (screen-1 nox0)
+    # per-token header features (modded_medium_core.header_features) on every move position:
+    # 1 = mover's and opponent's Elo, 2 = + the base time and increment
+    header_feats=0,
 )
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.
@@ -61,6 +64,7 @@ def resolve(arch):
     out = DEFAULTS | {k: v for k, v in arch.items() if k in DEFAULTS}
     assert out["moe_update"] in ("sign", "prop", "quantile")
     assert out["moe_score"] in ("sigmoid", "sqrtsoftplus")
+    assert out["header_feats"] in (0, 1, 2)
     return out
 
 
