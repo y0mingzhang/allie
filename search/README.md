@@ -206,19 +206,26 @@ historical GPU predictions. Keep batch size/order fixed for comparisons. The
 historical large-model order audit's macro/expert changes were +0.000128/+0.000365,
 with intervals including zero.
 
-Experiment drivers, queue daemons, exploratory kernels and fit scripts were
-deleted from the production tree. Their source remains at Git commit `48445c7`
-and in the preserved search worktree for historical reproduction. The original
-frozen trainer/evaluator copies remain untouched; production imports no live
-`scripts/` module. Research reports and raw arrays were not deleted or regenerated.
+Production search runs from this repository's main checkout. Experiment drivers,
+queue daemons, exploratory kernels and fit scripts were deleted from the
+production tree; their source remains at Git commit `48445c7`. The original frozen
+trainer/evaluator copies remain untouched; production imports no live `scripts/`
+module. Research reports and raw arrays were not deleted or regenerated.
 
-Keep both existing links intact:
+Assets live outside Git and outside any worktree. Keep these links intact:
 
-- `results/search-v1` → `/data/group_data/dei-group/yimingz3/allie/worktrees/search-v1/results/search-v1`
-- `vendor` → `/data/group_data/dei-group/yimingz3/allie/worktrees/search-v1/vendor`
+- `results/search-v1` → `/data/group_data/dei-group/yimingz3/allie/search/artifacts`
+- `vendor` → `/data/group_data/dei-group/yimingz3/allie/search/vendor`
 
-The destination worktree must remain while these links are used. Checkpoints,
-exports, runtime archives, receipts and cumulative compute charges stay there.
+Checkpoints, exports, calibrations, runtime archives, receipts and cumulative
+compute records remain under the artifact directory. The installed runtime's
+launchers use its new absolute path; the checksummed runtime archive is unchanged.
+Historical reports may name the retired `worktrees/search-v1` paths: replace their
+`results/search-v1` prefix with the artifact path above, and their `vendor` prefix
+with the vendor path above. The migration inventory, original runtime launchers,
+legacy source archive at `baff151`, and verification records are retained in
+`/data/group_data/dei-group/yimingz3/allie/search/migration-20260924/`.
+
 Allie attribution is in [ALLIE_LICENSE](ALLIE_LICENSE); the vendored rules library
 retains its own license. The [algorithm-family explainer](explainer/index.html)
 and [search math notes](SEARCH_MATH.md) provide research context.
