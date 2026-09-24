@@ -397,6 +397,7 @@ DEFER = (
     False  # eager checkpoints: NorMuon's param broadcasts finish under the next forward
 )
 _inflight = []  # (work, param, grad) reduces of the running backward
+INFLIGHT_BYTES = 1 << 29  # BF16 grads whose reduce compute has not waited on yet
 _bcast = {}  # block index (-1: outside blocks) -> the param broadcasts it waits on
 
 
@@ -425,7 +426,9 @@ def _drain():
 @torch.no_grad()
 def reduce_to_owner(p):
     """Post-accumulate hook: average this micro-batch's BF16 grad over ranks straight into its
-    owner's FP32 row, then drop it (a few reduces in flight overlap the rest of the backward)."""
+    owner's FP32 row, then drop it. Up to INFLIGHT_BYTES of reduces in flight overlap the rest of
+    the backward: a block's 6-7 grads arrive together, so a count cap made compute wait on reduces
+    it had just issued."""
     if not _inflight:
         torch.autograd.Variable._execution_engine.queue_callback(_drain)
     g, p.grad = p.grad, None
@@ -434,7 +437,7 @@ def reduce_to_owner(p):
     if dist.get_world_size() > 1:
         work = dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True)
     _inflight.append((work, p, g))
-    while len(_inflight) > 4:
+    while sum(x[2].nbytes for x in _inflight) > INFLIGHT_BYTES:
         _finish(_inflight.pop(0))
 
 
