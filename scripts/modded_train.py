@@ -154,6 +154,22 @@ def continuation(shared, local, args, config, output, pointer):
     return migrated, provenance
 
 
+def init_triton_signals():
+    """Let LLVM register its handlers before installing the trainer's callbacks.
+
+    Triton 3.6's first MLIR pass pipeline installs process-wide native signal
+    handlers, including USR1 and TERM. Lazy compilation otherwise replaces our
+    Python handlers. An empty pipeline triggers that one-time registration now;
+    later pipelines leave the handlers installed below intact. No GPU is used.
+    """
+    from triton._C.libtriton import ir
+
+    ctx = ir.context()
+    ir.load_dialects(ctx)
+    mod = ir.builder(ctx).create_module()
+    ir.pass_manager(ctx).run(mod, "initialize-signal-handlers")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--name", required=True)
@@ -411,6 +427,7 @@ def main():
     def stop_handler(*_):
         termination[0] = True
 
+    init_triton_signals()
     signal.signal(signal.SIGUSR1, stop_handler)
     signal.signal(signal.SIGTERM, stop_handler)
 
