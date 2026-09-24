@@ -23,6 +23,7 @@ whose bias balances the selection (the audit's example, both scores): about 0 fr
 counts, the raw top-k formula's (DeepSeek-V3 Eq. 18) with moe_seq_raw.
 
     inhold.sh scripts/test_moe_nongemm.py [layer|kernels|topk|counts|seqraw ...] [--base COMMIT]
+    big run's h192: layer --experts 256 --topk 16 --arch moe_shared_frac=0.25 --arch moe_round=16
     .venv/bin/python scripts/test_moe_nongemm.py    # CPU: reruns itself under TRITON_INTERPRET=1
 """
 
@@ -131,6 +132,7 @@ def run(a):
         moe_router_lr_mul=0.1, moe_gamma=1e-3, moe_seq=0.001, moe_update="sign",
         moe_score="sigmoid",
     )  # fmt: skip
+    arch |= {k: ast.literal_eval(v) for k, _, v in (s.partition("=") for s in a.arch)}
     m = MoE(d, *moe_dims(d, arch)).to(DEV).train()
     with torch.no_grad():
         m.down.normal_(0, 0.02)
@@ -176,10 +178,12 @@ def run(a):
 
 
 def layer(a):
-    tmp, out = Path(tempfile.mkdtemp()), {}
+    tmp, out = Path(a.dump or tempfile.mkdtemp()), {}
+    tmp.mkdir(parents=True, exist_ok=True)
     shape = [f"--experts={a.experts}"] * bool(a.experts) + [f"--topk={a.topk}"]
+    shape += [f"--arch={s}" for s in a.arch]
     for name, impl, sets in (
-        ("base", base_scripts(a.base), a.set or BASE_SET),
+        ("base", base_scripts(a.base), a.set or BASE_SET * (a.base == BASE)),
         ("new", HERE, []),
     ):
         cmd = [
@@ -445,7 +449,7 @@ def main():
     tests = dict(layer=layer, kernels=kernels, topk=topk, counts=counts, seqraw=seqraw)
     p.add_argument("cmd", nargs="*", choices=(*tests, "run"))
     p.add_argument("--impl")
-    p.add_argument("--dump")
+    p.add_argument("--dump", help="layer: keep the two records in this directory")
     p.add_argument("--base", default=BASE, help="layer: the reference commit")
     p.add_argument(
         "--set", action="append", default=[], help="layer: MOD.NAME=VALUE (base side)"
@@ -454,6 +458,9 @@ def main():
         "--experts", type=int, default=0, help="layer: E (default 96, CPU 16)"
     )
     p.add_argument("--topk", type=int, default=4, help="layer: k")
+    p.add_argument(
+        "--arch", action="append", default=[], help="layer: KEY=VALUE arch override (both sides)"
+    )
     a = p.parse_args()
     if a.cmd == ["run"]:
         return run(a)
