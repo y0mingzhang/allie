@@ -41,10 +41,10 @@ DX = (64, 128, 64, 8, 3)
 SCATTER = (128, 128, 32, 4, 4)
 WGRAD = (32, 128, 128, 4, 4)
 # hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256) take 64-wide
-# hidden tiles: UP's and DX's BLOCK_N, the down wgrad's BLOCK_K; its BLOCK_M, the row chain, stays 32
-UP64 = (128, 64, 64, 8, 3)
-DX64 = (64, 64, 64, 4, 3)
-DOWN64 = (32, 128, 64, 4, 4)
+# hidden tiles (BLOCK_N of UP and DX); sm_89 d1536 h192 E256 top16 at 64K tokens: up 8.75 -> 7.21 ms, dx
+# 6.53 -> 6.13 ms. The down wgrad keeps WGRAD: 64-wide BLOCK_K there measured slower
+UP64 = (256, 64, 64, 8, 2)
+DX64 = (64, 64, 128, 8, 2)
 
 
 def _narrow(h):
@@ -296,8 +296,8 @@ def scatter_op(x: torch.Tensor, w: torch.Tensor, se: torch.Tensor, order: torch.
 
 @torch.library.custom_op("allie_smoe::down_wgrad", mutates_args={"out"})
 def down_wgrad_op(dy: torch.Tensor, x: torch.Tensor, gates: torch.Tensor, order: torch.Tensor,
-                  offsets: torch.Tensor, out: torch.Tensor, bm: int, bn: int, bk: int, warps: int,
-                  stages: int) -> None:
+                  offsets: torch.Tensor, out: torch.Tensor) -> None:
+    bm, bn, bk, warps, stages = WGRAD
     grid = (offsets.numel() * triton.cdiv(x.shape[-1], bk), triton.cdiv(dy.shape[-1], bn))
     _down_wgrad[grid](dy, x, gates, order, offsets, out, *dy.stride(), *x.stride(), *out.stride(),
                       x.shape[-1], dy.shape[-1], gates.shape[1], bm, bn, bk,
@@ -346,7 +346,7 @@ def down_wgrad(dy, y, gates, order, offsets):
     """The down weight's grad [E, H, D], in its own layout (AccumulateGrad keeps it as is)."""
     gates = gates.contiguous()
     out = dy.new_empty((offsets.numel(), y.shape[-1], dy.shape[-1]))
-    down_wgrad_op(dy, y, gates, order, offsets, out, *(DOWN64 if _narrow(y.shape[-1]) else WGRAD))
+    down_wgrad_op(dy, y, gates, order, offsets, out)
     return out
 
 
