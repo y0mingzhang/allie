@@ -40,6 +40,15 @@ UP = (128, 128, 64, 8, 3)
 DX = (64, 128, 64, 8, 3)
 SCATTER = (128, 128, 32, 4, 4)
 WGRAD = (32, 128, 128, 4, 4)
+# hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256) take 64-wide
+# hidden tiles: UP's and DX's BLOCK_N, the down wgrad's BLOCK_K; its BLOCK_M, the row chain, stays 32
+UP64 = (128, 64, 64, 8, 3)
+DX64 = (64, 64, 64, 4, 3)
+DOWN64 = (32, 128, 64, 4, 4)
+
+
+def _narrow(h):
+    return -h % 128 >= 64
 
 
 # fmt: off
@@ -287,8 +296,8 @@ def scatter_op(x: torch.Tensor, w: torch.Tensor, se: torch.Tensor, order: torch.
 
 @torch.library.custom_op("allie_smoe::down_wgrad", mutates_args={"out"})
 def down_wgrad_op(dy: torch.Tensor, x: torch.Tensor, gates: torch.Tensor, order: torch.Tensor,
-                  offsets: torch.Tensor, out: torch.Tensor) -> None:
-    bm, bn, bk, warps, stages = WGRAD
+                  offsets: torch.Tensor, out: torch.Tensor, bm: int, bn: int, bk: int, warps: int,
+                  stages: int) -> None:
     grid = (offsets.numel() * triton.cdiv(x.shape[-1], bk), triton.cdiv(dy.shape[-1], bn))
     _down_wgrad[grid](dy, x, gates, order, offsets, out, *dy.stride(), *x.stride(), *out.stride(),
                       x.shape[-1], dy.shape[-1], gates.shape[1], bm, bn, bk,
@@ -310,7 +319,8 @@ def up(x, w, order, offsets, k, save=True):
     a | b = pre; w [E, D, 2H]. save=False skips pre (returned empty)."""
     n, h2 = order.numel(), w.shape[-1]
     pre, y = x.new_empty((n, h2) if save else 0), x.new_empty(n, h2 // 2)
-    up_op(x, w, order, offsets, tile_prefix(offsets, UP[0]), pre, y, k, *UP)
+    cfg = UP64 if _narrow(h2 // 2) else UP
+    up_op(x, w, order, offsets, tile_prefix(offsets, cfg[0]), pre, y, k, *cfg)
     return pre, y
 
 
@@ -320,7 +330,8 @@ def dx(dy, w, gates, order, offsets, pre):
     gates = gates.contiguous()
     assert pre.is_contiguous() and pre.shape == (order.numel(), 2 * w.shape[-1])
     out = torch.empty_like(pre)
-    dx_op(dy, w, gates, order, offsets, tile_prefix(offsets, DX[0]), pre, out, *DX)
+    cfg = DX64 if _narrow(w.shape[-1]) else DX
+    dx_op(dy, w, gates, order, offsets, tile_prefix(offsets, cfg[0]), pre, out, *cfg)
     return out
 
 
@@ -335,7 +346,7 @@ def down_wgrad(dy, y, gates, order, offsets):
     """The down weight's grad [E, H, D], in its own layout (AccumulateGrad keeps it as is)."""
     gates = gates.contiguous()
     out = dy.new_empty((offsets.numel(), y.shape[-1], dy.shape[-1]))
-    down_wgrad_op(dy, y, gates, order, offsets, out)
+    down_wgrad_op(dy, y, gates, order, offsets, out, *(DOWN64 if _narrow(y.shape[-1]) else WGRAD))
     return out
 
 
