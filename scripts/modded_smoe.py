@@ -40,15 +40,18 @@ UP = (128, 128, 64, 8, 3)
 DX = (64, 128, 64, 8, 3)
 SCATTER = (128, 128, 32, 4, 4)
 WGRAD = (32, 128, 128, 4, 4)
-# hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256) take 64-wide
-# hidden tiles (BLOCK_N of UP and DX); sm_89 d1536 h192 E256 top16 at 64K tokens: up 8.75 -> 7.21 ms, dx
-# 6.53 -> 6.13 ms. The down wgrad keeps WGRAD: 64-wide BLOCK_K there measured slower
-UP64 = (256, 64, 64, 8, 2)
-DX64 = (64, 64, 128, 8, 2)
+WIDE = dict(up=UP, dx=DX, scatter=SCATTER, up_wgrad=WGRAD)
+# hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256), tuned at sm_89
+# d1536 h192 E256 top16, 64K tokens, every candidate bitwise: up and dx 64-wide hidden tiles (8.75 -> 7.21 ms,
+# 6.53 -> 6.13), scatter BLOCK_K 64 (two forwards and a backward 21.1 -> 19.4), up wgrad BLOCK_N 256 (12.8 -> 8.0;
+# BLOCK_M, its row chain, stays 32). The down wgrad keeps WGRAD: no candidate was faster
+NARROW = dict(up=(256, 64, 64, 8, 2), dx=(64, 64, 128, 8, 2), scatter=(128, 128, 64, 4, 3),
+              up_wgrad=(32, 256, 128, 8, 3))
 
 
-def _narrow(h):
-    return -h % 128 >= 64
+def tiles(h):
+    """The tile tuples for expert hidden width h."""
+    return NARROW if -h % 128 >= 64 else WIDE
 
 
 # fmt: off
@@ -286,8 +289,7 @@ def dx_op(dy: torch.Tensor, w: torch.Tensor, gates: torch.Tensor, order: torch.T
 
 @torch.library.custom_op("allie_smoe::scatter", mutates_args={"out"})
 def scatter_op(x: torch.Tensor, w: torch.Tensor, se: torch.Tensor, order: torch.Tensor,
-               out: torch.Tensor) -> None:
-    bm, bn, bk, warps, stages = SCATTER
+               out: torch.Tensor, bm: int, bn: int, bk: int, warps: int, stages: int) -> None:
     grid = (triton.cdiv(order.numel(), bm) * triton.cdiv(out.shape[1], bn),)
     _scatter[grid](x, *x.stride(), w, *w.stride(), out, *out.stride(), order, se,
                    x.shape[0], x.shape[1], out.shape[1], w.shape[0], bm, bn, bk,
@@ -306,8 +308,7 @@ def down_wgrad_op(dy: torch.Tensor, x: torch.Tensor, gates: torch.Tensor, order:
 
 @torch.library.custom_op("allie_smoe::up_wgrad", mutates_args={"out"})
 def up_wgrad_op(dy: torch.Tensor, x: torch.Tensor, order: torch.Tensor, offsets: torch.Tensor,
-                out: torch.Tensor, fan: int) -> None:
-    bm, bn, bk, warps, stages = WGRAD
+                out: torch.Tensor, fan: int, bm: int, bn: int, bk: int, warps: int, stages: int) -> None:
     grid = (offsets.numel() * triton.cdiv(x.shape[-1], bk), triton.cdiv(dy.shape[-1], bn))
     _up_wgrad[grid](dy, x, order, offsets, out, *dy.stride(), *x.stride(), *out.stride(),
                     x.shape[-1], dy.shape[-1], fan, bm, bn, bk, num_warps=warps, num_stages=stages)
@@ -319,7 +320,7 @@ def up(x, w, order, offsets, k, save=True):
     a | b = pre; w [E, D, 2H]. save=False skips pre (returned empty)."""
     n, h2 = order.numel(), w.shape[-1]
     pre, y = x.new_empty((n, h2) if save else 0), x.new_empty(n, h2 // 2)
-    cfg = UP64 if _narrow(h2 // 2) else UP
+    cfg = tiles(h2 // 2)["up"]
     up_op(x, w, order, offsets, tile_prefix(offsets, cfg[0]), pre, y, k, *cfg)
     return pre, y
 
@@ -330,15 +331,16 @@ def dx(dy, w, gates, order, offsets, pre):
     gates = gates.contiguous()
     assert pre.is_contiguous() and pre.shape == (order.numel(), 2 * w.shape[-1])
     out = torch.empty_like(pre)
-    cfg = DX64 if _narrow(w.shape[-1]) else DX
+    cfg = tiles(w.shape[-1])["dx"]
     dx_op(dy, w, gates, order, offsets, tile_prefix(offsets, cfg[0]), pre, out, *cfg)
     return out
 
 
-def scatter(x, w, se, order):
-    """Rows x in expert order times their expert's w [E, K, N], written back in route order."""
+def scatter(x, w, se, order, h):
+    """Rows x in expert order times their expert's w [E, K, N], written back in route order; h:
+    the experts' hidden width (K is h or 2h)."""
     out = x.new_empty((order.numel(), w.shape[-1]))
-    scatter_op(x, w, se, order, out)
+    scatter_op(x, w, se, order, out, *tiles(h)["scatter"])
     return out
 
 
@@ -353,7 +355,7 @@ def down_wgrad(dy, y, gates, order, offsets):
 def up_wgrad(dpre, x, order, offsets, k):
     """The transposed up weight's grad [E, D, 2H], a view of the up weight's [E, 2H, D] layout."""
     out = dpre.new_empty((offsets.numel(), dpre.shape[-1], x.shape[-1])).transpose(1, 2)
-    up_wgrad_op(dpre, x, order, offsets, out, k)
+    up_wgrad_op(dpre, x, order, offsets, out, k, *tiles(dpre.shape[-1] // 2)["up_wgrad"])
     return out
 
 
@@ -377,7 +379,7 @@ class Routed(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, up_t, down, k, se, order, offsets, gates, remat):
         pre, y = up(x, up_t, order, offsets, k)
-        expanded = scatter(y, down, se, order).view(*gates.shape, down.shape[-1])
+        expanded = scatter(y, down, se, order, y.shape[1]).view(*gates.shape, down.shape[-1])
         saved = x, up_t, down, se, order, offsets, gates, pre, y
         ctx.save_for_backward(*saved, *(() if remat else (expanded,)))
         ctx.k = k
@@ -386,13 +388,13 @@ class Routed(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad):
         x, up_t, down, se, order, offsets, gates, pre, y, *kept = ctx.saved_tensors
-        expanded = kept[0] if kept else scatter(y, down, se, order).view(*gates.shape, -1)
+        expanded = kept[0] if kept else scatter(y, down, se, order, y.shape[1]).view(*gates.shape, -1)
         dgates = (expanded @ grad.unsqueeze(-1)).squeeze(-1)
         del expanded, kept
         ddown = down_wgrad(grad, y, gates, order, offsets)
         dpre = dx(grad, down.permute(0, 2, 1), gates, order, offsets, pre)
         dup = up_wgrad(dpre, x, order, offsets, ctx.k)
-        dh = scatter(dpre, up_t.permute(0, 2, 1), se, order)
+        dh = scatter(dpre, up_t.permute(0, 2, 1), se, order, y.shape[1])
         dh = dh.view(x.shape[0], ctx.k, dh.shape[-1]).sum(-2)
         return dh, dup, ddown, None, None, None, None, dgates, None
 
@@ -404,7 +406,7 @@ def routed(x, up_t, down, k, se, order, offsets, gates, remat=True):
     if torch.is_grad_enabled():
         return Routed.apply(x, up_t, down, k, se, order, offsets, gates, remat)
     y = up(x, up_t, order, offsets, k, save=False)[1]
-    return combine(scatter(y, down, se, order).view(*gates.shape, -1), gates)
+    return combine(scatter(y, down, se, order, y.shape[1]).view(*gates.shape, -1), gates)
 
 
 MIN = tl.constexpr(-(2**31))
