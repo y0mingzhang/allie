@@ -54,21 +54,22 @@ STATS_REPS = (
 
 
 @contextlib.contextmanager
-def _reps(n):
+def _reps(n, replay=False):
     global STATS_REPS
-    STATS_REPS = n
+    STATS_REPS, modded_smoe.REPLAY = n, replay
     try:
         yield
     finally:
-        STATS_REPS = 1
+        STATS_REPS, modded_smoe.REPLAY = 1, False
 
 
 def replay_context():
-    """checkpoint context_fn: the forward adds its loads and stats twice, the recompute skips them.
-    The recompute used to add them again, identically (a deterministic replay). Doubling alone keeps
-    the counts and every rebalance ratio and sign but not a margin sum over micro-batches
-    (fl(fl(2a + b) + b) != 2 fl(a + b)); two in-order adds keep the buffer bitwise."""
-    return _reps(2 if torch.is_grad_enabled() else 1), _reps(0)
+    """checkpoint context_fn: the forward adds its loads and stats twice, the recompute skips them
+    and the routed combine (modded_smoe.combine_op). The recompute used to add them again,
+    identically (a deterministic replay). Doubling alone keeps the counts and every rebalance ratio
+    and sign but not a margin sum over micro-batches (fl(fl(2a + b) + b) != 2 fl(a + b)); two
+    in-order adds keep the buffer bitwise."""
+    return _reps(2 if torch.is_grad_enabled() else 1), _reps(0, True)
 
 
 # Opaque ops read STATS_REPS when they run, so forward and recompute share one compiled graph: a

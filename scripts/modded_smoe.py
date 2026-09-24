@@ -375,6 +375,28 @@ def combine(expanded, gates):
     return bf16_round(functools.reduce(operator.add, terms)).to(expanded.dtype)
 
 
+REPLAY = False  # a checkpoint's recompute is running (modded_moe.replay_context)
+
+
+@functools.cache
+def _combine():
+    return torch.compile(combine, dynamic=False, fullgraph=True)
+
+
+@torch.library.custom_op("allie_smoe::combine", mutates_args=())
+def combine_op(expanded: torch.Tensor, gates: torch.Tensor) -> torch.Tensor:
+    """combine, opaque: a recompute skips it, since only the block's output reads it and a
+    checkpoint drops the recomputed output. The same adds in the same order, so the same bits."""
+    if REPLAY:
+        return expanded.new_empty(expanded.shape[0], expanded.shape[-1])
+    return (_combine() if expanded.is_cuda else combine)(expanded, gates)
+
+
+@combine_op.register_fake
+def _(expanded, gates):
+    return expanded.new_empty(expanded.shape[0], expanded.shape[-1])
+
+
 class Routed(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, up_t, down, k, se, order, offsets, gates, remat):
@@ -383,7 +405,7 @@ class Routed(torch.autograd.Function):
         saved = x, up_t, down, se, order, offsets, gates, pre, y
         ctx.save_for_backward(*saved, *(() if remat else (expanded,)))
         ctx.k = k
-        return combine(expanded, gates)
+        return combine_op(expanded, gates)
 
     @staticmethod
     def backward(ctx, grad):
