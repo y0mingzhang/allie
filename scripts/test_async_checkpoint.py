@@ -8,7 +8,8 @@ reused and reallocated on a shape change; the writer thread blocks the trainer's
 OSError(512) on the first fsync is retried; pointers move only once every rank's files are durable,
 the next save waits for the in-flight one, and a failed or killed write never moves them. pinned()
 buffers equal cpu_copy's in bytes and strides, each registered once at its exact size and page
-aligned, and unregistered when freed (cudaHostRegister stubbed). Not covered: real registration,
+aligned, and unregistered when freed (cudaHostRegister stubbed). paced(): atomic_save's chunked
+writes and their fault paths. rowlog(): the trainer's log thread. Not covered: real registration,
 CUDA copies and modded_train's own call sites.
 Run: python test_async_checkpoint.py
 """
@@ -334,10 +335,108 @@ def worker(mode, tmp, rank):
     dist.destroy_process_group()
 
 
+def paced(tmp):
+    """atomic_save writes torch.save's exact bytes, one fdatasync per full chunk (records larger
+    than a chunk and records straddling one), then one fsync. An OSError from a mid-file
+    fdatasync or fadvise, which torch.save masks with its own RuntimeError, reaches durable_save
+    and is retried; a persistent one is raised and publishes nothing."""
+    import torch
+
+    import modded_checkpoints as mc
+
+    state = {"a": torch.randn(5000), "b": torch.randn(333).bfloat16(), "c": [1, "x"]}
+    ref = io.BytesIO()
+    torch.save(state, ref)
+    n, out = len(ref.getvalue()), Path(tmp) / "paced.pt"
+    real = os.fdatasync, os.fsync, os.posix_fadvise, time.sleep
+    calls, fail = [], {}
+
+    def spy(name, fn):
+        def call(*a):
+            calls.append(name)
+            if fail.get(name, 0):
+                fail[name] -= 1
+                raise OSError(512, "Unknown error 512")
+            return fn(*a)
+
+        return call
+
+    os.fdatasync, os.fsync, os.posix_fadvise = (
+        spy(k, f) for k, f in zip(("fdatasync", "fsync", "fadvise"), real)
+    )
+    time.sleep = lambda s: None
+    mc.CHUNK, chunk = 4099, mc.CHUNK
+    syncs = ["fdatasync", "fadvise"] * (n // 4099) + ["fsync", "fadvise"]
+    mc.durable_save(state, out)
+    assert out.read_bytes() == ref.getvalue() and calls == syncs, (n, calls)
+    for name in ("fdatasync", "fadvise"):
+        out.unlink()
+        calls, fail[name] = [], 1
+        mc.durable_save(state, out)
+        assert out.read_bytes() == ref.getvalue() and calls[-len(syncs) :] == syncs
+        assert calls.count("fdatasync") == n // 4099 + 1, calls
+    out.unlink()
+    fail["fdatasync"] = 99
+    try:
+        mc.durable_save(state, out, tries=3)
+    except OSError as e:
+        assert e.errno == 512 and fail["fdatasync"] == 96
+    else:
+        raise AssertionError("persistent fdatasync failure not raised")
+    mc.CHUNK, (os.fdatasync, os.fsync, os.posix_fadvise, time.sleep) = chunk, real
+    assert not out.exists()
+
+
+def rowlog(tmp):
+    """RowLog appends and echoes rows in order, from a thread that blocks the trainer's signals;
+    a failed write is raised by close() (last row) or by the next put() (earlier row)."""
+    import modded_checkpoints as mc
+
+    out, masks = Path(tmp) / "rowlog", []
+    out.mkdir()
+
+    class Echo(io.StringIO):
+        def write(self, s):
+            masks.append(signal.pthread_sigmask(signal.SIG_BLOCK, []))
+            return super().write(s)
+
+    stdout, sys.stdout = sys.stdout, Echo()
+    lines = [json.dumps({"step": i}) + "\n" for i in range(50)]
+    log = mc.RowLog(out)
+    for i, line in enumerate(lines):
+        log.put(None if i % 7 == 0 else "a.jsonl", line)
+    log.close()
+    echo, sys.stdout = sys.stdout.getvalue(), stdout
+    assert echo == "".join(lines)
+    assert (out / "a.jsonl").read_text() == "".join(
+        x for i, x in enumerate(lines) if i % 7
+    )
+    assert masks and all(mc.QUIET <= m for m in masks)
+    log = mc.RowLog(out / "missing")
+    log.put("a.jsonl", lines[0])
+    try:
+        log.close()
+    except RuntimeError as e:
+        assert isinstance(e.__cause__, FileNotFoundError)
+    else:
+        raise AssertionError("failed last row not raised by close()")
+    log = mc.RowLog(out / "missing")
+    log.put("a.jsonl", lines[0])
+    log.thread.join(10)
+    try:
+        log.put("a.jsonl", lines[1])
+    except RuntimeError as e:
+        assert isinstance(e.__cause__, FileNotFoundError)
+    else:
+        raise AssertionError("failed row not raised by the next put()")
+
+
 def main():
     if len(sys.argv) == 4:
         return worker(sys.argv[1], sys.argv[2], int(sys.argv[3]))
     tmp = tempfile.mkdtemp(prefix="async-ckpt-")
+    paced(tmp)
+    rowlog(tmp)
     for mode in ("crash", "check"):
         procs = [
             subprocess.Popen([sys.executable, __file__, mode, tmp, str(r)])

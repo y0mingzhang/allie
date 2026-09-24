@@ -20,7 +20,7 @@ import modded_medium
 from lm_checkpoint import restore_rng, rng_state
 from lm_data import Packed
 from modded_arch import extra_flops
-from modded_checkpoints import AsyncSaver, publish
+from modded_checkpoints import AsyncSaver, RowLog, publish
 from modded_checkpoints import prune as prune_checkpoints
 from modded_medium import (
     RUNTIME_SOURCE_KEY,
@@ -414,11 +414,11 @@ def main():
     signal.signal(signal.SIGUSR1, stop_handler)
     signal.signal(signal.SIGTERM, stop_handler)
 
+    log = RowLog(out) if rank == 0 else None
+
     def append(file, row):
         if rank == 0:
-            with (out / file).open("a") as f:
-                f.write(json.dumps(row) + "\n")
-            print(json.dumps(row), flush=True)
+            log.put(file, json.dumps(row) + "\n")
 
     metadata = dict(
         args=vars(a),
@@ -512,18 +512,21 @@ def main():
         def commit():
             publish(out, directory, step, world, names)
             removed = prune_checkpoints(out, a.keep_checkpoints, directory)
-            append(
-                "checkpoints.jsonl",
-                {
-                    "step": step,
-                    "seconds": seconds,
-                    "wait_seconds": waited,
-                    "durable_seconds": time.monotonic() - checkpoint_start,
-                    "host_bytes": saver.nbytes,
-                    "directory": str(directory.relative_to(out)),
-                    "removed": removed,
-                },
-            )
+            row = {
+                "step": step,
+                "seconds": seconds,
+                "wait_seconds": waited,
+                "durable_seconds": time.monotonic() - checkpoint_start,
+                "host_bytes": saver.nbytes,
+                "directory": str(directory.relative_to(out)),
+                "removed": removed,
+            }
+            # written here, not by the log thread: prune() finds directories through this
+            # file, and no checkpoint write is in flight once commit runs
+            line = json.dumps(row) + "\n"
+            with (out / "checkpoints.jsonl").open("a") as f:
+                f.write(line)
+            log.put(None, line)
 
         saver.start(commit if rank == 0 else None)
 
@@ -728,6 +731,7 @@ def main():
             break
     saver.flush()
     if rank == 0:
+        log.close()
         (out / "done.json").write_text(
             json.dumps(
                 dict(

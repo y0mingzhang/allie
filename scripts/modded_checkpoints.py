@@ -3,6 +3,8 @@
 import copy
 import json
 import mmap
+import os
+import queue
 import re
 import shutil
 import signal
@@ -14,7 +16,54 @@ import weakref
 import torch
 import torch.distributed as dist
 
-from lm_checkpoint import atomic_save
+CHUNK = 16 << 20
+
+
+class Paced:
+    """Write-through file that fdatasyncs every CHUNK bytes and asks the kernel to drop them from the
+    page cache. Buffered, a multi-GB save sits dirty on the node and uncommitted on the server, and
+    the trainer's own small NFS writes were seen waiting behind it (bug-audit/REPORT.md (a))."""
+
+    def __init__(self, f, chunk):
+        assert chunk > 0
+        self.f, self.chunk, self.dirty, self.error = f, chunk, 0, None
+
+    def write(self, b):
+        view = memoryview(b).cast("B")
+        n = len(view)
+        try:
+            while view:
+                k = self.f.write(view[: self.chunk - self.dirty])
+                if not k:
+                    raise OSError(f"write made no progress ({k!r})")
+                view, self.dirty = view[k:], self.dirty + k
+                if self.dirty == self.chunk:
+                    self.sync(os.fdatasync)
+        except OSError as e:  # torch.save masks it with its own RuntimeError
+            self.error = e
+            raise
+        return n
+
+    def sync(self, flush):
+        flush(self.f.fileno())
+        os.posix_fadvise(self.f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+        self.dirty = 0
+
+    def flush(self):
+        pass
+
+
+def atomic_save(state, path):
+    partial = path.with_suffix(path.suffix + ".partial")
+    with partial.open("wb", buffering=0) as f:
+        paced = Paced(f, CHUNK)
+        try:
+            torch.save(state, paced)
+        finally:
+            if paced.error:
+                raise paced.error
+        paced.sync(os.fsync)
+    partial.replace(path)
 
 
 def prune(out, keep, current):
@@ -99,6 +148,50 @@ def pinned(like):
     return buffer
 
 
+QUIET = {
+    signal.SIGINT,
+    signal.SIGTERM,
+    signal.SIGUSR1,
+}  # left to the main thread's handlers
+
+
+class RowLog:
+    """Rank 0's jsonl rows, appended under out and echoed to stdout by a thread, in order. On NFS
+    an append can wait out a checkpoint write in flight, and every rank waits for rank 0
+    (bug-audit/REPORT.md (a)). A failed write is raised by the next put() or by close()."""
+
+    def __init__(self, out):
+        self.out, self.rows, self.error = out, queue.SimpleQueue(), None
+        self.thread = threading.Thread(target=self._write, daemon=True)
+        self.thread.start()
+
+    def _write(self):
+        signal.pthread_sigmask(signal.SIG_BLOCK, QUIET)
+        try:
+            while row := self.rows.get():
+                file, line = row
+                if file:
+                    with (self.out / file).open("a") as f:
+                        f.write(line)
+                print(line, end="", flush=True)
+        except BaseException as e:
+            self.error = e
+
+    def check(self):
+        if self.error:
+            raise RuntimeError("log writer failed") from self.error
+
+    def put(self, file, line):
+        """Append line to out/file (echo only if file is None)."""
+        self.check()
+        self.rows.put((file, line))
+
+    def close(self):
+        self.rows.put(None)
+        self.thread.join()
+        self.check()
+
+
 class AsyncSaver:
     """Checkpoints written from a thread, at most one save in flight. Each rank snapshots its state into host
     buffers reused across saves and a thread writes it; commit (rank 0: pointers, prune) runs on
@@ -144,9 +237,7 @@ class AsyncSaver:
 
         def write():
             # process-directed signals go to the main thread, not into this thread's fsync
-            signal.pthread_sigmask(
-                signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGUSR1}
-            )
+            signal.pthread_sigmask(signal.SIG_BLOCK, QUIET)
             for state, path in files:
                 durable_save(state, path)
             self.written = True
