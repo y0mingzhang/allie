@@ -110,6 +110,13 @@ def book(load: torch.Tensor, u: torch.Tensor) -> None:
         load.add_(u)
 
 
+@torch.library.custom_op("allie_moe::book_once", mutates_args={"acc"})
+def book_once(acc: torch.Tensor, u: torch.Tensor) -> None:
+    """acc += u once per real forward: replay_context's doubled forward and skipped recompute alike."""
+    if STATS_REPS:
+        acc.add_(u)
+
+
 def counts(keys, e):
     """Occurrences of 0..e-1 in sorted integer keys. Exact and atomic-free: scatter_add_ runs as a
     sorting index_put under torch.use_deterministic_algorithms."""
@@ -180,7 +187,7 @@ def qb_book(
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
-        gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0,
+        gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0, center=0.0,
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop", "quantile")
@@ -229,13 +236,24 @@ class MoE(nn.Module):
             hist = torch.zeros(experts, modded_smoe.QB_BINS, dtype=torch.int32)
             self.register_buffer("hist", hist, persistent=False)
         self.remat = True  # modded_smoe.routed's: False where a checkpoint recomputes the layer
+        # center: EMA decay of the mean router input mu, subtracted before the router (0: off). A shared
+        # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores (big run
+        # layer 0: 77% of the input energy in mu, routing nearly token-independent). mu averages past
+        # steps' global batch means, so a token's routing never sees other tokens
+        assert 0 <= center < 1
+        self.center = center
+        if center:
+            self.register_buffer("mu", torch.zeros(dim))
+            self.register_buffer("mu_steps", torch.zeros(()))
+            # summed router inputs and their count, once per real forward
+            self.register_buffer("mu_sum", torch.zeros(dim + 1), persistent=False)
 
     def forward(self, x):
         shape, d = x.shape, x.shape[-1]
         h = x.reshape(-1, d)
         t, e, k = h.shape[0], self.experts, self.topk
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
-        s = F.linear(h.to(g), self.router.to(g))
+        s = F.linear(h.to(g) - self.mu if self.center else h.to(g), self.router.to(g))
         s = (
             torch.sigmoid(s)
             if self.score == "sigmoid"
@@ -280,6 +298,8 @@ class MoE(nn.Module):
                 )
                 if self.update == "quantile":
                     qb_book(self.hist, s.detach(), self.bias, idx)
+                if self.center:
+                    book_once(self.mu_sum, torch.cat((h.float().sum(0), h.new_full((1,), t, dtype=torch.float32))))
         if self.shared:
             shared = self.act(F.linear(h, self.shared_up.type_as(h)))
             out = out + F.linear(shared, self.shared_down.T.type_as(h))
@@ -329,6 +349,12 @@ class MoE(nn.Module):
         else:
             self.bias += self.gamma * scale * ((mean - load) / mean).clamp(-1, 1)
         tokens = tokens.clamp(min=1)
+        if self.center:  # the first step takes its mean outright
+            dist.all_reduce(self.mu_sum)
+            beta = torch.where(self.mu_steps > 0, self.center, 0.0)
+            self.mu.lerp_(self.mu_sum[:-1] / self.mu_sum[-1].clamp(min=1), 1 - beta)
+            self.mu_steps += 1
+            self.mu_sum.zero_()
         self.stats.copy_(
             torch.stack(
                 (
