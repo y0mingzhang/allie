@@ -25,6 +25,7 @@ DEFAULTS = dict(
     # per-token header features (modded_medium_core.header_features) on every move position:
     # 1 = mover's and opponent's Elo, 2 = + the base time and increment
     header_feats=0,
+    header_lr_mul=None,  # Adam lr multiplier of the header table (None: input_lr_mul)
 )
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.

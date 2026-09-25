@@ -216,12 +216,15 @@ def create_model(cfg, device="cuda"):
     model.use_x0 = modded_arch.resolve(cfg.arch)["x0"]
     model.feat_embed.weight.lr_mul = cfg.input_lr_mul
     model.board = modded_board.build(cfg.width).to(device)
-    model.header_feats = modded_arch.resolve(cfg.arch)["header_feats"]
+    arch = modded_arch.resolve(cfg.arch)
+    model.header_feats = arch["header_feats"]
     if model.header_feats:  # zero init, no RNG draw: every other init is unchanged
         w = torch.zeros(128, cfg.width, device=device)
         model.header_embed = torch.nn.Embedding(128, cfg.width, _weight=w)
         w = model.header_embed.weight
-        w.label, w.lr_mul, w.wd_mul = "embed2", cfg.input_lr_mul, 5.0
+        lr = arch["header_lr_mul"]
+        w.label, w.wd_mul = "embed2", 5.0
+        w.lr_mul = cfg.input_lr_mul if lr is None else lr
     # Follow upstream: BF16 embeddings/gates/head; the board stays FP32
     for m in model.modules():
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)):
