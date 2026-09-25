@@ -8,6 +8,8 @@ adam_every: the Adam and scalar groups run at half the default lr, twice its wei
 square-rooted betas, and step on every step (their Adam step counts equal the training steps, and
 Adam-trained weights move on even steps too), where the default leaves them untouched on even steps.
 schedule: modelexp's sched overrides final_lr / plateau, and mtp 0 gives mtp_steps 0 (weights [1]).
+tc_header False: ids 10..377 (base time and increment) map to the unknown ones and occur only at header
+positions 1 / 2 of real rows; the model's forward equals the default forward on rows so replaced.
 
     torchrun --standalone --nproc_per_node=1 scripts/test_nanogpt_knobs.py [--dump F] [--ref F]
 """
@@ -102,6 +104,41 @@ def schedule():
     assert all(w.mtp(i) == [1.0] for i in range(10))
 
 
+def tc_header(val):
+    """mask_tc_header on the whole vocabulary, TC ids only at header positions 1 / 2 of real rows,
+    and a tc_header False forward == the default forward on rows with those tokens replaced."""
+    from modded_medium import core
+
+    v = torch.arange(2350, device="cuda")
+    want = torch.where(v < 10, v, torch.where(v <= 191, 191, torch.where(v <= 377, 377, v)))
+    assert torch.equal(core.mask_tc_header(v), want)
+    rows = np.asarray(val.rows(np.arange(0, 400, 50)))
+    tc = (rows >= 10) & (rows <= 377)
+    bos = rows == 2348
+    head = np.zeros_like(tc)
+    head[:, 1:] |= bos[:, :-1]
+    head[:, 2:] |= bos[:, :-2]
+    head[:, :2] = True  # a row may start inside a cut header
+    assert tc.any() and np.array_equal(tc, tc & head), "a TC id off a header position"
+    torch.manual_seed(701)
+    cfg = Config(width=128, head_dim=64, layers=8, max_tokens=1024, scheduled_steps=8, arch=dict(moe=[16, 2]))
+    m = create_model(cfg)
+    m.eval()
+    net = torch.compile(m, dynamic=False, fullgraph=True)
+    mgr = TrainingManager(m, cfg, SCHEDULE)
+    mgr.advance_schedule(0)
+    x = torch.as_tensor(rows[:1, :-1], device="cuda")
+    ctx = make_context(x, mgr.ws_short * 128, mgr.ws_long * 128)
+    with torch.inference_mode():
+        ref = net(core.mask_tc_header(x.flatten()), x.flatten(), ctx, mgr.get_forward_args())
+        m.tc_header = False
+        got = net(x.flatten(), x.flatten(), ctx, mgr.get_forward_args())
+        m.tc_header = True
+        raw = net(x.flatten(), x.flatten(), ctx, mgr.get_forward_args())
+    assert torch.equal(ref, got) and not torch.equal(ref, raw)
+    print(json.dumps(dict(tc_positions=int(tc.sum()))), flush=True)
+
+
 def main():
     torch.cuda.set_device(0)
     dist.init_process_group("nccl", device_id=torch.device("cuda", 0))
@@ -122,6 +159,7 @@ def main():
         print("off == reference: losses and parameters bitwise", flush=True)
     if NEW:
         schedule()
+        tc_header(val)
         wd, mgr = train(val, wd_scale=0.5)
         assert groups(mgr, "weight_decay") == [
             0.5 * w for w in groups(base, "weight_decay")

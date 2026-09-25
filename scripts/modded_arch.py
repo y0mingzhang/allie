@@ -29,6 +29,9 @@ DEFAULTS = dict(
     # Adam and scalar optimizers step every step at half their lr, twice their (lr^2) weight decay
     # and square-rooted betas (off: odd steps only, on two steps of summed gradient, as upstream)
     adam_every=False,
+    # the header's base-time and increment tokens (False: every forward replaces them with the
+    # unknown-time-control tokens, so the model never sees them; the clock features stay)
+    tc_header=True,
     wd_scale=1.0,  # multiplies every optimizer group's (lr^2, cautious) weight decay; not moe_router_wd
 )
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
@@ -71,6 +74,7 @@ def resolve(arch):
     assert out["moe_score"] in ("sigmoid", "sqrtsoftplus")
     assert out["header_feats"] in (0, 1, 2)
     assert out["wd_scale"] >= 0 and isinstance(out["adam_every"], bool)
+    assert out["tc_header"] or out["header_feats"] < 2, "header_feats 2 reads the masked tokens"
     return out
 
 

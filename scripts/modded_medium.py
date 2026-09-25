@@ -218,6 +218,7 @@ def create_model(cfg, device="cuda"):
     model.board = modded_board.build(cfg.width).to(device)
     arch = modded_arch.resolve(cfg.arch)
     model.header_feats = arch["header_feats"]
+    model.tc_header = arch["tc_header"]
     if model.header_feats:  # zero init, no RNG draw: every other init is unchanged
         w = torch.zeros(128, cfg.width, device=device)
         model.header_embed = torch.nn.Embedding(128, cfg.width, _weight=w)

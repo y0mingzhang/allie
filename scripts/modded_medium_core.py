@@ -15,6 +15,7 @@ import triton
 import triton.language as tl
 from torch import Tensor, nn
 
+from chess_vocab import INCREMENTS_ID, SECONDS_ID
 from modded_arch import swiglu_hidden
 from modded_moe import MoE, replay_context
 
@@ -1217,6 +1218,14 @@ def header_features(tokens: Tensor, same_previous: Tensor, n: int):
     return F.pad((f * ok).flatten(1), (0, 128 - 18 * v.shape[1]))
 
 
+def mask_tc_header(tokens: Tensor):
+    """The tokens with every base-time and increment token (ids 10..377, used only by game headers)
+    replaced by the unknown base time and unknown increment tokens."""
+    inc, base = INCREMENTS_ID["*"], SECONDS_ID["*"]
+    tc = (tokens >= INCREMENTS_ID["0"]) & (tokens <= base)
+    return torch.where(tc, torch.where(tokens <= inc, inc, base), tokens)
+
+
 class GPT(nn.Module):
     def __init__(
         self,
@@ -1330,6 +1339,7 @@ class GPT(nn.Module):
         self.feat_embed.weight.wd_mul = 5.0
         self.board = None  # modded_board branch, added at every position
         self.header_feats = 0  # header_features on every move position (header_embed)
+        self.tc_header = True  # False: mask_tc_header on every input
 
     def train(
         self, mode=True
@@ -1372,6 +1382,8 @@ class GPT(nn.Module):
             for i in range(self.num_layers)
         ]
 
+        if not self.tc_header:
+            input_seq = mask_tc_header(input_seq)
         # weight-tied: use lm_head.weight for embedding lookup (or separate embed after split)
         if self.split_embed:
             x = self.embed(input_seq)
