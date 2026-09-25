@@ -4,7 +4,7 @@ with decay beta, booked once per real forward (replay_context's doubled forward 
 bitwise unchanged over several micro-batches). CPU: E = 256 takes the torch top-k
 path, and the routed experts (modded_smoe's Triton kernels, unchanged) run as a torch reference.
 
-    .venv/bin/python scripts/test_moe_center.py [REV]   (REV: the reference commit, default HEAD)
+    .venv/bin/python scripts/test_moe_center.py [REV]   (REV: the reference MoE, default 90fd74c, the commit before the switch)
 """
 
 import importlib.util
@@ -68,7 +68,7 @@ def same(a, b):
 
 
 def main():
-    rev = sys.argv[1] if len(sys.argv) > 1 else "HEAD"
+    rev = sys.argv[1] if len(sys.argv) > 1 else "90fd74c"
     os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
     os.environ.setdefault("MASTER_PORT", "29583")
     dist.init_process_group("gloo", rank=0, world_size=1)
