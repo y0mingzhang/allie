@@ -1540,6 +1540,7 @@ class TrainingManager:
         for opt in self.optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]
+        self.adam_every = False  # Adam optimizers step on every step, not odd ones only
 
     def get_forward_args(self):
         return ForwardScheduleConfig(
@@ -1551,7 +1552,9 @@ class TrainingManager:
 
     def activate_hooks(self, step: int):
         """Before the last micro-batch: the Adam optimizers reduce grads on the steps they take."""
-        self.adam_opt.should_sync = self.scalar_opt.should_sync = step % 2 == 1
+        self.adam_opt.should_sync = self.scalar_opt.should_sync = (
+            self.adam_every or step % 2 == 1
+        )
 
     def step_optimizers(self, step: int):
         step_lr = self.schedule.lr(step, self.decay_start, self.end_step)
@@ -1559,7 +1562,8 @@ class TrainingManager:
             group["momentum"] = self.schedule.momentum(step)
 
         for opt in self.optimizers:
-            if opt is self.muon_opt or step % 2 == 1:  # Adam on odd steps only
+            # Adam on odd steps only, unless adam_every
+            if opt is self.muon_opt or self.adam_every or step % 2 == 1:
                 for group in opt.param_groups:
                     group["lr"] = group["initial_lr"] * step_lr
                 opt.step()

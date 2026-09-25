@@ -326,10 +326,20 @@ class TrainingManager(core.TrainingManager):
         super().__init__(model, schedule or Schedule(), decay_start, end_step)
         self.cfg = cfg
         self.schedule_step = 0
+        arch = modded_arch.resolve(cfg.arch)
+        self.adam_every = arch["adam_every"]
         for opt in self.optimizers:
+            half = self.adam_every and opt is not self.muon_opt
             for group in opt.param_groups:
                 group["initial_lr"] *= cfg.lr_scale
                 group["lr"] *= cfg.lr_scale
+                if half:  # the same per-token lr, lr^2 decay and moment horizons
+                    group["initial_lr"] *= 0.5
+                    group["lr"] *= 0.5
+                    group["weight_decay"] *= 2
+                    group["betas"] = tuple(b**0.5 for b in group["betas"])
+                if arch["wd_scale"] != 1:
+                    group["weight_decay"] *= arch["wd_scale"]
 
     def advance_schedule(self, step):
         super().advance_schedule(step)

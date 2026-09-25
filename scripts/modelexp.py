@@ -150,12 +150,14 @@ def shape(r):
 
 
 def schedule(r, steps):
-    """WSD schedule and decay start for this run length (r['sched'] overrides FRAC)."""
+    """WSD schedule and decay start for this run length (r['sched'] overrides FRAC and the
+    SCHEDULE fields, e.g. final_lr; an mtp fraction of 0 turns multi-token prediction off)."""
     f = FRAC | r.get("sched", {})
     warmup = max(1, round(f["warmup"] * steps))
-    mtp = max(1, round(f["mtp"] * steps))
+    mtp = max(int(f["mtp"] > 0), round(f["mtp"] * steps))
     split = max(mtp, round(f["split"] * steps)) | 1
-    s = SCHEDULE | dict(warmup_steps=warmup, mtp_steps=mtp, split_step=split)
+    s = SCHEDULE | {k: f[k] for k in SCHEDULE if k in f}
+    s |= dict(warmup_steps=warmup, mtp_steps=mtp, split_step=split)
     return s, max(warmup, round(f["decay"] * steps))
 
 

@@ -26,6 +26,10 @@ DEFAULTS = dict(
     # 1 = mover's and opponent's Elo, 2 = + the base time and increment
     header_feats=0,
     header_lr_mul=None,  # Adam lr multiplier of the header table (None: input_lr_mul)
+    # Adam and scalar optimizers step every step at half their lr, twice their (lr^2) weight decay
+    # and square-rooted betas (off: odd steps only, on two steps of summed gradient, as upstream)
+    adam_every=False,
+    wd_scale=1.0,  # multiplies every optimizer group's (lr^2, cautious) weight decay; not moe_router_wd
 )
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.
@@ -41,7 +45,6 @@ SHIPPED = dict(
     untie_ve=False,
     matrix_adam=0.0,
     matrix_wd=0.005,
-    adam_every=False,
     uniform_mults=False,
     fp32_embed=False,
     cautious_wd=True,
@@ -67,6 +70,7 @@ def resolve(arch):
     assert out["moe_update"] in ("sign", "prop", "quantile")
     assert out["moe_score"] in ("sigmoid", "sqrtsoftplus")
     assert out["header_feats"] in (0, 1, 2)
+    assert out["wd_scale"] >= 0 and isinstance(out["adam_every"], bool)
     return out
 
 
