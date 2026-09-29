@@ -410,7 +410,9 @@ def main():
                     parent_mix_history=shared["args"]["mix_history"],
                 ),
             ]
-            # the rank state's configuration differs from this run's only in RESUMABLE arch switches
+            # the rank state is the parent's (whose arch differs from this run's only in RESUMABLE switches,
+            # checked through args.arch above): take this run's arch, the rest stays asserted on load
+            assert local["manager"]["config"] == shared["config"], "Rank/model configuration mismatch"
             local["manager"]["config"] = dict(local["manager"]["config"], arch=cfg.arch)
         assert shared["runtime"] == runtime, (
             "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
