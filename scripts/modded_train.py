@@ -17,6 +17,7 @@ import torch.distributed as dist
 import triton
 
 import modded_medium
+import modded_moe
 from lm_checkpoint import restore_rng, rng_state
 from lm_data import Packed
 from modded_arch import extra_flops
@@ -206,6 +207,17 @@ def main():
     )
     p.add_argument("--resume")
     p.add_argument(
+        "--resume-new-source",
+        action="store_true",
+        help="resume on a training source other than the checkpoint's (recorded as source_changes)",
+    )
+    p.add_argument(
+        "--moe-gate-floor",
+        type=float,
+        default=0.0,
+        help="modded_moe.GATE_FLOOR: floor of the MoE gate renormalisation's sum (0: off)",
+    )
+    p.add_argument(
         "--data",
         default="/scratch/yimingz3/allie/lichess_tokens_v2",
         help="packed corpus of the validation rows",
@@ -266,6 +278,8 @@ def main():
     assert a.initial_batch_rows == schedule.batch_rows
     assert 0 < a.wsd_end_step <= a.steps
     assert sum(bool(x) for x in (a.resume, a.wsd_fork_from, a.wsd_continue_from)) <= 1
+    assert a.resume or not a.resume_new_source
+    assert a.moe_gate_floor >= 0
     fork_steps = (
         set(map(int, a.wsd_fork_steps.split(","))) if a.wsd_fork_steps else set()
     )
@@ -315,6 +329,7 @@ def main():
     )
     aux = bool(a.aux_time or a.aux_wdl)
     torch.manual_seed(a.seed)
+    modded_moe.GATE_FLOOR = a.moe_gate_floor
     model = create_model(cfg)
     manager = TrainingManager(model, cfg, schedule, a.wsd_decay_start, a.wsd_end_step)
     net = torch.compile(model, dynamic=False, fullgraph=a.ckpt != "eager")
@@ -360,7 +375,7 @@ def main():
     torch.manual_seed(a.seed + rank)
     np.random.seed(a.seed + rank)
     random.seed(a.seed + rank)
-    continuation_provenance = None
+    continuation_provenance, source_changes = None, []
     load_path = a.resume or a.wsd_fork_from or a.wsd_continue_from
     if load_path:
         pointer = torch.load(load_path, weights_only=False, map_location="cpu")
@@ -373,12 +388,21 @@ def main():
             directory / f"rank{rank}.pt", weights_only=False, map_location="cpu"
         )
         for key in SAME:
-            assert shared["args"][key] == vars(a)[key], f"Resume changes {key}"
+            same = shared["args"][key] == vars(a)[key]
+            if not same and key == "mix_history" and a.resume_new_source:
+                # another study's copy of the same counts
+                old = Path(shared["args"][key])
+                same = old.read_bytes() == Path(a.mix_history).read_bytes()
+            assert same, f"Resume changes {key}"
         old_row = shared["args"].get("row_tokens", 1024)
         assert old_row == a.row_tokens, "Resume changes row_tokens"
-        assert shared["source_sha256"] == source_hashes, (
-            "Resume requires the frozen training source"
-        )
+        source_changes = shared.get("source_changes", [])
+        if shared["source_sha256"] != source_hashes:
+            assert a.resume_new_source, "Resume requires the frozen training source"
+            source_changes = [
+                *source_changes,
+                dict(step=shared["step"], parent_source_sha256=shared["source_sha256"]),
+            ]
         assert shared["runtime"] == runtime, (
             "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
         )
@@ -452,6 +476,7 @@ def main():
         mix_months=list(train.months),
         val_indices=val_idx.tolist(),
         continuation_provenance=continuation_provenance,
+        source_changes=source_changes,
         job_id=os.environ.get("SLURM_JOB_ID"),
         compute_accounting="Useful model matmul FLOPs; excludes optimizer, elementwise and padded attention kernel work",
         gradient_normalization="Global summed objective /8, matching upstream fixed grad_accum_steps=8/world_size; physical microbatch accumulation does not change normalization",
@@ -514,6 +539,7 @@ def main():
                     useful_training_flops=total_flops.item(),
                     inference=saver.snapshot(inference),
                     continuation_provenance=continuation_provenance,
+                    source_changes=source_changes,
                     elapsed_seconds=elapsed_prior + time.monotonic() - start,
                 ),
                 directory / "model.pt",

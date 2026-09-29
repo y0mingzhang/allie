@@ -48,6 +48,18 @@ class AddLoss(torch.autograd.Function):
         return grad, torch.ones((), dtype=torch.float32, device=grad.device)
 
 
+# floor of the sums of sigmoid scores that normalise a token's gates (its k selected scores) and its sequence-wise
+# balance affinities (all e scores); 0: off, bitwise the plain sums. Below a sum of ~1e-19 the compiled division's
+# backward overflows (k**0.5 / sum**2), below ~1e-38 its forward: the big run's step 60081 went nonfinite on one token
+# whose 16 selected layer-1 scores summed to 5.7e-20. Floored, such a token's gates sum to k**0.5 * sum / floor.
+# Set by modded_train --moe-gate-floor
+GATE_FLOOR = 0.0
+
+
+def floored(total):
+    return total.clamp_min(GATE_FLOOR) if GATE_FLOOR else total
+
+
 STATS_REPS = (
     1  # times a training forward adds its loads and stats (replay_context: 2, then 0)
 )
@@ -264,7 +276,7 @@ class MoE(nn.Module):
         else:  # trunk's path: torch.topk here, the stats top-k below
             idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
         w = s.gather(1, idx)
-        w = w * (k**0.5 / w.sum(-1, keepdim=True))
+        w = w * (k**0.5 / floored(w.sum(-1, keepdim=True)))
         flat = idx.flatten()
         order = flat.argsort(stable=True)
         count = counts(flat[order], e)
@@ -314,7 +326,7 @@ class MoE(nn.Module):
             assert t % 1024 == 0
             top = torch.topk(s.detach(), k, dim=-1).indices if self.seq_raw else idx
             sel = torch.zeros_like(s).scatter_(1, top, 1.0).view(-1, 1024, e).mean(1)
-            prob = (s / s.sum(-1, keepdim=True)).view(-1, 1024, e).mean(1)
+            prob = (s / floored(s.sum(-1, keepdim=True))).view(-1, 1024, e).mean(1)
             loss = (
                 self.seq
                 * (dist.get_world_size() / 8)
