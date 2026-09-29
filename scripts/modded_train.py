@@ -16,8 +16,8 @@ import torch
 import torch.distributed as dist
 import triton
 
+import modded_arch
 import modded_medium
-import modded_moe
 from lm_checkpoint import restore_rng, rng_state
 from lm_data import Packed
 from modded_arch import extra_flops
@@ -155,6 +155,17 @@ def continuation(shared, local, args, config, output, pointer):
     return migrated, provenance
 
 
+def migratable(key, old, new):
+    """--resume-new-source: another study's byte-identical history counts, or an arch that differs only
+    in switches that guard numerics (modded_arch.RESUMABLE)."""
+    if key == "mix_history":
+        return bool(old and new) and Path(old).read_bytes() == Path(new).read_bytes()
+    if key == "arch":
+        o, n = (modded_arch.resolve(json.loads(x)) for x in (old, new))
+        return all(o[k] == n[k] for k in o if k not in modded_arch.RESUMABLE)
+    return False
+
+
 def init_triton_signals():
     """Let LLVM register its handlers before installing the trainer's callbacks.
 
@@ -209,13 +220,8 @@ def main():
     p.add_argument(
         "--resume-new-source",
         action="store_true",
-        help="resume on a training source other than the checkpoint's (recorded as source_changes)",
-    )
-    p.add_argument(
-        "--moe-gate-floor",
-        type=float,
-        default=0.0,
-        help="modded_moe.GATE_FLOOR: floor of the MoE gate renormalisation's sum (0: off)",
+        help="resume on another training source, arch switches in modded_arch.RESUMABLE or another study's "
+        "copy of the history counts (recorded as source_changes)",
     )
     p.add_argument(
         "--data",
@@ -279,7 +285,6 @@ def main():
     assert 0 < a.wsd_end_step <= a.steps
     assert sum(bool(x) for x in (a.resume, a.wsd_fork_from, a.wsd_continue_from)) <= 1
     assert a.resume or not a.resume_new_source
-    assert a.moe_gate_floor >= 0
     fork_steps = (
         set(map(int, a.wsd_fork_steps.split(","))) if a.wsd_fork_steps else set()
     )
@@ -329,7 +334,6 @@ def main():
     )
     aux = bool(a.aux_time or a.aux_wdl)
     torch.manual_seed(a.seed)
-    modded_moe.GATE_FLOOR = a.moe_gate_floor
     model = create_model(cfg)
     manager = TrainingManager(model, cfg, schedule, a.wsd_decay_start, a.wsd_end_step)
     net = torch.compile(model, dynamic=False, fullgraph=a.ckpt != "eager")
@@ -389,20 +393,25 @@ def main():
         )
         for key in SAME:
             same = shared["args"][key] == vars(a)[key]
-            if not same and key == "mix_history" and a.resume_new_source:
-                # another study's copy of the same counts
-                old = Path(shared["args"][key])
-                same = old.read_bytes() == Path(a.mix_history).read_bytes()
+            if not same and a.resume_new_source:
+                same = migratable(key, shared["args"][key], vars(a)[key])
             assert same, f"Resume changes {key}"
         old_row = shared["args"].get("row_tokens", 1024)
         assert old_row == a.row_tokens, "Resume changes row_tokens"
         source_changes = shared.get("source_changes", [])
-        if shared["source_sha256"] != source_hashes:
+        if shared["source_sha256"] != source_hashes or shared["args"]["arch"] != a.arch:
             assert a.resume_new_source, "Resume requires the frozen training source"
             source_changes = [
                 *source_changes,
-                dict(step=shared["step"], parent_source_sha256=shared["source_sha256"]),
+                dict(
+                    step=shared["step"],
+                    parent_source_sha256=shared["source_sha256"],
+                    parent_arch=shared["args"]["arch"],
+                    parent_mix_history=shared["args"]["mix_history"],
+                ),
             ]
+            # the rank state's configuration differs from this run's only in RESUMABLE arch switches
+            local["manager"]["config"] = dict(local["manager"]["config"], arch=cfg.arch)
         assert shared["runtime"] == runtime, (
             "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
         )

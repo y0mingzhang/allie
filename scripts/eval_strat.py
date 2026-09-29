@@ -63,13 +63,9 @@ def main():
             "pass its run's frozen source"
         )
     sys.path.insert(0, str(source))
-    import modded_moe
     from lm_data import Packed
     from modded_medium import Config, core, create_model, make_context
     from modded_train import ratings
-
-    # the run's own gate floor (absent before it existed: off)
-    modded_moe.GATE_FLOOR = state["args"].get("moe_gate_floor", 0.0)
 
     torch.set_num_threads(4)
     torch.backends.cuda.matmul.allow_tf32 = True

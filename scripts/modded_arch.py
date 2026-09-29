@@ -33,7 +33,12 @@ DEFAULTS = dict(
     # unknown-time-control tokens, so the model never sees them; the clock features stay)
     tc_header=True,
     wd_scale=1.0,  # multiplies every optimizer group's (lr^2, cautious) weight decay; not moe_router_wd
+    # floor of the sums of sigmoid scores that renormalise a token's gates and its balance-loss affinities
+    # (0: off); modded_moe.MoE gate_floor
+    moe_gate_floor=0.0,
 )
+# switches a --resume-new-source resume may change: numerical guards, not a different model
+RESUMABLE = ("moe_gate_floor",)
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.
 SHIPPED = dict(
@@ -74,7 +79,10 @@ def resolve(arch):
     assert out["moe_score"] in ("sigmoid", "sqrtsoftplus")
     assert out["header_feats"] in (0, 1, 2)
     assert out["wd_scale"] >= 0 and isinstance(out["adam_every"], bool)
-    assert out["tc_header"] or out["header_feats"] < 2, "header_feats 2 reads the masked tokens"
+    assert out["tc_header"] or out["header_feats"] < 2, (
+        "header_feats 2 reads the masked tokens"
+    )
+    assert 0 <= out["moe_gate_floor"] < float("inf")
     return out
 
 
@@ -100,6 +108,7 @@ def moe_dims(width, arch):
         a["moe_seq_raw"],
         a["moe_router_wd"],
         a["moe_router_center"],
+        a["moe_gate_floor"],
     )
 
 
