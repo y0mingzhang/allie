@@ -17,6 +17,9 @@ import modded_smoe
 
 SHARDED = []  # every sharded MoE layer, each model's in forward order
 PREFETCH = True
+# the backward's next gather from the end of a layer's expert grads, not its start (one gathered layer less at the
+# backward's peak, less overlap; modded_train --shard-late-prefetch)
+LATE = False
 _span = []  # per layer: its model's first and end positions
 _ready = {}  # layer position -> (works, up, down): gathers in flight
 _pending = []  # (work, shard, its grad, the whole grads it reads): reduce-scatters in flight
@@ -70,10 +73,16 @@ def gather(
     works, up, down = _ready.pop(pos, None) or _launch(pos)
     for w in works:
         w.wait()
-    nxt, (lo, end) = pos + (-1 if modded_smoe.REPLAY else step), _span[pos]
+    step = -1 if modded_smoe.REPLAY else step
+    if not (LATE and step < 0):
+        prefetch(pos + step, pos)
+    return up, down
+
+
+def prefetch(nxt, pos):
+    lo, end = _span[pos]
     if PREFETCH and lo <= nxt < end and nxt not in _ready:
         _ready[nxt] = _launch(nxt)
-    return up, down
 
 
 @gather.register_fake
@@ -116,7 +125,10 @@ def wgrad(
         g = full.new_empty(p.shape)
         work = dist.reduce_scatter_tensor(g, full, op=dist.ReduceOp.AVG, async_op=True)
         _pending.append((work, p, g, full))
-    return modded_smoe.input_grad(dpre, up, se, order, k)
+    dh = modded_smoe.input_grad(dpre, up, se, order, k)
+    if LATE:
+        prefetch(pos - 1, pos)
+    return dh
 
 
 @wgrad.register_fake

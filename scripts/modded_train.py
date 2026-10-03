@@ -423,6 +423,12 @@ def main():
         "down output, the gates' grad, a batched matmul per chunk, may round otherwise on GPU)",
     )
     p.add_argument(
+        "--shard-late-prefetch",
+        action="store_true",
+        help="moe_shard: the backward gathers the next layer's experts after this layer's expert grads, not "
+        "before (one gathered layer less at the peak; less overlap)",
+    )
+    p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
     )
     p.add_argument(
@@ -501,6 +507,7 @@ def main():
     torch.utils.deterministic.fill_uninitialized_memory = False
     modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
     modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = not a.moe_remat, a.moe_chunks
+    modded_shard.LATE = a.shard_late_prefetch
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0

@@ -245,10 +245,10 @@ def worker(rank, world, port, tmp):
         assert not diff.any(), "every step must be bitwise"
     final = got[-1][1], manager.rank_state_dict()
     del model, manager
-    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = False, 4
+    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS, modded_shard.LATE = False, 4, True
     assert same(train(val, *build(True), range(STEPS)), got) == 0.0
-    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = True, 1
-    say("--moe-remat --moe-chunks 4 bitwise")
+    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS, modded_shard.LATE = True, 1, False
+    say("--moe-remat --moe-chunks 4 --shard-late-prefetch bitwise")
 
     model, manager = build(True)
     head = train(val, model, manager, range(SAVE))
