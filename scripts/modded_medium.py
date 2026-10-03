@@ -204,12 +204,21 @@ def build(cfg, shard):
         cfg.head_dim,
         cfg.width,
         cfg.max_tokens,
-        moe=modded_arch.moe_dims(cfg.width, cfg.arch),
-        dense_first=modded_arch.resolve(cfg.arch)["moe_dense_first"],
+        moe=moe_layers(cfg),
     )
     if shard:
         modded_shard.shard([m for m in model.modules() if isinstance(m, core.MoE)])
     return model
+
+
+def moe_layers(cfg):
+    """Per block: its MoE constructor arguments (modded_arch.moe_dims), None for a dense MLP."""
+    dense = modded_arch.resolve(cfg.arch)["moe_dense_first"]
+    if not modded_arch.moe_dims(cfg.width, cfg.arch):
+        return [None] * cfg.layers
+    return [None] * dense + [
+        modded_arch.moe_dims(cfg.width, cfg.arch, j) for j in range(cfg.layers - dense)
+    ]
 
 
 def create_model(cfg, device="cuda"):

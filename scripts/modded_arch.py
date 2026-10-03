@@ -14,6 +14,7 @@ DEFAULTS = dict(
     moe_seq=1e-3,
     moe_seq_raw=False,  # balance loss counts from the raw top-k (DeepSeek-V3 Eq. 18), not the biased one
     moe_router_center=0.0,  # EMA decay of the mean router input subtracted before the router (0: off)
+    moe_router_center_first=0,  # centre only the first n MoE layers' router inputs (0: every MoE layer)
     moe_update="prop",  # prop | sign | quantile (Kimi K3's Quantile Balancing: moe_gamma unused)
     moe_score="sigmoid",  # sigmoid (DeepSeek-V3) | sqrtsoftplus (DeepSeek-V4.1 Flash)
     moe_shared=True,  # shared expert; off: routed experts take the whole active width
@@ -94,16 +95,21 @@ def resolve(arch):
     assert isinstance(out["moe_log_gates"], bool)
     assert not out["moe_log_gates"] or out["moe_score"] == "sigmoid"
     assert isinstance(out["moe_dense_first"], int) and out["moe_dense_first"] >= 1
+    assert (
+        isinstance(out["moe_router_center_first"], int)
+        and out["moe_router_center_first"] >= 0
+    )
     assert isinstance(out["moe_keep"], int) and out["moe_keep"] >= 0
     assert not out["moe_keep"] or (out["moe"] and out["moe_keep"] < out["moe"][1])
     return out
 
 
-def moe_dims(width, arch):
-    """MoE constructor arguments: the dense MLP's active hidden width (swiglu_hidden) split into a
-    shared expert of half of it plus k routed experts sharing the rest (all routed without the
-    shared expert), then the routing settings."""
+def moe_dims(width, arch, layer=0):
+    """MoE constructor arguments of MoE layer `layer` (0 = the first): the dense MLP's active hidden
+    width (swiglu_hidden) split into a shared expert of half of it plus k routed experts sharing the
+    rest (all routed without the shared expert), then the routing settings."""
     a = resolve(arch)
+    first = a["moe_router_center_first"]
     if not a["moe"]:
         return None
     experts, topk = a["moe"]
@@ -120,7 +126,7 @@ def moe_dims(width, arch):
         a["moe_score"],
         a["moe_seq_raw"],
         a["moe_router_wd"],
-        a["moe_router_center"],
+        a["moe_router_center"] if not first or layer < first else 0.0,
         a["moe_gate_floor"],
         a["moe_log_gates"],
         a["moe_keep"],

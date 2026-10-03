@@ -1286,7 +1286,7 @@ class GPT(nn.Module):
         for ve in self.value_embeds:
             ve.weight.label = "value_embed"
         # MoE (modded_arch.moe_dims) after dense_first dense blocks, as in DeepSeek-V3
-        moes = [moe if i >= dense_first else None for i in range(num_layers)]
+        moes = moe if isinstance(moe, list) else [moe if i >= dense_first else None for i in range(num_layers)]
         self.blocks = nn.ModuleList(
             [Block(model_dim, head_dim, num_heads, i, m) for i, m in enumerate(moes)]
         )
