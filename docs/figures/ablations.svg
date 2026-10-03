@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-10-03T15:18:57.210726</dc:date>
+    <dc:date>2026-10-03T16:17:56.878039</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -43,14 +43,14 @@ L 525.226333 266.256
 L 525.226333 71.208 
 L 289.481359 71.208 
 z
-" clip-path="url(#p60e682fade)" style="fill: #f0efec; stroke: #f0efec; stroke-linejoin: miter"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #f0efec; stroke: #f0efec; stroke-linejoin: miter"/>
    </g>
    <g id="matplotlib.axis_1">
     <g id="xtick_1">
      <g id="line2d_1">
       <path d="M 243.661538 266.256 
 L 243.661538 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_2"/>
      <g id="text_1">
@@ -119,7 +119,7 @@ z
      <g id="line2d_3">
       <path d="M 325.507692 266.256 
 L 325.507692 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_4"/>
      <g id="text_2">
@@ -160,7 +160,7 @@ z
      <g id="line2d_5">
       <path d="M 407.353846 266.256 
 L 407.353846 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_6"/>
      <g id="text_3">
@@ -178,7 +178,7 @@ L 407.353846 71.208
      <g id="line2d_7">
       <path d="M 489.2 266.256 
 L 489.2 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_8"/>
      <g id="text_4">
@@ -196,7 +196,7 @@ L 489.2 71.208
      <g id="line2d_9">
       <path d="M 571.046154 266.256 
 L 571.046154 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_10"/>
      <g id="text_5">
@@ -214,7 +214,7 @@ L 571.046154 71.208
      <g id="line2d_11">
       <path d="M 652.892308 266.256 
 L 652.892308 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_12"/>
      <g id="text_6">
@@ -1211,7 +1211,7 @@ z
    <g id="line2d_20">
     <path d="M 407.353846 266.256 
 L 407.353846 71.208 
-" clip-path="url(#p60e682fade)" style="fill: none; stroke: #c3c2b7; stroke-linecap: round"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: none; stroke: #c3c2b7; stroke-linecap: round"/>
    </g>
    <g id="patch_4">
     <path d="M 407.353846 93.713538 
@@ -1219,7 +1219,7 @@ L 327.588281 93.713538
 L 327.588281 80.073818 
 L 407.353846 80.073818 
 z
-" clip-path="url(#p60e682fade)" style="fill: #2a78d6"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #2a78d6"/>
    </g>
    <g id="patch_5">
     <path d="M 407.353846 120.992979 
@@ -1227,7 +1227,7 @@ L 364.363628 120.992979
 L 364.363628 107.353259 
 L 407.353846 107.353259 
 z
-" clip-path="url(#p60e682fade)" style="fill: #2a78d6"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #2a78d6"/>
    </g>
    <g id="patch_6">
     <path d="M 407.353846 148.27242 
@@ -1235,7 +1235,7 @@ L 425.525047 148.27242
 L 425.525047 134.632699 
 L 407.353846 134.632699 
 z
-" clip-path="url(#p60e682fade)" style="fill: #bdbbb4"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #bdbbb4"/>
    </g>
    <g id="patch_7">
     <path d="M 407.353846 175.55186 
@@ -1243,7 +1243,7 @@ L 511.799867 175.55186
 L 511.799867 161.91214 
 L 407.353846 161.91214 
 z
-" clip-path="url(#p60e682fade)" style="fill: #bdbbb4"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #bdbbb4"/>
    </g>
    <g id="patch_8">
     <path d="M 407.353846 202.831301 
@@ -1251,7 +1251,7 @@ L 521.525752 202.831301
 L 521.525752 189.19158 
 L 407.353846 189.19158 
 z
-" clip-path="url(#p60e682fade)" style="fill: #bdbbb4"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #bdbbb4"/>
    </g>
    <g id="patch_9">
     <path d="M 407.353846 230.110741 
@@ -1259,7 +1259,7 @@ L 582.968799 230.110741
 L 582.968799 216.471021 
 L 407.353846 216.471021 
 z
-" clip-path="url(#p60e682fade)" style="fill: #2a78d6"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #2a78d6"/>
    </g>
    <g id="patch_10">
     <path d="M 407.353846 257.390182 
@@ -1267,7 +1267,7 @@ L 636.931484 257.390182
 L 636.931484 243.750462 
 L 407.353846 243.750462 
 z
-" clip-path="url(#p60e682fade)" style="fill: #2a78d6"/>
+" clip-path="url(#p77f3cb1f3f)" style="fill: #2a78d6"/>
    </g>
    <g id="patch_11">
     <path d="M 223.2 266.256 
@@ -1974,7 +1974,7 @@ z
     <use xlink:href="#NimbusSans-Regular-a" transform="translate(5275.4375 0)"/>
     <use xlink:href="#NimbusSans-Regular-1c" transform="translate(5308.734375 0)"/>
    </g>
-   <!-- same seed and data order. Gray band: ±1 seed-to-seed standard deviation of a run (0.0029). Blue: used in the big run. -->
+   <!-- same seed and data order. Gray band: ±1 seed-to-seed standard deviation of a run (0.0029). Blue: used in Allie-v3.0. -->
    <g style="fill: #52514e" transform="translate(8.64 50.421102) scale(0.095 -0.095)">
     <defs>
      <path id="NimbusSans-Regular-28" d="M 4538 2464 
@@ -2125,23 +2125,22 @@ z
     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(4619.578125 0)"/>
     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(4641.78125 0)"/>
     <use xlink:href="#NimbusSans-Regular-1" transform="translate(4697.375 0)"/>
-    <use xlink:href="#NimbusSans-Regular-55" transform="translate(4725.171875 0)"/>
-    <use xlink:href="#NimbusSans-Regular-49" transform="translate(4752.375 0)"/>
-    <use xlink:href="#NimbusSans-Regular-46" transform="translate(4807.96875 0)"/>
-    <use xlink:href="#NimbusSans-Regular-1" transform="translate(4863.5625 0)"/>
-    <use xlink:href="#NimbusSans-Regular-43" transform="translate(4891.359375 0)"/>
-    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(4946.953125 0)"/>
-    <use xlink:href="#NimbusSans-Regular-48" transform="translate(4969.0625 0)"/>
-    <use xlink:href="#NimbusSans-Regular-1" transform="translate(5024.65625 0)"/>
-    <use xlink:href="#NimbusSans-Regular-53" transform="translate(5052.453125 0)"/>
-    <use xlink:href="#NimbusSans-Regular-56" transform="translate(5085.953125 0)"/>
-    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(5141.546875 0)"/>
-    <use xlink:href="#NimbusSans-Regular-f" transform="translate(5197.140625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-22" transform="translate(4725.171875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(4791.875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(4814.078125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(4836.28125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(4858.484375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-e" transform="translate(4915.28125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-57" transform="translate(4947.484375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-14" transform="translate(4997.484375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-f" transform="translate(5053.078125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-11" transform="translate(5080.875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-f" transform="translate(5136.46875 0)"/>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="p60e682fade">
+  <clipPath id="p77f3cb1f3f">
    <rect x="223.2" y="71.208" width="478.8" height="195.048"/>
   </clipPath>
  </defs>

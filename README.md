@@ -1,20 +1,22 @@
 # Allie
 
-Allie predicts the move a human chess player will make from the game so far, both players' ratings and the clock. The current model is a mixture-of-experts (MoE) transformer with 0.69B active and 5.6B total parameters, trained on 75B tokens of Lichess and over-the-board games. It continues the original Allie ([paper](https://arxiv.org/abs/2410.03893), [code](https://github.com/ippolito-cmu/allie)).
+Allie predicts the move a human chess player will make from the game so far, both players' ratings and the clock. The released model, **Allie-v3.0**, is a mixture-of-experts (MoE) transformer with 0.69B active and 5.6B total parameters, trained on 75B tokens of Lichess and over-the-board games. It continues the original Allie ([paper](https://arxiv.org/abs/2410.03893), [code](https://github.com/ippolito-cmu/allie)).
 
-**On held-out Lichess blitz from July 2026, for each Maia-3 model (5M, 23M and 79M parameters) an Allie model reaches lower cross-entropy and higher top-1 accuracy at lower inference compute per move.** Compared with Maia-3 79M, the full model's cross-entropy is 0.0238 nats lower and its accuracy 0.48 points higher, at 6.6x less compute per move; fine-tuned to use 4 of its 16 experts per token, it still compares favourably at 10x less. On our all-format main evaluation it scored 1.2533 nats, 0.032 below its scaling-law forecast.
+**On held-out Lichess blitz from July 2026, Allie-v3.0 reaches lower cross-entropy and higher top-1 accuracy than each Maia-3 model, using 6.6x less inference compute per move than Maia-3 79M.** On our all-format main evaluation it scored 1.2533 nats, 0.032 below its scaling-law forecast.
 
 Maia-3 ([Chessformer, ICLR 2026](https://arxiv.org/abs/2605.19091); [models](https://huggingface.co/collections/MaiaChess/maia3)), from Ashton Anderson's group at the University of Toronto, is the state of the art in human-move prediction, after [Maia](https://arxiv.org/abs/2006.01855) (KDD 2020) and [Maia-2](https://arxiv.org/abs/2409.20553) (NeurIPS 2024). Its open release of weights and inference code is what made a like-for-like comparison possible. The comparison is not symmetric: Allie reads the clock and the released Maia-3 does not, our training data is more recent, and our compute is counted, not measured (see [Caveats](#caveats)).
 
-![Pareto plot: cross-entropy and top-1 accuracy against inference GFLOPs per move for Allie and Maia-3](docs/figures/pareto.png)
+![Cross-entropy and top-1 accuracy against inference GFLOPs per move for Allie-v3.0 and Maia-3](docs/figures/pareto.png)
 
-| Maia-3 | GFLOPs/move | cheapest Allie model with lower CE and higher top-1 | GFLOPs/move | CE difference (nats) | top-1 difference (pp) |
-|---|---:|---|---:|---:|---:|
-| 5M | 0.60 | distilled student, MoE 181M active / 1.42B total | 0.36 | −0.0410 [−0.0446, −0.0374] | +0.96 [+0.74, +1.19] |
-| 23M | 2.40 | big run fine-tuned to use 2 of 16 experts | 0.82 | −0.0270 [−0.0307, −0.0236] | +0.41 [+0.19, +0.64] |
-| 79M | 9.23 | big run fine-tuned to use 4 of 16 experts | 0.90 | −0.0180 [−0.0215, −0.0149] | +0.34 [+0.12, +0.56] |
+| Model | Parameters | GFLOPs/move | CE (nats) | top-1 (%) |
+|---|---|---:|---:|---:|
+| Maia-3 5M | 5.2M | 0.60 | 1.2955 | 56.95 |
+| Maia-3 23M | 22.9M | 2.40 | 1.2475 | 58.34 |
+| Maia-3 79M | 78.9M | 9.23 | 1.2269 | 58.80 |
+| Allie-v3.0 | 0.69B active / 5.6B total | 1.39 | 1.2056 | 59.26 |
+| Allie-v3.0 (annealed) | 0.69B active / 5.6B total | 1.39 | 1.2030 | 59.29 |
 
-Allie minus Maia-3 on the same 80,000 positions, with 95% intervals over games: negative CE and positive top-1 differences mean Allie's predictions match the played move better. More numbers and detail: [docs/DETAILS.md](docs/DETAILS.md).
+Blitz benchmark, the same 80,000 positions for every model. On those positions, Allie-v3.0 minus Maia-3 79M is −0.0213 [−0.0245, −0.0184] nats and +0.46 [+0.24, +0.67] points of top-1 accuracy (95% intervals over games); for the annealed version, −0.0238 [−0.0272, −0.0208] and +0.48 [+0.27, +0.70]. More numbers: [docs/DETAILS.md](docs/DETAILS.md).
 
 ## How we measure
 
@@ -24,16 +26,16 @@ Both evaluations use Lichess games from July 2026, a month excluded from all tra
 
 ![Accuracy and CE against game rating for Maia-3 5M, 23M, 79M and two Allie models](docs/figures/rating.png)
 
-The final checkpoint has lower CE than Maia-3 79M in 22 of 23 rating bins (intervals below zero in 19) and equal or higher accuracy in all but two, both within noise. The differences are largest where the setup favours Allie: bullet (−0.141 nats), which lies outside Maia-3's blitz training data, and positions with under 10 s on the clock (−0.223), where Allie reads the clock and the released Maia-3 does not. Maia-3 79M predicts better in the middlegame (plies 40-59, Allie +0.007 nats) and with one to two minutes left (+0.011), and on Maia-3's own protocol (ply > 20, at least 30 s left) the accuracy difference is within noise: +0.12 pp [−0.16, +0.40].
+Allie-v3.0 has lower CE than Maia-3 79M in 22 of 23 rating bins (intervals below zero in 19) and equal or higher accuracy in all but two, both within noise. The differences are largest where the setup favours Allie: bullet (−0.141 nats), which lies outside Maia-3's blitz training data, and positions with under 10 s on the clock (−0.223), where Allie reads the clock and the released Maia-3 does not. Maia-3 79M predicts better in the middlegame (plies 40-59, Allie +0.007 nats) and with one to two minutes left (+0.011), and on Maia-3's own protocol (ply > 20, at least 30 s left) the accuracy difference is within noise: +0.12 pp [−0.16, +0.40].
 
 ## Caveats
 
 - **Not matched compute or data.** Maia-3 trained on about 2.5 years of Lichess blitz (January 2023 to July 2025; compute not published), Allie on all formats from 2017 to 2026 plus over-the-board and engine games, with 3.1e20 FLOPs. The claim is about inference cost.
-- **Recency.** Our data runs up to the test month, and August 2026 (1.2% of tokens) is in training; July 2026 is excluded everywhere. The second anneal and the fine-tunes used only 2024-2026 months.
-- **Different inputs.** The released Maia-3 checkpoints have no clock input and see 8 boards; Allie reads the clock and the whole game. Our largest gains are in time trouble.
+- **Recency.** Our data runs up to the test month, and August 2026 (1.2% of tokens) is in training; July 2026 is excluded everywhere. The annealed version's extra tokens came only from 2024-2026 months.
+- **Different inputs.** The released Maia-3 checkpoints have no clock input and see 8 boards; Allie reads the clock and the whole game. The largest differences are in time trouble.
 - **FLOPs, not latency.** Allie's cost is analytic (2 × active parameters per move, with a cached game). Serving keeps all 5.6B weights resident (11 GB in BF16), against about 0.3 GB for Maia-3 79M.
-- **Some choices were tuned on these positions:** the anneal's learning rate (two arms) and the fine-tune and distillation settings. The final checkpoint, which predates them, already has lower CE and higher accuracy than 79M (−0.0213 nats, +0.46 pp).
-- **Thin data at the top.** Above game rating 2700 the test month has 43 games, and the big run is a single seed.
+- **The anneal was tuned on these positions:** its learning rate was chosen between two values on the benchmark. Allie-v3.0 itself predates that choice.
+- **Thin data at the top.** Above game rating 2700 the test month has 43 games, and Allie-v3.0 is a single training run.
 
 ## The model
 
@@ -45,31 +47,31 @@ A game is a token sequence: an 11-token header (time control and both ratings as
 
 ![Main-eval CE over training against the scaling-law forecast, and the gap to Maia-3 79M over training](docs/figures/training.png)
 
-The data is every Lichess month with clock times from May 2017 to August 2026 except July 2026 (7.9B games, 616B tokens), plus over-the-board and engine games. A sampler doubles a game's weight for every 200 rating points of its stronger player, using no game more than 8 times. Training ran 143,051 steps of 524,288 tokens with NorMuon for the weight matrices and Adam for the rest, decaying the learning rate linearly to 0.1% of its peak, on one node of 8 NVIDIA L40S GPUs at 131K tokens/s for 6.6 days. The main eval reached 1.2533 (best sweep model: 1.3170); on the benchmark, its CE fell below Maia-3 79M's only at 70B of its 75B tokens. A second, low-learning-rate anneal on 1B tokens of recent months improved every format (main eval 1.2505).
+The data is every Lichess month with clock times from May 2017 to August 2026 except July 2026 (7.9B games, 616B tokens), plus over-the-board and engine games. A sampler doubles a game's weight for every 200 rating points of its stronger player, using no game more than 8 times. Training ran 143,051 steps of 524,288 tokens with NorMuon for the weight matrices and Adam for the rest, decaying the learning rate linearly to 0.1% of its peak, on one node of 8 NVIDIA L40S GPUs at 131K tokens/s for 6.6 days. The final checkpoint, Allie-v3.0, reached 1.2533 on the main eval (best sweep model: 1.3170); on the benchmark, its CE fell below Maia-3 79M's only at 70B of its 75B tokens. Allie-v3.0 (annealed) continues it with a second, low-learning-rate anneal on 1B tokens of recent months, which improved every format (main eval 1.2505).
 
 ## Scaling laws
 
 ![Isoflop curves for dense and MoE models at three training budgets](docs/figures/scaling.png)
 
-Before the big run we trained 45 dense and MoE models at three budgets. The MoE reaches lower loss at every budget: dense models need 2.2x, 2.3x and 2.5x the compute to match it, although the gap between the fitted optima narrows (0.033, 0.025, 0.017 nats). A fitted law L(N, D) = E + A·N^−α + B·D^−β forecast 1.2856 for the big run; it scored 1.2533, below even the fitted floor E = 1.27. We don't know why yet. Our recipe changes don't explain it at small scale; a 50x extrapolation may simply exceed what the fit can pin down. Memory, not the law, set the model's size (the law's optimum: 1.8B active parameters on 28B tokens).
+Before Allie-v3.0 we trained 45 dense and MoE models at three budgets. The MoE reaches lower loss at every budget: dense models need 2.2x, 2.3x and 2.5x the compute to match it, although the gap between the fitted optima narrows (0.033, 0.025, 0.017 nats). A fitted law L(N, D) = E + A·N^−α + B·D^−β forecast 1.2856 for Allie-v3.0; it scored 1.2533, below even the fitted floor E = 1.27. We don't know why yet. Our recipe changes don't explain it at small scale; a 50x extrapolation may simply exceed what the fit can pin down. Memory, not the law, set the model's size (the law's optimum: 1.8B active parameters on 28B tokens).
 
-## Cheaper inference
+## Inference cost
 
 ![CE against the number of routed experts per token, and the gain from tree search against training compute](docs/figures/inference.png)
 
-The best 8 of the 16 experts carry nearly everything: computing only those costs 0.0011 nats, keeping 4 costs 0.0095, and a short distilled fine-tune that routes through only 4 (0.5B tokens) recovers two thirds of that. Distilling the big run into small students helps more the longer they train: −0.0017, −0.0031 and −0.0063 nats against a played-moves-only control at 0.25B, 0.75B and 1.5B tokens. Tree search fades with scale instead: 128 simulations gain 0.022, 0.019 and 0.013 nats on the sweep's MoE models and only 0.0055 on the big run.
+Allie-v3.0 uses 16 of its 256 routed experts per token, but the best 8 by router score carry nearly everything: computing only those, with no retraining, costs 0.0011 nats on the benchmark at 1.06 GFLOPs per move; 6 cost 0.0025 and 4 cost 0.0095. Tree search over the model's own move, outcome and thinking-time predictions helps less as models grow: 128 simulations gain 0.022, 0.019 and 0.013 nats on the sweep's MoE models and 0.0055 on Allie-v3.0.
 
 ## Training stability
 
-![Starved experts in the first MoE layer over the first 3,125 steps: first attempt against the final run](docs/figures/router.png)
+![Starved experts in the first MoE layer over the first 3,125 steps: first attempt against Allie-v3.0](docs/figures/router.png)
 
-The first attempt at the big run collapsed during warmup. In the first MoE layer one direction came to carry most of the router's input, routing became the same for every token, and up to 116 of 256 experts starved. Halving the router's learning rate only delayed it. Subtracting a running mean from the router's input, and stepping the Adam-trained parameters on every step rather than every other step (modded-nanoGPT's default), stopped it. At step 60,081 one token's 16 router scores summed to 6e-20 and the backward pass of the gate normalization overflowed; flooring that sum at 1e-12 fixed it.
+The first attempt to train Allie-v3.0 collapsed during warmup. In the first MoE layer one direction came to carry most of the router's input, routing became the same for every token, and up to 116 of 256 experts starved. Halving the router's learning rate only delayed it. Subtracting a running mean from the router's input, and stepping the Adam-trained parameters on every step rather than every other step (modded-nanoGPT's default), stopped it. At step 60,081 one token's 16 router scores summed to 6e-20 and the backward pass of the gate normalization overflowed; flooring that sum at 1e-12 fixed it.
 
 ## Ablations
 
 ![Small-scale ablations of training choices](docs/figures/ablations.png)
 
-modded-nanoGPT is tuned for short GPT-2 runs, so we tested its defaults one at a time on a small MoE. Dropping multi-token prediction and decaying the learning rate nearly to zero helped; halving weight decay and removing the time-control tokens hurt. Giving the model both ratings at every token, not just in the header, gained nothing: the moves themselves reveal a player's strength. The two router fixes cost 0.004-0.006 nats at this scale, where routers stay healthy; we keep them because the big run needs them. Every difference is within about two seed standard deviations, so read directions, not sizes.
+modded-nanoGPT is tuned for short GPT-2 runs, so we tested its defaults one at a time on a small MoE. Dropping multi-token prediction and decaying the learning rate nearly to zero helped; halving weight decay and removing the time-control tokens hurt. Giving the model both ratings at every token, not just in the header, gained nothing: the moves themselves reveal a player's strength. The two router fixes cost 0.004-0.006 nats at this scale, where routers stay healthy; we keep them because Allie-v3.0's width needs them. Every difference is within about two seed standard deviations, so read directions, not sizes.
 
 ## Next
 
@@ -77,4 +79,4 @@ The next run is an MoE with 1.2B active / ~9.2B total parameters (24 blocks of w
 
 ## Reproducing
 
-[scripts/](scripts/) holds the data pipeline ([chessdata.py](scripts/chessdata.py), [chessmix.py](scripts/chessmix.py)), the trainer ([modded_train.py](scripts/modded_train.py)), the model (`modded_*.py`), the main evaluation ([eval_strat.py](scripts/eval_strat.py)) and [modelexp.py](scripts/modelexp.py), which freezes each experiment's code and data before it runs. [runs/](runs/README.md) has the released model's frozen study and the launchers of its anneal, fine-tunes and students; [bench/](bench/README.md) the Maia-3 benchmark, fewer-experts inference and analysis scripts; [search/](search/README.md) the inference engine with tree search. Setup: Python 3.12 and `uv sync`; storage and checkout roots are read from `ALLIE_DATA` and `ALLIE_PROJECT_ROOT`. Data and checkpoints are not in git. [docs/make_figures.py](docs/make_figures.py) regenerates every figure; workflow and file map in [docs/DETAILS.md](docs/DETAILS.md#reproducing). The project is MIT-licensed ([LICENSE](LICENSE)); upstream notices are listed in [LICENSES.md](LICENSES.md).
+[scripts/](scripts/) holds the data pipeline ([chessdata.py](scripts/chessdata.py), [chessmix.py](scripts/chessmix.py)), the trainer ([modded_train.py](scripts/modded_train.py)), the model (`modded_*.py`), the main evaluation ([eval_strat.py](scripts/eval_strat.py)) and [modelexp.py](scripts/modelexp.py), which freezes each experiment's code and data before it runs. [runs/](runs/README.md) has Allie-v3.0's frozen study and the launcher of its second anneal; [bench/](bench/README.md) the Maia-3 benchmark and analysis scripts; [search/](search/README.md) the inference engine with tree search. Setup: Python 3.12 and `uv sync`; storage and checkout roots are read from `ALLIE_DATA` and `ALLIE_PROJECT_ROOT`. Data and checkpoints are not in git. [docs/make_figures.py](docs/make_figures.py) regenerates every figure; workflow and file map in [docs/DETAILS.md](docs/DETAILS.md#reproducing). The project is MIT-licensed ([LICENSE](LICENSE)); upstream notices are listed in [LICENSES.md](LICENSES.md).

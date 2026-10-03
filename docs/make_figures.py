@@ -25,7 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 R = ROOT / "results"
 X = R / "recipe10x"
 OUT = ROOT / "docs" / "figures"
-BIG = R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"
+FINAL = (
+    R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"
+)  # Allie-v3.0
 OLD = R / "pretrain/bigrun-24x1536d75m4ship-s16-24x1536-c8s200f0v4-s42"
 REPORT = X / "distill-v2/report.json"
 SWEEP = X / "sweep-readout-c8s200f0v4-w4.json"
@@ -122,12 +124,12 @@ def logx(ax, ticks, fmt="{:g}".format):
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt(v)))
 
 
-def bigrun_n():
-    """Active and total non-embedding matmul parameters of the big run, and its tokens."""
+def allie_n():
+    """Active and total non-embedding matmul parameters of Allie-v3.0, and its tokens."""
     sys.path.insert(0, str(ROOT / "scripts"))
     import modded_arch
 
-    c = jload(BIG / "resume-config.json")["config"]
+    c = jload(FINAL / "resume-config.json")["config"]
     L, d = c["layers"], c["width"]
     e, k, routed, shared = modded_arch.moe_dims(d, c["arch"])[:4]
     base = 4 * L * d * d + 3 * d * modded_arch.swiglu_hidden(d) + (L - 1) * d * e
@@ -152,31 +154,18 @@ def law(fam):
 
 def pareto():
     rep = jload(REPORT)
-    untrained = ["bigrun-143051"] + [f"final-k{k}-trunc" for k in (8, 6, 4, 2)]
-    kd = ["ann-all-p05-t954-k4-a5", "ann-all-p05-t954-k2-a5"]
-    students = ["kd-s896-a05-t1440", "kd-s1024-a05-t2880-gfinal-eager"]
-    ann = "ann-all-p05-t1907"
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.9))
+    final, ann = "bigrun-143051", "ann-all-p05-t1907"
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.7))
     fig.subplots_adjust(left=0.075, right=0.985, top=0.8, bottom=0.2, wspace=0.2)
     titled(
         fig,
-        "Prediction quality against inference compute: Allie and Maia-3",
+        "Prediction quality against inference compute: Allie-v3.0 and Maia-3",
         "Held-out Lichess blitz, July 2026: the same 80,000 positions for every model. "
         "Up and to the left: closer to the moves played, for less compute.",
     )
     for ax, key in zip(axes, ("ce", "acc")):
         at = {k: (v["gflops"], v[key]) for k, v in rep.items()}
-        x79, y79 = at["maia3-79m"]
         ce = key == "ce"
-        lo, hi = (1.302, 1.196) if ce else (56.6, 59.6)
-        ax.add_patch(Rectangle((0.28, y79), x79 - 0.28, hi - y79, color=WASH, lw=0))
-        tip = (
-            "less compute, "
-            + ("lower CE" if ce else "higher accuracy")
-            + " than Maia-3 79M"
-        )
-        ty, va = (y79 - 0.0012, "bottom") if ce else (hi - 0.06, "top")
-        ax.text(x79 * 0.94, ty, tip, ha="right", va=va, fontsize=8, color=BLUE)
         mx = [at[k] for k in MAIA]
         ax.plot(*zip(*mx), color=MAIA["maia3-23m"], lw=1.2, zorder=2)
         for k, xy in zip(MAIA, mx):
@@ -185,42 +174,25 @@ def pareto():
                 note(ax, NAME[k], xy, 0, -16, ha="center")
             else:
                 note(ax, NAME[k], xy, 9, -3, va="center")
-        ux = [at[k] for k in untrained]
-        ax.plot(*zip(*ux), color=BLUE, lw=1.2, alpha=0.55, zorder=3)
-        ax.plot(*zip(*ux), "o", ls="", ms=7, zorder=5, **HOLLOW)
-        ax.plot(
-            *zip(*map(at.get, kd)), "D", ls="", ms=7.5, color=BLUE, zorder=6, **RING
-        )
-        ax.plot(*at[ann], "*", ms=15, color=BLUE, zorder=7, **RING)
-        stu = zip(*map(at.get, students))
-        ax.plot(*stu, "s", ls="", ms=7.5, color=AQUA, zorder=6, **RING)
-        logx(ax, [0.3, 0.5, 1, 2, 5, 10])
-        ax.set(xlim=(0.28, 14), ylim=(lo, hi))
+        ax.plot(*at[final], "o", ms=15, zorder=5, **HOLLOW)
+        ax.plot(*at[ann], "*", ms=9, color=BLUE, mew=0, zorder=6)
+        note(ax, "Allie-v3.0", at[final], 14, 0, va="center", color=INK)
+        logx(ax, [0.5, 1, 2, 5, 10])
+        ax.set_xlim(0.45, 14)
+        ax.set_ylim(*((1.305, 1.195) if ce else (56.6, 59.6)))
         ax.set_xlabel("Inference compute per move (GFLOPs, log scale)")
         ylab = "Cross-entropy over legal moves (nats, flipped)"
         ax.set_ylabel(ylab if ce else "Top-1 accuracy (%)")
-    a = axes[0]
-    at = {k: (v["gflops"], v["ce"]) for k, v in rep.items()}
-    text = "big run, after a second\nlow-LR anneal"
-    note(a, text, at[ann], 12, -2, va="center", color=INK)
-    text = "best 8, 6, 4 or 2\nof its 16 experts,\nno training"
-    note(a, text, at["final-k2-trunc"], -4, -9, ha="right", va="top")
-    note(
-        a, "fine-tuned to use\n4 or 2 experts", at[kd[1]], -10, ha="right", va="center"
-    )
-    note(a, "distilled students", at[students[1]], 0, 9, ha="center")
     handles = [
-        H("big run, annealed", marker="*", ls="", ms=12, color=BLUE, **RING),
-        H("big run, final, 16 to 2 experts", marker="o", ms=6, color=BLUE, **HOLLOW),
-        H("big run, fine-tuned to 4 or 2 experts", marker="D", ls="", color=BLUE),
-        H("distilled students", marker="s", ls="", color=AQUA),
+        H("Allie-v3.0", marker="o", ls="", ms=11, **HOLLOW),
+        H("Allie-v3.0 (annealed)", marker="*", ls="", ms=9, color=BLUE, mew=0),
         H("Maia-3 5M / 23M / 79M", marker="o", ms=7, color=MAIA["maia3-23m"]),
     ]
-    fig.legend(handles=handles, loc="lower center", ncol=5, columnspacing=1.4)
+    fig.legend(handles=handles, loc="lower center", ncol=3, columnspacing=2)
     save(fig, "pareto")
-    for k in [*MAIA, ann, *untrained, *kd, *students]:
+    for k in [*MAIA, final, ann]:
         r = rep[k]
-        print(f"  {k:32s} {r['gflops']:.2f} GF  CE {r['ce']:.4f}  top-1 {r['acc']:.2f}")
+        print(f"  {k:20s} {r['gflops']:.2f} GF  CE {r['ce']:.4f}  top-1 {r['acc']:.2f}")
 
 
 # ------------------------------------------------------- 2. accuracy and CE by game rating
@@ -236,8 +208,7 @@ def rating():
         ("maia3-5m", "Maia-3 5M", MAIA["maia3-5m"], 1.6),
         ("maia3-23m", "Maia-3 23M", MAIA["maia3-23m"], 1.6),
         ("maia3-79m", "Maia-3 79M", MAIA["maia3-79m"], 2.0),
-        ("sw-moe-s42", "Allie MoE 181M active (0.36 GFLOPs)", AQUA, 2.0),
-        (big, "Allie big run, final (1.39 GFLOPs)", BLUE, 2.6),
+        (big, "Allie-v3.0 (1.39 GFLOPs)", BLUE, 2.6),
     ]
     grid = {"height_ratios": [2.1, 1]}
     fig, axes = plt.subplots(2, 2, figsize=(10, 6.6), sharex=True, gridspec_kw=grid)
@@ -276,7 +247,7 @@ def rating():
     axes[0, 1].set_ylim(1.9, 0.92)
     axes[1, 0].set_ylim(-4, 5)
     axes[1, 1].set_ylim(0.13, -0.13)
-    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="lower center", ncol=5)
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="lower center", ncol=4)
     save(fig, "rating")
     for key, scale in (("ce", 1), ("acc", 100)):
         d = {r["bin"]: r["models"][big][f"d_{key}_79m"] for r in rows}
@@ -301,12 +272,12 @@ def arrow(ax, a, b):
 
 
 def model():
-    act, tot, _ = bigrun_n()
+    act, tot, _ = allie_n()
     fig = plt.figure(figsize=(10, 4.6))
     ax = fig.add_axes((0, 0, 1, 1))
     ax.set(xlim=(0, 1), ylim=(0, 0.46))
     ax.axis("off")
-    title = "The model: a mixture-of-experts transformer over the whole game"
+    title = "Allie-v3.0: a mixture-of-experts transformer over the whole game"
     ax.text(0.012, 0.449, title, fontsize=13.5, color=INK, weight="bold", va="top")
     sub = (
         f"MoE {act / 1e9:.2f}B active / {tot / 1e9:.1f}B total parameters. Every block "
@@ -376,7 +347,7 @@ def model():
 def training():
     path = X / "maia3-bench/bigrun-trajectory-v2.jsonl"
     rows = sorted(jsonl(path), key=lambda r: r["step"])
-    act, _, D = bigrun_n()
+    act, _, D = allie_n()
     f = law("s16")
     forecast = f(act, D)
     ann = jload(REPORT)["ann-all-p05-t1907"]["golden"]["macro"]
@@ -389,7 +360,7 @@ def training():
     fig.subplots_adjust(left=0.07, right=0.985, top=0.79, bottom=0.12, wspace=0.24)
     titled(
         fig,
-        "75B tokens on one 8-GPU node: the run landed below its scaling-law forecast",
+        "Training Allie-v3.0: 75B tokens on one 8-GPU node, below its scaling-law forecast",
         "Left: main eval (16-cell macro CE, all formats), scored every second checkpoint "
         "from 22B tokens on. Right: blitz-benchmark CE\nminus Maia-3 79M's on the same "
         "80,000 positions, with 95% intervals.",
@@ -410,8 +381,8 @@ def training():
     note(ax, f"forecast {forecast:.4f}", (D / 1e9, forecast), 0, 9, ha="center")
     ax.plot(D / 1e9 + 1, ann, "*", ms=12, color=BLUE, zorder=6, **RING)
     right = {"ha": "right", "color": INK}
-    note(ax, f"final {gm[-1]:.4f}", (t[-1], gm[-1]), -10, 1, va="bottom", **right)
-    text = f"after a second anneal {ann:.4f}"
+    note(ax, f"Allie-v3.0 {gm[-1]:.4f}", (t[-1], gm[-1]), -10, 1, va="bottom", **right)
+    text = f"annealed {ann:.4f}"
     note(ax, text, (D / 1e9 + 1, ann), -12, -2, va="top", **right)
     ax.set(xlim=(0, 80), ylim=(1.235, 1.42))
     ax.set_xlabel("Training tokens (billions)")
@@ -441,8 +412,8 @@ def training():
 def scaling():
     runs = jload(SWEEP)["runs"]
     cells = macro_metric()["cells"]
-    act, _, D = bigrun_n()
-    final = jload(R / f"lm-eval/{BIG.name}/strat-v1.json")["macro"]
+    act, _, D = allie_n()
+    final = jload(R / f"lm-eval/{FINAL.name}/strat-v1.json")["macro"]
     fig, axes = plt.subplots(1, 3, figsize=(10, 4.4), sharey=True)
     fig.subplots_adjust(left=0.075, right=0.985, top=0.75, bottom=0.2, wspace=0.08)
     titled(
@@ -451,7 +422,7 @@ def scaling():
         "45 runs, main-eval CE. Curves: quadratic in log N through the four sizes around "
         "each minimum (hollow points: outside that window). Same recipe\nfor both; the "
         "MoE sends each token to 16 of 256 experts plus a shared one. Fitted law's "
-        f"forecast for the big run: {law('s16')(act, D):.4f} (measured {final:.4f}).",
+        f"forecast for Allie-v3.0: {law('s16')(act, D):.4f} (measured {final:.4f}).",
     )
     names = {"1e17": "6.3e17", "3e17": "1.9e18", "1e18": "6.2e18"}
     for ax, b in zip(axes, names):
@@ -503,13 +474,12 @@ def scaling():
 def inference():
     rep = jload(REPORT)
     ks = {16: "bigrun-143051"} | {k: f"final-k{k}-trunc" for k in (12, 8, 6, 4, 2)}
-    kd = {4: "ann-all-p05-t954-k4-a5", 2: "ann-all-p05-t954-k2-a5"}
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.6))
     fig.subplots_adjust(left=0.07, right=0.985, top=0.79, bottom=0.16, wspace=0.26)
     titled(
         fig,
-        "Cheaper inference: compute fewer experts; search buys little",
-        "Left: the big run computing only its best K of 16 routed experts per token "
+        "Inference cost: most experts can be skipped; search adds little",
+        "Left: Allie-v3.0 computing only its best K of 16 routed experts per token, no retraining "
         "(blitz benchmark, 80,000 positions). Right: what\n128 simulations of tree search "
         "add, against the model's training compute (20,000 positions, 95% intervals).",
     )
@@ -521,21 +491,11 @@ def inference():
     kk = sorted(ks)
     ce = [rep[ks[k]]["ce"] for k in kk]
     ax.plot(kk, ce, color=BLUE, lw=1.3, alpha=0.55, zorder=2)
-    ax.plot(kk, ce, "o", ls="", ms=7, zorder=3, label="no training", **HOLLOW)
-    label = "fine-tuned with distillation (0.5B tokens)"
-    kce = [rep[v]["ce"] for v in kd.values()]
-    ax.plot(
-        list(kd), kce, "D", ls="", ms=7.5, color=BLUE, zorder=4, label=label, **RING
-    )
-    tip = {"arrowstyle": "-|>", "color": BLUE, "lw": 1, "mutation_scale": 8}
-    tip |= {"shrinkA": 5, "shrinkB": 5}
-    for k, v in kd.items():
-        ax.annotate("", (k, rep[v]["ce"]), (k, rep[ks[k]]["ce"]), arrowprops=tip)
+    ax.plot(kk, ce, "o", ls="", ms=7, zorder=3, **HOLLOW)
     ax.set_xticks(kk, [f"{k}\n{rep[ks[k]]['gflops']:.2f}" for k in kk])
     ax.set(xlim=(1, 17), ylim=(1.268, 1.198))
     ax.set_xlabel("Routed experts per token, and GFLOPs per move")
     ax.set_ylabel("Cross-entropy over legal moves (nats, flipped)")
-    ax.legend(loc="lower right", bbox_to_anchor=(1, 0.08))
     ax = axes[1]
     flops = {r["name"]: r["c"] for r in jload(SWEEP)["runs"]}
     search = X / "maia3-bench/search"
@@ -562,14 +522,14 @@ def inference():
     ax.plot([c2, c], [g2[0], g[0]], color=BLUE, lw=1.2, alpha=0.5, zorder=2)
     err = [[g[0] - g[1]], [g[2] - g[0]]]
     ax.errorbar([c], [g[0]], err, fmt="*", ms=14, color=BLUE, mew=0, zorder=4)
-    text = f"big run: {g[0]:+.4f} nats"
+    text = f"Allie-v3.0: {g[0]:+.4f} nats"
     note(ax, text, (c, g[0]), -12, -4, ha="right", va="top", color=INK)
     logx(ax, [1e18, 1e19, 1e20], lambda v: f"1e{round(math.log10(v))}")
     ax.set(xlim=(8e16, 6e20), ylim=(0, 0.036))
     ax.set_xlabel("Training compute of the model (FLOPs, log scale)")
     ax.set_ylabel("CE gain from 128-simulation search (nats)")
     save(fig, "inference")
-    for k, v in sorted(ks.items()) + sorted(kd.items()):
+    for k, v in sorted(ks.items()):
         r = rep[v]
         print(
             f"  K={k:2d} {v:24s} {r['gflops']:.2f} GF  CE {r['ce']:.4f}  {r['acc']:.2f}%"
@@ -606,7 +566,7 @@ def ablations():
         "One change at a time, at small scale",
         "Each bar: one change to an MoE with 39M active parameters trained on 2.5B tokens, "
         f"minus the unchanged run ({base:.4f});\nsame seed and data order. Gray band: ±1 "
-        f"seed-to-seed standard deviation of a run ({sigma:.4f}). Blue: used in the big run.",
+        f"seed-to-seed standard deviation of a run ({sigma:.4f}). Blue: used in Allie-v3.0.",
     )
     ax.axvspan(-sigma, sigma, color="#f0efec", zorder=0)
     ax.axvline(0, color=AXIS, lw=1, zorder=1)
@@ -647,7 +607,7 @@ def router():
         "the collapse; centring the router's input and stepping Adam on every step "
         "stopped it.",
     )
-    for run, color, label in ((OLD, RED, "first attempt"), (BIG, BLUE, "final run")):
+    for run, color, label in ((OLD, RED, "first attempt"), (FINAL, BLUE, "Allie-v3.0")):
         rows = [r for r in jsonl(run / "train.jsonl") if r["step"] <= 3125]
         s = np.array([r["step"] for r in rows])
         v = np.array([r["moe_starved"][0] for r in rows])

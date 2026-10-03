@@ -2,27 +2,19 @@
 
 Numbers behind the [README](../README.md). CE is in nats; intervals are 95%, bootstrapping whole games (2,000 draws), and differences are paired on identical positions.
 
-## Blitz benchmark frontier
+## Blitz benchmark
 
-| Model | GFLOPs/move | CE | top-1 (%) | vs Maia-3 79M: CE | vs 79M: top-1 (pp) |
-|---|---:|---:|---:|---:|---:|
-| Maia-3 5M | 0.60 | 1.2955 | 56.95 | +0.0686 [+0.0657, +0.0715] | −1.85 [−2.06, −1.64] |
-| Maia-3 23M | 2.40 | 1.2475 | 58.34 | +0.0206 [+0.0189, +0.0223] | −0.47 [−0.63, −0.29] |
-| Maia-3 79M | 9.23 | 1.2269 | 58.80 | | |
-| Allie big run, after a second anneal | 1.39 | 1.2030 | 59.29 | −0.0238 [−0.0272, −0.0208] | +0.48 [+0.27, +0.70] |
-| Allie big run, final checkpoint | 1.39 | 1.2056 | 59.26 | −0.0213 [−0.0245, −0.0184] | +0.46 [+0.24, +0.67] |
-| final, best 8 of 16 experts, no training | 1.06 | 1.2067 | 59.27 | −0.0202 [−0.0235, −0.0172] | +0.47 [+0.26, +0.69] |
-| final, best 6 of 16 experts, no training | 0.98 | 1.2081 | 59.21 | −0.0188 [−0.0221, −0.0157] | +0.41 [+0.19, +0.63] |
-| fine-tuned to use 4 of 16 experts | 0.90 | 1.2088 | 59.14 | −0.0180 [−0.0215, −0.0149] | +0.34 [+0.12, +0.56] |
-| fine-tuned to use 2 of 16 experts | 0.82 | 1.2205 | 58.75 | −0.0064 [−0.0100, −0.0033] | −0.06 [−0.27, +0.17] |
-| student, MoE 261M active / 2.07B total | 0.52 | 1.2469 | 58.09 | +0.0201 [+0.0168, +0.0231] | −0.71 [−0.92, −0.50] |
-| student, MoE 181M active / 1.42B total | 0.36 | 1.2545 | 57.92 | +0.0276 [+0.0240, +0.0309] | −0.89 [−1.12, −0.67] |
+Allie-v3.0 is the final training checkpoint; Allie-v3.0 (annealed) continues it with a second anneal (see [Training](#training)). Differences on the same 80,000 positions:
 
-Relative to Maia-3 23M, the fine-tuned 2-expert model has lower CE and higher accuracy (−0.0270 nats, +0.41 pp); relative to Maia-3 5M, so does the 0.36-GFLOP student (−0.0410, +0.96 pp).
+| Allie model minus | Allie-v3.0: CE | top-1 (pp) | Allie-v3.0 (annealed): CE | top-1 (pp) |
+|---|---:|---:|---:|---:|
+| Maia-3 5M | −0.0899 [−0.0938, −0.0863] | +2.31 [+2.07, +2.54] | −0.0925 [−0.0964, −0.0887] | +2.33 [+2.10, +2.59] |
+| Maia-3 23M | −0.0419 [−0.0454, −0.0387] | +0.92 [+0.71, +1.14] | −0.0444 [−0.0480, −0.0412] | +0.95 [+0.75, +1.17] |
+| Maia-3 79M | −0.0213 [−0.0245, −0.0184] | +0.46 [+0.24, +0.67] | −0.0238 [−0.0272, −0.0208] | +0.48 [+0.27, +0.70] |
 
 ## Where the differences come from
 
-Final checkpoint minus Maia-3 79M, blitz unless stated (bullet, rapid and classical from 5,000 positions per rating band):
+Allie-v3.0 minus Maia-3 79M, blitz unless stated (bullet, rapid and classical from 5,000 positions per rating band):
 
 | Slice | positions | CE difference | top-1 difference (pp) |
 |---|---:|---:|---:|
@@ -34,7 +26,7 @@ Final checkpoint minus Maia-3 79M, blitz unless stated (bullet, rapid and classi
 | plies 40-59 | 15,997 | +0.0071 [+0.0003, +0.0137] | −0.09 [−0.62, +0.42] |
 | Maia-3's protocol: ply > 20, at least 30 s left | 48,987 | −0.0057 [−0.0095, −0.0019] | +0.12 [−0.16, +0.40] |
 
-The rating plot reweights every scored blitz move of the main evaluation (402,108 positions in 6,247 games) to the natural player mix. In 100-point bins of game rating, the final checkpoint's CE interval is below Maia-3 79M's in 19 of 23; the exceptions are 600-700, 700-800, 1000-1100 and 2800-2900 (7 games), and only the last has a higher point estimate. Its accuracy is lower only at 800-900 (−0.12 pp) and 2800-2900 (−0.33 pp), both within noise.
+The rating plot reweights every scored blitz move of the main evaluation (402,108 positions in 6,247 games) to the natural player mix. In 100-point bins of game rating, Allie-v3.0's CE interval is below Maia-3 79M's in 19 of 23; the exceptions are 600-700, 700-800, 1000-1100 and 2800-2900 (7 games), and only the last has a higher point estimate. Its accuracy is lower only at 800-900 (−0.12 pp) and 2800-2900 (−0.33 pp), both within noise.
 
 ## Evaluation
 
@@ -55,7 +47,7 @@ The rating plot reweights every scored blitz move of the main evaluation (402,10
 - **Data.** 111 Lichess months (May 2017 to August 2026 without July 2026; 7.87B games, 616B tokens), plus over-the-board games (TWIC, PGN Mentor, Lichess broadcasts; 5.1M) and engine games (CCRL, TCEC; 4.6M, under 1% of tokens). The sampler draws games from rating-bucketed monthly shards and tokenizes on the fly. Its *Elo ramp* table doubles a game's weight per 200 points of its stronger player, keeps formats at their natural shares and caps any game at 8 uses; it won a series of small-scale data-mixing screens, mainly on the strongest players' cells.
 - **Optimization.** NorMuon (a Muon variant) for all weight matrices including experts; Adam, stepping every step, for embeddings, head, routers, board CNN and clock table. Warmup 2,013 steps, then linear decay to 0.1% of the peak learning rate. No multi-token prediction. BF16 matrix multiplies with FP32 master weights.
 - **Systems.** 8 NVIDIA L40S (48 GB) on one node; data parallel with optimizer state sharded, four 16K-token rows per GPU per micro-batch, activation recompute, fused Triton expert kernels. Median 131K tokens/s, about 19% of peak BF16 throughput; 159 hours in 2-day jobs resuming from checkpoints every 1,024 steps.
-- **Second anneal.** From the final checkpoint with a fresh optimizer: 1B tokens of January 2024 to June 2026 plus August 2026, peak learning rate 0.05 (the main schedule's value at 99%), decaying over the last 30%. Main eval −0.0028, every format better; benchmark −0.0026 [−0.0033, −0.0019]. Peak 0.2 gained nothing.
+- **Second anneal (Allie-v3.0 annealed).** From Allie-v3.0 with a fresh optimizer: 1B tokens of January 2024 to June 2026 plus August 2026, peak learning rate 0.05 (the main schedule's value at 99%), decaying over the last 30%. Main eval −0.0028, every format better; benchmark −0.0026 [−0.0033, −0.0019]. Peak 0.2 gained nothing.
 
 ## Scaling laws
 
@@ -66,14 +58,12 @@ The rating plot reweights every scored blitz move of the main evaluation (402,10
 | MoE | 1.27 [1.26, 1.28] | 0.54 [0.42, 0.67] | 1.06 [1.01, 1.11] | 0.0026 |
 | dense | 1.27 [1.26, 1.29] | 0.54 [0.44, 0.66] | 1.03 [0.95, 1.10] | 0.0020 |
 
-Compute multiplier of MoE over dense: 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] at the three budgets. The compute-optimal size grows as C^0.66. The big run (N = 0.69B, D = 75B, 109 tokens per parameter) was forecast at 1.2856 and scored 1.2533. B and β are correlated at 0.98 in the fit.
+Compute multiplier of MoE over dense: 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] at the three budgets. The compute-optimal size grows as C^0.66. Allie-v3.0 (N = 0.69B, D = 75B, 109 tokens per parameter) was forecast at 1.2856 and scored 1.2533. B and β are correlated at 0.98 in the fit.
 
-## Cheaper inference
+## Inference cost
 
-- **Fewer experts, no training** (final checkpoint; the dropped experts' gates are left out, not renormalized): K = 12, 8, 6, 4, 2 cost +0.0001, +0.0011, +0.0025, +0.0095, +0.0544 nats. Renormalizing the kept gates is far worse (+0.0178 at K = 8).
-- **Fewer-experts fine-tunes:** 0.5B tokens of recent months, routing through only the best K and distilled 50/50 toward the 16-expert model: K = 4 1.2088 (from 1.2151), K = 2 1.2205 (from 1.2600).
-- **Students** (MoE 261M active / 2.07B total, 0.52 GFLOPs): distillation minus a played-moves-only control on identical rows, −0.0017 [−0.0023, −0.0011], −0.0031 [−0.0038, −0.0023] and −0.0063 [−0.0069, −0.0056] at 0.25B, 0.75B and 1.5B tokens. Teacher-only targets and temperature 2 did not help.
-- **Search** (20,000 positions, 128 simulations with a per-model calibration fit on separate July 2026 games): the gain is +0.0055 [+0.0038, +0.0070] for the big run, almost all from players rated 2000+; five simulations on the annealed model buy 0.0025 nats at 6x the compute.
+- **Fewer experts, no retraining** (Allie-v3.0; the dropped experts' gates are left out, not renormalized): K = 12, 8, 6, 4, 2 cost +0.0001, +0.0011, +0.0025, +0.0095, +0.0544 nats. Renormalizing the kept gates is far worse (+0.0178 at K = 8).
+- **Search** (20,000 positions, 128 simulations with a per-model calibration fit on separate July 2026 games): the gain is +0.0055 [+0.0038, +0.0070] for Allie-v3.0, almost all from players rated 2000+; five simulations on Allie-v3.0 (annealed) buy 0.0025 nats at 6x the compute.
 
 ## Training stability
 
@@ -88,12 +78,12 @@ Compute multiplier of MoE over dense: 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and
 | `scripts/extdata.py` | The same store for over-the-board and engine games, deduplicated against the evaluation games |
 | `scripts/datapin.py`, `scripts/history_counts.py`, `scripts/pool_inventory.py` | Freeze a data selection, count its games per bucket, build sampling tables such as the Elo ramp |
 | `scripts/chessmix.py`, `scripts/chess_vocab.py` | Training-time sampler (mixing policies, on-the-fly tokenization, packing) and the vocabulary |
-| `scripts/modded_train.py` | Resumable distributed trainer; `--init-from` fine-tunes, `--kd-teacher` distills, arch `moe_keep` trains fewer-experts models |
+| `scripts/modded_train.py` | Resumable distributed trainer; `--init-from` continues from a checkpoint's weights with a fresh optimizer (the second anneal) |
 | `scripts/modded_*.py` | Model, optimizers, MoE layer and Triton kernels, board CNN, architecture switches |
 | `scripts/strateval.py`, `scripts/eval_strat.py` | Build and score the main evaluation |
 | `scripts/modelexp.py` | Freeze a study (source, data, recipe, hashes), run and score it on Slurm |
 | `scripts/test_*.py` | Unit and equivalence tests (some need a GPU or real data rows) |
-| `runs/` | The released model's frozen study, and the anneal, fine-tune and student launchers |
+| `runs/` | Allie-v3.0's frozen study and the launcher of its second anneal |
 | `bench/` | Maia-3 benchmark scoring, fewer-experts inference, rating plot, scaling readout, search on the MoE |
 | `search/` | Inference engine with tree search, calibration and export |
 | `docs/make_figures.py` | All README figures from the result files |
