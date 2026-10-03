@@ -19,6 +19,7 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
     engine = Engine(model)
     config = copy.deepcopy(config)
     config.max_games = max(config.max_games, games)
+    config.challenge.per_user = games  # every game comes from the same challenger
     tokens = {"token-a": "allie-a"} | (
         {"token-b": "allie-b"} if opponent == "self" else {}
     )
@@ -37,7 +38,7 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
     while len(mock.games) < games or any(
         g.status == "started" for g in mock.games.values()
     ):
-        if time.monotonic() - start > timeout:
+        if time.monotonic() - start > timeout or mock.declined:
             break
         time.sleep(0.5)
     time.sleep(1)  # let the game threads log their ends
@@ -77,6 +78,8 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
         tokens=engine.tokens,
         max_rss_gb=rss(),
     )
+    if summary["finished"] < games:
+        raise RuntimeError(f"{summary['finished']} of {games} games finished: {summary}")
     return dict(summary=summary, games=records)
 
 
