@@ -1,6 +1,7 @@
 """Recoverable training of the pinned medium recipe on chessmix-sampled chess rows."""
 
 import argparse
+import gc
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.distributed as dist
+from torch._dynamo.utils import counters
 import triton
 
 import modded_arch
@@ -847,7 +849,14 @@ def main():
     stop_reason = "steps"
     step = first
     # MEMSNAP also dumps early OOMs; successful diagnostics stop before step3.
+    graphs = counters["stats"]["unique_graphs"]
     for index in range(first, total_steps):
+        # new graphs (a compile, or a cache hit) can leave GPU tensors in
+        # reference cycles until a full collection: with a cold compile cache
+        # 5.6 GB at 8 x 2048 on 2 GPUs, an OOM in the next backward
+        if graphs != counters["stats"]["unique_graphs"]:
+            graphs = counters["stats"]["unique_graphs"]
+            gc.collect()
         if snap and index == first + 2:
             if rank == 0:
                 torch.cuda.memory._dump_snapshot(snap)
