@@ -55,7 +55,36 @@ process holds the model once and plays several games at a time.
 
 ## Cost and accuracy
 
-RESULTS
+**Speed and memory.** Time to choose a move, from receiving the opponent's move, on one AMD EPYC 9554 node
+with 8 threads (median of a 60-ply game). The bot appends its own move while the opponent thinks, so each
+decision reads one new token.
+
+| Setting | ms per move | Resident memory |
+|---|---:|---:|
+| BF16, all 16 experts (default) | 83 | 11 GB |
+| int8 weights | 40 | 7.7 GB |
+| `strongest` with 5 simulations of search | 440 | 11 GB |
+| `strongest` with 25 simulations of search | 1,100-1,400 | 11 GB |
+
+The first move of a game also reads the 11-token header: about 0.3 s. On an AMD EPYC 7763, BF16 takes 65-80 ms
+with 8-16 threads, and 8 experts instead of 16 saves about a quarter. More threads than physical cores slow it
+down. Two games at once roughly double each decision's time: on a CPU, batching games saves little.
+
+**Accuracy.** `analysis/lichess/parity.py` scores the bot's own code path on 5,000 positions of the Maia-3 blitz
+benchmark, 1,250 per rating band, against the trained model's scores (the training forward on a GPU). The
+port is not bitwise identical, because floating-point sums run in a different order, but it is equal within
+noise. 95% intervals are bootstrapped over games.
+
+| Setting | CE minus the trained model's (nats) | Same top move as the GPU port |
+|---|---:|---:|
+| GPU, BF16 | −0.0002 [−0.0012, +0.0006] | |
+| CPU, BF16 | −0.0003 [−0.0012, +0.0006] | 99.6% |
+| CPU, int8 weights | +0.0012 [−0.0009, +0.0034] | 97.6% |
+| CPU, 8 of 16 experts | +0.0014 [−0.0003, +0.0031] | 98.6% |
+
+CPU and GPU give the same top move on 99.6% of positions; the largest difference in any move's probability is
+0.055. The int8 and 8-expert rows were measured one revision earlier, before gates were rounded to BF16 as in
+training.
 
 ## Offline testing
 
