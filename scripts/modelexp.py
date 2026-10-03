@@ -326,8 +326,11 @@ def tables(w, runs):
     for r in runs:
         parts = []  # (policy name, the cooldown start it runs after, None if it is not a late phase)
         for k in r["policy"].split("+"):
-            c = chessmix.cool(k)
-            parts += [(c[1], None), (c[2], c[0])] if c else [(k, None)]
+            c, t = chessmix.cool(k), chessmix.recent(k)
+            if c:
+                parts += [(c[1], None), (c[2], c[0])]
+            else:  # a recent-only tail trains on its inner policy's table throughout
+                parts += [(t[2] if t else k, None)]
         for k, start in parts:
             if not (k or "").startswith("table:"):
                 continue

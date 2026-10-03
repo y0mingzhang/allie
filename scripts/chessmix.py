@@ -346,6 +346,19 @@ def cooldown(policy, start, before=control):
     return lambda g, p: before(g, p) if p < start else policy(g, p)
 
 
+def tail_recent(policy, start, since):
+    """policy; from training progress start on, its Lichess games from months before `since` (YYYY-MM) weigh 0.
+    External sources keep their weights, and so do the bucket caps (Grid games carry no month)."""
+
+    def fn(g, p):
+        w, mw, mb = policy(g, p)
+        if p >= start and g.src == 0 and getattr(g, "month", since) < since:
+            w = np.zeros(g.n)
+        return w, mw, mb
+
+    return fn
+
+
 POLICIES = dict(
     control=control,
     natural=lambda g, p: (np.ones(g.n), True, True),
@@ -378,6 +391,7 @@ def table(name):
 
 
 COOL = re.compile(r"cool(\d+)(?:\(([^()]+)\))?:(.+)")
+RECENT = re.compile(r"recent(\d+)\((\d{4}-\d{2})\):(.+)")
 
 
 def cool(name):
@@ -393,12 +407,26 @@ def cool(name):
     return start, before, after
 
 
+def recent(name):
+    """recentNN(YYYY-MM):POLICY as (NN / 100, YYYY-MM, POLICY); None if not a recent-tail name."""
+    m = RECENT.fullmatch(name)
+    if not m:
+        assert not name.startswith("recent"), name
+        return None
+    start = int(m[1]) / 100
+    assert 0 < start < 1 and not m[3].startswith(("cool", "recent")), name
+    return start, m[2], m[3]
+
+
 def resolve(name):
-    """A policy name: POLICIES key, table:NAME, or coolNN[(BEFORE)]:AFTER (BEFORE, control by default, until NN% of
-    training, then AFTER)."""
+    """A policy name: POLICIES key, table:NAME, coolNN[(BEFORE)]:AFTER (BEFORE, control by default, until NN% of
+    training, then AFTER) or recentNN(YYYY-MM):POLICY (POLICY; after NN%, only its Lichess games from YYYY-MM on)."""
     if c := cool(name):
         start, before, after = c
         return cooldown(resolve(after), start, resolve(before) if before else control)
+    if r := recent(name):  # POLICY, then only its games from YYYY-MM on after NN%
+        start, since, inner = r
+        return tail_recent(resolve(inner), start, since)
     return (
         table(name.removeprefix("table:"))
         if name.startswith("table:")
@@ -407,7 +435,7 @@ def resolve(name):
 
 
 def marks(name):
-    c = cool(name)
+    c = cool(name) or recent(name)
     return (0.0, c[0]) if c else PHASES.get(name, (0.0,))
 
 
