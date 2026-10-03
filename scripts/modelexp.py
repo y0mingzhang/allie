@@ -158,6 +158,8 @@ def schedule(r, steps):
     split = max(mtp, round(f["split"] * steps)) | 1
     s = SCHEDULE | {k: f[k] for k in SCHEDULE if k in f}
     s |= dict(warmup_steps=warmup, mtp_steps=mtp, split_step=split)
+    if f["decay"] < 0:  # stable WSD mainline: only its --wsd-fork-from branches decay
+        return s, -1
     return s, max(warmup, round(f["decay"] * steps))
 
 
@@ -242,17 +244,31 @@ def planned(w, r):
     if w["pin"]:
         pin = json.loads(w["pin"].read_text())
         r = r | dict(months=pin["months"], stores=pin["stores"])
-    return r | dict(
-        pool_frac=pf,
-        baseline=BASE["meta"]["sha256"],
-        group=w["group"],
-        name=name(w, r),
-        layers=layers,
-        width=width,
-        steps=steps,
-        schedule=s,
-        decay_start=decay,
+    return (
+        r
+        | dict(
+            pool_frac=pf,
+            baseline=BASE["meta"]["sha256"],
+            group=w["group"],
+            name=name(w, r),
+            layers=layers,
+            width=width,
+            steps=steps,
+            schedule=s,
+            decay_start=decay,
+        )
+        | fork(r, steps)
     )
+
+
+def fork(r, steps):
+    """A WSD decay branch of the stable mainline r['fork']['parent'] (a run of the same shape and
+    schedule whose fork_steps include 'at'): decays from 'at' to 'end'."""
+    if "fork" not in r:
+        return {}
+    at, end = r["fork"]["at"], r["fork"]["end"]
+    assert 0 < at < end <= steps, r["fork"]
+    return dict(decay_start=at, end_step=end, fork_steps=[])
 
 
 def frozen_files(commit=None):
@@ -601,9 +617,11 @@ def train_args(study, r):
         "--data", DATA, "--mix", r["policy"], "--mix-pool-frac", r["pool_frac"],
         "--mix-stores", ",".join(r["stores"]), "--mix-months", ",".join(r["months"]),
         "--wsd-schedule", json.dumps(r["schedule"], sort_keys=True),
-        "--wsd-end-step", r["steps"], "--wsd-decay-start", r["decay_start"],
+        "--wsd-end-step", r.get("end_step", r["steps"]), "--wsd-decay-start", r["decay_start"],
     ]  # fmt: skip
     args += ["--mix-history", study / "history-counts.json"] * bool(r.get("history"))
+    if r.get("fork_steps"):  # a stable mainline's checkpoints kept for decay branches
+        args += ["--wsd-fork-steps", ",".join(map(str, r["fork_steps"]))]
     for k, flag in DATA_FLAGS.items():
         args += [flag, r[k]] * bool(r.get(k))
     args += ["--arch", json.dumps(r["arch"], sort_keys=True)]
@@ -779,7 +797,14 @@ def run_one(study, r, gpu):
             max(600, left - int(time.monotonic() - started) - 1500),
         ]
         cmd += ["--stop-after", leg] * bool(leg)
-        cmd += ["--resume", out / "last.pt"] * (out / "last.pt").exists()
+        if (out / "last.pt").exists():
+            cmd += ["--resume", out / "last.pt"]
+        elif "fork" in r:  # the mainline's --wsd-fork-steps pointer
+            f = r["fork"]
+            cmd += [
+                "--wsd-fork-from",
+                ROOT / "results/pretrain" / f["parent"] / f"fork-{f['at']}.pt",
+            ]
         run(cmd, env, f"{log}.train.log", watch=out / "train.jsonl")
         if json.loads(done.read_text())["stop_reason"] != (
             "stop_after" if leg else "steps"
