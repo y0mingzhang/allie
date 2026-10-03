@@ -619,13 +619,24 @@ def train_args(study, r):
         "--wsd-schedule", json.dumps(r["schedule"], sort_keys=True),
         "--wsd-end-step", r.get("end_step", r["steps"]), "--wsd-decay-start", r["decay_start"],
     ]  # fmt: skip
-    args += ["--mix-history", study / "history-counts.json"] * bool(r.get("history"))
+    args += ["--mix-history", history(study, r)] * bool(r.get("history"))
     if r.get("fork_steps"):  # a stable mainline's checkpoints kept for decay branches
         args += ["--wsd-fork-steps", ",".join(map(str, r["fork_steps"]))]
     for k, flag in DATA_FLAGS.items():
         args += [flag, r[k]] * bool(r.get(k))
     args += ["--arch", json.dumps(r["arch"], sort_keys=True)]
     return args + r.get("extra_args", [])  # e.g. --attn-kernel, --ckpt eager
+
+
+def history(study, r):
+    """The history-counts file; a fork trains on its mainline's copy (the trainer compares paths)."""
+    own = study / "history-counts.json"
+    if "fork" not in r:
+        return own
+    cfg = ROOT / "results/pretrain" / r["fork"]["parent"] / "config.json"
+    path = json.loads(cfg.read_text())["args"]["mix_history"]
+    assert sha(path) == sha(own), "a fork's history counts differ from its mainline's"
+    return path
 
 
 # modded_train arguments that change what a run computes, with the defaults of absent ones
