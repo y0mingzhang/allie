@@ -419,8 +419,8 @@ def main():
         "--moe-chunks",
         type=int,
         default=1,
-        help="the routed [T*k, d] products in this many token chunks (less memory; with --moe-remat the gates' "
-        "grad, a batched matmul per chunk, may round otherwise on GPU)",
+        help="the routed [T*k, d] products in this many token chunks (less memory; where the backward reruns the "
+        "down output, the gates' grad, a batched matmul per chunk, may round otherwise on GPU)",
     )
     p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"

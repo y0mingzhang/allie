@@ -380,8 +380,9 @@ REPLAY = False  # a checkpoint's recompute is running (modded_moe.replay_context
 # False: their recompute skips it and their backward reruns it (modded_train --moe-remat)
 SAVE_EXPANDED = True
 # the [T * k, D] products (the down output, dh before its sum over the k slots) in this many token chunks, each chunk's
-# routes in expert order: the same rows from the same kernels (--moe-chunks); the gates' grad, a batched matmul per
-# chunk, need not round as the whole batch's does
+# routes in expert order: the same rows from the same kernels (--moe-chunks); where the backward reruns the down output
+# (blocks out of a checkpoint, or with --moe-remat), the gates' grad is a batched matmul per chunk, which need not
+# round as the whole batch's does
 CHUNKS = 1
 
 
@@ -446,6 +447,7 @@ def routed_out(
     for lo, hi, r, d in chunks(order, k):
         e = scatter(y[r], down, se[r], d, y.shape[1]).view(hi - lo, k, -1)
         out[lo:hi] = (_combine() if y.is_cuda else combine)(e, gates[lo:hi])
+        del e  # one chunk at a time
     return out
 
 
