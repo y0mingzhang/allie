@@ -1,0 +1,218 @@
+"""Move choice for live games: one resident model, one inference thread batching all games."""
+
+import math
+import queue
+import threading
+from concurrent.futures import Future
+from dataclasses import dataclass
+
+import chess
+import numpy as np
+import torch
+
+from allie.data.vocab import MOVE_ID
+
+from .model import Cache, step
+from .tokens import CONTEXT, HEADER, START, advance, features, header
+
+TIME, WDL = slice(2350, 2413), slice(2413, 2416)
+# allie.search's format of each Lichess speed: bullet, blitz, rapid, classical
+FORMATS = dict(ultraBullet=0, bullet=0, blitz=1, rapid=2, classical=3, correspondence=3)
+
+
+@dataclass
+class Play:
+    mode: str = "human"  # human: sample the policy; strongest: argmax (or search)
+    rating: int | str = 1500  # the bot's header Elo, or "opponent" to mirror it
+    temperature: float = 1.0  # human mode
+    search: int = 0  # strongest mode: coverage-search simulations (0 = policy argmax)
+    think_time: bool = True  # wait the model's predicted human think time
+    max_think: float = 0.1  # ... at most this fraction of the clock left
+    resign_loss: float = 0.97  # resign after resign_moves own moves at P(loss) >= this
+    resign_moves: int = 3
+    draw_accept: float = 0.4  # accept a draw offer when W + D/2 <= this
+    draw_offer: float = 0.9  # offer a draw from ply 60 when P(draw) >= this (1 = never)
+
+
+class Engine:
+    """Owns the model; game threads call extend() and run(), which the inference thread serves,
+    batching concurrent extend() calls into one forward."""
+
+    def __init__(self, model, max_batch=32):
+        self.model, self.max_batch = model, max_batch
+        self.requests = queue.SimpleQueue()
+        self.forwards = self.tokens = 0
+        threading.Thread(target=self._loop, daemon=True, name="inference").start()
+
+    def extend(self, cache, ids, feats, boards):
+        """Append tokens to a game's cache; logits at the last one."""
+        return self._call((cache, ids, feats, boards))
+
+    def run(self, fn):
+        """fn() on the inference thread, alone."""
+        return self._call(fn)
+
+    def _call(self, request):
+        f = Future()
+        self.requests.put((request, f))
+        return f.result()
+
+    def _loop(self):
+        while True:
+            batch = [self.requests.get()]
+            while len(batch) < self.max_batch:
+                try:
+                    batch.append(self.requests.get_nowait())
+                except queue.Empty:
+                    break
+            steps = [(r, f) for r, f in batch if isinstance(r, tuple)]
+            try:
+                if steps:
+                    logits = step(self.model, [r for r, _ in steps])
+                    self.forwards += 1
+                    self.tokens += sum(len(r[1]) for r, _ in steps)
+            except Exception as e:  # noqa: BLE001 - every waiting game gets the error
+                for _, f in steps:
+                    f.set_exception(e)
+            else:
+                for (_, f), z in zip(steps, logits.cpu()):
+                    f.set_result(z)
+            for r, f in batch:
+                if callable(r):
+                    try:
+                        f.set_result(r())
+                    except Exception as e:  # noqa: BLE001
+                        f.set_exception(e)
+
+
+@dataclass
+class Decision:
+    move: str
+    think: float  # seconds to wait before playing, already capped by the clock
+    wdl: tuple  # the mover's (bot's) win / draw / loss probabilities
+    probability: float  # of the chosen move
+    resign: bool = False
+    offer_draw: bool = False
+
+
+class Game:
+    """One game's tokens, clocks and cache. Clocks: each move's mover's clock after it."""
+
+    def __init__(self, engine, white, black, base, increment, speed="blitz", seed=None):
+        self.engine, self.base, self.inc = engine, base, increment
+        self.speed, self.elo = speed, (white, black)
+        self.tokens = header(base, increment, white, black)
+        self.boards = [START] * HEADER
+        self.moves, self.clocks = [], []
+        self.board = chess.Board()
+        self.cache = Cache(engine.model)
+        self.logits = None
+        self.rng = np.random.default_rng(seed)
+        self.losing = 0
+
+    def update(self, moves, wtime=None, btime=None):
+        """The server's move list and clocks (seconds) after its last move."""
+        common = 0
+        while (
+            common < min(len(moves), len(self.moves))
+            and moves[common] == self.moves[common]
+        ):
+            common += 1
+        if common < len(self.moves):  # takeback or a different game state: rewind
+            del self.moves[common:], self.clocks[common:]
+            del self.tokens[HEADER + common :], self.boards[HEADER + common :]
+            self.board = chess.Board()
+            for m in self.moves:
+                self.board.push_uci(m)
+            self.cache.truncate(HEADER + common)
+            self.logits = None
+        for j in range(common, len(moves)):
+            move = self.board.parse_uci(moves[j])
+            self.board.push(move)
+            token = MOVE_ID[move.uci()]
+            self.moves.append(moves[j])
+            last = j == len(moves) - 1
+            clock = (wtime if j % 2 == 0 else btime) if last else None
+            self.clocks.append(None if clock is None else int(clock))
+            self.tokens.append(token)
+            self.boards.append(advance(self.boards[-1], token))
+
+    def sync(self):
+        """Bring the cache up to the last known token; the logits there."""
+        if self.cache.n == len(self.tokens) and self.logits is not None:
+            return self.logits
+        if len(self.tokens) > CONTEXT:
+            raise OverflowError("game longer than the model's context")
+        n = min(self.cache.n, len(self.tokens) - 1)  # at least the last token, for its logits
+        self.cache.truncate(n)
+        self.logits = self.engine.extend(
+            self.cache,
+            torch.tensor(self.tokens[n:]),
+            torch.tensor(self.features(n), dtype=torch.float32),
+            torch.tensor(
+                np.frombuffer(b"".join(self.boards[n:]), np.uint8).reshape(-1, 68)
+            ),
+        )
+        return self.logits
+
+    def features(self, lo=0):
+        """Clock features of the tokens from position lo on."""
+        f = lambda p: features(p - HEADER + 1, self.base, self.inc, self.clocks)
+        return [f(p) if p >= HEADER - 1 else [-1] * 3 for p in range(lo, len(self.tokens))]
+
+    def decide(self, play, search=None, clock=None):
+        """The bot's move at the current position. clock: its time left in seconds."""
+        legal = [m.uci() for m in self.board.legal_moves]
+        try:
+            z = self.sync().double()
+        except OverflowError:  # past 1,014 plies: a random legal move
+            return Decision(str(self.rng.choice(legal)), 0.0, (0, 1, 0), 1 / len(legal))
+        ids = torch.tensor([MOVE_ID[m] for m in legal])
+        p = torch.softmax(z[ids], 0).numpy()
+        if play.mode == "strongest" and search is not None and play.search:
+            moves, q = search(self, play.search)
+            p = np.zeros(len(legal))
+            p[[legal.index(m) for m in moves]] = q
+        if play.mode == "strongest" or play.temperature <= 0:
+            i = int(p.argmax())
+        else:
+            t = np.log(np.maximum(p, 1e-300)) / play.temperature
+            t = np.exp(t - t.max())
+            i = int(self.rng.choice(len(p), p=t / t.sum()))
+        wdl = tuple(torch.softmax(z[WDL], 0).tolist())
+        ply = len(self.moves)
+        self.losing = self.losing + 1 if wdl[2] >= play.resign_loss else 0
+        return Decision(
+            move=legal[i],
+            think=self.think(z, play, clock) if play.think_time else 0.0,
+            wdl=wdl,
+            probability=float(p[i]),
+            resign=self.losing >= play.resign_moves and ply >= 20,
+            offer_draw=ply >= 60 and wdl[1] >= play.draw_offer,
+        )
+
+    def think(self, z, play, clock):
+        """A think time drawn from the model's head (trained from each side's second move)."""
+        if len(self.moves) < 2:
+            return float(self.rng.uniform(0.5, 2))
+        p = torch.softmax(z[TIME], 0).numpy()
+        b = self.rng.choice(len(p), p=p / p.sum())
+        u = self.rng.uniform(-0.5, 0.5)
+        s = max(b + u, 0.0) if b < 16 else 16 * math.exp((b - 16 + u) / 7.06)
+        return min(s, play.max_think * clock) if clock is not None else s
+
+    def accept_draw(self, play, white):
+        """For the bot playing white (or not): is its expected score at most draw_accept?"""
+        try:
+            w, d, loss = torch.softmax(self.sync().double()[WDL], 0).tolist()
+        except OverflowError:
+            return True
+        if (len(self.moves) % 2 == 0) != white:  # the head speaks for the side to move
+            w = loss
+        return w + d / 2 <= play.draw_accept
+
+    def cell(self, elo):
+        """allie.search's cell: format x mover Elo band."""
+        band = 0 if elo < 1400 else 1 if elo < 2000 else 2 if elo < 2400 else 3
+        return 4 * FORMATS.get(self.speed, 1) + band
+

@@ -1,0 +1,36 @@
+# allie-bot: Allie-v3.0 on Lichess. The API token comes from LICHESS_TOKEN, never this file.
+# Override any key on the command line: allie-bot play --config this.toml --set play.rating=1800
+
+model = "exports/allie-v3.0"  # allie-bot export output: model.safetensors + config.json
+device = "cpu"                # or "cuda"
+dtype = "bfloat16"            # or "float32" (twice the memory, no faster on most CPUs)
+threads = 0                   # torch CPU threads, 0 = all cores
+experts = 0                   # routed experts per token, 0 = all 16; 8 is faster for ~0.001 nats
+int8 = false                  # int8 weights (CPU only): 5.6 GB instead of 11 GB
+url = "https://lichess.org"
+max_games = 4                 # concurrent games; the rest are declined with "later"
+greeting = ""                 # sent to the opponent's chat at the start of each game
+
+[challenge]
+rated = true
+casual = true
+speeds = ["bullet", "blitz", "rapid", "classical"]
+min_base = 60                 # seconds
+max_base = 3600
+min_increment = 0
+max_increment = 180
+humans = true
+bots = false
+per_user = 1                  # concurrent games with one opponent
+
+[play]
+mode = "human"                # human: sample the policy; strongest: argmax (or search)
+rating = "opponent"           # the bot's Elo in the game header: a number, or "opponent" to mirror it
+temperature = 1.0             # human mode; 1 is the model's own distribution
+search = 0                    # strongest mode: 0 or 5 / 8 / 25 / 128 coverage-search simulations
+think_time = true             # wait the model's predicted human think time before moving
+max_think = 0.1               # ... capped at this fraction of the clock left
+resign_loss = 0.97            # resign once P(loss) >= this for resign_moves own moves (from ply 20)
+resign_moves = 3
+draw_accept = 0.4             # accept a draw offer when P(win) + P(draw) / 2 <= this
+draw_offer = 0.9              # offer a draw from ply 60 when P(draw) >= this (above 1: never)

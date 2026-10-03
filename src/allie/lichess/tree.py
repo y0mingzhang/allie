@@ -1,0 +1,182 @@
+"""allie.search's coverage search over a live game, on this package's model.
+
+Search nodes extend the game's cache: each node adds one token whose attention reads the game's
+keys and values plus its own path's. Clock bookkeeping is allie.search's (as MoEHandles in
+allie.search.moe_oracle). The output calibration is Allie-v3.0's dev refit: the frozen
+calibration.json of allie.search hurts this model at every budget.
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch.nn import functional as F
+
+from allie.data.vocab import MOVES
+from allie.search import Search
+from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
+from allie.search.native import from_prefix
+
+from .tokens import CONTEXT, MOVE_START, advance
+
+CALIBRATION = Path(__file__).with_name("calibration-allie-v3.0.json")
+# simulations -> the output policy fitted for them (8 and 25 reuse 128's, as the benchmark did)
+POLICY = {5: "5", 8: "128", 25: "128", 128: "128"}
+
+
+class Tree:
+    """allie.search's oracle interface (reset, handles, new_tokens) for one root: the game's
+    current position, whose keys and values are the game's cache."""
+
+    def __init__(self, game, logits, capacity=1024):
+        self.game, self.model, self.cache = game, game.engine.model, game.cache
+        self.root_logits = logits[None].double().numpy()
+        m = self.model
+        kw = dict(dtype=m.dtype, device=m.device)
+        self.k = torch.empty(m.layers, m.heads, capacity, m.head_dim, **kw)
+        self.v, self.e = torch.empty_like(self.k), torch.empty(capacity, m.width, **kw)
+        self.capacity, self.new_tokens = capacity, 0
+
+    def reset(self):
+        self.new_tokens = 0
+
+    def handles(self, prefixes, feats, clock_rule="predicted"):
+        assert len(prefixes) == 1 and list(prefixes[0]) == self.game.tokens
+        return Nodes(self, np.asarray(feats[0], np.float32), clock_rule)
+
+
+class Nodes:
+    """MoEHandles' causal board and clock bookkeeping over Tree's per-node keys and values."""
+
+    def __init__(self, tree, feats, clock_rule):
+        self.tree, self.clock_rule = tree, clock_rule
+        game = tree.game
+        self.root_logits = tree.root_logits
+        n, cap = len(game.tokens), tree.capacity
+        inc = game.inc if game.inc is not None else -1
+        self.parent = np.full(cap, -1, np.int64)
+        self.length, self.token = np.zeros(cap, np.int64), np.zeros(cap, np.int64)
+        self.board = [None] * cap
+        self.feats = np.full((cap, 3), -1.0)
+        self.other = np.full(cap, -1.0)
+        self.elapsed = np.zeros(cap)
+        self.length[0], self.board[0], self.feats[0] = n, game.boards[-1], feats[-1]
+        self.other[0] = root_other_previous(game.tokens, feats, inc)
+        self.inc = inc
+        if clock_rule == "predicted":
+            self.elapsed[0] = predicted_seconds(self.root_logits)[0]
+        self.queries, self.per_root_queries = 0, np.zeros(1, np.int64)
+
+    def __call__(self, handles):
+        h = np.asarray(handles, np.int64)
+        ids, parents, tokens, lengths = h.T
+        assert (self.length[ids] == 0).all() and (
+            lengths == self.length[parents] + 1
+        ).all()
+        assert lengths.max() <= CONTEXT
+        self.parent[ids], self.token[ids] = parents, tokens
+        self.length[ids] = lengths
+        for i, p, t in zip(ids, parents, tokens):
+            self.board[i] = advance(self.board[p], int(t))
+        n = len(ids)
+        f, o = advance_clocks(
+            self.feats[parents], self.other[parents], self.length[parents],
+            np.full(n, self.inc), self.elapsed[parents],
+        )  # fmt: skip
+        self.feats[ids], self.other[ids] = f, o
+        z = self.forward(ids, tokens, lengths)
+        if self.clock_rule == "predicted":
+            self.elapsed[ids] = predicted_seconds(z)
+        self.queries += n
+        self.per_root_queries[0] += n
+        self.tree.new_tokens += n
+        return z
+
+    def forward(self, ids, tokens, lengths):
+        t, m = self.tree, self.tree.model
+        dev, dt = m.device, m.dtype
+        cache, n0 = t.cache, t.cache.n
+        assert ids.max() < t.capacity
+        paths = []
+        for i in ids:  # the node's ancestors below the root, then itself
+            p, j = [], int(i)
+            while j:
+                p.append(j)
+                j = int(self.parent[j])
+            paths.append(p[::-1])
+        width = max(map(len, paths))
+        path = torch.tensor([p + [0] * (width - len(p)) for p in paths], device=dev)
+        live = torch.tensor(
+            [[k < len(p) for k in range(width)] for p in paths], device=dev
+        )
+        slots = torch.as_tensor(ids, device=dev)
+        before = torch.as_tensor(self.parent[ids], device=dev)
+
+        def previous(e):
+            t.e[slots] = e
+            p = t.e[before]
+            p[before == 0] = cache.e[n0 - 1]
+            return p
+
+        def attend(i, q, k, v):
+            t.k[i][:, slots], t.v[i][:, slots] = k.transpose(0, 1), v.transpose(0, 1)
+            kp, vp = cache.k[i, :, :n0], cache.v[i, :, :n0]  # [H, L, D]
+            kn, vn = t.k[i][:, path], t.v[i][:, path]  # [H, N, P, D]
+            s = (
+                torch.cat(
+                    (
+                        torch.einsum("nhd,hld->nhl", q, kp),
+                        torch.einsum("nhd,hnpd->nhp", q, kn),
+                    ),
+                    -1,
+                ).float()
+                * m.scale
+            )
+            s[..., n0:] = s[..., n0:].masked_fill(~live[:, None], float("-inf"))
+            a = F.softmax(s, -1).to(dt)
+            return torch.einsum("nhl,hld->nhd", a[..., :n0], vp) + torch.einsum(
+                "nhp,hnpd->nhd", a[..., n0:], vn
+            )
+
+        feats = torch.as_tensor(self.feats[ids], dtype=torch.float32, device=dev)
+        boards = torch.tensor(
+            np.frombuffer(b"".join(self.board[i] for i in ids), np.uint8).reshape(
+                -1, 68
+            ),
+            device=dev,
+        )
+        pos = torch.as_tensor(lengths - 1, device=dev)
+        tok = torch.as_tensor(tokens, device=dev)
+        z = m.forward(tok, pos, feats, boards, previous, attend)
+        return z.double().cpu().numpy()
+
+
+class Coverage:
+    """search(game, simulations) -> (legal moves, searched human-move probabilities)."""
+
+    def __init__(self, threads=4):
+        self.parameters = json.loads(CALIBRATION.read_text())
+        bp = self.parameters["budget_policies"]
+        for b, key in POLICY.items():
+            bp.setdefault(str(b), bp[key])
+        self.threads = threads
+
+    def __call__(self, game, simulations):
+        z = game.sync()
+        feats = np.array(game.features(), np.float32)
+        elo = game.elo[len(game.moves) % 2]
+        row = dict(
+            prefix=list(game.tokens),
+            cell=game.cell(elo),
+            legal=from_prefix(np.asarray(game.tokens)).legal(),
+        )
+
+        def run():
+            tree = Tree(game, z)
+            s = Search(tree, threads=self.threads, calibration=self.parameters)
+            return s._batch([row], [feats], "coverage", simulations, "predicted",
+                            False, 0.9, 2.0, 1.25)[0]  # fmt: skip
+
+        out = game.engine.run(run)
+        return [MOVES[t - MOVE_START] for t in out["tokens"]], out["probabilities"]

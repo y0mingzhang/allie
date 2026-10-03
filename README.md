@@ -125,6 +125,7 @@ The code is one Python package, [`allie`](src/allie):
 - `train`: trainer, schedule, checkpoints
 - `eval`: the main evaluation and the Maia-3 benchmark
 - `search`: the tree-search engine
+- `lichess`: a Lichess bot, with a CPU inference engine for Allie-v3.0
 - `experiments`: frozen studies on Slurm, scaling-law fits
 
 It needs Linux and CUDA 12.8 GPUs. `ALLIE_DATA` points at the game stores and evaluation sets; `ALLIE_PROJECT_ROOT` is where `results/` receives runs and scores (default: this checkout).
@@ -141,7 +142,8 @@ It needs Linux and CUDA 12.8 GPUs. `ALLIE_DATA` points at the game stores and ev
 4. **Train Allie-v3.0.** Run `allie-train configs/allie-v3.0.json --nproc 8` on one node of eight 48 GB GPUs (on NVIDIA L40S: 131K tokens/s, 6.6 days). The run stops after each 2-day chunk (`max_seconds`), and the same command resumes it.
 5. **Evaluate.** `allie-eval --checkpoint results/pretrain/allie-v3.0/last.pt` writes the 16 cells to `results/lm-eval/allie-v3.0/strat-v1.json`. The Maia-3 benchmark samples its positions with `allie.eval.maia3.positions` and `legal`. It then scores Maia-3 with `allie.eval.maia3.score_maia3` (with the Maia-3 code at `MAIA3_REPO`) and Allie with `allie.eval.maia3.score_moe`.
 6. **Search.** See [src/allie/search/README.md](src/allie/search/README.md).
-7. **Figures.** `python docs/make_figures.py` regenerates every figure here from the result files.
+7. **Play on Lichess.** `allie-bot` runs Allie-v3.0 as a Lichess bot on a CPU. See [src/allie/lichess/README.md](src/allie/lichess/README.md).
+8. **Figures.** `python docs/make_figures.py` regenerates every figure here from the result files.
 
 **Weights.** TODO: the Allie-v3.0 checkpoint is not published yet.
 

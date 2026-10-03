@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+bot = [
+    { name = "safetensors" },
+]
 search = [
     { name = "pybind11" },
     { name = "safetensors" },
@@ -33,12 +36,13 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=15" },
     { name = "pybind11", marker = "extra == 'search'", specifier = ">=3.0,<4" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
+    { name = "safetensors", marker = "extra == 'bot'", specifier = ">=0.4" },
     { name = "safetensors", marker = "extra == 'search'", specifier = ">=0.4" },
     { name = "scipy", specifier = ">=1.11" },
     { name = "torch", specifier = "==2.10.*", index = "https://download.pytorch.org/whl/cu128" },
     { name = "zstandard", specifier = ">=0.22" },
 ]
-provides-extras = ["search", "test"]
+provides-extras = ["search", "bot", "test"]
 
 [[package]]
 name = "chess"
