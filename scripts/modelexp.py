@@ -210,7 +210,16 @@ ROUND = None  # the round file being loaded
 
 
 def wave(
-    key, study, prefix, runs, purpose, lane="dei", group=None, pin=None, history=None
+    key,
+    study,
+    prefix,
+    runs,
+    purpose,
+    lane="dei",
+    group=None,
+    pin=None,
+    history=None,
+    local=False,
 ):
     """Declare a wave. Waves split across lanes share one group (and its 'base' runs).
     pin: a datapin file fixing every run's months and stores; history: the all-history
@@ -233,6 +242,7 @@ def wave(
         pin=pin and Path(pin),
         history=Path(history) if history else history_file(),
         round=ROUND,
+        local=local,
     )
 
 
@@ -373,6 +383,7 @@ def plan(key, commit=None):
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output={study}/logs/%x-%A_%a.out
+{f"export MODELEXP_LOCAL={LOCAL}" if w["local"] else ""}
 exec {ROOT}/.venv/bin/python {study}/modelexp.py task {study}/round.py {key}
 """
     )
@@ -807,6 +818,27 @@ def pretrained(r):
     return ROOT / "results/pretrain" / r["name"]
 
 
+# node-local project root of local waves: they train there and copy back all but the rank files (model.pt, pointers,
+# logs), so ROOT's storage holds no optimizer state; a requeue on another node starts the run over
+LOCAL = Path("/scratch/yimingz3/allie/modelexp-root")
+
+
+def finished(out):
+    f = out / "done.json"
+    return f.exists() and json.loads(f.read_text())["stop_reason"] == "steps"
+
+
+def local_root():
+    root = os.environ.get("MODELEXP_LOCAL")
+    if not root:
+        return ROOT
+    (Path(root) / "results/pretrain").mkdir(parents=True, exist_ok=True)
+    link = Path(root) / "results/original-data.json"
+    if not link.exists():
+        link.symlink_to(ROOT / "results/original-data.json")
+    return Path(root)
+
+
 def run_one(study, r, gpu):
     """Train, then score one run on original validation and the golden eval."""
     n = r["name"]
@@ -841,7 +873,13 @@ def run_one(study, r, gpu):
     stage = Path(f"{log}.stage.log")
     run([sys.executable, src / "modded_runtime_stage.py"], env, stage, limit=3600)
     py = stage.read_text().split()[-1]
-    done = out / "done.json"
+    root = local_root()
+    train_env = env | dict(ALLIE_PROJECT_ROOT=str(root))
+    tout = root / "results/pretrain" / n
+    assert root == ROOT or "fork" not in r, "a fork needs its mainline's rank files"
+    if finished(out) and not (tout / "done.json").exists():
+        tout = out  # trained and copied back earlier
+    done = tout / "done.json"
     for leg in r.get("stop_after", [None]):
         d = json.loads(done.read_text()) if done.exists() else {}
         if d.get("stop_reason") == "steps" or (leg and d.get("step", 0) >= leg):
@@ -856,19 +894,23 @@ def run_one(study, r, gpu):
             max(600, left - int(time.monotonic() - started) - 1500),
         ]
         cmd += ["--stop-after", leg] * bool(leg)
-        if (out / "last.pt").exists():
-            cmd += ["--resume", out / "last.pt"]
+        if (tout / "last.pt").exists():
+            cmd += ["--resume", tout / "last.pt"]
         elif "fork" in r:  # the mainline's --wsd-fork-steps pointer
             f = r["fork"]
             cmd += [
                 "--wsd-fork-from",
                 ROOT / "results/pretrain" / f["parent"] / f"fork-{f['at']}.pt",
             ]
-        run(cmd, env, f"{log}.train.log", watch=out / "train.jsonl")
+        run(cmd, train_env, f"{log}.train.log", watch=tout / "train.jsonl")
         if json.loads(done.read_text())["stop_reason"] != (
             "stop_after" if leg else "steps"
         ):
             return False
+        if tout != out:  # done.json last, so a partial copy never looks finished
+            rsync = ["rsync", "-a", "--exclude", "rank*.pt", "--exclude", "done.json"]
+            subprocess.run([*rsync, f"{tout}/", f"{out}/"], check=True)
+            subprocess.run(["cp", "-p", done, out / "done.json"], check=True)
     scores = ROOT / "results/lm-eval" / n
     for split, f in (("original_val", "original-val.json"), ("strat", "strat-v1.json")):
         if not (scores / f).exists():
