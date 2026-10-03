@@ -31,7 +31,7 @@ Every model sees the same 80,000 blitz positions. Allie-v3.0 minus Maia-3 79M is
 
 **The original Allie** ([ICLR 2025](https://arxiv.org/abs/2410.03893)) is scored the same way, from its raw policy: the released 305M-parameter checkpoint, trained on 2022 Lichess blitz, which reproduces the paper's test accuracy. It sits between Maia-3 5M and 23M on this benchmark. It has no clock input and saw only 2022 data.
 
-Its 0.61 GFLOPs per move assume a key-value cache, as for the other models. Its released decoder re-reads the game for every move, about 26 GFLOPs, and its time-adaptive search runs about 50 such passes per move. Here every model is scored on its policy alone.
+Its 0.61 GFLOPs per move assume a key-value cache, as for the other models. Its released decoder re-reads the game for every move, about 28 GFLOPs, and its time-adaptive search runs about 50 such passes per move. Here every model is scored on its policy alone.
 
 ## How we measure
 

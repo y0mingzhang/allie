@@ -25,8 +25,10 @@ The original Allie ([ICLR 2025](https://arxiv.org/abs/2410.03893)) is scored fro
 - **Checkpoint.** `medium/best.pt` from [yimingzhang/allie-models](https://huggingface.co/datasets/yimingzhang/allie-models): a GPT-2-medium shape with 305M parameters, trained on 2022 Lichess blitz. It is a retrain of the paper's recipe, not the exact model behind the paper's stored outputs: it reproduces its training run's validation loss (1.3535) and the paper's test accuracy (55.73% against 55.7% reported).
 - **Benchmark.** CE 1.2848 [1.2748, 1.2941], top-1 57.06% [56.70, 57.42]. By rating band, CE 1.4256, 1.2947, 1.2320 and 1.1870 from <1400 to ≥2400. On Maia-3's protocol (ply > 20, at least 30 s left): 1.2778 and 57.36%.
 - **Main evaluation.** 1.3526, against Allie-v3.0's 1.2533. Only blitz is in its training distribution: bullet, rapid and classical time controls map to its unknown token.
-- **Compute.** 0.61 GFLOPs per move with a key-value cache, counted as for the other models. Its released decoder has no cache and re-reads the game, about 26 GFLOPs per move at the benchmark's mean ply; its time-adaptive search averages 50 such passes per move.
+- **Compute.** 0.61 GFLOPs per move with a key-value cache, counted as for the other models. Its released decoder has no cache and re-reads the game, about 28 GFLOPs per move at the benchmark's mean ply; its time-adaptive search averages 50 such passes per move.
 - **Mapping.** 3 of 6,191 benchmark games (35 positions) have a time control outside its 24 blitz tokens and get the unknown token. The model clamps ratings to 500-3000.
+
+Our previous model, Allie v2 (a dense 1.42B Qwen3 on the same token format, without clock inputs), scores 1.2343 [1.2247, 1.2439] and 58.43% [58.06, 58.79] on the benchmark at 2.85 GFLOPs per move.
 
 ## Where the differences come from
 
