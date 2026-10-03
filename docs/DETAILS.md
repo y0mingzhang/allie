@@ -18,9 +18,9 @@ Numbers behind the [README](../README.md). CE is in nats; intervals are 95%, boo
 | student, MoE 261M active / 2.07B total | 0.52 | 1.2469 | 58.09 | +0.0201 [+0.0168, +0.0231] | −0.71 [−0.92, −0.50] |
 | student, MoE 181M active / 1.42B total | 0.36 | 1.2545 | 57.92 | +0.0276 [+0.0240, +0.0309] | −0.89 [−1.12, −0.67] |
 
-The fine-tuned 2-expert model beats Maia-3 23M (−0.0270 nats, +0.41 pp); the 0.36-GFLOP student beats Maia-3 5M (−0.0410, +0.96 pp).
+Relative to Maia-3 23M, the fine-tuned 2-expert model has lower CE and higher accuracy (−0.0270 nats, +0.41 pp); relative to Maia-3 5M, so does the 0.36-GFLOP student (−0.0410, +0.96 pp).
 
-## Where the lead comes from
+## Where the differences come from
 
 Final checkpoint minus Maia-3 79M, blitz unless stated (bullet, rapid and classical from 5,000 positions per rating band):
 
@@ -38,7 +38,7 @@ The rating plot reweights every scored blitz move of the main evaluation (402,10
 
 ## Evaluation
 
-- **Benchmark positions.** The main evaluation's 402,108 scored blitz moves, rebuilt into games (every target move replays as legal); a fixed random sample of 20,000 per rating band, drawn before any model ran. Maia-3 receives the current board and the 7 previous ones in its side-to-move orientation, and the mover's and opponent's ratings; our scorer reproduces the authors' engine move for move and probability for probability. Allie receives the whole game, both ratings and the clock, in one forward pass per game.
+- **Benchmark positions.** The main evaluation's 402,108 scored blitz moves, rebuilt into games (every target move replays as legal); a fixed random sample of 20,000 per rating band, drawn before any model ran. Maia-3 ([paper](https://arxiv.org/abs/2605.19091), [models](https://huggingface.co/collections/MaiaChess/maia3), [code](https://github.com/CSSLab/maia-chess), AGPL-3.0) runs unmodified from its public 5M, 23M and 79M checkpoints. It receives the current board and the 7 previous ones in its side-to-move orientation, and the mover's and opponent's ratings; our scorer reproduces the authors' engine move for move and probability for probability. Allie receives the whole game, both ratings and the clock, in one forward pass per game.
 - **Main evaluation.** 16 cells of format × mover rating with about 100,000 scored moves each (1.55M moves, 26,278 games; classical ≥2400 has all 37,180 available moves). Rated human games only; BOT players and games that leak into validation are excluded. CE is over all 1,968 move tokens without legal masking, and the macro is the unweighted mean of the 16 cells.
 
 ## The model

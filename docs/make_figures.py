@@ -160,9 +160,9 @@ def pareto():
     fig.subplots_adjust(left=0.075, right=0.985, top=0.8, bottom=0.2, wspace=0.2)
     titled(
         fig,
-        "Every Maia-3 model is beaten on both metrics by a cheaper Allie model",
+        "Prediction quality against inference compute: Allie and Maia-3",
         "Held-out Lichess blitz, July 2026: the same 80,000 positions for every model. "
-        "Up and to the left is better in both panels.",
+        "Up and to the left: closer to the moves played, for less compute.",
     )
     for ax, key in zip(axes, ("ce", "acc")):
         at = {k: (v["gflops"], v[key]) for k, v in rep.items()}
@@ -170,9 +170,13 @@ def pareto():
         ce = key == "ce"
         lo, hi = (1.302, 1.196) if ce else (56.6, 59.6)
         ax.add_patch(Rectangle((0.28, y79), x79 - 0.28, hi - y79, color=WASH, lw=0))
-        tip = "cheaper and better than Maia-3 79M"
-        dy = -0.0012 if ce else 0.04
-        ax.text(x79 * 0.94, y79 + dy, tip, ha="right", fontsize=8, color=BLUE)
+        tip = (
+            "less compute, "
+            + ("lower CE" if ce else "higher accuracy")
+            + " than Maia-3 79M"
+        )
+        ty, va = (y79 - 0.0012, "bottom") if ce else (hi - 0.06, "top")
+        ax.text(x79 * 0.94, ty, tip, ha="right", va=va, fontsize=8, color=BLUE)
         mx = [at[k] for k in MAIA]
         ax.plot(*zip(*mx), color=MAIA["maia3-23m"], lw=1.2, zorder=2)
         for k, xy in zip(MAIA, mx):
@@ -241,7 +245,7 @@ def rating():
     fig.subplots_adjust(wspace=0.22, hspace=0.08)
     titled(
         fig,
-        "Ahead of Maia-3 79M across the rating range",
+        "Accuracy and cross-entropy across the rating range",
         "All 402,108 scored blitz moves of the July 2026 eval, by game rating (mean of both "
         "players), reweighted to the natural player mix.\nBands: 95% intervals, "
         "bootstrapping whole games. Hollow markers: bins with fewer than 3,000 positions.",
@@ -278,7 +282,7 @@ def rating():
         d = {r["bin"]: r["models"][big][f"d_{key}_79m"] for r in rows}
         worse = [(b, v[0] * scale) for b, v in d.items() if (v[0] > 0) == (key == "ce")]
         spans = [b for b, v in d.items() if v[1] < 0 < v[2]]
-        print(f"  {key}: {len(d)} bins; behind 79M: {worse}; interval spans 0: {spans}")
+        print(f"  {key}: {len(d)} bins; 79M closer: {worse}; interval spans 0: {spans}")
 
 
 # ------------------------------------------------------------------ 3. model diagram
@@ -418,18 +422,16 @@ def training():
     ax.fill_between(t, gap[:, 1], gap[:, 2], color=BLUE, alpha=0.14, lw=0, zorder=2)
     ax.plot(t, gap[:, 0], color=BLUE, lw=2, zorder=3)
     cross = t[np.argmax(gap[:, 2] < 0)]
-    text = (
-        f"ahead beyond the interval from {cross:.0f}B tokens;\n"
-        f"final {gap[-1, 0]:+.4f} [{gap[-1, 1]:+.4f}, {gap[-1, 2]:+.4f}]"
-    )
-    note(ax, text.translate(MINUS), (21.5, -0.006), va="top", color=INK)
+    nums = f"{gap[-1, 0]:+.4f} [{gap[-1, 1]:+.4f}, {gap[-1, 2]:+.4f}]".translate(MINUS)
+    text = f"CE below Maia-3 79M's, beyond the interval,\nfrom {cross:.0f}B tokens; final {nums}"
+    note(ax, text, (21.5, -0.006), va="top", color=INK)
     ax.set(xlim=(20, 78), ylim=(-0.03, 0.14))
     ax.set_xlabel("Training tokens (billions)")
-    ax.set_ylabel("CE minus Maia-3 79M (nats; below 0 is better)")
+    ax.set_ylabel("CE minus Maia-3 79M (nats)")
     save(fig, "training")
     print(f"  N {act / 1e6:.1f}M, D {D / 1e9:.1f}B: forecast {forecast:.4f}")
     print(f"  final {gm[-1]:.4f} ({gm[-1] - forecast:+.4f}), annealed {ann:.4f}")
-    print(f"  best sweep model {sweep_best:.4f}; ahead of 79M from {cross:.1f}B tokens")
+    print(f"  best sweep model {sweep_best:.4f}; below 79M from {cross:.1f}B tokens")
     print(f"  final gap to 79M {gap[-1]}")
 
 
@@ -445,7 +447,7 @@ def scaling():
     fig.subplots_adjust(left=0.075, right=0.985, top=0.75, bottom=0.2, wspace=0.08)
     titled(
         fig,
-        "Scaling sweep: at every compute budget, mixture-of-experts beats dense",
+        "Scaling sweep: mixture-of-experts reaches lower loss than dense at every budget",
         "45 runs, main-eval CE. Curves: quadratic in log N through the four sizes around "
         "each minimum (hollow points: outside that window). Same recipe\nfor both; the "
         "MoE sends each token to 16 of 256 experts plus a shared one. Fitted law's "
