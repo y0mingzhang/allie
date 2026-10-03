@@ -3,8 +3,7 @@
 world 4 with log-space gates and blocks 0-1 dense instead, v3's direction), blocks 0-3 under eager checkpoints and 4-7 not, one micro-batch on even steps and two on odd, real validation rows. Collectives are
 deterministic (FP32 sums in rank order); modded_smoe's Triton kernels and polar express run as torch references.
 
-replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal, or
-the step's largest difference is printed. resume: a sharded run saved after 3 steps as modded_train saves it
+replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal. resume: a sharded run saved after 3 steps as modded_train saves it
 (model.pt with whole experts, each rank's state), rebuilt, loaded and continued through the embed split equals the
 uninterrupted run bit for bit: losses, model.pt, every rank's optimizer state. --moe-remat --moe-chunks 4 (the down
 output rerun in checkpointed blocks, the backward's [T*k, D] products in 4 token chunks) is bitwise the sharded run. eval: an unsharded model loading the final model.pt gives the sharded model's eval
@@ -195,9 +194,8 @@ def same(a, b):
     """Largest absolute difference of two nested states (0.0: bitwise equal)."""
     if isinstance(a, torch.Tensor):
         assert a.dtype == b.dtype and a.shape == b.shape
-        return (
-            0.0 if torch.equal(a, b) else (a.double() - b.double()).abs().max().item()
-        )
+        d = 0.0 if torch.equal(a, b) else (a.double() - b.double()).abs().max().item()
+        return d if d == d else float("inf")  # nan: max() would drop it
     if isinstance(a, dict):
         assert a.keys() == b.keys()
         return max([same(a[k], b[k]) for k in a], default=0.0)
@@ -243,7 +241,7 @@ def worker(rank, world, port, tmp):
         say(
             f"step {step + 1}: replicated vs sharded, loss diff {diff[:-1].max():.3g}, param diff {diff[-1]:.3g}"
         )
-        assert step or not diff.any(), "step 1 must be bitwise"
+        assert not diff.any(), "every step must be bitwise"
     final = got[-1][1], manager.rank_state_dict()
     del model, manager
     modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = False, 4

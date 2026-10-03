@@ -423,6 +423,7 @@ def submit(key):
                 "sbatch",
                 "--parsable",
                 f"--comment={token}",
+                f"--exclude={bad_nodes()}",  # the list as of now, not as of the plan
                 str(study / "run.sbatch"),
             ]
             jobs = [subprocess.check_output(cmd, text=True).strip().split(";")[0]]
@@ -602,8 +603,11 @@ TRIES = 3  # failed attempts of a run before its task stops requeueing
 
 def looping(study, r):
     """Its last two failures resumed from the checkpoint it is still at: a crash loop, which requeueing repeats."""
-    steps = [x.get("step") for x in failures(study, r)[-2:]]
-    return steps == [checkpoint_step(r)] * 2
+    step = checkpoint_step(r)
+    return (
+        step is not None
+        and [x.get("step") for x in failures(study, r)[-2:]] == [step] * 2
+    )
 
 
 def alert(study, r):
@@ -617,10 +621,14 @@ def alert(study, r):
 
 
 def checkpoint_step(r):
-    """The step of the run's last committed checkpoint (0: none)."""
-    f = pretrained(r) / "checkpoints.jsonl"
-    rows = f.read_text().splitlines() if f.exists() else []
-    return json.loads(rows[-1])["step"] if rows else 0
+    """The step last.pt points at (0: none; None: unreadable, which never counts as a loop)."""
+    import torch
+
+    f = pretrained(r) / "last.pt"
+    try:
+        return torch.load(f, weights_only=True)["step"] if f.exists() else 0
+    except Exception:
+        return None
 
 
 def failures(study, r):

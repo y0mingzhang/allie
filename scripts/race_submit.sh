@@ -11,7 +11,9 @@ name=$1 script=$(readlink -f "$2")
 shift 2
 root=${RACE_ROOT:-/data/group_data/dei-group/yimingz3/allie/race}
 bad=$(sed 's/#.*//' "${BAD_NODES:-/data/group_data/dei-group/yimingz3/allie/bad-nodes}" | xargs | tr ' ' ,)
-[[ "$*" != *--exclude* ]] || { echo "race $name: the shared bad-node list sets --exclude" >&2; exit 1; }
+for o in "$@"; do
+	[[ " $o" != *" --exclude"* && " $o" != *" -x"* ]] || { echo "race $name: the shared bad-node list sets --exclude" >&2; exit 1; }
+done
 mkdir -p "$root"
 dir=$root/$name
 mkdir "$dir" || { echo "race $name exists: $dir" >&2; exit 1; }

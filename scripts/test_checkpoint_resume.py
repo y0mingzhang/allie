@@ -124,9 +124,12 @@ def recompute(val, checkpointed):
         z.float().square().mean().backward()
     proof = {"output": z.detach().cpu()}
     for name, p in m.named_parameters():
-        grad = p.grad if p.grad is not None else getattr(p, "main_grad", None)
+        grads = (p.grad, getattr(p, "main_grad", None), getattr(p, "part", None))
+        grad = next((g for g in grads if g is not None), None)
         if grad is not None:
             proof[name] = grad.detach().cpu().clone()
+    shards = {n for n, p in m.named_parameters() if getattr(p, "local", False)}
+    assert shards <= proof.keys(), shards - proof.keys()
     core._eager_block = ORIGINAL
     del m, mgr, net
     gc.collect()

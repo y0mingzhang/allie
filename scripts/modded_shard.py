@@ -5,8 +5,8 @@ gather() all-gathers a layer's BF16 experts where its forward needs them and lau
 (prefetch). A layer under an eager block checkpoint (modded_moe.MoE.remat False) saves its gathered experts for
 backward: the checkpoint drops them in the forward and its recompute holds them until the block's own backward.
 Any other layer saves its shards and gathers again in backward. The backward computes the full expert grads and
-reduce-scatters them (BF16, averaged, in flight until the previous layer's backward is done) into the shards' FP32
-grad rows. model.pt keeps whole experts: state_dict() gathers them, load_state_dict slices them (same world size).
+reduce-scatters them (BF16, averaged, in flight until the next layer's backward) to the shards (finish()). model.pt
+keeps whole experts: state_dict() gathers them, load_state_dict slices them (same world size).
 """
 
 import torch

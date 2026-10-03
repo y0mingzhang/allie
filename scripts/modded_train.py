@@ -1,13 +1,13 @@
 """Recoverable training of the pinned medium recipe on chessmix-sampled chess rows."""
 
 import argparse
-import errno
 import hashlib
 import json
 import os
 import random
 import shutil
 import signal
+import threading
 import time
 import uuid
 from dataclasses import asdict
@@ -270,16 +270,32 @@ def migratable(key, old, new):
     return False
 
 
-def keep_model(src, dst):
-    """A copy prune never removes: a hard link, or a copy on another filesystem."""
-    try:
-        os.link(src, dst)
-    except OSError as e:
-        if e.errno != errno.EXDEV:
-            raise
-        tmp = dst.with_suffix(".partial")
-        shutil.copyfile(src, tmp)
-        tmp.replace(dst)
+def keep_model(src, kept, away=None):
+    """Hard-link src into kept/ (instant; prune cannot free it); away: then move it there from a thread, durably,
+    dropping the link only once the copy is synced (a failed or cut copy leaves the link)."""
+    kept.parent.mkdir(exist_ok=True)
+    os.link(src, kept)
+    if away is None:
+        return
+
+    def move():
+        away.parent.mkdir(parents=True, exist_ok=True)
+        tmp = away.with_suffix(".partial")
+        with kept.open("rb") as f, tmp.open("wb") as g:
+            shutil.copyfileobj(f, g, 64 << 20)
+            g.flush()
+            os.fsync(g.fileno())
+        tmp.replace(away)
+        kept.unlink()
+
+    threading.Thread(target=move, daemon=True).start()
+
+
+def last_checkpoint(out):
+    """The step of the run's last committed checkpoint before this one (0: none)."""
+    f = out / "checkpoints.jsonl"
+    rows = f.read_text().splitlines() if f.exists() else []
+    return max((json.loads(x)["step"] for x in rows if x.endswith("}")), default=0)
 
 
 def init_triton_signals():
@@ -327,10 +343,11 @@ def main():
         "--keep-model-every",
         type=int,
         default=0,
-        help="link (or copy, across filesystems) the first model.pt at or after each multiple of this step into "
-        "--keep-model-dir (never pruned)",
+        help="hard-link the first model.pt at or after each multiple of this step into kept/ (never pruned)",
     )
-    p.add_argument("--keep-model-dir", help="default: the run's kept/")
+    p.add_argument(
+        "--keep-model-dir", help="move the kept copies to DIR/NAME (another filesystem)"
+    )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
@@ -770,14 +787,11 @@ def main():
 
         def commit():
             publish(out, directory, step, world, names)
-            if a.keep_model_every:
-                kept = Path(a.keep_model_dir or out / "kept")
-                kept.mkdir(parents=True, exist_ok=True)
-                last = max(
-                    (int(f.stem[6:]) for f in kept.glob("model-*.pt")), default=0
-                )
-                if step // a.keep_model_every > last // a.keep_model_every:
-                    keep_model(directory / "model.pt", kept / f"model-{step:08d}.pt")
+            n = a.keep_model_every  # the first checkpoint at or after each multiple
+            if n and step // n > last_checkpoint(out) // n:
+                name = f"model-{step:08d}.pt"
+                away = a.keep_model_dir and Path(a.keep_model_dir) / a.name / name
+                keep_model(directory / "model.pt", out / "kept" / name, away)
             removed = prune_checkpoints(out, a.keep_checkpoints, directory)
             row = {
                 "step": step,
