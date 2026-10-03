@@ -3,12 +3,15 @@
 # "-p general --qos=normal --gres=gpu:L40S:4"); the first copy to start runs it, the others are cancelled or exit.
 # Every copy must be the same single task (an array script needs one --array=N). RACE_DIR keeps the guard and wrapper
 # the copies run, their hashes, OPTS, and submits: each sbatch before it is sent and the id it returned. On failure the
-# known copies are cancelled and RACE_DIR is kept; a copy it does not list in RACE_DIR/jobs cannot run.
+# known copies are cancelled and RACE_DIR is kept; a copy it does not list in RACE_DIR/jobs cannot run. Every copy
+# excludes the shared bad-node list (BAD_NODES, one node per line, # comments); OPTS must not pass --exclude.
 set -euo pipefail
 (($# >= 3)) || { echo "usage: race_submit.sh NAME SCRIPT OPTS..." >&2; exit 1; }
 name=$1 script=$(readlink -f "$2")
 shift 2
 root=${RACE_ROOT:-/data/group_data/dei-group/yimingz3/allie/race}
+bad=$(sed 's/#.*//' "${BAD_NODES:-/data/group_data/dei-group/yimingz3/allie/bad-nodes}" | xargs | tr ' ' ,)
+[[ "$*" != *--exclude* ]] || { echo "race $name: the shared bad-node list sets --exclude" >&2; exit 1; }
 mkdir -p "$root"
 dir=$root/$name
 mkdir "$dir" || { echo "race $name exists: $dir" >&2; exit 1; }
@@ -36,7 +39,7 @@ for opts in "$@"; do
 	read -ra o <<< "$opts"
 	echo "sbatch $opts" >> "$dir/submits"
 	sent=$((sent + 1))
-	id=$(sbatch --parsable --hold "${o[@]}" "$body")
+	id=$(sbatch --parsable --hold ${bad:+--exclude=$bad} "${o[@]}" "$body")
 	id=${id%%;*}
 	[[ $id =~ ^[0-9]+$ ]] || fail "sbatch returned '$id'"
 	ids+=("$id")

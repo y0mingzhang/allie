@@ -78,6 +78,11 @@ MOE = lambda e, k, **kw: dict(arch=dict(moe=[e, k]) | ROUTER | kw)
 # results/recipe10x/gpu-allocation.md fast types as sinfo names them
 FAST = "RTX_PRO_6000|H200|H100|A100_80GB|A100_80G|L40S|6000Ada"
 QOS = {"dei-group": "dei_group_qos", "preempt": "preempt_qos", "general": "normal"}
+G = Path("/data/group_data/dei-group/yimingz3/allie")
+# one node per line, # comments: every launcher excludes them
+BAD_NODES = G / "bad-nodes"
+# runs that stopped requeueing in a crash loop: main's controller reads them
+ALERTS = G / "alerts.jsonl"
 # lane: runs per task, GPUs per task, partition, gres, constraint, CPUs, GB, array throttle
 LANES = dict(
     dei=(4, 4, "dei-group", "gpu:A6000:4", None, 16, 128, None),
@@ -213,7 +218,7 @@ def wave(
     pack, gpus, part, gres, constraint, cpus, mem, throttle = LANES[lane]
     sbatch = ["--account=dippolit", f"--partition={part}", f"--qos={QOS[part]}"]
     sbatch += [f"--gres={gres}"] + [f"--constraint={constraint}"] * bool(constraint)
-    sbatch += ["--exclude=babel-q9-32,babel-x9-32", f"--cpus-per-task={cpus}"]
+    sbatch += [f"--exclude={bad_nodes()}", f"--cpus-per-task={cpus}"]
     sbatch += [f"--mem={mem}G", "--time=12:00:00"]
     WAVES[key] = dict(
         study=study,
@@ -228,6 +233,14 @@ def wave(
         pin=pin and Path(pin),
         history=Path(history) if history else history_file(),
         round=ROUND,
+    )
+
+
+def bad_nodes():
+    return ",".join(
+        x.split("#")[0].strip()
+        for x in BAD_NODES.read_text().splitlines()
+        if x.split("#")[0].strip()
     )
 
 
@@ -576,12 +589,38 @@ def task(key):
     with ThreadPoolExecutor(len(mine)) as ex:
         ok = list(ex.map(lambda j: arm(study, mine[j], gpus(j)), range(len(mine))))
     failed = [r for r, o in zip(mine, ok) if not o]
-    if failed and all(len(failures(study, r)) < TRIES for r in failed):
+    loops = [r for r in failed if looping(study, r)]
+    for r in loops:
+        alert(study, r)
+    if failed and not loops and all(len(failures(study, r)) < TRIES for r in failed):
         subprocess.run(["scontrol", "requeue", task_id()], check=True)
     sys.exit(1 if failed else 0)
 
 
 TRIES = 3  # failed attempts of a run before its task stops requeueing
+
+
+def looping(study, r):
+    """Its last two failures resumed from the checkpoint it is still at: a crash loop, which requeueing repeats."""
+    steps = [x.get("step") for x in failures(study, r)[-2:]]
+    return steps == [checkpoint_step(r)] * 2
+
+
+def alert(study, r):
+    """Stop requeueing r: an ALERT file next to its logs and a row in the shared alerts for main's controller."""
+    f = failures(study, r)
+    row = dict(at=time.time(), run=r["name"], study=str(study), step=f[-1]["step"], failures=f[-2:],
+               why="two failures at the same checkpoint step: not requeued")  # fmt: skip
+    write(study / "logs" / f"{r['name']}.ALERT", json.dumps(row, indent=1) + "\n")
+    with open(ALERTS, "a") as out:
+        out.write(json.dumps(row) + "\n")
+
+
+def checkpoint_step(r):
+    """The step of the run's last committed checkpoint (0: none)."""
+    f = pretrained(r) / "checkpoints.jsonl"
+    rows = f.read_text().splitlines() if f.exists() else []
+    return json.loads(rows[-1])["step"] if rows else 0
 
 
 def failures(study, r):
@@ -599,6 +638,7 @@ def arm(study, r, gpu):
             raise
         f = study / "logs" / f"{r['name']}.failed.json"
         rec = dict(at=time.time(), job=os.environ.get("SLURM_JOB_ID"), reason=repr(e))
+        rec["step"] = checkpoint_step(r)
         write(f, json.dumps([*failures(study, r), rec], indent=1) + "\n")
         if not isinstance(e, Exception):
             raise

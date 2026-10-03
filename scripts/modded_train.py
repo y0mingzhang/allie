@@ -309,6 +309,12 @@ def main():
         default=0,
         help="0 keeps all; otherwise retain latest N>=2 plus best",
     )
+    p.add_argument(
+        "--keep-model-every",
+        type=int,
+        default=0,
+        help="hard-link the first model.pt at or after each multiple of this step into kept/ (never pruned)",
+    )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
@@ -734,6 +740,14 @@ def main():
 
         def commit():
             publish(out, directory, step, world, names)
+            if a.keep_model_every:
+                kept = out / "kept"
+                kept.mkdir(exist_ok=True)
+                last = max(
+                    (int(f.stem[6:]) for f in kept.glob("model-*.pt")), default=0
+                )
+                if step // a.keep_model_every > last // a.keep_model_every:
+                    os.link(directory / "model.pt", kept / f"model-{step:08d}.pt")
             removed = prune_checkpoints(out, a.keep_checkpoints, directory)
             row = {
                 "step": step,
