@@ -80,7 +80,8 @@ def prune(out, keep, current):
         return path
 
     protected = set()
-    for name in ("last.pt", "best.pt", *[p.name for p in out.glob("fork-*.pt")]):
+    names = ("last.pt", "best.pt", "final.pt", *[p.name for p in out.glob("fork-*.pt")])
+    for name in names:
         if (out / name).exists():
             pointer = torch.load(out / name, map_location="cpu", weights_only=False)
             assert pointer["format"] == "allie-modded-medium-1"
