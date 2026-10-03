@@ -508,9 +508,10 @@ class NorMuon(torch.optim.Optimizer):
                 group["master"] = torch.stack([p.fp32 for p in ps[lo : lo + n]]).to(
                     ps[0].device
                 )
-            self._flat[i] = torch.zeros(
-                (n, *ps[0].shape), dtype=torch.float32, device=ps[0].device
-            )
+            if not local:  # local rows are built at the step (step())
+                self._flat[i] = torch.zeros(
+                    (n, *ps[0].shape), dtype=torch.float32, device=ps[0].device
+                )
             self._pflat[i] = torch.zeros(
                 (n * self.world_size, *ps[0].shape),
                 dtype=ps[0].dtype,
@@ -519,7 +520,8 @@ class NorMuon(torch.optim.Optimizer):
             for k, p in enumerate(ps):
                 self._pflat[i][k].copy_(p.detach())
                 p.data, p.fresh, p.owner = self._pflat[i][k], True, k // n
-                p.main_grad = self._flat[i][k - lo] if lo <= k < lo + n else None
+                owned = lo <= k < lo + n and not local
+                p.main_grad = self._flat[i][k - lo] if owned else None
                 del p.fp32
                 if not local:
                     p.register_post_accumulate_grad_hook(reduce_to_owner)
@@ -545,8 +547,14 @@ class NorMuon(torch.optim.Optimizer):
             self._deferred is not None
         ):  # the last step's broadcasts, if a block has not run
             sync_params()
-        if self.local:
+        if self.local:  # the shards' grads (modded_shard.finish: BF16, FP32 once a second micro-batch adds) as FP32 rows
             modded_shard.reset()
+            for i, g in enumerate(self.param_groups):
+                ps = g["params"]
+                self._flat[i] = ps[0].new_empty((len(ps), *ps[0].shape), dtype=torch.float32)
+                for k, p in enumerate(ps):
+                    self._flat[i][k].copy_(p.part)
+                    p.part = None
         rank = 0 if self.local else dist.get_rank()
         group_infos = []
         for group in self.param_groups:
@@ -761,6 +769,8 @@ class NorMuon(torch.optim.Optimizer):
             unstacked_params = torch.unbind(stacked_params)
             for i, p in enumerate(orig_params):
                 p.copy_(unstacked_params[i], non_blocking=True)
+        if self.local:
+            self._flat.clear()
 
 
 class DistAdam(torch.optim.Optimizer):

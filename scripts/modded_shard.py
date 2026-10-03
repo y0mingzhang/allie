@@ -82,11 +82,12 @@ def _(up, down, dep, pos, step):
 
 
 def finish():
-    """Wait for the reduce-scatters in flight and add them into the shards' FP32 grad rows."""
+    """Wait for the reduce-scatters in flight and keep each shard's grad: BF16 until a second micro-batch's arrives,
+    then FP32 sums (the replicated rows' copy and adds, without their memory at one micro-batch a step)."""
     while _pending:
         work, p, g, _ = _pending.pop(0)
         work.wait()
-        p.main_grad.copy_(g) if p.fresh else p.main_grad.add_(g)
+        p.part = g if p.fresh else p.part.float().add_(g)
         p.fresh = False
 
 

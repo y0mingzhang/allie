@@ -1,6 +1,6 @@
 """arch moe_shard (modded_shard) on CPU, gloo worlds 2 and 4: the GPT (board CNN, dense attention, v2's MoE recipe:
 256 experts top-4, shared expert, quantile balancing, router centring, adam_every, gate floor, FP32 small masters),
-blocks 0-3 under eager checkpoints and 4-7 not, two micro-batches a step, real validation rows. Collectives are
+blocks 0-3 under eager checkpoints and 4-7 not, one micro-batch on even steps and two on odd, real validation rows. Collectives are
 deterministic (FP32 sums in rank order); modded_smoe's Triton kernels and polar express run as torch references.
 
 replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal, or
@@ -167,12 +167,13 @@ def build(shard):
     return model, TrainingManager(model, cfg, SCHEDULE)
 
 
-def train(val, model, manager, steps, accum=2):
+def train(val, model, manager, steps):
     """Every step's losses (this rank's micro-batches) and the whole parameters after it (rank 0)."""
     world, rank, out = dist.get_world_size(), dist.get_rank(), []
     for step in steps:
         manager.advance_schedule(step)
         losses = []
+        accum = 1 + step % 2
         for micro in range(accum):
             if micro == accum - 1:
                 manager.activate_hooks(step)
