@@ -255,8 +255,9 @@ class MoE(nn.Module):
         # log_gates: the same gates (and balance-loss affinities) as softmaxes of log-sigmoid scores, which never divide
         assert not log_gates or score == "sigmoid"
         self.log_gates = log_gates
-        # keep: route each token through only the best keep (by score + bias) of its top-k experts, with the gates
-        # they have in the top-k; selection, balance loss, bias updates and their stats stay the top-k's (0: off)
+        # keep: route each token through only the best keep (by score + bias; ties in top-k order) of its top-k experts,
+        # with the gates they have in the top-k; selection, balance loss, bias updates and their stats (moe_* in
+        # train.jsonl: the top-k candidates, not the executed routes) stay the top-k's (0: off)
         assert 0 <= keep < topk
         self.keep = keep
         if center:
@@ -287,7 +288,7 @@ class MoE(nn.Module):
             w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
         ridx = idx
         if self.keep:
-            best = (s.detach() + self.bias).gather(1, idx).argsort(-1, descending=True)[:, : self.keep]
+            best = torch.sort((s.detach() + self.bias).gather(1, idx), dim=-1, descending=True, stable=True).indices[:, : self.keep]
             ridx, w = idx.gather(1, best), w.gather(1, best)
         flat = ridx.flatten()
         order = flat.argsort(stable=True)

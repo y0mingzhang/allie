@@ -98,7 +98,7 @@ def main():
         else torch.sigmoid(h @ b.router.T.float())
     )
     idx = torch.topk(s + b.bias, K, dim=-1).indices
-    best = (s + b.bias).gather(1, idx).argsort(-1, descending=True)[:, :KEEP]
+    best = torch.sort((s + b.bias).gather(1, idx), dim=-1, descending=True, stable=True).indices[:, :KEEP]
     mask = torch.zeros_like(s, dtype=torch.bool).scatter_(1, idx.gather(1, best), True)
     kept = mask.gather(1, idx)  # [t, k] in the routed order of idx
     modded_smoe.routed = masked_routed(lambda gates: kept.to(gates.dtype))
