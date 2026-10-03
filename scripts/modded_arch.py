@@ -36,9 +36,13 @@ DEFAULTS = dict(
     # floor of the sums of sigmoid scores that renormalise a token's gates and its balance-loss affinities
     # (0: off); modded_moe.MoE gate_floor
     moe_gate_floor=0.0,
+    # gates as k**0.5 * softmax of the selected log-sigmoid scores (and balance-loss affinities as the softmax of all of
+    # them): the same function as the renormalised sigmoids, finite in forward and backward at any score
+    moe_log_gates=False,
+    moe_dense_first=1,  # blocks 0 .. n-1 keep the dense MLP, MoE after (DeepSeek-V3: 3)
 )
 # switches a --resume-new-source resume may change: numerical guards, not a different model
-RESUMABLE = ("moe_gate_floor",)
+RESUMABLE = ("moe_gate_floor", "moe_log_gates")
 # Retired switches, accepted only at the value this code hardcodes: older configs that set anything
 # else describe a different model.
 SHIPPED = dict(
@@ -83,6 +87,9 @@ def resolve(arch):
         "header_feats 2 reads the masked tokens"
     )
     assert 0 <= out["moe_gate_floor"] < float("inf")
+    assert isinstance(out["moe_log_gates"], bool)
+    assert not out["moe_log_gates"] or out["moe_score"] == "sigmoid"
+    assert isinstance(out["moe_dense_first"], int) and out["moe_dense_first"] >= 1
     return out
 
 
@@ -109,6 +116,7 @@ def moe_dims(width, arch):
         a["moe_router_wd"],
         a["moe_router_center"],
         a["moe_gate_floor"],
+        a["moe_log_gates"],
     )
 
 
@@ -129,9 +137,8 @@ def extra_flops(arch, width, layers):
     extra, dense = 2 * board_macs(width), layers
     if a["moe"]:
         _, k, routed, shared, *_ = moe_dims(width, arch)
-        extra += 2 * (layers - 1) * width * a["moe"][0]
-        extra += (
-            2 * (layers - 1) * (3 * width * (shared + k * routed) - 8 * width * width)
-        )
-        dense = 1
+        dense = a["moe_dense_first"]
+        m = layers - dense
+        extra += 2 * m * width * a["moe"][0]
+        extra += 2 * m * (3 * width * (shared + k * routed) - 8 * width * width)
     return extra + 2 * dense * (3 * width * swiglu_hidden(width) - 8 * width * width)

@@ -188,7 +188,7 @@ class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
         gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0, center=0.0,
-        gate_floor=0.0,
+        gate_floor=0.0, log_gates=False,
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop", "quantile")
@@ -250,6 +250,9 @@ class MoE(nn.Module):
         # sum to k**0.5 * sum / floor: its routed output is suppressed, the router's degeneration is not repaired
         assert 0 <= gate_floor < float("inf")
         self.gate_floor = gate_floor
+        # log_gates: the same gates (and balance-loss affinities) as softmaxes of log-sigmoid scores, which never divide
+        assert not log_gates or score == "sigmoid"
+        self.log_gates = log_gates
         if center:
             self.register_buffer("mu", torch.zeros(dim))
             self.register_buffer("mu_steps", torch.zeros(()))
@@ -261,18 +264,21 @@ class MoE(nn.Module):
         h = x.reshape(-1, d)
         t, e, k = h.shape[0], self.experts, self.topk
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
-        s = F.linear(h.to(g) - self.mu if self.center else h.to(g), self.router.to(g))
+        z = F.linear(h.to(g) - self.mu if self.center else h.to(g), self.router.to(g))
         s = (
-            torch.sigmoid(s)
+            torch.sigmoid(z)
             if self.score == "sigmoid"
-            else F.softplus(s).clamp_min(1e-12).sqrt()
+            else F.softplus(z).clamp_min(1e-12).sqrt()
         )
         if e <= 128:  # the kernel holds a row of experts in registers
             idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
         else:  # trunk's path: torch.topk here, the stats top-k below
             idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
-        w = s.gather(1, idx)
-        w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
+        if self.log_gates:
+            w = k**0.5 * torch.softmax(F.logsigmoid(z.gather(1, idx)), -1)
+        else:
+            w = s.gather(1, idx)
+            w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
         flat = idx.flatten()
         order = flat.argsort(stable=True)
         count = counts(flat[order], e)
@@ -322,7 +328,12 @@ class MoE(nn.Module):
             assert t % 1024 == 0
             top = torch.topk(s.detach(), k, dim=-1).indices if self.seq_raw else idx
             sel = torch.zeros_like(s).scatter_(1, top, 1.0).view(-1, 1024, e).mean(1)
-            prob = (s / self.floored(s.sum(-1, keepdim=True))).view(-1, 1024, e).mean(1)
+            prob = (
+                torch.softmax(F.logsigmoid(z), -1)
+                if self.log_gates
+                else s / self.floored(s.sum(-1, keepdim=True))
+            )
+            prob = prob.view(-1, 1024, e).mean(1)
             loss = (
                 self.seq
                 * (dist.get_world_size() / 8)

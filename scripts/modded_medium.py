@@ -208,6 +208,7 @@ def create_model(cfg, device="cuda"):
         cfg.width,
         cfg.max_tokens,
         moe=modded_arch.moe_dims(cfg.width, cfg.arch),
+        dense_first=modded_arch.resolve(cfg.arch)["moe_dense_first"],
     ).to(device)
     for i, block in enumerate(model.blocks):
         for p in block.parameters():

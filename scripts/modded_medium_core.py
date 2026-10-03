@@ -1155,8 +1155,7 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalSelfAttention(dim, head_dim, num_heads, layer_idx)
         self.layer_idx = layer_idx
-        # MoE (modded_arch.moe_dims) after a dense first layer, as in DeepSeek-V3
-        self.mlp = MoE(dim, *moe) if moe and layer_idx else MLP(dim)
+        self.mlp = MoE(dim, *moe) if moe else MLP(dim)
         if isinstance(self.mlp, MoE):  # a checkpointed block's recompute keeps expanded briefly
             self.mlp.remat = not (CKPT == "eager" and layer_idx < CKPT_LAYERS)
 
@@ -1236,6 +1235,7 @@ class GPT(nn.Module):
         model_dim: int,
         max_seq_len: int,
         moe: tuple | None = None,
+        dense_first: int = 1,
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -1264,8 +1264,10 @@ class GPT(nn.Module):
             nn.init.zeros_(embed.weight)
         for ve in self.value_embeds:
             ve.weight.label = "value_embed"
+        # MoE (modded_arch.moe_dims) after dense_first dense blocks, as in DeepSeek-V3
+        moes = [moe if i >= dense_first else None for i in range(num_layers)]
         self.blocks = nn.ModuleList(
-            [Block(model_dim, head_dim, num_heads, i, moe) for i in range(num_layers)]
+            [Block(model_dim, head_dim, num_heads, i, m) for i, m in enumerate(moes)]
         )
         self.yarn = Yarn(head_dim, max_seq_len)
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
