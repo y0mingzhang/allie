@@ -69,7 +69,7 @@ def atomic_save(state, path):
 def prune(out, keep, current):
     if keep == 0:
         return []
-    assert keep >= 2
+    assert keep >= 1  # the pointers move to a durable checkpoint before this runs
     root = (out / "checkpoints").resolve()
 
     def checked(path):

@@ -195,12 +195,8 @@ def configure(cfg, device):
     core.DEFER = cfg.ckpt == "eager"
 
 
-def create_model(cfg, device="cuda"):
-    configure(cfg, device)
-    if torch.device(device).type == "cuda":
-        # Upstream initializes autograd on the device before model/collectives.
-        # Keep that warmup out of module import so CPU inspection still works.
-        torch.empty(1, device=device, requires_grad=True).backward()
+def build(cfg, shard):
+    """The seeded FP32 init on the host, every rank the same; shard: this rank keeps its experts' slice."""
     model = core.GPT(
         VOCAB,
         cfg.layers,
@@ -211,11 +207,26 @@ def create_model(cfg, device="cuda"):
         moe=modded_arch.moe_dims(cfg.width, cfg.arch),
         dense_first=modded_arch.resolve(cfg.arch)["moe_dense_first"],
     )
-    # every rank seeds the same init: its own expert shards are sliced from it before the device sees the whole
-    shard = modded_arch.resolve(cfg.arch)["moe_shard"] and dist.get_world_size() > 1
     if shard:
         modded_shard.shard([m for m in model.modules() if isinstance(m, core.MoE)])
-    model = model.to(device)
+    return model
+
+
+def create_model(cfg, device="cuda"):
+    configure(cfg, device)
+    if torch.device(device).type == "cuda":
+        # Upstream initializes autograd on the device before model/collectives.
+        # Keep that warmup out of module import so CPU inspection still works.
+        torch.empty(1, device=device, requires_grad=True).backward()
+    world = dist.get_world_size()
+    shard = modded_arch.resolve(cfg.arch)["moe_shard"] and world > 1
+    # sharded, two ranks at a time: the node holds two whole FP32 inits (~40-53 GB each at width 2048), not eight
+    turns = world // 2 if shard else 1
+    for turn in range(turns):
+        if dist.get_rank() * turns // world == turn:
+            model = build(cfg, shard).to(device)
+        if turns > 1:
+            dist.barrier()
     for i, block in enumerate(model.blocks):
         for p in block.parameters():
             p.block = i

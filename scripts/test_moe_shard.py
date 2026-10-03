@@ -1,6 +1,6 @@
 """arch moe_shard (modded_shard) on CPU, gloo worlds 2 and 4: the GPT (board CNN, dense attention, v2's MoE recipe:
-256 experts top-4, shared expert, quantile balancing, router centring, adam_every, gate floor, FP32 small masters),
-blocks 0-3 under eager checkpoints and 4-7 not, one micro-batch on even steps and two on odd, real validation rows. Collectives are
+256 experts top-4, shared expert, quantile balancing, router centring, adam_every, gate floor, FP32 small masters; at
+world 4 with log-space gates and blocks 0-1 dense instead, v3's direction), blocks 0-3 under eager checkpoints and 4-7 not, one micro-batch on even steps and two on odd, real validation rows. Collectives are
 deterministic (FP32 sums in rank order); modded_smoe's Triton kernels and polar express run as torch references.
 
 replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal, or
@@ -46,6 +46,7 @@ ARCH = dict(
     moe=[256, 4], moe_shared_frac=0.25, moe_update="quantile", moe_router_center=0.9,
     moe_router_lr_mul=0.05, adam_every=True, moe_gate_floor=1e-12, fp32_small_masters=True,
 )  # fmt: skip
+V3 = ARCH | dict(moe_gate_floor=0.0, moe_log_gates=True, moe_dense_first=2)
 STEPS, SAVE = 6, 3
 SCHEDULE = Schedule(warmup_steps=2, mtp_steps=0, split_step=SAVE, batch_rows=8)
 
@@ -224,8 +225,11 @@ def worker(rank, world, port, tmp):
     )
     torch.set_num_threads(1)
     patch()
+    if world == 4:
+        globals()["ARCH"] = V3
     val = Packed(DATA, "val")
-    say = lambda *a: rank == 0 and print(f"world {world}:", *a, flush=True)
+    tag = "log gates, dense first 2" if ARCH is V3 else "v2 router"
+    say = lambda *a: rank == 0 and print(f"world {world} ({tag}):", *a, flush=True)
 
     ref = train(val, *build(False), range(STEPS))
     model, manager = build(True)

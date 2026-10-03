@@ -1,10 +1,12 @@
 """Recoverable training of the pinned medium recipe on chessmix-sampled chess rows."""
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import random
+import shutil
 import signal
 import time
 import uuid
@@ -268,6 +270,18 @@ def migratable(key, old, new):
     return False
 
 
+def keep_model(src, dst):
+    """A copy prune never removes: a hard link, or a copy on another filesystem."""
+    try:
+        os.link(src, dst)
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+        tmp = dst.with_suffix(".partial")
+        shutil.copyfile(src, tmp)
+        tmp.replace(dst)
+
+
 def init_triton_signals():
     """Let LLVM register its handlers before installing the trainer's callbacks.
 
@@ -307,14 +321,16 @@ def main():
         "--keep-checkpoints",
         type=int,
         default=0,
-        help="0 keeps all; otherwise retain latest N>=2 plus best",
+        help="0 keeps all; otherwise retain the latest N plus best (a save of nonfinite weights is refused)",
     )
     p.add_argument(
         "--keep-model-every",
         type=int,
         default=0,
-        help="hard-link the first model.pt at or after each multiple of this step into kept/ (never pruned)",
+        help="link (or copy, across filesystems) the first model.pt at or after each multiple of this step into "
+        "--keep-model-dir (never pruned)",
     )
+    p.add_argument("--keep-model-dir", help="default: the run's kept/")
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
@@ -457,7 +473,7 @@ def main():
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
-    assert a.keep_checkpoints == 0 or a.keep_checkpoints >= 2
+    assert a.keep_checkpoints >= 0
     assert a.name and all(c.isalnum() or c in "-_" for c in a.name)
     out = ROOT / "results/pretrain" / a.name
     if rank == 0:
@@ -626,6 +642,8 @@ def main():
         if a.wsd_fork_from or a.wsd_continue_from:
             # Endpoint model compute includes prefix; branch allocation time does not.
             elapsed_prior, best = 0.0, float("inf")
+        # model.pt is mapped: once nothing reads it, pruning frees the file
+        del shared, local
     elif (out / "last.pt").exists():
         raise ValueError("Existing checkpoint requires explicit resume")
     termination = [False]
@@ -678,6 +696,12 @@ def main():
 
     def save(step, metrics, weights_only=False):
         checkpoint_start = time.monotonic()
+        # a pruned predecessor cannot be got back: never replace it by nonfinite weights
+        sync_params()
+        finite = torch.stack([p.isfinite().all() for p in model.parameters()]).all()
+        finite = finite.to(torch.int32)
+        dist.all_reduce(finite, op=dist.ReduceOp.MIN)
+        assert finite, f"nonfinite weights at step {step}: not saved"
         waited = saver.flush()
         total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
         dist.all_reduce(total_flops)
@@ -747,13 +771,13 @@ def main():
         def commit():
             publish(out, directory, step, world, names)
             if a.keep_model_every:
-                kept = out / "kept"
-                kept.mkdir(exist_ok=True)
+                kept = Path(a.keep_model_dir or out / "kept")
+                kept.mkdir(parents=True, exist_ok=True)
                 last = max(
                     (int(f.stem[6:]) for f in kept.glob("model-*.pt")), default=0
                 )
                 if step // a.keep_model_every > last // a.keep_model_every:
-                    os.link(directory / "model.pt", kept / f"model-{step:08d}.pt")
+                    keep_model(directory / "model.pt", kept / f"model-{step:08d}.pt")
             removed = prune_checkpoints(out, a.keep_checkpoints, directory)
             row = {
                 "step": step,
