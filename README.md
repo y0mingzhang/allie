@@ -1,149 +1,175 @@
 # Allie
 
-Human chess move prediction from move history and player ratings. This repository contains the current move-sequence model, Qwen controls, and the completed size/data scaling study.
+Allie predicts the move a human chess player will make, given the game so far, both players' ratings and the clock. The current model is a 24-block mixture-of-experts (MoE) transformer with 0.69B active and 5.6B total parameters, trained on 75B tokens of Lichess and over-the-board games.
 
-The completed [inference track](search/README.md) adds a resident search engine,
-Allie MCTS references, and [transfer results and Pareto plots](search/TRANSFER_REPORT.md)
-for the later 34M and 129M recipes with board and clock inputs. The architecture
-and scaling sections below describe the earlier move-only study.
+**On held-out Lichess blitz from July 2026, every model of the public Maia-3 family (5M, 23M and 79M parameters) is beaten on both cross-entropy and top-1 accuracy by a cheaper Allie model.** Against the largest, Maia-3 79M, the full model is ahead by 0.0238 nats and 0.48 accuracy points at 6.6x less compute per move, and a version fine-tuned to use 4 of its 16 experts per token is still ahead at 10x less. On our main all-format evaluation the run scored 1.2533 nats, 0.032 below what our scaling law forecast for it (1.2856).
 
-The objective is low next-move cross-entropy (CE), including moves played by players rated at least 2400 and 2600. Lower is better. The current scaling study uses no board features, distillation, or search.
+![Pareto plot: cross-entropy and top-1 accuracy against inference GFLOPs per move for Allie and Maia-3](docs/figures/pareto.png)
 
-## Architecture
+| Maia-3 model | its cost (GFLOPs/move) | cheapest Allie model ahead on both metrics | cost | CE difference (nats) | top-1 difference (pp) |
+|---|---:|---|---:|---:|---:|
+| 5M | 0.60 | distilled student, MoE 181M active / 1.42B total | 0.36 | −0.0410 [−0.0446, −0.0374] | +0.96 [+0.74, +1.19] |
+| 23M | 2.40 | big run fine-tuned to use 2 of 16 experts | 0.82 | −0.0270 [−0.0307, −0.0236] | +0.41 [+0.19, +0.64] |
+| 79M | 9.23 | big run fine-tuned to use 4 of 16 experts | 0.90 | −0.0180 [−0.0215, −0.0149] | +0.34 [+0.12, +0.56] |
 
-Ours derives from the medium track of [modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt/tree/ecbb586296d3dac36fd206211f25d63bad4a6b35), with chess-specific tokenization, causal masks, losses and checkpoint recovery. The checked-in implementation matches the frozen source used for the small-model scaling runs; hashes are in [analysis/provenance.json](analysis/provenance.json).
+Differences are Allie minus Maia-3 on the same 80,000 positions (negative CE and positive accuracy favour Allie), with 95% intervals from bootstrapping whole games; pp = percentage points. The caveats below matter for reading these numbers.
 
-```text
-Game header, including both Elo ratings → move tokens
-    → token embeddings + gated previous-token mixing
-    → transformer blocks: normalized attention + 4× ReLU² MLP
-    → output head → distribution over 1,968 move tokens
-```
+## Contents
 
-Each game has an 11-token header. Original 1,024-token input rows can contain multiple games. Ours masks attention at both row and game boundaries, so a move uses only its causal game context. The configured attention windows cover the full game prefix within a row. Strength conditioning remains in the input.
+1. [How we measure](#how-we-measure)
+2. [Results against Maia-3](#results-against-maia-3)
+3. [Caveats](#caveats)
+4. [The model](#the-model)
+5. [Training](#training)
+6. [Scaling laws](#scaling-laws)
+7. [Cheaper inference](#cheaper-inference)
+8. [What we learned](#what-we-learned)
+9. [Next](#next)
+10. [Reproducing](#reproducing)
 
-The model retains these medium-track features:
+## How we measure
 
-- Head dimension 64, Q/K normalization and rotary positions.
-- Gated attention, token-value embeddings in early and late layers, and three gated skip connections.
-- Learned mixtures of residual and input embeddings, plus a learned residual subtraction before the output head.
-- Input/output embeddings start tied and split at update 65. The padded vocabulary has 2,432 entries; CE is normalized over the original 1,968 move IDs.
-- An early auxiliary objective predicts up to three future plies from the same logits, within a game. It is disabled after 64 updates.
+Both evaluations use Lichess games from **July 2026**, a month excluded from all training. Scores are cross-entropy (CE, in nats; lower is better): the negative log-probability the model gives the move the human actually played.
 
-Primary source: [model adapter](scripts/modded_medium.py), [transformer and optimizers](scripts/modded_medium_core.py), [trainer](scripts/modded_train.py), [schedule](scripts/modded_wsd.py).
+- **Blitz benchmark (head-to-head with Maia-3).** 80,000 positions from July 2026 blitz games, 20,000 in each band of the mover's rating (<1400, 1400-2000, 2000-2400, ≥2400). Every model scores the same positions. Maia-3 is the public 5M, 23M and 79M checkpoints from the University of Toronto's CSSLab. Both models' probabilities are renormalized over the legal moves, and we also report top-1 accuracy (how often the most likely move is the one played). Maia-3 gets its own inputs: the current board, the 7 previous boards and both ratings. Allie gets the whole game so far, both ratings and the clock. Our reimplementation of Maia-3's input pipeline reproduces the authors' own inference code move for move. Intervals resample whole games (2,000 draws); model differences are paired on identical positions.
+- **Main evaluation (all formats).** 16 cells: bullet, blitz, rapid and classical, each split into the same four rating bands, with about 100,000 scored moves per cell (1.55M moves from 26,278 games). CE is over all 1,968 move tokens without legal-move masking, averaged over the 16 cells. Every training decision in this project was made on this number. It is not comparable to benchmark numbers.
 
-Training uses Muon for attention/MLP matrices and selected gates, with Adam for embeddings, the output head and other parameter groups. Matrix parameters and updates use mixed FP32/BF16 storage; forward matrix products use BF16. FP8 is disabled in the reported experiments. The selected recipe uses a full linear LR decline, a schedule multiplier of 4→0.2, and 32-step momentum warmup. Checkpoints preserve the model, optimizer, RNG, data order and schedule state.
+## Results against Maia-3
 
-### Qwen control
+All points on the frontier, blitz benchmark:
 
-[scaled_native_qwen.py](scripts/scaled_native_qwen.py) uses native Qwen3 blocks: RMSNorm, RoPE, grouped-query attention, head dimension 128, and SwiGLU. Controls start from random weights with unit Q/K norm scales. They use Muon, FP32 Adam state for normalization vectors, a 0.01→0.0005 linear LR schedule, and 32 warmup updates.
+| Model | GFLOPs/move | CE | top-1 (%) | vs Maia-3 79M: CE | vs 79M: top-1 (pp) |
+|---|---:|---:|---:|---:|---:|
+| Maia-3 5M | 0.60 | 1.2955 | 56.95 | +0.0686 [+0.0657, +0.0715] | −1.85 [−2.06, −1.64] |
+| Maia-3 23M | 2.40 | 1.2475 | 58.34 | +0.0206 [+0.0189, +0.0223] | −0.47 [−0.63, −0.29] |
+| Maia-3 79M | 9.23 | 1.2269 | 58.80 | | |
+| **Allie big run, after a second anneal** | 1.39 | **1.2030** | **59.29** | **−0.0238 [−0.0272, −0.0208]** | **+0.48 [+0.27, +0.70]** |
+| Allie big run, final checkpoint | 1.39 | 1.2056 | 59.26 | −0.0213 [−0.0245, −0.0184] | +0.46 [+0.24, +0.67] |
+| final checkpoint, best 8 of 16 experts, no training | 1.06 | 1.2067 | 59.27 | −0.0202 [−0.0235, −0.0172] | +0.47 [+0.26, +0.69] |
+| final checkpoint, best 6 of 16 experts, no training | 0.98 | 1.2081 | 59.21 | −0.0188 [−0.0221, −0.0157] | +0.41 [+0.19, +0.63] |
+| fine-tuned to use 4 of 16 experts | 0.90 | 1.2088 | 59.14 | −0.0180 [−0.0215, −0.0149] | +0.34 [+0.12, +0.56] |
+| fine-tuned to use 2 of 16 experts | 0.82 | 1.2205 | 58.75 | −0.0064 [−0.0100, −0.0033] | −0.06 [−0.27, +0.17] |
+| distilled student, MoE 261M active / 2.07B total | 0.52 | 1.2469 | 58.09 | +0.0201 [+0.0168, +0.0231] | −0.71 [−0.92, −0.50] |
+| distilled student, MoE 181M active / 1.42B total | 0.36 | 1.2545 | 57.92 | +0.0276 [+0.0240, +0.0309] | −0.89 [−1.12, −0.67] |
 
-Qwen trains on all 2,350 token IDs with full causal packed-row attention. Ours trains on move targets with game-isolated attention. Both are evaluated with the same raw move-token normalization. This compares complete training recipes, not architecture alone.
+The plot below follows the Maia project's own presentation: accuracy and CE against the game's rating (the mean of both players'). The final checkpoint has lower CE than Maia-3 79M in 22 of 23 100-point bins, with intervals below zero in 19; the exception is 2800-2900, which has 7 games. Its accuracy is at or above 79M's in every bin except 800-900 (−0.12 pp) and 2800-2900 (−0.33 pp), both within noise.
 
-The historical big Qwen checkpoint is a separate reference: 1.419B parameters and 44.407B processed tokens. Its WSD schedule, batch size and initialization differ from these controls. There is evidence of inherited pretrained Q/K norm scales; the historical checkpoint-to-run binding is not cryptographically established.
+![Accuracy and CE against game rating for Maia-3 5M, 23M, 79M and two Allie models](docs/figures/rating.png)
 
-## Data and evaluation
+Where the lead comes from (final checkpoint minus Maia-3 79M, blitz unless stated):
 
-Original corpus: `yimingzhang/lichess_tokens_v2`, revision `20a899ddf344ccaea74e273509a60e5a511125f8`. Original splits and packed rows are retained.
+| Slice | positions | CE difference | top-1 difference (pp) |
+|---|---:|---:|---:|
+| bullet (5,000 per rating band) | 20,000 | −0.1412 [−0.1514, −0.1310] | +3.33 [+2.81, +3.83] |
+| rapid (5,000 per band) | 20,000 | −0.0163 [−0.0222, −0.0102] | +0.53 [+0.11, +0.94] |
+| classical (5,000 per band) | 20,000 | −0.0208 [−0.0278, −0.0144] | +0.45 [−0.00, +0.90] |
+| mover has under 10 s left | 2,852 | −0.2229 [−0.2627, −0.1823] | +3.47 [+1.88, +4.91] |
+| mover has 60-120 s left | 15,719 | +0.0107 [+0.0034, +0.0182] | −0.53 [−1.06, −0.02] |
+| plies 40-59 (middlegame) | 15,997 | +0.0071 [+0.0003, +0.0137] | −0.09 [−0.62, +0.42] |
+| Maia-3's own protocol: ply > 20 and at least 30 s left | 48,987 | −0.0057 [−0.0095, −0.0019] | +0.12 [−0.16, +0.40] |
 
-| Quantity | Count |
-|---|---:|
-| Training shards | 100 |
-| Training rows | 54,368,123 |
-| Input tokens per corpus pass | 55,672,957,952 |
-| ≥2400 move targets | 4.084B; 8.74% of moves |
-| ≥2600 move targets | 1.565B; 3.35% of moves |
-| Validation rows | 5,371 |
-| Validation move / ≥2400 / ≥2600 targets | 4,616,637 / 396,483 / 151,660 |
+The biggest margins are where Maia-3 is weakest by construction: bullet, which it was not trained on, and time trouble, which it cannot see. Maia-3 79M still holds a small edge in the middlegame and with one to two minutes on the clock, and on its own evaluation protocol the accuracy difference is a tie.
 
-Counts are stored occurrences, not deduplicated positions. Expert rating is the rating of the player making the target move. Evaluation uses raw CE over the 1,968 move IDs, without legal masking. Final tests remain unopened.
+## Caveats
 
-## Scaling study
+- **Not a matched-compute or matched-data comparison.** Maia-3 was trained on about 2.5 years of Lichess blitz (January 2023 to July 2025); its training compute is not published. Allie trained on all formats from 2017 to 2026 plus over-the-board and engine games, with 3.1e20 FLOPs. The claim is about inference cost per move, not training efficiency.
+- **Our data is more recent.** Maia-3's data ends a year before the test month; ours runs up to it. August 2026, the month after the test month, is in our training data (one of 111 Lichess months, 1.2% of the pool's tokens). July 2026 itself is excluded from everything. The second anneal and the expert fine-tunes used only recent months (January 2024 to June 2026, plus August 2026), so part of what they buy is recency.
+- **The inputs differ.** The released Maia-3 checkpoints take no clock input, while Allie reads three clock features; our largest gains are in time trouble. Maia-3 sees 8 recent boards; Allie sees the whole game, including the opening.
+- **FLOPs, not latency.** Allie's cost is analytic, 2 × active matmul parameters per move with a cached game (attention adds about 0.008 GFLOPs at the mean context); Maia-3's is its measured forward FLOPs per 64-square board. Serving the MoE keeps all 5.6B weights in memory (about 11 GB in BF16) against about 0.3 GB for Maia-3 79M. We do not compare wall-clock latency.
+- **Some choices were made on the benchmark.** The second anneal's learning rate was picked from two arms using these positions, and the fine-tune and distillation settings came from pilots on them. The final checkpoint, which predates all of that, is already ahead of Maia-3 79M (−0.0213 nats, +0.46 pp).
+- **Thin bins and one seed.** Above game rating 2700 the test month has 36 and 7 games. The big run is a single training run.
 
-The initial grid was two recipes × three shapes × four independent token budgets:
+## The model
 
-| Layers × width | Ours parameters | Qwen parameters |
-|---|---:|---:|
-| 8 × 128 | 3,752,557 | 2,506,368 |
-| 12 × 256 | 14,419,457 | 11,829,504 |
-| 16 × 512 | 60,296,597 | 57,477,632 |
+![Diagram of the model: tokens, clock and board inputs, 24 transformer blocks with mixture-of-experts layers, and three outputs](docs/figures/model.png)
 
-Each shape trained for 134M, 268M, 537M and 1.074B tokens. Global batch was 512 rows × 1,024 tokens. Each endpoint had its own complete LR schedule.
+A game is a sequence of tokens: an 11-token header (start, base time, increment, and each player's rating as four digits), then one token per move from a vocabulary of the 1,968 possible moves in from-square/to-square notation. At every position two more inputs are added to the token embedding: three clock features (the mover's and the opponent's time left, and the mover's previous thinking time, encoded as Fourier features) and a small CNN over the current board (13 piece planes on 8×8, three 3×3 convolutions with 32 channels). Games are packed into 16K-token rows with attention masked at game boundaries, so each move attends to its own game's history only.
 
-The final fit has **42 endpoints**: those 24 runs, six prospective 16×384 checks, and twelve historical 128M/483M endpoints extending to 3.758B tokens. Six additional seed repeats diagnose variability and are excluded from the fit. The historical big Qwen checkpoint and our 1.064B short run are also excluded.
+The trunk is 24 transformer blocks of width 1536 with 24 heads of size 64, descended from the [modded-nanoGPT](https://github.com/KellerJordan/modded-nanogpt) medium track: QK-normalized attention with rotary positions on half of each head, gated attention outputs, value embeddings, U-net skip connections, two re-injected input embeddings and a soft-capped output. The first block has a dense SwiGLU MLP (hidden width 4096). In the other 23 blocks, a mixture-of-experts layer takes its place:
 
-For each recipe and metric, fit independently:
+- 256 routed SwiGLU experts of hidden width 192 plus one shared expert of hidden width 1024; each token uses 16 routed experts, so the active width (16 × 192 + 1024 = 4096) matches the dense block.
+- A router scores every expert with a sigmoid; the top 16 by score plus a per-expert bias are chosen, and their scores, renormalized to sum to 4, weight their outputs. The biases are reset every step to balance load (quantile balancing, as in Kimi K3), with a small sequence-level balance loss on top. There is no capacity limit and no token is dropped.
+- Two stabilizers came out of the failures described [below](#what-we-learned): the router sees its input minus a running mean of it (router-input centring), and the sum that normalizes the gates is floored at 1e-12.
 
-\[
-L(N,D)=E+A(N/10^7)^{-\alpha}+B(D/10^8)^{-\beta}.
-\]
+One output head serves three targets: the next move (the training objective) and, as auxiliary losses at weight 0.2 each, the thinking time of that move (63 bins) and the game result from the mover's side.
 
-Here N is total parameter count and D is processed training tokens. Fitting minimizes unweighted squared CE residuals with positive exponents and a nonnegative floor.
+**Inference cost.** With the game's key-value cache, each move is one token forward: 1.39 GFLOPs, of which 0.74 is fixed (attention projections, the shared experts, routers, the board CNN and the head) and each routed expert per token adds 0.041. The weights take 11 GB in BF16.
 
-| Recipe | Metric | E | A | B | α | β | Fit RMSE |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Ours | Move | 1.30980 | 0.40453 | 1.03273 | 0.6326 | 1.0244 | 0.03025 |
-| Qwen | Move | 1.29305 | 0.53400 | 1.11295 | 0.5494 | 0.9422 | 0.03564 |
-| Ours | ≥2400 | 1.13361 | 0.51189 | 1.16990 | 0.5633 | 0.9243 | 0.02525 |
-| Qwen | ≥2400 | 1.11378 | 0.66675 | 1.26838 | 0.4988 | 0.8598 | 0.03203 |
+## Training
 
-[scaling_fit.json](analysis/scaling_fit.json) contains full precision coefficients, all three metrics, the 42 observations, residuals and omitted-group checks.
+![Main-eval CE over training against the scaling-law forecast, and the gap to Maia-3 79M over training](docs/figures/training.png)
 
-### Optimal allocation and compute multiplier
+**Data.** Every Lichess month with clock annotations from May 2017 to August 2026 except July 2026: 111 months, 7.87B games, 616B tokens. Added to it are over-the-board games (TWIC, PGN Mentor and Lichess broadcasts, 5.1M games) and engine games (CCRL and TCEC, 4.6M games, under 1% of tokens). A training-time sampler draws games from rating-bucketed monthly shards and tokenizes them on the fly. Its weights form an *Elo ramp*: a game is drawn twice as often for every 200 rating points of its stronger player, formats keep their natural shares, and no game is used more than 8 times. That recipe won a series of data-mixing screens at small scale, mainly by improving the strongest players' cells.
 
-Let C=ND, with nominal training FLOPs ≈6C. At fixed C, the fitted optimum satisfies
+**Recipe.** 143,051 steps of 524,288 tokens (75B tokens, 3.1e20 training FLOPs). NorMuon, a Muon variant, trains the weight matrices including all experts; Adam trains embeddings, the head, routers, the board CNN and the clock table, and steps on every step. The learning rate warms up for 2,013 steps, then decays linearly to 0.1% of its peak. Input and output embeddings are tied for the first 307 steps. There is no multi-token prediction. Matrix multiplies run in BF16 with FP32 master weights.
 
-\[
-\alpha A(N/10^7)^{-\alpha}=\beta B(D/10^8)^{-\beta}.
-\]
+**Systems.** One node of 8 NVIDIA L40S (48 GB). Data parallel with every expert on every GPU and optimizer state sharded across them, micro-batches of four 16K-token rows per GPU, activation recompute, and fused Triton kernels for the experts. Median throughput was 131K tokens/s, about 19% of the GPUs' peak BF16 throughput, for 159 hours (6.6 days) of training in 2-day jobs that resume from checkpoints taken every 1,024 steps.
 
-Consequently N scales as C^(β/(α+β)), and D as C^(α/(α+β)). D/N is not constant. Each metric has its own optimal allocation.
+**Result.** The main eval finished at 1.2533 nats, against 1.3170 for the best model of the scaling sweep and a forecast of 1.2856. On the benchmark, the run passed Maia-3 79M (beyond its interval) only at 70B of 75B tokens, during the last stretch of the learning-rate decay. A second anneal then took the final checkpoint through 1B more tokens of recent months, with a fresh optimizer and a peak learning rate of 0.05 (where the main run's schedule was at 99%). It improved every format: main eval 1.2505 (−0.0028), benchmark CE −0.0026 [−0.0033, −0.0019]. A hotter anneal (peak 0.2) gained nothing.
 
-Compute multiplier (CM) is Qwen compute divided by our compute at equal loss. Distinguish an optimally allocated Qwen forecast from the actual historical Qwen run:
+## Scaling laws
 
-| Question | Move CM | ≥2400 CM |
-|---|---:|---:|
-| Ours at ND=10¹⁸ vs optimally allocated Qwen | 2.29× | 2.33× |
-| Ours at one equivalent L40S node-day vs optimally allocated Qwen | 1.40× | 1.67× |
-| Match historical checkpoint's measured loss vs its actual nominal compute | 7.25× | 1.01× |
+![Isoflop curves for dense and MoE models at three training budgets](docs/figures/scaling.png)
 
-One equivalent node-day assumes eight L40S GPUs, dense BF16 peak 362.05 TFLOP/s per GPU and 35% MFU: 8.76×10¹⁹ model FLOPs, or ND=1.46×10¹⁹. This is a conversion assumption, not measured runtime. [NVIDIA specifications](https://www.nvidia.com/en-us/data-center/l40s/).
+Before the big run we trained 45 models, dense and MoE with the same recipe, at three budgets: 6.3e17, 1.9e18 and 6.2e18 training FLOPs, five to seven sizes each (8 to 24 blocks, widths 384 to 1280), and 11 repeats with a second seed (seed-to-seed standard deviation 0.0029 nats). The MoE layout is the big run's: 256 experts, 16 per token, plus a shared expert. For each family we fit
 
-### How accurate is it?
+L(N, D) = E + A (N / 10⁷)^−α + B (D / 10⁸)^−β
 
-Prospective intermediate-size move predictions had RMSE 0.014 for ours and 0.025 for Qwen using the initial tiny-grid fit. Omitting the largest size or horizon from the final fit produces roughly 0.04 move-CE error. At two repeated points, seed SD is only 0.0033/0.0025, while final-fit errors are 0.079/0.086.
+with N the active non-embedding parameters and D the training tokens:
 
-On the original tiny grid, nearly all fitting error is unavoidable for any additive size-plus-data formula. More coefficient optimization cannot remove it. The actual big Qwen checkpoint has move CE **1.3422**, versus **1.3317** predicted; expert ≥2400 CE is **1.1622**, versus **1.1768** predicted.
+| family | E | α | β | fit error (rms) |
+|---|---|---|---|---:|
+| MoE | 1.27 [1.26, 1.28] | 0.54 [0.42, 0.67] | 1.06 [1.01, 1.11] | 0.0026 |
+| dense | 1.27 [1.26, 1.29] | 0.54 [0.44, 0.66] | 1.03 [0.95, 1.10] | 0.0020 |
 
-The laws are useful approximations, not validated guarantees at billion-parameter, long-token allocations. Their fitted floors drive the shrinking projected CM. Historical anchors also differ in shape and execution details. Logged FLOP counters for our 8/12-layer models overcount some operations and are excluded from this analysis.
+(90% intervals.) The compute-optimal size grows as C^0.66 for both. Matching the MoE's loss takes 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] as much dense compute at the three budgets, although the gap between the two families' best models narrows in nats (0.033, 0.025, 0.017).
 
-## Reproduce the calculations
+The law forecast 1.2856 for the big run; it scored 1.2533, 0.032 better: twelve times the fit's rms error, and below the fitted floor E. We do not know why yet. The big run's recipe changes (no multi-token prediction, decay to 0.1%, the router fixes) do not help at small scale: the final recipe re-run at the smallest budget scores 0.0087 worse than the sweep's model. The likelier reading is that a 50x extrapolation in compute exceeds what this fit can pin down (B and β are correlated at 0.98). Memory, not the law, set the big run's size: the law's compute-optimal model at 3.1e20 FLOPs would have 1.8B active parameters trained on 28B tokens (15 per parameter), while 48 GB GPUs capped us at 0.69B active, trained on 109 tokens per parameter.
 
-The calculator requires only Python's standard library and the checked-in JSON files:
+## Cheaper inference
 
-```bash
-python analysis/scaling.py --nd 1e18 --metric move
-python analysis/scaling.py --node-days 1 --metric expert2400
-python analysis/scaling.py --target-original --metric expert2400
-```
+![CE against the number of routed experts per token, and the gain from tree search against training compute](docs/figures/inference.png)
 
-To refit the saved observations with the original fitting code:
+**Use fewer experts.** The big run computes 16 routed experts per token, but the best 8 by router score carry nearly everything: keeping only those (dropping the rest, without renormalizing the gates) costs +0.0011 nats on the benchmark, 6 cost +0.0025 and 4 cost +0.0095. A 0.5B-token fine-tune that routes through only the best K, distilled from the 16-expert model, recovers about two thirds of the loss at K = 4 and three quarters at K = 2. Below about 0.75 GFLOPs the fixed cost dominates and only smaller models help.
 
-```bash
-python -m pip install -r requirements-analysis.txt
-python analysis/refit.py --metric move
-```
+**Distill into smaller models.** Training small MoE students on a 50/50 mix of the played move and the big run's predicted distribution beats the same fine-tune on played moves alone, and the gain grows with tokens: for the 0.52-GFLOP student, −0.0017 nats at 0.25B tokens, −0.0031 at 0.75B and −0.0063 [−0.0069, −0.0056] at 1.5B. Teacher-only targets and temperature 2 did not help.
 
-Raw evaluations, datasets, checkpoints and job records remain outside Git under `/data/group_data/dei-group/yimingz3/allie`. The local `results` symlink points there. Snapshot provenance is in [analysis/provenance.json](analysis/provenance.json).
+**Search buys little at this scale.** Our tree search over the model's own move, outcome and thinking-time predictions (in [search/](search/README.md)) helps less the better the model: at 128 simulations, the MoE sweep's best models gained 0.022, 0.019 and 0.013 nats at 6.3e17, 1.9e18 and 6.2e18 training FLOPs, and the big run gains 0.0055 [0.0038, 0.0070], almost all of it for players rated 2000 and above. Five simulations on the annealed model buy 0.0025 nats at 6x the compute.
 
-## Training and cluster operations
+## What we learned
 
-The training stack is cluster-specific. Ours uses the pinned PyTorch 2.10.0+cu128 environment in `/data/group_data/dei-group/yimingz3/allie/envs/modded-torch210`; Qwen uses PyTorch 2.8.0+cu128 with the native dependency overlay in `envs/qwen-reproduction-deps-v1`. The native Picotron source is hash-pinned under `results/recipe10x/qwen-reproduction/source-v1` and is required by `historical_qwen_runtime.py`.
+![Small-scale ablations of training choices](docs/figures/ablations.png)
 
-`scripts/prepare_tiny_scaling.py` records the exact training commands and freezes sources. Existing study directories are immutable; rerunning preparation must not overwrite completed runs. Resume historical checkpoints with their frozen source and runtime, not a newly edited working tree. `scripts/stage_corpus.py` restores a verified node-local cache from durable data. `scripts/budget.py ledger` reports cumulative Slurm usage.
+- **Router collapse at width 1536.** The first attempt at the big run collapsed during warmup: in the first MoE layer, the attention output feeding the router came to be dominated by one direction shared by all tokens, routing became nearly the same for every token, and up to 116 of 256 experts starved. The MoE sweep, at widths up to 1152, never showed it. Halving the router's learning rate only delayed it. What fixed it was subtracting a running mean from the router's input and stepping the Adam-trained parameters (router included) on every step instead of every other step, the modded-nanoGPT default. Both cost about 0.004-0.006 nats at small scale, where routers are healthy.
 
-IsoFLOP v1 (ours vs chess-v2 Qwen, 26 runs, 3e16–3e17) is complete: `results/recipe10x/isoflop-v1/RESULTS.md` supersedes the scaling fit above. [GOAL.md](GOAL.md) records the research state; [CONTROLLER.md](CONTROLLER.md) describes the running controller. Cleanup does not authorize a new training run.
+![Starved experts in the first MoE layer over the first 3,125 steps: first attempt against the final run](docs/figures/router.png)
 
-Next hypothesis discussed: change expert sampling proportions at fixed compute. A prior 3× expert loss-weighting trial at 128M/470M tokens worsened both overall and expert CE; it did not test additional expert-example exposure. No new mixture experiment has been launched.
+- **A NaN at step 60,081.** One token had all 16 selected router scores near zero (summing to 6e-20), and the backward pass of the gate normalization overflowed. Flooring that sum at 1e-12 fixed it; the floor only touches tokens whose scores sum below it (about 0.2% of that layer's tokens at that step), and the run resumed from step 59,392. The early routers' weights had grown about 15x over training; the next run computes the gate normalization in log space instead.
+- **Inherited defaults deserve an audit.** modded-nanoGPT is tuned for short GPT-2 runs. One change at a time at small scale (figure above): multi-token prediction and the 5% learning-rate floor were worth dropping, halving weight decay hurt, and the time-control tokens are worth keeping even with the clock features present. Each difference is within about two seed standard deviations, so these are directions, not precise sizes.
+- **Ratings at every token: no gain.** Our use of the header ratings fades over a game while Maia-3's does not, so we tried adding both ratings to every token. It sped up early training and gained nothing by the end (+0.0004 to +0.0055 across five variants). The fading is the moves themselves revealing a player's strength.
+- **A low-learning-rate second anneal helps; a hot one does not.** See [Training](#training).
 
-The modded-nanogpt-derived code retains its [MIT license](scripts/modded_medium_LICENSE).
+## Next
+
+- **Next run (planned).** MoE 1.2B active / ~9.2B total (24 blocks, width 2048, the first three blocks dense), 112B tokens, about 18 days on the same 8-GPU node with experts sharded across GPUs. At small scale, three dense first blocks cost nothing where the current router fixes cost 0.010 nats, and a constant-then-cooldown schedule was 0.026 nats worse than linear decay, so the run keeps the decay.
+- **Strong-player data limits tokens.** Past about 110B tokens, the Elo ramp must either repeat games of players rated 2400+ more often or give them a smaller share, and both cost on the strongest cells. Beyond the next run, compute should go to parameters (GPUs with more memory) and to more strong-player data, such as more over-the-board games, rather than to more tokens.
+- **Distillation from the next run** into students that beat Maia-3 23M at a fraction of its cost.
+
+## Reproducing
+
+The code is in two directories; training data, checkpoints and per-run results live outside the repository.
+
+| Path | What it is |
+|---|---|
+| [scripts/chessdata.py](scripts/chessdata.py), [scripts/extdata.py](scripts/extdata.py) | Build the structured game stores from Lichess monthly PGN dumps and over-the-board / engine collections |
+| [scripts/chessmix.py](scripts/chessmix.py), [scripts/chess_vocab.py](scripts/chess_vocab.py) | Training-time sampler (data mixing policies, tokenization, packing) and the token vocabulary |
+| [scripts/modded_train.py](scripts/modded_train.py) | Distributed, resumable trainer, including fine-tuning from a checkpoint, distillation and fewer-experts training |
+| [scripts/modded_medium_core.py](scripts/modded_medium_core.py), [scripts/modded_moe.py](scripts/modded_moe.py), [scripts/modded_smoe.py](scripts/modded_smoe.py), [scripts/modded_board.py](scripts/modded_board.py), [scripts/modded_arch.py](scripts/modded_arch.py) | Model, optimizers, MoE layer and its kernels, board CNN, architecture switches |
+| [scripts/strateval.py](scripts/strateval.py), [scripts/eval_strat.py](scripts/eval_strat.py) | Build the 16-cell main evaluation and score a checkpoint on it |
+| [scripts/modelexp.py](scripts/modelexp.py) | Freezes an experiment (code, data selection, recipe) into a study directory and runs and scores it on Slurm |
+| [search/](search/README.md) | Inference engine with tree search, calibrated output policy and export |
+| [docs/make_figures.py](docs/make_figures.py) | Regenerates every figure here from the result files |
+
+Experiments are frozen before they run: `modelexp.py plan` copies the trainer source, data selection and recipe tables into a study directory with their hashes, and the trainer refuses to resume a run whose source or settings changed. The big run's study is `results/recipe10x/bigfix-24x1536d75m4shipv2nf-c8s200f0v4`. The Maia-3 benchmark scoring code lives with its results in `results/recipe10x/maia3-bench`. `results/` is a link to the group's storage and is not tracked. Figures: `.venv/bin/python docs/make_figures.py`.
+
+Code derived from modded-nanoGPT is under its MIT license ([scripts/modded_medium_LICENSE](scripts/modded_medium_LICENSE)); the search engine is under [search/ALLIE_LICENSE](search/ALLIE_LICENSE).

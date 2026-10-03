@@ -1,0 +1,3005 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="720pt" height="324pt" viewBox="0 0 720 324" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-10-03T15:19:08.699034</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 324 
+L 720 324 
+L 720 0 
+L 0 0 
+z
+" style="fill: #fcfcfb"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 50.4 285.12 
+L 365.026246 285.12 
+L 365.026246 68.04 
+L 50.4 68.04 
+z
+" style="fill: #fcfcfb"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 50.4 285.12 
+L 50.4 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_2"/>
+     <g id="text_1">
+      <!-- 0 -->
+      <g style="fill: #52514e" transform="translate(47.898281 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-11" d="M 1760 4627 
+C 1338 4627 954 4435 717 4122 
+C 422 3712 275 3098 275 2240 
+C 275 678 787 -147 1760 -147 
+C 2720 -147 3245 678 3245 2202 
+C 3245 3098 3104 3699 2803 4122 
+C 2566 4442 2189 4627 1760 4627 
+z
+M 1760 4128 
+C 2368 4128 2669 3507 2669 2253 
+C 2669 934 2374 320 1747 320 
+C 1152 320 851 960 851 2234 
+C 851 3507 1152 4128 1760 4128 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-11"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 89.728281 285.12 
+L 89.728281 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_4"/>
+     <g id="text_2">
+      <!-- 10 -->
+      <g style="fill: #52514e" transform="translate(84.724843 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-12" d="M 1658 3296 
+L 1658 0 
+L 2221 0 
+L 2221 4627 
+L 1850 4627 
+C 1651 3917 1523 3821 653 3706 
+L 653 3296 
+L 1658 3296 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 129.056561 285.12 
+L 129.056561 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_6"/>
+     <g id="text_3">
+      <!-- 20 -->
+      <g style="fill: #52514e" transform="translate(124.053124 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-13" d="M 3238 557 
+L 851 557 
+C 909 941 1114 1184 1670 1523 
+L 2310 1882 
+C 2944 2234 3270 2707 3270 3277 
+C 3270 3661 3117 4019 2848 4269 
+C 2579 4512 2246 4627 1818 4627 
+C 1242 4627 813 4422 563 4026 
+C 403 3782 333 3494 320 3027 
+L 883 3027 
+C 902 3341 941 3526 1018 3680 
+C 1165 3962 1459 4134 1798 4134 
+C 2310 4134 2694 3763 2694 3264 
+C 2694 2893 2483 2573 2080 2342 
+L 1491 1997 
+C 544 1453 269 1018 218 6 
+L 3238 6 
+L 3238 557 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-13"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 168.384842 285.12 
+L 168.384842 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_8"/>
+     <g id="text_4">
+      <!-- 30 -->
+      <g style="fill: #52514e" transform="translate(163.381405 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-14" d="M 1414 2131 
+L 1485 2131 
+L 1722 2131 
+C 2336 2131 2662 1843 2662 1286 
+C 2662 704 2310 352 1728 352 
+C 1107 352 806 666 768 1344 
+L 205 1344 
+C 230 973 294 730 403 525 
+C 640 77 1082 -147 1702 -147 
+C 2637 -147 3238 416 3238 1293 
+C 3238 1882 3014 2202 2470 2394 
+C 2893 2566 3104 2886 3104 3354 
+C 3104 4147 2586 4627 1722 4627 
+C 806 4627 320 4115 301 3136 
+L 864 3136 
+C 870 3418 896 3578 966 3718 
+C 1094 3981 1376 4134 1728 4134 
+C 2227 4134 2528 3834 2528 3334 
+C 2528 3008 2413 2810 2163 2701 
+C 2010 2637 1805 2611 1414 2605 
+L 1414 2131 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-14"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_9">
+      <path d="M 207.713123 285.12 
+L 207.713123 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_10"/>
+     <g id="text_5">
+      <!-- 40 -->
+      <g style="fill: #52514e" transform="translate(202.709685 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-15" d="M 2093 1120 
+L 2093 0 
+L 2656 0 
+L 2656 1120 
+L 3328 1120 
+L 3328 1626 
+L 2656 1626 
+L 2656 4627 
+L 2240 4627 
+L 179 1715 
+L 179 1120 
+L 2093 1120 
+z
+M 2093 1626 
+L 672 1626 
+L 2093 3667 
+L 2093 1626 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-15"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_11">
+      <path d="M 247.041404 285.12 
+L 247.041404 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_12"/>
+     <g id="text_6">
+      <!-- 50 -->
+      <g style="fill: #52514e" transform="translate(242.037966 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-16" d="M 3046 4538 
+L 704 4538 
+L 365 2067 
+L 883 2067 
+C 1146 2381 1363 2490 1722 2490 
+C 2330 2490 2707 2074 2707 1402 
+C 2707 749 2330 352 1715 352 
+C 1222 352 922 602 787 1114 
+L 224 1114 
+C 301 742 365 563 499 397 
+C 755 51 1216 -147 1728 -147 
+C 2643 -147 3283 518 3283 1478 
+C 3283 2374 2688 2989 1818 2989 
+C 1498 2989 1242 2906 979 2714 
+L 1158 3981 
+L 3046 3981 
+L 3046 4538 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-16"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_7">
+     <g id="line2d_13">
+      <path d="M 286.369684 285.12 
+L 286.369684 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_14"/>
+     <g id="text_7">
+      <!-- 60 -->
+      <g style="fill: #52514e" transform="translate(281.366247 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-17" d="M 3187 3424 
+C 3078 4179 2592 4627 1901 4627 
+C 1402 4627 954 4384 685 3968 
+C 397 3514 275 2950 275 2112 
+C 275 1331 384 838 659 429 
+C 902 51 1299 -147 1798 -147 
+C 2662 -147 3283 499 3283 1402 
+C 3283 2253 2707 2854 1894 2854 
+C 1446 2854 1094 2688 851 2349 
+C 858 3494 1216 4128 1862 4128 
+C 2259 4128 2534 3872 2624 3424 
+L 3187 3424 
+z
+M 1824 2355 
+C 2368 2355 2707 1971 2707 1357 
+C 2707 774 2323 352 1805 352 
+C 1280 352 883 794 883 1382 
+C 883 1958 1267 2355 1824 2355 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-17"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_8">
+     <g id="line2d_15">
+      <path d="M 325.697965 285.12 
+L 325.697965 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_16"/>
+     <g id="text_8">
+      <!-- 70 -->
+      <g style="fill: #52514e" transform="translate(320.694528 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-18" d="M 3328 4538 
+L 294 4538 
+L 294 3981 
+L 2746 3981 
+C 1664 2438 1222 1491 883 0 
+L 1485 0 
+C 1734 1453 2304 2701 3328 4064 
+L 3328 4538 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-18"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_9">
+     <g id="line2d_17">
+      <path d="M 365.026246 285.12 
+L 365.026246 68.04 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_18"/>
+     <g id="text_9">
+      <!-- 80 -->
+      <g style="fill: #52514e" transform="translate(360.022808 295.181) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-19" d="M 2502 2438 
+C 2976 2726 3123 2957 3123 3392 
+C 3123 4122 2566 4627 1760 4627 
+C 960 4627 397 4122 397 3398 
+C 397 2957 544 2733 1011 2438 
+C 493 2176 237 1798 237 1286 
+C 237 442 858 -147 1760 -147 
+C 2656 -147 3283 442 3283 1286 
+C 3283 1798 3027 2176 2502 2438 
+z
+M 1760 4128 
+C 2240 4128 2547 3840 2547 3379 
+C 2547 2944 2234 2656 1760 2656 
+C 1280 2656 973 2944 973 3392 
+C 973 3840 1280 4128 1760 4128 
+z
+M 1760 2182 
+C 2323 2182 2707 1811 2707 1274 
+C 2707 717 2330 352 1747 352 
+C 1197 352 813 730 813 1267 
+C 813 1818 1190 2182 1760 2182 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-19"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_10">
+     <!-- Training tokens (billions) -->
+     <g style="fill: #52514e" transform="translate(154.127185 308.910625) scale(0.1 -0.1)">
+      <defs>
+       <path id="NimbusSans-Regular-35" d="M 2266 4141 
+L 3795 4141 
+L 3795 4666 
+L 134 4666 
+L 134 4141 
+L 1670 4141 
+L 1670 0 
+L 2266 0 
+L 2266 4141 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-53" d="M 442 3354 
+L 442 0 
+L 979 0 
+L 979 1741 
+C 986 2547 1318 2906 2054 2886 
+L 2054 3430 
+C 1965 3443 1914 3450 1850 3450 
+C 1504 3450 1242 3245 934 2746 
+L 934 3354 
+L 442 3354 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-42" d="M 3424 314 
+C 3366 301 3341 301 3309 301 
+C 3123 301 3021 397 3021 563 
+L 3021 2534 
+C 3021 3130 2586 3450 1760 3450 
+C 1267 3450 877 3309 646 3059 
+C 493 2886 429 2694 416 2362 
+L 954 2362 
+C 998 2771 1242 2957 1741 2957 
+C 2227 2957 2490 2778 2490 2458 
+L 2490 2317 
+C 2483 2086 2368 2003 1933 1946 
+C 1178 1850 1062 1824 858 1741 
+C 467 1574 269 1280 269 845 
+C 269 237 691 -147 1370 -147 
+C 1792 -147 2131 0 2509 346 
+C 2547 0 2714 -147 3059 -147 
+C 3174 -147 3245 -134 3424 -90 
+L 3424 314 
+z
+M 2490 1056 
+C 2490 877 2438 768 2278 621 
+C 2061 422 1798 320 1485 320 
+C 1069 320 826 518 826 858 
+C 826 1210 1056 1389 1632 1472 
+C 2202 1549 2310 1574 2490 1658 
+L 2490 1056 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-4a" d="M 960 3354 
+L 429 3354 
+L 429 0 
+L 960 0 
+L 960 3354 
+z
+M 960 4666 
+L 422 4666 
+L 422 3994 
+L 960 3994 
+L 960 4666 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-4f" d="M 448 3354 
+L 448 0 
+L 986 0 
+L 986 1850 
+C 986 2534 1344 2982 1894 2982 
+C 2317 2982 2586 2726 2586 2323 
+L 2586 0 
+L 3117 0 
+L 3117 2534 
+C 3117 3091 2701 3450 2054 3450 
+C 1555 3450 1235 3258 941 2790 
+L 941 3354 
+L 448 3354 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-48" d="M 2586 3354 
+L 2586 2867 
+C 2317 3270 2022 3450 1600 3450 
+C 787 3450 224 2694 224 1619 
+C 224 1056 358 646 646 307 
+C 896 13 1216 -147 1562 -147 
+C 1965 -147 2253 32 2534 454 
+L 2534 282 
+C 2534 -614 2285 -947 1619 -947 
+C 1165 -947 928 -768 877 -384 
+L 333 -384 
+C 384 -1005 877 -1395 1606 -1395 
+C 2099 -1395 2509 -1235 2726 -966 
+C 2982 -653 3078 -237 3078 550 
+L 3078 3354 
+L 2586 3354 
+z
+M 1651 2957 
+C 2214 2957 2534 2483 2534 1632 
+C 2534 819 2208 346 1651 346 
+C 1101 346 781 826 781 1651 
+C 781 2470 1101 2957 1651 2957 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-1" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-55" d="M 1626 3354 
+L 1075 3354 
+L 1075 4275 
+L 544 4275 
+L 544 3354 
+L 90 3354 
+L 90 2918 
+L 544 2918 
+L 544 384 
+C 544 38 774 -147 1190 -147 
+C 1331 -147 1446 -134 1626 -102 
+L 1626 346 
+C 1549 326 1478 320 1370 320 
+C 1139 320 1075 384 1075 621 
+L 1075 2918 
+L 1626 2918 
+L 1626 3354 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-50" d="M 1741 3450 
+C 794 3450 230 2778 230 1651 
+C 230 518 794 -147 1747 -147 
+C 2694 -147 3264 525 3264 1626 
+C 3264 2790 2714 3450 1741 3450 
+z
+M 1747 2957 
+C 2349 2957 2707 2464 2707 1632 
+C 2707 838 2336 346 1747 346 
+C 1152 346 787 838 787 1651 
+C 787 2464 1152 2957 1747 2957 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-4c" d="M 902 4666 
+L 371 4666 
+L 371 0 
+L 902 0 
+L 902 1306 
+L 1421 1818 
+L 2554 0 
+L 3213 0 
+L 1843 2195 
+L 3008 3354 
+L 2323 3354 
+L 902 1933 
+L 902 4666 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-46" d="M 3283 1498 
+C 3283 2010 3245 2317 3149 2566 
+C 2931 3117 2419 3450 1792 3450 
+C 858 3450 256 2739 256 1632 
+C 256 525 832 -147 1779 -147 
+C 2547 -147 3078 288 3213 1018 
+L 2675 1018 
+C 2528 576 2227 346 1798 346 
+C 1459 346 1171 499 992 781 
+C 864 973 819 1165 813 1498 
+L 3283 1498 
+z
+M 826 1933 
+C 870 2554 1248 2957 1786 2957 
+C 2330 2957 2707 2534 2707 1933 
+L 826 1933 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-54" d="M 2803 2419 
+C 2797 3078 2362 3450 1587 3450 
+C 806 3450 301 3046 301 2426 
+C 301 1901 570 1651 1363 1459 
+L 1862 1338 
+C 2234 1248 2381 1114 2381 877 
+C 2381 557 2067 346 1600 346 
+C 1312 346 1069 429 934 570 
+C 851 666 813 762 781 998 
+L 218 998 
+C 243 224 678 -147 1555 -147 
+C 2400 -147 2938 269 2938 915 
+C 2938 1414 2656 1690 1990 1850 
+L 1478 1971 
+C 1043 2074 858 2214 858 2451 
+C 858 2765 1133 2957 1568 2957 
+C 1997 2957 2227 2771 2240 2419 
+L 2803 2419 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-9" d="M 1510 4666 
+C 870 3827 467 2662 467 1658 
+C 467 646 870 -518 1510 -1357 
+L 1862 -1357 
+C 1299 -442 986 634 986 1658 
+C 986 2675 1299 3757 1862 4666 
+L 1510 4666 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-43" d="M 346 4666 
+L 346 0 
+L 826 0 
+L 826 429 
+C 1082 38 1421 -147 1888 -147 
+C 2771 -147 3347 576 3347 1690 
+C 3347 2778 2803 3450 1914 3450 
+C 1453 3450 1126 3277 877 2899 
+L 877 4666 
+L 346 4666 
+z
+M 1811 2950 
+C 2406 2950 2790 2432 2790 1632 
+C 2790 870 2394 352 1811 352 
+C 1242 352 877 864 877 1651 
+C 877 2438 1242 2950 1811 2950 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-4d" d="M 973 4666 
+L 435 4666 
+L 435 0 
+L 973 0 
+L 973 4666 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-a" d="M 595 -1357 
+C 1235 -518 1638 646 1638 1651 
+C 1638 2662 1235 3827 595 4666 
+L 243 4666 
+C 806 3750 1120 2675 1120 1651 
+C 1120 634 806 -448 243 -1357 
+L 595 -1357 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#NimbusSans-Regular-35"/>
+      <use xlink:href="#NimbusSans-Regular-53" transform="translate(51.890625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(84.78125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(140.375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(162.578125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(218.171875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(240.375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-48" transform="translate(295.96875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(351.5625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-55" transform="translate(379.359375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-50" transform="translate(405.953125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4c" transform="translate(461.546875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-46" transform="translate(509.453125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(565.046875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(620.640625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(670.640625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-9" transform="translate(698.4375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-43" transform="translate(732.828125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(788.421875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4d" transform="translate(810.625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4d" transform="translate(832.828125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(855.03125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-50" transform="translate(877.234375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(932.828125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(988.421875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-a" transform="translate(1038.421875 0)"/>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_19">
+      <path d="M 50.4 267.518919 
+L 365.026246 267.518919 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_20"/>
+     <g id="text_11">
+      <!-- 1.250 -->
+      <g style="fill: #52514e" transform="translate(24.384531 270.799419) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-f" d="M 1222 666 
+L 557 666 
+L 557 0 
+L 1222 0 
+L 1222 666 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-13" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-16" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_21">
+      <path d="M 50.4 238.183784 
+L 365.026246 238.183784 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_22"/>
+     <g id="text_12">
+      <!-- 1.275 -->
+      <g style="fill: #52514e" transform="translate(24.384531 241.464284) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-13" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-18" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-16" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_23">
+      <path d="M 50.4 208.848649 
+L 365.026246 208.848649 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_24"/>
+     <g id="text_13">
+      <!-- 1.300 -->
+      <g style="fill: #52514e" transform="translate(24.384531 212.129149) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-14" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_25">
+      <path d="M 50.4 179.513514 
+L 365.026246 179.513514 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_26"/>
+     <g id="text_14">
+      <!-- 1.325 -->
+      <g style="fill: #52514e" transform="translate(24.384531 182.794014) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-14" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-13" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-16" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_27">
+      <path d="M 50.4 150.178378 
+L 365.026246 150.178378 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_28"/>
+     <g id="text_15">
+      <!-- 1.350 -->
+      <g style="fill: #52514e" transform="translate(24.384531 153.458878) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-14" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-16" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_29">
+      <path d="M 50.4 120.843243 
+L 365.026246 120.843243 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_30"/>
+     <g id="text_16">
+      <!-- 1.375 -->
+      <g style="fill: #52514e" transform="translate(24.384531 124.123743) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-14" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-18" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-16" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_31">
+      <path d="M 50.4 91.508108 
+L 365.026246 91.508108 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_32"/>
+     <g id="text_17">
+      <!-- 1.400 -->
+      <g style="fill: #52514e" transform="translate(24.384531 94.788608) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-12"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-15" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(138.984375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(194.578125 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_18">
+     <!-- Main eval CE (nats) -->
+     <g style="fill: #52514e" transform="translate(17.674531 220.262812) rotate(-90) scale(0.1 -0.1)">
+      <defs>
+       <path id="NimbusSans-Regular-2e" d="M 2995 0 
+L 4307 3910 
+L 4307 0 
+L 4870 0 
+L 4870 4666 
+L 4045 4666 
+L 2688 602 
+L 1306 4666 
+L 480 4666 
+L 480 0 
+L 1043 0 
+L 1043 3910 
+L 2368 0 
+L 2995 0 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-57" d="M 1824 0 
+L 3110 3354 
+L 2509 3354 
+L 1562 634 
+L 666 3354 
+L 64 3354 
+L 1242 0 
+L 1824 0 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-24" d="M 4237 3219 
+C 4051 4243 3462 4742 2438 4742 
+C 1811 4742 1306 4544 960 4160 
+C 538 3699 307 3034 307 2278 
+C 307 1510 544 851 979 397 
+C 1344 26 1805 -147 2413 -147 
+C 3552 -147 4192 467 4333 1702 
+L 3718 1702 
+C 3667 1382 3603 1165 3507 979 
+C 3315 595 2918 378 2419 378 
+C 1491 378 902 1120 902 2285 
+C 902 3482 1459 4218 2368 4218 
+C 2746 4218 3098 4109 3290 3923 
+C 3462 3763 3558 3571 3629 3219 
+L 4237 3219 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-26" d="M 1171 2125 
+L 3712 2125 
+L 3712 2650 
+L 1171 2650 
+L 1171 4141 
+L 3808 4141 
+L 3808 4666 
+L 576 4666 
+L 576 0 
+L 3923 0 
+L 3923 525 
+L 1171 525 
+L 1171 2125 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#NimbusSans-Regular-2e"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(83.296875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(138.890625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(161.09375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(216.6875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-46" transform="translate(244.484375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-57" transform="translate(298.578125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(346.875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4d" transform="translate(402.46875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(424.671875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-24" transform="translate(452.46875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-26" transform="translate(524.671875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(591.375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-9" transform="translate(619.171875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(652.46875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(708.0625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-55" transform="translate(762.5625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(790.359375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-a" transform="translate(840.359375 0)"/>
+     </g>
+    </g>
+   </g>
+   <g id="line2d_33">
+    <path d="M 50.4 188.933022 
+L 365.026246 188.933022 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #1baf7a; stroke-width: 1.2; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_34">
+    <path d="M 81.862625 211.273503 
+L 84.70849 212.667219 
+L 87.554356 213.841873 
+L 91.823154 215.293487 
+L 96.091952 216.466952 
+L 100.360751 217.434726 
+L 106.052482 218.488258 
+L 113.167146 219.529739 
+L 121.704742 220.498354 
+L 131.665272 221.364811 
+L 143.048734 222.121287 
+L 157.278061 222.834723 
+L 175.776187 223.514255 
+L 198.543112 224.112087 
+L 228.4247 224.65924 
+L 268.266817 225.149928 
+L 322.338263 225.580695 
+L 365.026246 225.813715 
+L 365.026246 225.813715 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #c3c2b7; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 50.4 285.12 
+L 50.4 68.04 
+" style="fill: none; stroke: #c3c2b7; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 50.4 285.12 
+L 365.026246 285.12 
+" style="fill: none; stroke: #c3c2b7; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_19">
+    <!-- scaling law: where a finished run of D tokens -->
+    <g style="fill: #898781" transform="translate(97.593937 230.684249) scale(0.08 -0.08)">
+     <defs>
+      <path id="NimbusSans-Regular-44" d="M 3014 2227 
+C 2989 2554 2918 2765 2790 2950 
+C 2560 3264 2157 3450 1690 3450 
+C 781 3450 198 2733 198 1619 
+C 198 538 774 -147 1683 -147 
+C 2483 -147 2989 333 3053 1152 
+L 2515 1152 
+C 2426 614 2150 346 1696 346 
+C 1107 346 755 826 755 1619 
+C 755 2458 1101 2957 1683 2957 
+C 2131 2957 2413 2694 2477 2227 
+L 3014 2227 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-58" d="M 3546 0 
+L 4531 3354 
+L 3930 3354 
+L 3264 742 
+L 2605 3354 
+L 1952 3354 
+L 1312 742 
+L 627 3354 
+L 38 3354 
+L 1011 0 
+L 1613 0 
+L 2259 2630 
+L 2938 0 
+L 3546 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-1b" d="M 1370 666 
+L 704 666 
+L 704 0 
+L 1370 0 
+L 1370 666 
+z
+M 1370 3354 
+L 704 3354 
+L 704 2688 
+L 1370 2688 
+L 1370 3354 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-49" d="M 448 4666 
+L 448 0 
+L 979 0 
+L 979 1850 
+C 979 2534 1338 2982 1888 2982 
+C 2067 2982 2234 2931 2362 2835 
+C 2515 2720 2579 2560 2579 2323 
+L 2579 0 
+L 3110 0 
+L 3110 2534 
+C 3110 3098 2707 3450 2054 3450 
+C 1581 3450 1293 3302 979 2893 
+L 979 4666 
+L 448 4666 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-6d" d="M 1613 3354 
+L 1056 3354 
+L 1056 3878 
+C 1056 4102 1178 4218 1427 4218 
+C 1472 4218 1491 4218 1613 4211 
+L 1613 4653 
+C 1491 4678 1421 4685 1312 4685 
+C 819 4685 525 4403 525 3923 
+L 525 3354 
+L 77 3354 
+L 77 2918 
+L 525 2918 
+L 525 0 
+L 1056 0 
+L 1056 2918 
+L 1613 2918 
+L 1613 3354 
+z
+M 2790 3354 
+L 2259 3354 
+L 2259 0 
+L 2790 0 
+L 2790 3354 
+z
+M 2790 4666 
+L 2259 4666 
+L 2259 3994 
+L 2790 3994 
+L 2790 4666 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-45" d="M 3168 4666 
+L 2637 4666 
+L 2637 2931 
+C 2413 3270 2054 3450 1606 3450 
+C 736 3450 166 2752 166 1683 
+C 166 550 717 -147 1626 -147 
+C 2086 -147 2406 26 2694 442 
+L 2694 0 
+L 3168 0 
+L 3168 4666 
+z
+M 1696 2950 
+C 2272 2950 2637 2445 2637 1638 
+C 2637 864 2266 352 1702 352 
+C 1114 352 723 870 723 1651 
+C 723 2432 1114 2950 1696 2950 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-56" d="M 3085 0 
+L 3085 3354 
+L 2554 3354 
+L 2554 1453 
+C 2554 768 2195 320 1638 320 
+C 1216 320 947 576 947 979 
+L 947 3354 
+L 416 3354 
+L 416 768 
+C 416 211 832 -147 1485 -147 
+C 1978 -147 2291 26 2605 467 
+L 2605 0 
+L 3085 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-47" d="M 1651 3354 
+L 1094 3354 
+L 1094 3878 
+C 1094 4102 1216 4218 1466 4218 
+C 1510 4218 1530 4218 1651 4211 
+L 1651 4653 
+C 1530 4678 1459 4685 1350 4685 
+C 858 4685 563 4403 563 3923 
+L 563 3354 
+L 115 3354 
+L 115 2918 
+L 563 2918 
+L 563 0 
+L 1094 0 
+L 1094 2918 
+L 1651 2918 
+L 1651 3354 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-25" d="M 570 0 
+L 2368 0 
+C 3546 0 4269 883 4269 2336 
+C 4269 3782 3552 4666 2368 4666 
+L 570 4666 
+L 570 0 
+z
+M 1165 525 
+L 1165 4141 
+L 2266 4141 
+C 3187 4141 3674 3520 3674 2330 
+C 3674 1146 3187 525 2266 525 
+L 1165 525 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#NimbusSans-Regular-54"/>
+     <use xlink:href="#NimbusSans-Regular-44" transform="translate(50 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(100.703125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(156.296875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(178.5 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(200.703125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-48" transform="translate(256.296875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(311.890625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(339.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(361.890625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-58" transform="translate(416.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1b" transform="translate(487.390625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(515.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-58" transform="translate(542.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(615.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(670.78125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-53" transform="translate(726.375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(758.671875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(814.265625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(842.0625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(897.65625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-6d" transform="translate(925.453125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(975.453125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(1031.046875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(1053.25 0)"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(1103.25 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1158.84375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(1214.4375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1270.03125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-53" transform="translate(1297.828125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-56" transform="translate(1331.328125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(1386.921875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1442.515625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(1470.3125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-47" transform="translate(1525.90625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1553.703125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-25" transform="translate(1581.5 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1653.703125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(1681.5 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(1708.09375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4c" transform="translate(1763.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1811.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(1867.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(1922.78125 0)"/>
+    </g>
+    <!-- should land, at this model size -->
+    <g style="fill: #898781" transform="translate(97.593937 240.547999) scale(0.08 -0.08)">
+     <defs>
+      <path id="NimbusSans-Regular-d" d="M 557 666 
+L 557 0 
+L 941 0 
+L 941 -115 
+C 941 -557 858 -685 557 -698 
+L 557 -941 
+C 979 -954 1229 -646 1229 -102 
+L 1229 666 
+L 557 666 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-4e" d="M 448 3354 
+L 448 0 
+L 986 0 
+L 986 2106 
+C 986 2592 1338 2982 1773 2982 
+C 2170 2982 2394 2739 2394 2310 
+L 2394 0 
+L 2931 0 
+L 2931 2106 
+C 2931 2592 3283 2982 3718 2982 
+C 4109 2982 4339 2733 4339 2310 
+L 4339 0 
+L 4877 0 
+L 4877 2515 
+C 4877 3117 4531 3450 3904 3450 
+C 3456 3450 3187 3315 2874 2938 
+C 2675 3296 2406 3450 1971 3450 
+C 1523 3450 1222 3283 941 2880 
+L 941 3354 
+L 448 3354 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-5b" d="M 2835 3354 
+L 333 3354 
+L 333 2886 
+L 2202 2886 
+L 198 480 
+L 198 0 
+L 2925 0 
+L 2925 467 
+L 845 467 
+L 2835 2880 
+L 2835 3354 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#NimbusSans-Regular-54"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(50 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(105.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-56" transform="translate(161.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(216.78125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(238.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(294.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(322.375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(344.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(400.171875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(455.765625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-d" transform="translate(510.15625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(537.953125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(565.75 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(620.25 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(648.046875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(675.84375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(703.046875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(758.640625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(780.84375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(830.84375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4e" transform="translate(858.640625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(941.9375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(997.53125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1053.125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(1108.3125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1130.515625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(1158.3125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(1208.3125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-5b" transform="translate(1229.421875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1277.125 0)"/>
+    </g>
+   </g>
+   <g id="text_20">
+    <!-- best model of the scaling sweep: 1.3170 -->
+    <g style="fill: #52514e" transform="translate(56.299242 185.933022) scale(0.08 -0.08)">
+     <defs>
+      <path id="NimbusSans-Regular-51" d="M 346 -1395 
+L 883 -1395 
+L 883 352 
+C 1165 6 1478 -147 1914 -147 
+C 2784 -147 3347 550 3347 1619 
+C 3347 2746 2797 3450 1907 3450 
+C 1453 3450 1088 3245 838 2848 
+L 838 3354 
+L 346 3354 
+L 346 -1395 
+z
+M 1818 2950 
+C 2406 2950 2790 2432 2790 1632 
+C 2790 870 2400 352 1818 352 
+C 1248 352 883 864 883 1651 
+C 883 2438 1248 2950 1818 2950 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#NimbusSans-Regular-43"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(55.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(110.78125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(160.484375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(188.28125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4e" transform="translate(216.078125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(299.375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(354.96875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(410.5625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(465.75 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(487.953125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(515.75 0)"/>
+     <use xlink:href="#NimbusSans-Regular-47" transform="translate(571.34375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(599.140625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(626.9375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(654.140625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(709.734375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(765.328125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(793.125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-44" transform="translate(843.125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(893.828125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(949.421875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(971.625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(993.828125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-48" transform="translate(1049.421875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1105.015625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(1132.8125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-58" transform="translate(1182.015625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1252.921875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1308.515625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-51" transform="translate(1364.109375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1b" transform="translate(1419.703125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1447.5 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(1475.296875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(1530.890625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-14" transform="translate(1558.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(1614.28125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-18" transform="translate(1669.875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(1725.46875 0)"/>
+    </g>
+   </g>
+   <g id="line2d_35">
+    <path d="M 138.588941 84.452337 
+L 170.750997 107.5903 
+L 172.862418 106.209479 
+L 174.973839 111.326358 
+L 179.196681 115.12463 
+L 183.419523 117.872896 
+L 187.642365 119.389653 
+L 191.865207 122.927485 
+L 196.088049 126.235432 
+L 200.310891 126.425002 
+L 204.533733 132.73125 
+L 208.756575 134.371184 
+L 212.979417 139.074183 
+L 217.202259 142.636728 
+L 221.425101 146.261368 
+L 225.647943 148.537581 
+L 229.870785 152.045589 
+L 234.093627 154.409328 
+L 238.316468 159.268258 
+L 242.53931 161.893089 
+L 246.762152 167.043575 
+L 250.984994 169.21215 
+L 255.207836 172.583392 
+L 259.430678 177.283971 
+L 261.20188 177.545069 
+L 263.65352 180.757781 
+L 267.876362 183.683536 
+L 272.099204 187.96775 
+L 276.322046 191.888326 
+L 280.544888 196.050359 
+L 284.76773 200.783545 
+L 288.990572 205.097969 
+L 293.213414 208.233025 
+L 297.436256 213.346094 
+L 301.659098 218.472749 
+L 305.88194 223.100147 
+L 310.104782 226.340163 
+L 314.327624 231.739672 
+L 318.550466 236.294272 
+L 322.773308 240.711635 
+L 326.99615 245.005265 
+L 331.218992 249.926942 
+L 335.441834 254.227792 
+L 339.664676 258.720039 
+L 343.887518 263.276539 
+L 345.361801 263.647326 
+" clip-path="url(#p2f2d2e9247)" style="fill: none; stroke: #2a78d6; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="text_21">
+    <!-- forecast 1.2856 -->
+    <g style="fill: #52514e" transform="translate(316.137075 216.714988) scale(0.085 -0.085)">
+     <use xlink:href="#NimbusSans-Regular-47"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(26.796875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-53" transform="translate(82.390625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(114.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-44" transform="translate(170.28125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(220.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(276.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(326.28125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(354.078125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(381.875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(437.46875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-13" transform="translate(465.265625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-19" transform="translate(520.859375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-16" transform="translate(576.453125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-17" transform="translate(632.046875 0)"/>
+    </g>
+   </g>
+   <g id="text_22">
+    <!-- final 1.2533 -->
+    <g style="fill: #0b0b0b" transform="translate(291.420786 260.560842) scale(0.085 -0.085)">
+     <use xlink:href="#NimbusSans-Regular-6d"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(50 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(105.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(161.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(183.390625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(211.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(266.78125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-13" transform="translate(294.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-16" transform="translate(350.171875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-14" transform="translate(405.765625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-14" transform="translate(461.359375 0)"/>
+    </g>
+   </g>
+   <g id="text_23">
+    <!-- after a second anneal 1.2505 -->
+    <g style="fill: #0b0b0b" transform="translate(227.121348 277.042063) scale(0.085 -0.085)">
+     <use xlink:href="#NimbusSans-Regular-42"/>
+     <use xlink:href="#NimbusSans-Regular-47" transform="translate(55.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(85.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(112.078125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-53" transform="translate(167.671875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(200.96875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(228.765625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(284.359375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(312.15625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(362.15625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-44" transform="translate(417.75 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(468.546875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(524.140625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(579.734375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(635.328125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(663.125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(718.71875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(774.3125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(829.90625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(884.796875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(940.390625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(962.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(990.390625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(1045.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-13" transform="translate(1073.78125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-16" transform="translate(1129.375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(1184.96875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-16" transform="translate(1240.5625 0)"/>
+    </g>
+   </g>
+   <g id="line2d_36">
+    <defs>
+     <path id="m0b9c30481a" d="M 0 1.3 
+C 0.344764 1.3 0.675454 1.163024 0.919239 0.919239 
+C 1.163024 0.675454 1.3 0.344764 1.3 0 
+C 1.3 -0.344764 1.163024 -0.675454 0.919239 -0.919239 
+C 0.675454 -1.163024 0.344764 -1.3 0 -1.3 
+C -0.344764 -1.3 -0.675454 -1.163024 -0.919239 -0.919239 
+C -1.163024 -0.675454 -1.3 -0.344764 -1.3 0 
+C -1.3 0.344764 -1.163024 0.675454 -0.919239 0.919239 
+C -0.675454 1.163024 -0.344764 1.3 0 1.3 
+z
+"/>
+    </defs>
+    <g clip-path="url(#p2f2d2e9247)">
+     <use xlink:href="#m0b9c30481a" x="138.588941" y="84.452337" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="170.750997" y="107.5903" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="172.862418" y="106.209479" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="174.973839" y="111.326358" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="179.196681" y="115.12463" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="183.419523" y="117.872896" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="187.642365" y="119.389653" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="191.865207" y="122.927485" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="196.088049" y="126.235432" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="200.310891" y="126.425002" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="204.533733" y="132.73125" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="208.756575" y="134.371184" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="212.979417" y="139.074183" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="217.202259" y="142.636728" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="221.425101" y="146.261368" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="225.647943" y="148.537581" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="229.870785" y="152.045589" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="234.093627" y="154.409328" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="238.316468" y="159.268258" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="242.53931" y="161.893089" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="246.762152" y="167.043575" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="250.984994" y="169.21215" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="255.207836" y="172.583392" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="259.430678" y="177.283971" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="261.20188" y="177.545069" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="263.65352" y="180.757781" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="267.876362" y="183.683536" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="272.099204" y="187.96775" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="276.322046" y="191.888326" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="280.544888" y="196.050359" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="284.76773" y="200.783545" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="288.990572" y="205.097969" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="293.213414" y="208.233025" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="297.436256" y="213.346094" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="301.659098" y="218.472749" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="305.88194" y="223.100147" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="310.104782" y="226.340163" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="314.327624" y="231.739672" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="318.550466" y="236.294272" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="322.773308" y="240.711635" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="326.99615" y="245.005265" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="331.218992" y="249.926942" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="335.441834" y="254.227792" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="339.664676" y="258.720039" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="343.887518" y="263.276539" style="fill: #2a78d6"/>
+     <use xlink:href="#m0b9c30481a" x="345.361801" y="263.647326" style="fill: #2a78d6"/>
+    </g>
+   </g>
+   <g id="line2d_37">
+    <defs>
+     <path id="m980889aa3b" d="M 0 4.5 
+C 1.193414 4.5 2.338109 4.025852 3.181981 3.181981 
+C 4.025852 2.338109 4.5 1.193414 4.5 0 
+C 4.5 -1.193414 4.025852 -2.338109 3.181981 -3.181981 
+C 2.338109 -4.025852 1.193414 -4.5 0 -4.5 
+C -1.193414 -4.5 -2.338109 -4.025852 -3.181981 -3.181981 
+C -4.025852 -2.338109 -4.5 -1.193414 -4.5 0 
+C -4.5 1.193414 -4.025852 2.338109 -3.181981 3.181981 
+C -2.338109 4.025852 -1.193414 4.5 0 4.5 
+z
+" style="stroke: #52514e; stroke-width: 1.6"/>
+    </defs>
+    <g clip-path="url(#p2f2d2e9247)">
+     <use xlink:href="#m980889aa3b" x="345.361801" y="225.714988" style="fill: #fcfcfb; stroke: #52514e; stroke-width: 1.6"/>
+    </g>
+   </g>
+   <g id="line2d_38">
+    <defs>
+     <path id="mb113feae12" d="M 0 -6 
+L -1.347084 -1.854102 
+L -5.706339 -1.854102 
+L -2.179628 0.708204 
+L -3.526712 4.854102 
+L -0 2.291796 
+L 3.526712 4.854102 
+L 2.179628 0.708204 
+L 5.706339 -1.854102 
+L 1.347084 -1.854102 
+z
+" style="stroke: #fcfcfb; stroke-width: 1.6; stroke-linejoin: bevel"/>
+    </defs>
+    <g clip-path="url(#p2f2d2e9247)">
+     <use xlink:href="#mb113feae12" x="349.29463" y="266.928547" style="fill: #2a78d6; stroke: #fcfcfb; stroke-width: 1.6; stroke-linejoin: bevel"/>
+    </g>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_5">
+    <path d="M 435.61196 285.12 
+L 709.2 285.12 
+L 709.2 68.04 
+L 435.61196 68.04 
+z
+" style="fill: #fcfcfb"/>
+   </g>
+   <g id="matplotlib.axis_3">
+    <g id="xtick_10">
+     <g id="line2d_39">
+      <path d="M 435.61196 285.12 
+L 435.61196 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_40"/>
+     <g id="text_24">
+      <!-- 20 -->
+      <g style="fill: #52514e" transform="translate(430.608523 295.181) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-13"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_11">
+     <g id="line2d_41">
+      <path d="M 482.782312 285.12 
+L 482.782312 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_42"/>
+     <g id="text_25">
+      <!-- 30 -->
+      <g style="fill: #52514e" transform="translate(477.778874 295.181) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-14"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_12">
+     <g id="line2d_43">
+      <path d="M 529.952664 285.12 
+L 529.952664 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_44"/>
+     <g id="text_26">
+      <!-- 40 -->
+      <g style="fill: #52514e" transform="translate(524.949226 295.181) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-15"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_13">
+     <g id="line2d_45">
+      <path d="M 577.123015 285.12 
+L 577.123015 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_46"/>
+     <g id="text_27">
+      <!-- 50 -->
+      <g style="fill: #52514e" transform="translate(572.119578 295.181) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-16"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_14">
+     <g id="line2d_47">
+      <path d="M 624.293367 285.12 
+L 624.293367 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_48"/>
+     <g id="text_28">
+      <!-- 60 -->
+      <g style="fill: #52514e" transform="translate(619.289929 295.181) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-17"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_15">
+     <g id="line2d_49">
+      <path d="M 671.463719 285.12 
+L 671.463719 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_50"/>
+     <g id="text_29">
+      <!-- 70 -->
+      <g style="fill: #52514e" transform="translate(666.460281 295.181) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-18"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(55.59375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_30">
+     <!-- Training tokens (billions) -->
+     <g style="fill: #52514e" transform="translate(518.820043 308.910625) scale(0.1 -0.1)">
+      <use xlink:href="#NimbusSans-Regular-35"/>
+      <use xlink:href="#NimbusSans-Regular-53" transform="translate(51.890625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(84.78125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(140.375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(162.578125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(218.171875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(240.375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-48" transform="translate(295.96875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(351.5625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-55" transform="translate(379.359375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-50" transform="translate(405.953125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4c" transform="translate(461.546875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-46" transform="translate(509.453125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(565.046875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(620.640625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(670.640625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-9" transform="translate(698.4375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-43" transform="translate(732.828125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(788.421875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4d" transform="translate(810.625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4d" transform="translate(832.828125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(855.03125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-50" transform="translate(877.234375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(932.828125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(988.421875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-a" transform="translate(1038.421875 0)"/>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_4">
+    <g id="ytick_8">
+     <g id="line2d_51">
+      <path d="M 435.61196 272.350588 
+L 709.2 272.350588 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_52"/>
+     <g id="text_31">
+      <!-- −0.02 -->
+      <g style="fill: #52514e" transform="translate(409.343366 275.631088) scale(0.09 -0.09)">
+       <defs>
+        <path id="NimbusSans-Regular-a6" d="M 3482 1709 
+L 256 1709 
+L 256 1261 
+L 3482 1261 
+L 3482 1709 
+z
+" transform="scale(0.015625)"/>
+       </defs>
+       <use xlink:href="#NimbusSans-Regular-a6"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(58.40625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(114 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(141.796875 0)"/>
+       <use xlink:href="#NimbusSans-Regular-13" transform="translate(197.390625 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_9">
+     <g id="line2d_53">
+      <path d="M 435.61196 246.811765 
+L 709.2 246.811765 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_54"/>
+     <g id="text_32">
+      <!-- 0.00 -->
+      <g style="fill: #52514e" transform="translate(414.599929 250.092265) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_55">
+      <path d="M 435.61196 221.272941 
+L 709.2 221.272941 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_56"/>
+     <g id="text_33">
+      <!-- 0.02 -->
+      <g style="fill: #52514e" transform="translate(414.599929 224.553441) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-13" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_57">
+      <path d="M 435.61196 195.734118 
+L 709.2 195.734118 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_58"/>
+     <g id="text_34">
+      <!-- 0.04 -->
+      <g style="fill: #52514e" transform="translate(414.599929 199.014618) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-15" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_59">
+      <path d="M 435.61196 170.195294 
+L 709.2 170.195294 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_60"/>
+     <g id="text_35">
+      <!-- 0.06 -->
+      <g style="fill: #52514e" transform="translate(414.599929 173.475794) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-17" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_61">
+      <path d="M 435.61196 144.656471 
+L 709.2 144.656471 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_62"/>
+     <g id="text_36">
+      <!-- 0.08 -->
+      <g style="fill: #52514e" transform="translate(414.599929 147.936971) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-19" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_63">
+      <path d="M 435.61196 119.117647 
+L 709.2 119.117647 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_64"/>
+     <g id="text_37">
+      <!-- 0.10 -->
+      <g style="fill: #52514e" transform="translate(414.599929 122.398147) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-12" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-11" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_15">
+     <g id="line2d_65">
+      <path d="M 435.61196 93.578824 
+L 709.2 93.578824 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_66"/>
+     <g id="text_38">
+      <!-- 0.12 -->
+      <g style="fill: #52514e" transform="translate(414.599929 96.859324) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-12" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-13" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_16">
+     <g id="line2d_67">
+      <path d="M 435.61196 68.04 
+L 709.2 68.04 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #e9e8e2; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_68"/>
+     <g id="text_39">
+      <!-- 0.14 -->
+      <g style="fill: #52514e" transform="translate(414.599929 71.3205) scale(0.09 -0.09)">
+       <use xlink:href="#NimbusSans-Regular-11"/>
+       <use xlink:href="#NimbusSans-Regular-f" transform="translate(55.59375 0)"/>
+       <use xlink:href="#NimbusSans-Regular-12" transform="translate(83.390625 0)"/>
+       <use xlink:href="#NimbusSans-Regular-15" transform="translate(138.984375 0)"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_40">
+     <!-- CE minus Maia-3 79M (nats; below 0 is better) -->
+     <g style="fill: #52514e" transform="translate(402.633366 279.216719) rotate(-90) scale(0.1 -0.1)">
+      <defs>
+       <path id="NimbusSans-Regular-e" d="M 1818 1997 
+L 294 1997 
+L 294 1536 
+L 1818 1536 
+L 1818 1997 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-1a" d="M 339 1056 
+C 448 301 934 -147 1626 -147 
+C 2131 -147 2579 96 2848 512 
+C 3130 966 3258 1530 3258 2368 
+C 3258 3149 3142 3642 2874 4051 
+C 2624 4429 2227 4627 1728 4627 
+C 864 4627 243 3981 243 3085 
+C 243 2234 819 1632 1638 1632 
+C 2067 1632 2387 1786 2675 2138 
+C 2669 986 2310 352 1664 352 
+C 1267 352 992 608 902 1056 
+L 339 1056 
+z
+M 1722 4134 
+C 2246 4134 2643 3693 2643 3098 
+C 2643 2528 2259 2131 1702 2131 
+C 1158 2131 819 2515 819 3130 
+C 819 3712 1197 4134 1722 4134 
+z
+" transform="scale(0.015625)"/>
+       <path id="NimbusSans-Regular-1c" d="M 1376 3354 
+L 710 3354 
+L 710 2688 
+L 1376 2688 
+L 1376 3354 
+z
+M 704 666 
+L 704 0 
+L 1088 0 
+L 1088 -115 
+C 1088 -557 1005 -685 704 -698 
+L 704 -941 
+C 1126 -954 1376 -646 1376 -102 
+L 1376 666 
+L 704 666 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#NimbusSans-Regular-24"/>
+      <use xlink:href="#NimbusSans-Regular-26" transform="translate(72.203125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(138.90625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4e" transform="translate(166.703125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(250 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(272.203125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-56" transform="translate(327.796875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(383.390625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(433.390625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-2e" transform="translate(461.1875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(544.484375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(600.078125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(622.28125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-e" transform="translate(677.875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-14" transform="translate(711.171875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(766.765625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-18" transform="translate(794.5625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1a" transform="translate(850.15625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-2e" transform="translate(905.75 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(989.046875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-9" transform="translate(1016.84375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4f" transform="translate(1050.140625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-42" transform="translate(1105.734375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-55" transform="translate(1160.234375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(1188.03125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1c" transform="translate(1237.625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(1265.421875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-43" transform="translate(1293.21875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-46" transform="translate(1348.8125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4d" transform="translate(1404 0)"/>
+      <use xlink:href="#NimbusSans-Regular-50" transform="translate(1426.203125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-58" transform="translate(1480.59375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(1552.796875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-11" transform="translate(1580.59375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(1636.1875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-4a" transform="translate(1663.984375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-54" transform="translate(1686.1875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-1" transform="translate(1736.1875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-43" transform="translate(1763.984375 0)"/>
+      <use xlink:href="#NimbusSans-Regular-46" transform="translate(1819.578125 0)"/>
+      <use xlink:href="#NimbusSans-Regular-55" transform="translate(1874.265625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-55" transform="translate(1904.15625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-46" transform="translate(1930.546875 0)"/>
+      <use xlink:href="#NimbusSans-Regular-53" transform="translate(1986.140625 0)"/>
+      <use xlink:href="#NimbusSans-Regular-a" transform="translate(2019.4375 0)"/>
+     </g>
+    </g>
+   </g>
+   <g id="line2d_69">
+    <path d="M 435.61196 246.811765 
+L 709.2 246.811765 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #3d3c38; stroke-width: 1.2; stroke-linecap: round"/>
+   </g>
+   <g id="FillBetweenPolyCollection_1">
+    <defs>
+     <path id="m973090c4c2" d="M 447.045099 -247.190964 
+L 447.045099 -235.650602 
+L 485.620278 -208.747701 
+L 488.152717 -215.631414 
+L 490.685156 -208.867623 
+L 495.750034 -205.714167 
+L 500.814912 -201.899789 
+L 505.87979 -197.787782 
+L 510.944668 -192.631279 
+L 516.009546 -190.818938 
+L 521.074424 -192.875042 
+L 526.139302 -187.197613 
+L 531.20418 -182.510326 
+L 536.269058 -178.137439 
+L 541.333936 -174.823365 
+L 546.398814 -169.226294 
+L 551.463692 -169.130083 
+L 556.528569 -164.789848 
+L 561.593447 -158.56283 
+L 566.658325 -155.501247 
+L 571.723203 -151.435608 
+L 576.788081 -148.06566 
+L 581.852959 -142.059543 
+L 586.917837 -140.820691 
+L 591.982715 -136.429938 
+L 594.107095 -136.175707 
+L 597.047593 -134.705085 
+L 602.112471 -131.004754 
+L 607.177349 -125.420543 
+L 612.242227 -120.668409 
+L 617.307105 -116.238611 
+L 622.371983 -111.878244 
+L 627.436861 -108.363328 
+L 632.501739 -105.979683 
+L 637.566617 -101.394166 
+L 642.631495 -95.388713 
+L 647.696373 -89.120141 
+L 652.76125 -84.859029 
+L 657.826128 -79.250846 
+L 662.891006 -74.760147 
+L 667.955884 -69.732433 
+L 673.020762 -65.852996 
+L 678.08564 -59.722872 
+L 683.150518 -53.250517 
+L 688.215396 -49.859273 
+L 693.280274 -46.174713 
+L 695.04853 -45.904481 
+L 695.04853 -53.721248 
+L 695.04853 -53.721248 
+L 693.280274 -54.020552 
+L 688.215396 -58.048934 
+L 683.150518 -61.498838 
+L 678.08564 -67.945173 
+L 673.020762 -74.002756 
+L 667.955884 -78.422318 
+L 662.891006 -83.164892 
+L 657.826128 -87.790768 
+L 652.76125 -93.548914 
+L 647.696373 -97.961568 
+L 642.631495 -104.529715 
+L 637.566617 -110.448483 
+L 632.501739 -114.845354 
+L 627.436861 -117.52017 
+L 622.371983 -121.305495 
+L 617.307105 -125.352127 
+L 612.242227 -129.764905 
+L 607.177349 -134.890031 
+L 602.112471 -140.667288 
+L 597.047593 -144.610948 
+L 594.107095 -145.504646 
+L 591.982715 -146.549612 
+L 586.917837 -150.356526 
+L 581.852959 -151.85416 
+L 576.788081 -158.182961 
+L 571.723203 -161.756945 
+L 566.658325 -165.642821 
+L 561.593447 -169.121176 
+L 556.528569 -175.056021 
+L 551.463692 -179.510805 
+L 546.398814 -179.238873 
+L 541.333936 -184.896811 
+L 536.269058 -188.296463 
+L 531.20418 -192.78432 
+L 526.139302 -197.647299 
+L 521.074424 -203.006261 
+L 516.009546 -201.917675 
+L 510.944668 -203.708766 
+L 505.87979 -208.653235 
+L 500.814912 -212.544824 
+L 495.750034 -216.811084 
+L 490.685156 -220.026994 
+L 488.152717 -226.162343 
+L 485.620278 -219.960373 
+L 447.045099 -247.190964 
+z
+"/>
+    </defs>
+    <g clip-path="url(#p3b8e0bdf6a)">
+     <use xlink:href="#m973090c4c2" x="0" y="324" style="fill: #2a78d6; fill-opacity: 0.14"/>
+    </g>
+   </g>
+   <g id="patch_6">
+    <path d="M 435.61196 285.12 
+L 435.61196 68.04 
+" style="fill: none; stroke: #c3c2b7; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 435.61196 285.12 
+L 709.2 285.12 
+" style="fill: none; stroke: #c3c2b7; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_41">
+    <!-- Maia-3 79M -->
+    <g style="fill: #52514e" transform="translate(445.04603 242.811765) scale(0.085 -0.085)">
+     <use xlink:href="#NimbusSans-Regular-2e"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(83.296875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(138.890625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(161.09375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-e" transform="translate(216.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-14" transform="translate(249.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(305.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-18" transform="translate(333.375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1a" transform="translate(388.96875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-2e" transform="translate(444.5625 0)"/>
+    </g>
+   </g>
+   <g id="line2d_70">
+    <path d="M 447.045099 82.420597 
+L 485.620278 109.572255 
+L 488.152717 103.058429 
+L 490.685156 109.423738 
+L 495.750034 112.578985 
+L 500.814912 116.573782 
+L 505.87979 120.703462 
+L 510.944668 125.923819 
+L 516.009546 127.47968 
+L 521.074424 126.014766 
+L 526.139302 131.280444 
+L 531.20418 136.256037 
+L 536.269058 140.704825 
+L 541.333936 144.072495 
+L 546.398814 149.604642 
+L 551.463692 149.566201 
+L 556.528569 153.860563 
+L 561.593447 160.017753 
+L 566.658325 163.408473 
+L 571.723203 167.227273 
+L 576.788081 170.68004 
+L 581.852959 176.909021 
+L 586.917837 178.121199 
+L 591.982715 182.449912 
+L 594.107095 183.023946 
+L 597.047593 184.235202 
+L 602.112471 188.00455 
+L 607.177349 193.661817 
+L 612.242227 198.716093 
+L 617.307105 203.009607 
+L 622.371983 207.194143 
+L 627.436861 211.029384 
+L 632.501739 213.530983 
+L 637.566617 217.887886 
+L 642.631495 223.837069 
+L 647.696373 230.303707 
+L 652.76125 234.603869 
+L 657.826128 240.35506 
+L 662.891006 245.002549 
+L 667.955884 249.712872 
+L 673.020762 253.763565 
+L 678.08564 259.925448 
+L 683.150518 266.350123 
+L 688.215396 269.843668 
+L 693.280274 273.669501 
+L 695.04853 273.963501 
+" clip-path="url(#p3b8e0bdf6a)" style="fill: none; stroke: #2a78d6; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="text_42">
+    <!-- ahead beyond the interval from 70B tokens; -->
+    <g style="fill: #0b0b0b" transform="translate(442.687513 261.758177) scale(0.085 -0.085)">
+     <defs>
+      <path id="NimbusSans-Regular-5a" d="M 2483 3354 
+L 1555 742 
+L 698 3354 
+L 128 3354 
+L 1261 -13 
+L 1056 -544 
+C 966 -781 851 -870 627 -870 
+C 538 -870 461 -858 346 -832 
+L 346 -1312 
+C 454 -1370 563 -1395 704 -1395 
+C 877 -1395 1062 -1338 1203 -1235 
+C 1370 -1114 1466 -973 1568 -704 
+L 3059 3354 
+L 2483 3354 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-23" d="M 506 0 
+L 2611 0 
+C 3053 0 3379 122 3629 390 
+C 3859 634 3987 966 3987 1331 
+C 3987 1894 3731 2234 3136 2464 
+C 3565 2662 3782 3002 3782 3482 
+C 3782 3827 3654 4122 3411 4339 
+C 3162 4563 2848 4666 2400 4666 
+L 506 4666 
+L 506 0 
+z
+M 1101 2656 
+L 1101 4141 
+L 2253 4141 
+C 2586 4141 2771 4096 2931 3974 
+C 3098 3846 3187 3654 3187 3398 
+C 3187 3142 3098 2950 2931 2822 
+C 2771 2701 2586 2656 2253 2656 
+L 1101 2656 
+z
+M 1101 525 
+L 1101 2131 
+L 2554 2131 
+C 3078 2131 3392 1830 3392 1325 
+C 3392 826 3078 525 2554 525 
+L 1101 525 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#NimbusSans-Regular-42"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(55.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(111.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(166.078125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(221.671875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(277.265625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-43" transform="translate(305.0625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(360.65625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-5a" transform="translate(414.15625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(461.953125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(517.546875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-45" transform="translate(573.140625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(628.734375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(656.53125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-49" transform="translate(683.734375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(739.328125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(794.921875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4a" transform="translate(822.71875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(844.921875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(900.515625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(926.90625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-53" transform="translate(982.5 0)"/>
+     <use xlink:href="#NimbusSans-Regular-57" transform="translate(1018.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(1066.890625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(1122.484375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1144.6875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-47" transform="translate(1172.484375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-53" transform="translate(1200.28125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(1232.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4e" transform="translate(1288.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1371.875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-18" transform="translate(1399.671875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(1455.265625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-23" transform="translate(1510.859375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1577.5625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-55" transform="translate(1605.359375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-50" transform="translate(1631.953125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4c" transform="translate(1687.546875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-46" transform="translate(1735.453125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(1791.046875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-54" transform="translate(1846.640625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1c" transform="translate(1896.234375 0)"/>
+    </g>
+    <!-- final −0.0213 [−0.0245, −0.0184] -->
+    <g style="fill: #0b0b0b" transform="translate(442.687513 271.983412) scale(0.085 -0.085)">
+     <defs>
+      <path id="NimbusSans-Regular-3c" d="M 1600 4666 
+L 410 4666 
+L 410 -1357 
+L 1600 -1357 
+L 1600 -896 
+L 941 -896 
+L 941 4205 
+L 1600 4205 
+L 1600 4666 
+z
+" transform="scale(0.015625)"/>
+      <path id="NimbusSans-Regular-3e" d="M 147 -1357 
+L 1338 -1357 
+L 1338 4666 
+L 147 4666 
+L 147 4205 
+L 806 4205 
+L 806 -896 
+L 147 -896 
+L 147 -1357 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#NimbusSans-Regular-6d"/>
+     <use xlink:href="#NimbusSans-Regular-4f" transform="translate(50 0)"/>
+     <use xlink:href="#NimbusSans-Regular-42" transform="translate(105.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-4d" transform="translate(161.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(183.390625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-a6" transform="translate(211.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(269.59375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(325.1875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(352.984375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-13" transform="translate(408.578125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(464.171875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-14" transform="translate(519.765625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(575.359375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-3c" transform="translate(603.15625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-a6" transform="translate(630.953125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(689.359375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(744.953125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(772.75 0)"/>
+     <use xlink:href="#NimbusSans-Regular-13" transform="translate(828.34375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-15" transform="translate(883.9375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-16" transform="translate(939.53125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-d" transform="translate(995.125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-1" transform="translate(1022.921875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-a6" transform="translate(1050.71875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(1109.125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-f" transform="translate(1164.71875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-11" transform="translate(1192.515625 0)"/>
+     <use xlink:href="#NimbusSans-Regular-12" transform="translate(1248.109375 0)"/>
+     <use xlink:href="#NimbusSans-Regular-19" transform="translate(1303.703125 0)"/>
+     <use xlink:href="#NimbusSans-Regular-15" transform="translate(1359.296875 0)"/>
+     <use xlink:href="#NimbusSans-Regular-3e" transform="translate(1414.890625 0)"/>
+    </g>
+   </g>
+  </g>
+  <g id="text_43">
+   <!-- 75B tokens on one 8-GPU node: the run landed below its scaling-law forecast -->
+   <g style="fill: #0b0b0b" transform="translate(8.64 18.102656) scale(0.135 -0.135)">
+    <defs>
+     <path id="NimbusSans-Bold-18" d="M 3379 4538 
+L 186 4538 
+L 186 3738 
+L 2445 3738 
+C 2170 3443 1626 2618 1446 2221 
+C 1133 1562 973 966 851 0 
+L 1754 0 
+C 1837 1434 2304 2534 3379 3834 
+L 3379 4538 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-16" d="M 3130 4538 
+L 704 4538 
+L 301 2010 
+L 1107 2010 
+C 1203 2234 1408 2355 1683 2355 
+C 2138 2355 2413 2029 2413 1478 
+C 2413 947 2138 621 1683 621 
+C 1293 621 1075 819 1056 1184 
+L 173 1184 
+C 186 390 787 -147 1670 -147 
+C 2643 -147 3309 518 3309 1498 
+C 3309 2432 2733 3066 1894 3066 
+C 1594 3066 1370 2989 1107 2790 
+L 1254 3738 
+L 3130 3738 
+L 3130 4538 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-23" d="M 525 0 
+L 2624 0 
+C 3162 0 3520 102 3802 339 
+C 4083 576 4262 966 4262 1344 
+C 4262 1805 4019 2170 3488 2477 
+C 3949 2771 4128 3040 4128 3437 
+C 4128 3763 3968 4096 3706 4326 
+C 3430 4563 3104 4666 2605 4666 
+L 525 4666 
+L 525 0 
+z
+M 1485 3866 
+L 2528 3866 
+C 2976 3866 3206 3686 3206 3341 
+C 3206 2989 2976 2810 2528 2810 
+L 1485 2810 
+L 1485 3866 
+z
+M 1485 2010 
+L 2630 2010 
+C 3098 2010 3341 1805 3341 1402 
+C 3341 1005 3098 800 2630 800 
+L 1485 800 
+L 1485 2010 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-1" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-55" d="M 1926 3386 
+L 1427 3386 
+L 1427 4314 
+L 531 4314 
+L 531 3386 
+L 90 3386 
+L 90 2790 
+L 531 2790 
+L 531 666 
+C 531 122 819 -147 1408 -147 
+C 1613 -147 1760 -128 1926 -77 
+L 1926 550 
+C 1837 538 1792 531 1722 531 
+C 1485 531 1427 602 1427 909 
+L 1427 2790 
+L 1926 2790 
+L 1926 3386 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-50" d="M 1926 3514 
+C 870 3514 224 2816 224 1683 
+C 224 544 870 -147 1933 -147 
+C 2989 -147 3642 544 3642 1658 
+C 3642 2829 3008 3514 1926 3514 
+z
+M 1933 2790 
+C 2426 2790 2746 2349 2746 1670 
+C 2746 1024 2413 576 1933 576 
+C 1446 576 1120 1018 1120 1683 
+C 1120 2349 1446 2790 1933 2790 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-4c" d="M 1274 2112 
+L 1274 4666 
+L 378 4666 
+L 378 0 
+L 1274 0 
+L 1274 1133 
+L 1632 1523 
+L 2458 0 
+L 3507 0 
+L 2246 2150 
+L 3424 3456 
+L 2406 3456 
+L 1274 2112 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-46" d="M 3354 1446 
+C 3360 1523 3360 1555 3360 1600 
+C 3360 1946 3309 2266 3226 2509 
+C 2995 3136 2438 3514 1741 3514 
+C 749 3514 141 2797 141 1638 
+C 141 531 742 -147 1722 -147 
+C 2496 -147 3123 288 3322 973 
+L 2438 973 
+C 2330 698 2080 538 1754 538 
+C 1498 538 1293 646 1165 838 
+C 1082 966 1050 1120 1037 1446 
+L 3354 1446 
+z
+M 1050 2042 
+C 1107 2573 1331 2829 1728 2829 
+C 2138 2829 2381 2554 2426 2042 
+L 1050 2042 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-4f" d="M 403 3456 
+L 403 0 
+L 1299 0 
+L 1299 2074 
+C 1299 2483 1581 2752 2022 2752 
+C 2406 2752 2598 2541 2598 2131 
+L 2598 0 
+L 3494 0 
+L 3494 2317 
+C 3494 3085 3078 3514 2336 3514 
+C 1869 3514 1555 3347 1299 2957 
+L 1299 3456 
+L 403 3456 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-54" d="M 3232 2342 
+C 3219 3072 2656 3514 1728 3514 
+C 851 3514 307 3072 307 2362 
+C 307 2131 378 1933 499 1798 
+C 621 1677 730 1619 1062 1510 
+L 2131 1178 
+C 2355 1107 2432 1037 2432 896 
+C 2432 685 2182 557 1766 557 
+C 1530 557 1350 595 1235 678 
+C 1139 749 1101 819 1062 1005 
+L 186 1005 
+C 211 243 768 -147 1818 -147 
+C 2298 -147 2662 -45 2918 160 
+C 3174 365 3328 685 3328 1024 
+C 3328 1472 3104 1760 2650 1894 
+L 1517 2221 
+C 1267 2298 1203 2349 1203 2490 
+C 1203 2682 1408 2810 1722 2810 
+C 2150 2810 2362 2656 2368 2342 
+L 3232 2342 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-19" d="M 2618 2470 
+C 2771 2554 2842 2598 2912 2662 
+C 3098 2835 3206 3110 3206 3405 
+C 3206 4115 2592 4634 1754 4634 
+C 909 4634 294 4115 294 3398 
+C 294 2963 474 2688 883 2470 
+C 358 2182 141 1843 141 1306 
+C 141 448 800 -147 1754 -147 
+C 2701 -147 3360 448 3360 1306 
+C 3360 1843 3142 2182 2618 2470 
+z
+M 1760 3910 
+C 2157 3910 2432 3667 2432 3315 
+C 2432 2970 2150 2720 1760 2720 
+C 1357 2720 1082 2963 1082 3322 
+C 1082 3667 1357 3910 1760 3910 
+z
+M 1747 2112 
+C 2189 2112 2464 1818 2464 1344 
+C 2464 909 2182 621 1747 621 
+C 1312 621 1037 909 1037 1357 
+C 1037 1818 1312 2112 1747 2112 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-e" d="M 1907 2189 
+L 166 2189 
+L 166 1325 
+L 1907 1325 
+L 1907 2189 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-28" d="M 4550 2509 
+L 2682 2509 
+L 2682 1709 
+L 3744 1709 
+C 3718 1446 3654 1286 3514 1120 
+C 3283 838 2925 672 2560 672 
+C 1779 672 1229 1350 1229 2310 
+C 1229 3315 1715 3923 2534 3923 
+C 2867 3923 3149 3827 3360 3642 
+C 3494 3526 3565 3418 3648 3174 
+L 4550 3174 
+C 4435 4141 3654 4742 2528 4742 
+C 1184 4742 269 3750 269 2298 
+C 269 883 1190 -147 2451 -147 
+C 3078 -147 3501 77 3859 602 
+L 3974 -13 
+L 4550 -13 
+L 4550 2509 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-31" d="M 1446 1664 
+L 2643 1664 
+C 3501 1664 4051 2272 4051 3219 
+C 4051 4154 3520 4666 2547 4666 
+L 486 4666 
+L 486 0 
+L 1446 0 
+L 1446 1664 
+z
+M 1446 2464 
+L 1446 3866 
+L 2342 3866 
+C 2854 3866 3091 3642 3091 3168 
+C 3091 2688 2854 2464 2342 2464 
+L 1446 2464 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-36" d="M 3226 4666 
+L 3226 1504 
+C 3226 941 2938 672 2336 672 
+C 1734 672 1446 941 1446 1504 
+L 1446 4666 
+L 486 4666 
+L 486 1504 
+C 486 979 627 608 941 326 
+C 1280 19 1773 -147 2336 -147 
+C 2899 -147 3392 19 3731 326 
+C 4045 608 4186 979 4186 1504 
+L 4186 4666 
+L 3226 4666 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-45" d="M 2592 0 
+L 3488 0 
+L 3488 4666 
+L 2592 4666 
+L 2592 3008 
+C 2368 3354 2074 3514 1638 3514 
+C 813 3514 186 2720 186 1677 
+C 186 1210 326 736 557 403 
+C 794 64 1216 -147 1638 -147 
+C 2074 -147 2368 6 2592 352 
+L 2592 0 
+z
+M 1837 2765 
+C 2291 2765 2592 2330 2592 1664 
+C 2592 1037 2285 602 1837 602 
+C 1389 602 1082 1043 1082 1677 
+C 1082 2323 1389 2765 1837 2765 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-1b" d="M 1683 934 
+L 723 934 
+L 723 0 
+L 1683 0 
+L 1683 934 
+z
+M 1683 3328 
+L 723 3328 
+L 723 2394 
+L 1683 2394 
+L 1683 3328 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-49" d="M 429 4666 
+L 429 0 
+L 1325 0 
+L 1325 2074 
+C 1325 2470 1613 2752 2016 2752 
+C 2214 2752 2362 2682 2464 2541 
+C 2547 2426 2566 2330 2566 2112 
+L 2566 0 
+L 3462 0 
+L 3462 2317 
+C 3462 2746 3347 3053 3110 3251 
+C 2912 3418 2624 3514 2336 3514 
+C 1894 3514 1574 3341 1325 2957 
+L 1325 4666 
+L 429 4666 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-53" d="M 403 3456 
+L 403 0 
+L 1299 0 
+L 1299 1837 
+C 1299 2362 1562 2624 2086 2624 
+C 2182 2624 2246 2618 2368 2598 
+L 2368 3507 
+C 2317 3514 2298 3514 2259 3514 
+C 1850 3514 1498 3245 1299 2778 
+L 1299 3456 
+L 403 3456 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-56" d="M 3462 0 
+L 3462 3456 
+L 2566 3456 
+L 2566 1293 
+C 2566 883 2285 614 1843 614 
+C 1459 614 1267 819 1267 1235 
+L 1267 3456 
+L 371 3456 
+L 371 1050 
+C 371 282 787 -147 1530 -147 
+C 1997 -147 2310 19 2566 410 
+L 2566 0 
+L 3462 0 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-4d" d="M 1325 4666 
+L 429 4666 
+L 429 0 
+L 1325 0 
+L 1325 4666 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-42" d="M 3354 109 
+C 3200 256 3149 358 3149 531 
+L 3149 2451 
+C 3149 3155 2669 3514 1734 3514 
+C 800 3514 314 3117 256 2317 
+L 1120 2317 
+C 1165 2675 1312 2790 1754 2790 
+C 2099 2790 2272 2675 2272 2445 
+C 2272 2330 2214 2234 2118 2176 
+C 1997 2112 1997 2112 1555 2042 
+L 1197 1978 
+C 512 1862 179 1510 179 890 
+C 179 269 595 -147 1229 -147 
+C 1613 -147 1958 13 2278 346 
+C 2278 166 2298 102 2381 0 
+L 3354 0 
+L 3354 109 
+z
+M 2272 1389 
+C 2272 870 2016 576 1562 576 
+C 1261 576 1075 736 1075 992 
+C 1075 1261 1216 1389 1587 1466 
+L 1894 1523 
+C 2131 1568 2170 1581 2272 1632 
+L 2272 1389 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-43" d="M 378 4666 
+L 378 0 
+L 1274 0 
+L 1274 352 
+C 1491 13 1792 -147 2227 -147 
+C 3053 -147 3680 640 3680 1683 
+C 3680 2150 3539 2624 3309 2957 
+C 3072 3296 2650 3514 2227 3514 
+C 1792 3514 1491 3354 1274 3008 
+L 1274 4666 
+L 378 4666 
+z
+M 2029 2765 
+C 2470 2765 2784 2317 2784 1677 
+C 2784 1043 2477 602 2029 602 
+C 1574 602 1274 1030 1274 1696 
+C 1274 2330 1581 2765 2029 2765 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-58" d="M 3923 0 
+L 4902 3456 
+L 3974 3456 
+L 3450 1037 
+L 2931 3456 
+L 2035 3456 
+L 1510 1037 
+L 960 3456 
+L 32 3456 
+L 1005 0 
+L 1926 0 
+L 2477 2438 
+L 2995 0 
+L 3923 0 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-4a" d="M 1325 3456 
+L 429 3456 
+L 429 0 
+L 1325 0 
+L 1325 3456 
+z
+M 1325 4666 
+L 429 4666 
+L 429 3866 
+L 1325 3866 
+L 1325 4666 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-44" d="M 3341 2163 
+C 3277 3008 2720 3514 1850 3514 
+C 813 3514 218 2835 218 1658 
+C 218 518 813 -147 1837 -147 
+C 2675 -147 3258 371 3341 1197 
+L 2483 1197 
+C 2374 749 2195 576 1837 576 
+C 1382 576 1114 979 1114 1658 
+C 1114 1990 1178 2291 1286 2496 
+C 1389 2688 1587 2790 1843 2790 
+C 2208 2790 2381 2618 2483 2163 
+L 3341 2163 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-48" d="M 2560 3456 
+L 2560 2925 
+C 2310 3328 2035 3514 1670 3514 
+C 1363 3514 1024 3360 787 3110 
+C 442 2752 262 2253 262 1645 
+C 262 582 826 -147 1651 -147 
+C 2022 -147 2246 -26 2560 352 
+L 2560 -115 
+C 2560 -531 2266 -819 1843 -819 
+C 1523 -819 1325 -678 1254 -416 
+L 333 -416 
+C 339 -685 435 -870 672 -1062 
+C 947 -1286 1325 -1395 1811 -1395 
+C 2810 -1395 3411 -915 3411 -115 
+L 3411 3456 
+L 2560 3456 
+z
+M 1837 2765 
+C 2259 2765 2573 2298 2573 1658 
+C 2573 1030 2272 602 1824 602 
+C 1434 602 1158 1030 1158 1658 
+C 1158 2310 1434 2765 1837 2765 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Bold-47" d="M 2003 3386 
+L 1472 3386 
+L 1472 3725 
+C 1472 3904 1549 3994 1715 3994 
+C 1798 3994 1882 3987 1971 3974 
+L 1971 4646 
+C 1779 4659 1594 4666 1459 4666 
+C 864 4666 576 4384 576 3802 
+L 576 3386 
+L 90 3386 
+L 90 2790 
+L 576 2790 
+L 576 0 
+L 1472 0 
+L 1472 2790 
+L 2003 2790 
+L 2003 3386 
+z
+" transform="scale(0.015625)"/>
+    </defs>
+    <use xlink:href="#NimbusSans-Bold-18"/>
+    <use xlink:href="#NimbusSans-Bold-16" transform="translate(55.59375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-23" transform="translate(111.1875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(183.390625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-55" transform="translate(211.1875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-50" transform="translate(243.484375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4c" transform="translate(304.578125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(358.578125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(414.171875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-54" transform="translate(475.265625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(530.859375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-50" transform="translate(558.65625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(619.75 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(680.84375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-50" transform="translate(708.640625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(769.734375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(830.828125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(886.421875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-19" transform="translate(914.21875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-e" transform="translate(969.8125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-28" transform="translate(1006.109375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-31" transform="translate(1083.90625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-36" transform="translate(1148.90625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(1221.109375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(1248.90625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-50" transform="translate(1310 0)"/>
+    <use xlink:href="#NimbusSans-Bold-45" transform="translate(1371.09375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(1432.1875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1b" transform="translate(1489.375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(1522.671875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-55" transform="translate(1550.46875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-49" transform="translate(1583.5625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(1644.65625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(1700.25 0)"/>
+    <use xlink:href="#NimbusSans-Bold-53" transform="translate(1728.046875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-56" transform="translate(1766.953125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(1828.046875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(1889.140625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4d" transform="translate(1916.9375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-42" transform="translate(1944.734375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(2000.328125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-45" transform="translate(2061.421875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(2122.515625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-45" transform="translate(2178.109375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(2239.203125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-43" transform="translate(2267 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(2328.09375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4d" transform="translate(2383.78125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-50" transform="translate(2411.578125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-58" transform="translate(2471.375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(2549.171875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4a" transform="translate(2576.96875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-55" transform="translate(2604.765625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-54" transform="translate(2638.15625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(2693.75 0)"/>
+    <use xlink:href="#NimbusSans-Bold-54" transform="translate(2721.546875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-44" transform="translate(2777.140625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-42" transform="translate(2833.234375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4d" transform="translate(2888.828125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4a" transform="translate(2916.625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4f" transform="translate(2944.421875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-48" transform="translate(3005.3125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-e" transform="translate(3067.5 0)"/>
+    <use xlink:href="#NimbusSans-Bold-4d" transform="translate(3100.796875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-42" transform="translate(3128.59375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-58" transform="translate(3183.390625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-1" transform="translate(3261.1875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-47" transform="translate(3288.984375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-50" transform="translate(3321.28125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-53" transform="translate(3382.375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-46" transform="translate(3421.6875 0)"/>
+    <use xlink:href="#NimbusSans-Bold-44" transform="translate(3477.28125 0)"/>
+    <use xlink:href="#NimbusSans-Bold-42" transform="translate(3533.375 0)"/>
+    <use xlink:href="#NimbusSans-Bold-54" transform="translate(3588.765625 0)"/>
+    <use xlink:href="#NimbusSans-Bold-55" transform="translate(3644.265625 0)"/>
+   </g>
+  </g>
+  <g id="text_44">
+   <!-- Left: main eval (16-cell macro CE, all formats), scored every second checkpoint from 22B tokens on. Right: blitz-benchmark CE -->
+   <g style="fill: #52514e" transform="translate(8.64 39.439102) scale(0.095 -0.095)">
+    <defs>
+     <path id="NimbusSans-Regular-2d" d="M 1107 4666 
+L 512 4666 
+L 512 0 
+L 3411 0 
+L 3411 525 
+L 1107 525 
+L 1107 4666 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Regular-33" d="M 1190 2010 
+L 2726 2010 
+C 3258 2010 3494 1754 3494 1178 
+L 3488 762 
+C 3488 474 3539 192 3622 0 
+L 4346 0 
+L 4346 147 
+C 4122 301 4077 467 4064 1088 
+C 4058 1856 3936 2086 3430 2304 
+C 3955 2566 4166 2880 4166 3418 
+C 4166 4224 3667 4666 2746 4666 
+L 595 4666 
+L 595 0 
+L 1190 0 
+L 1190 2010 
+z
+M 1190 2534 
+L 1190 4141 
+L 2630 4141 
+C 2963 4141 3155 4090 3302 3962 
+C 3462 3827 3546 3616 3546 3341 
+C 3546 2784 3264 2534 2630 2534 
+L 1190 2534 
+z
+" transform="scale(0.015625)"/>
+    </defs>
+    <use xlink:href="#NimbusSans-Regular-2d"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(54.390625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-47" transform="translate(108.984375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(139.078125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1b" transform="translate(166.78125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(194.578125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4e" transform="translate(222.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(305.671875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(361.265625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(383.46875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(439.0625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(466.859375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-57" transform="translate(520.953125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(569.25 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(624.84375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(647.046875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-9" transform="translate(674.84375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-12" transform="translate(708.140625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-17" transform="translate(763.734375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-e" transform="translate(819.328125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(852.625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(903.21875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(958.40625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(980.609375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1002.8125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4e" transform="translate(1030.609375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(1113.90625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(1169.5 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(1219.5 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(1252.203125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1307.796875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-24" transform="translate(1335.59375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-26" transform="translate(1407.796875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-d" transform="translate(1474.5 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1502.296875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(1530.09375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(1585.6875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(1607.890625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1630.09375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-47" transform="translate(1657.890625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(1684.6875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(1740.28125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4e" transform="translate(1773.578125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(1856.875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(1911.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(1939.171875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-a" transform="translate(1989.171875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-d" transform="translate(2022.46875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2050.265625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(2078.0625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(2128.0625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(2178.859375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(2234.453125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(2266.75 0)"/>
+    <use xlink:href="#NimbusSans-Regular-45" transform="translate(2322.34375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2377.9375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(2405.734375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-57" transform="translate(2459.828125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(2507.828125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(2563.421875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-5a" transform="translate(2599.015625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2649.015625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(2676.8125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(2726.8125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(2782.40625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(2833.203125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(2888.796875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-45" transform="translate(2944.390625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2999.984375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(3027.78125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-49" transform="translate(3077.78125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(3133.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(3188.96875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4c" transform="translate(3239.5625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-51" transform="translate(3290.859375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(3346.453125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(3402.046875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(3424.25 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(3479.84375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(3507.640625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-47" transform="translate(3535.4375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(3563.234375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(3595.9375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4e" transform="translate(3651.53125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(3734.828125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-13" transform="translate(3762.625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-13" transform="translate(3818.21875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-23" transform="translate(3873.8125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(3940.515625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(3968.3125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(3994.90625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4c" transform="translate(4050.5 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(4098.40625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(4154 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(4209.59375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(4259.59375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(4287.390625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(4342.984375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-f" transform="translate(4398.578125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(4426.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-33" transform="translate(4454.171875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(4526.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-48" transform="translate(4548.484375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-49" transform="translate(4603.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(4658.96875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1b" transform="translate(4686.671875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(4714.46875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-43" transform="translate(4742.265625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(4797.859375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(4820.0625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(4842.265625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-5b" transform="translate(4871.359375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-e" transform="translate(4915.765625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-43" transform="translate(4949.0625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(5004.65625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(5060.25 0)"/>
+    <use xlink:href="#NimbusSans-Regular-44" transform="translate(5115.84375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-49" transform="translate(5165.84375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4e" transform="translate(5221.4375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(5304.734375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(5360.328125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4c" transform="translate(5394.125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(5444.125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-24" transform="translate(5471.921875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-26" transform="translate(5544.125 0)"/>
+   </g>
+   <!-- minus Maia-3 79M's on the same 80,000 positions, with 95% intervals. -->
+   <g style="fill: #52514e" transform="translate(8.64 51.732695) scale(0.095 -0.095)">
+    <defs>
+     <path id="NimbusSans-Regular-68" d="M 307 4538 
+L 307 3827 
+L 480 2970 
+L 736 2970 
+L 909 3827 
+L 909 4538 
+L 307 4538 
+z
+" transform="scale(0.015625)"/>
+     <path id="NimbusSans-Regular-6" d="M 1274 4384 
+C 672 4384 186 3891 186 3290 
+C 186 2688 672 2195 1280 2195 
+C 1875 2195 2368 2688 2368 3277 
+C 2368 3898 1888 4384 1274 4384 
+z
+M 1274 3936 
+C 1638 3936 1926 3648 1926 3283 
+C 1926 2931 1632 2643 1280 2643 
+C 922 2643 627 2931 627 3290 
+C 627 3648 915 3936 1274 3936 
+z
+M 3898 4538 
+L 1370 -128 
+L 1792 -128 
+L 4320 4538 
+L 3898 4538 
+z
+M 4403 2061 
+C 3802 2061 3315 1574 3315 973 
+C 3315 365 3802 -122 4410 -122 
+C 5005 -122 5498 365 5498 960 
+C 5498 1574 5018 2061 4403 2061 
+z
+M 4403 1613 
+C 4768 1613 5056 1325 5056 960 
+C 5056 614 4762 326 4410 326 
+C 4045 326 3757 614 3757 973 
+C 3757 1325 4045 1613 4403 1613 
+z
+" transform="scale(0.015625)"/>
+    </defs>
+    <use xlink:href="#NimbusSans-Regular-4e"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(83.296875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(105.5 0)"/>
+    <use xlink:href="#NimbusSans-Regular-56" transform="translate(161.09375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(216.6875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(266.6875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-2e" transform="translate(294.484375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(377.78125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(433.375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(455.578125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-e" transform="translate(511.171875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-14" transform="translate(544.46875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(600.0625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-18" transform="translate(627.859375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1a" transform="translate(683.453125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-2e" transform="translate(739.046875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-68" transform="translate(822.34375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(841.4375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(891.4375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(919.234375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(974.828125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1030.421875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(1058.21875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-49" transform="translate(1085.421875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(1141.015625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1196.609375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(1224.40625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(1274.3125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4e" transform="translate(1329.90625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(1413.203125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1468.796875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-19" transform="translate(1496.59375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-11" transform="translate(1552.1875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-d" transform="translate(1607.78125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-11" transform="translate(1635.578125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-11" transform="translate(1691.171875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-11" transform="translate(1746.765625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(1802.359375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-51" transform="translate(1830.15625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(1885.75 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(1941.34375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(1991.34375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(2013.546875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(2040.84375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-50" transform="translate(2063.046875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(2118.640625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(2174.234375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-d" transform="translate(2223.234375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2251.03125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-58" transform="translate(2278.828125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(2351.03125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(2373.234375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-49" transform="translate(2400.4375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2456.03125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1a" transform="translate(2483.828125 0)"/>
+    <use xlink:href="#NimbusSans-Regular-16" transform="translate(2539.421875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-6" transform="translate(2595.015625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-1" transform="translate(2683.921875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4a" transform="translate(2711.71875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4f" transform="translate(2733.921875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-55" transform="translate(2789.515625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-46" transform="translate(2815.90625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-53" transform="translate(2871.5 0)"/>
+    <use xlink:href="#NimbusSans-Regular-57" transform="translate(2907.59375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-42" transform="translate(2955.890625 0)"/>
+    <use xlink:href="#NimbusSans-Regular-4d" transform="translate(3011.484375 0)"/>
+    <use xlink:href="#NimbusSans-Regular-54" transform="translate(3033.6875 0)"/>
+    <use xlink:href="#NimbusSans-Regular-f" transform="translate(3082.6875 0)"/>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p2f2d2e9247">
+   <rect x="50.4" y="68.04" width="314.626246" height="217.08"/>
+  </clipPath>
+  <clipPath id="p3b8e0bdf6a">
+   <rect x="435.61196" y="68.04" width="273.58804" height="217.08"/>
+  </clipPath>
+ </defs>
+</svg>
