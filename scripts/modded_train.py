@@ -273,6 +273,8 @@ def migratable(key, old, new):
 def keep_model(src, kept, away=None):
     """Hard-link src into kept/ (instant; prune cannot free it); away: then move it there from a thread, durably,
     dropping the link only once the copy is synced (a failed or cut copy leaves the link)."""
+    if kept.exists() or (away and away.exists()):
+        return  # kept before an interruption
     kept.parent.mkdir(exist_ok=True)
     os.link(src, kept)
     if away is None:
