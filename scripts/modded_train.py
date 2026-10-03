@@ -288,6 +288,11 @@ def keep_model(src, kept, away=None):
             g.flush()
             os.fsync(g.fileno())
         tmp.replace(away)
+        d = os.open(away.parent, os.O_RDONLY)
+        try:
+            os.fsync(d)  # the rename itself, before the link goes
+        finally:
+            os.close(d)
         kept.unlink()
 
     threading.Thread(target=move, daemon=True).start()
