@@ -18,6 +18,8 @@ import triton
 
 import modded_arch
 import modded_medium
+import modded_shard
+import modded_smoe
 from lm_checkpoint import restore_rng, rng_state
 from lm_data import Packed
 from modded_arch import extra_flops
@@ -355,6 +357,12 @@ def main():
         help="with --ckpt eager: checkpoint only the first ceil(frac * layers) blocks",
     )
     p.add_argument(
+        "--moe-remat",
+        action="store_true",
+        help="checkpointed blocks' backward reruns the routed down scatter instead of keeping its [T, k, d] "
+        "output from the recompute (bitwise; less memory, one more scatter per MoE layer)",
+    )
+    p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
     )
     p.add_argument(
@@ -432,6 +440,7 @@ def main():
     # reference config; new kernels keep a poisoned-allocation test
     torch.utils.deterministic.fill_uninitialized_memory = False
     modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
+    modded_smoe.SAVE_EXPANDED = not a.moe_remat
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0
@@ -500,7 +509,9 @@ def main():
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    vrows = val.rows(val_idx) if rank == 0 else None
+    # sharded experts make every forward a collective: all ranks evaluate, rank 0 records
+    sharded = any(m.pos is not None for m in manager.moe)
+    vrows = val.rows(val_idx) if rank == 0 or sharded else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
     teacher_flops = 0  # the teacher's forward FLOPs, not in useful_training_flops
     runtime = dict(
@@ -523,7 +534,7 @@ def main():
         assert pointer["format"] == "allie-modded-medium-1"
         directory = Path(load_path).resolve().parent / pointer["directory"]
         shared = torch.load(
-            directory / "model.pt", weights_only=False, map_location="cpu"
+            directory / "model.pt", weights_only=False, map_location="cpu", mmap=True
         )
         local = torch.load(
             directory / f"rank{rank}.pt", weights_only=False, map_location="cpu"
@@ -624,7 +635,10 @@ def main():
         args=vars(a),
         config=config_dict(cfg),
         world_size=world,
-        parameters=sum(p.numel() for p in model.parameters()),
+        parameters=sum(
+            p.numel() * (world if getattr(p, "local", False) else 1)
+            for p in model.parameters()
+        ),
         source_sha256=source_hashes,
         runtime=runtime,
         dataset=json.loads((ROOT / "results/original-data.json").read_text()),
@@ -674,6 +688,7 @@ def main():
         if not weights_only:
             saver.add(rank_state, directory / f"rank{rank}.pt")
         sync_params()
+        weights = modded_shard.state_dict(model, saver.snapshot)
         if rank == 0:
             inference = dict(
                 split_embed=model.split_embed,
@@ -688,7 +703,7 @@ def main():
             )
             saver.add(
                 dict(
-                    model=saver.snapshot(model.state_dict()),
+                    model=weights,
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=source_hashes,
@@ -861,6 +876,12 @@ def main():
                 )
             )
             dist.all_reduce(stats)
+            peaks = torch.tensor(
+                [torch.cuda.max_memory_allocated(), torch.cuda.max_memory_reserved()],
+                device="cuda",
+                dtype=torch.float64,
+            )
+            dist.all_reduce(peaks, op=dist.ReduceOp.MAX)
             torch.cuda.synchronize()
             assert torch.isfinite(stats[0]), "Nonfinite move CE"
             dt = time.monotonic() - window_start
@@ -878,6 +899,8 @@ def main():
                     split_embed=model.split_embed,
                     windows=[manager.ws_short * 128, manager.ws_long * 128],
                     max_memory_gb=torch.cuda.max_memory_allocated() / 1e9,
+                    max_memory_all_gb=peaks[0].item() / 1e9,
+                    max_reserved_all_gb=peaks[1].item() / 1e9,
                     **moe_stats(manager),
                     **(
                         dict(
@@ -921,12 +944,16 @@ def main():
             flag = torch.tensor(stop_code, device="cpu")
             dist.all_reduce(flag, op=dist.ReduceOp.MAX, group=cpu)
             stop_code = int(flag)
+        if stop_code and os.environ.get("ALLIE_NO_SAVE"):  # throughput probes
+            break
         metrics = None
         if stop_code != 2 and (
             step % a.eval_every == 0 or step == total_steps or stop_code
         ):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
+            if sharded and rank:
+                evaluate(net, manager, vrows, a.micro_batch * a.row_tokens // 1024)
             if rank == 0:
                 metrics = evaluate(
                     net, manager, vrows, a.micro_batch * a.row_tokens // 1024

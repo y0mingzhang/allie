@@ -22,6 +22,7 @@ from torch.nn.attention.flex_attention import (
 import modded_arch
 import modded_attn
 import modded_board
+import modded_shard
 import modded_medium_core as core
 from modded_runtime import prime_source_key
 from modded_wsd import Schedule
@@ -209,7 +210,12 @@ def create_model(cfg, device="cuda"):
         cfg.max_tokens,
         moe=modded_arch.moe_dims(cfg.width, cfg.arch),
         dense_first=modded_arch.resolve(cfg.arch)["moe_dense_first"],
-    ).to(device)
+    )
+    # every rank seeds the same init: its own expert shards are sliced from it before the device sees the whole
+    shard = modded_arch.resolve(cfg.arch)["moe_shard"] and dist.get_world_size() > 1
+    if shard:
+        modded_shard.shard([m for m in model.modules() if isinstance(m, core.MoE)])
+    model = model.to(device)
     for i, block in enumerate(model.blocks):
         for p in block.parameters():
             p.block = i
@@ -232,7 +238,8 @@ def create_model(cfg, device="cuda"):
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)):
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
-        dist.broadcast(p.detach(), 0)
+        if not getattr(p, "local", False):
+            dist.broadcast(p.detach(), 0)
     small = modded_arch.resolve(cfg.arch)["fp32_small_masters"]
     masters = MASTER_LABELS + ("attn_gate", "value_embed_gate") * small
     for p in model.parameters():
@@ -331,7 +338,7 @@ class TrainingManager(core.TrainingManager):
         arch = modded_arch.resolve(cfg.arch)
         self.adam_every = arch["adam_every"]
         for opt in self.optimizers:
-            half = self.adam_every and opt is not self.muon_opt
+            half = self.adam_every and not isinstance(opt, core.NorMuon)
             for group in opt.param_groups:
                 group["initial_lr"] *= cfg.lr_scale
                 group["lr"] *= cfg.lr_scale

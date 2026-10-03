@@ -6,6 +6,8 @@ those of the same per-block compiled graphs run without them.
 resume: 8 steps crossing the multi-token switch (4) and the embed split (5), saved after 3 steps
 (model state and rank_state_dict, in memory), rebuilt, restored and continued: losses and every
 model and optimizer tensor equal the uninterrupted run's. Not covered: world-size resharding.
+ARCH='{"moe_shard": true}' (JSON, merged into the arch): the same with the experts sharded (the
+model state with whole experts, as model.pt keeps them).
 
     torchrun --standalone --nproc_per_node=2 scripts/test_checkpoint_resume.py
 """
@@ -21,6 +23,7 @@ import torch
 import torch.distributed as dist
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import modded_shard
 from lm_data import Packed
 from modded_medium import (
     Config,
@@ -36,13 +39,14 @@ from modded_wsd import Schedule
 DATA = "/data/group_data/dei-group/yimingz3/allie/lichess_tokens_v2"
 SCHEDULE = Schedule(warmup_steps=2, mtp_steps=4, split_step=5, batch_rows=2)
 ORIGINAL = core._eager_block
+ARCH = json.loads(os.environ.get("ARCH", "{}"))
 
 
 def build():
     torch.manual_seed(701)
     cfg = Config(
         width=128, head_dim=64, layers=8, max_tokens=1024, scheduled_steps=8, ckpt="eager",
-        arch=dict(moe=[16, 2], moe_seq=0.001),
+        arch=dict(moe=[16, 2], moe_seq=0.001) | ARCH,
     )  # fmt: skip
     m = create_model(cfg, device=torch.device("cuda", int(os.environ["LOCAL_RANK"])))
     with torch.no_grad():  # nonzero expert outputs: every expert grad carries signal
@@ -74,6 +78,15 @@ def advance(val, m, mgr, net, step):
         primary.append(float(move.detach() / count))
     mgr.step_optimizers(step)
     return primary
+
+
+def snapshot(m, mgr):
+    """Every rank's copy of the model state (whole experts) and its own rank state, once the owners'
+    updates of the last step have arrived."""
+    core.sync_params()
+    whole = [modded_shard.state_dict(m, cpu_copy)]
+    dist.broadcast_object_list(whole, 0)
+    return dict(model=whole[0], manager=mgr.rank_state_dict())
 
 
 def equal(a, b, path="root"):
@@ -141,9 +154,9 @@ def main():
     for s in range(3):
         advance(val, m, mgr, net, s)
     buf = io.BytesIO()
-    torch.save(dict(model=cpu_copy(m.state_dict()), manager=mgr.rank_state_dict()), buf)
+    torch.save(snapshot(m, mgr), buf)
     losses = [advance(val, m, mgr, net, s) for s in range(3, 8)]
-    expected = dict(model=cpu_copy(m.state_dict()), manager=mgr.rank_state_dict())
+    expected = snapshot(m, mgr)
     assert m.split_embed
     del m, mgr, net
     gc.collect()
@@ -155,7 +168,7 @@ def main():
     mgr.load_rank_state_dict(saved["manager"])
     resumed = [advance(val, m, mgr, net, s) for s in range(3, 8)]
     assert losses == resumed, (losses, resumed)
-    now = dict(model=cpu_copy(m.state_dict()), manager=mgr.rank_state_dict())
+    now = snapshot(m, mgr)
     count = equal(expected, now)
     print(json.dumps(dict(rank=dist.get_rank(), resume_exact=count, losses=losses)))
     dist.destroy_process_group()

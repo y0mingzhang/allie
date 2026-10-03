@@ -17,6 +17,7 @@ import torch.distributed as dist
 from torch import nn
 from torch.nn import functional as F
 
+import modded_shard
 import modded_smoe
 
 # MoE.stats, per layer over the last step (modded_train logs them as moe_<name>); dropped is always
@@ -237,6 +238,7 @@ class MoE(nn.Module):
             hist = torch.zeros(experts, modded_smoe.QB_BINS, dtype=torch.int32)
             self.register_buffer("hist", hist, persistent=False)
         self.remat = True  # modded_smoe.routed's: False where a checkpoint recomputes the layer
+        self.pos = None  # modded_shard.SHARDED position once its experts are sharded
         # center: EMA decay of the mean router input mu, subtracted before the router (0: off). A shared
         # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores (big run
         # layer 0: 77% of the input energy in mu, routing nearly token-independent). mu averages past
@@ -282,18 +284,12 @@ class MoE(nn.Module):
         flat = idx.flatten()
         order = flat.argsort(stable=True)
         count = counts(flat[order], e)
-        up, down = self.up.type_as(h), self.down.type_as(h)
-        out = modded_smoe.routed(
-            h,
-            up.transpose(1, 2),
-            down,
-            k,
-            flat[order],
-            order,
-            count.cumsum(0),
-            w.type_as(h),
-            self.remat,
-        )
+        route = k, flat[order], order, count.cumsum(0), w.type_as(h), self.remat
+        if self.pos is None:
+            up, down = self.up.type_as(h), self.down.type_as(h)
+            out = modded_smoe.routed(h, up.transpose(1, 2), down, *route)
+        else:
+            out = modded_shard.routed(h, self.up, self.down, *route, self.pos)
         if self.training:
             with torch.no_grad():
                 val, top = stats or stats_topk(s, k + 1)

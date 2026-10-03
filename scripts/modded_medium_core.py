@@ -16,6 +16,7 @@ import triton.language as tl
 from torch import Tensor, nn
 
 from chess_vocab import INCREMENTS_ID, SECONDS_ID
+import modded_shard
 from modded_arch import swiglu_hidden
 from modded_moe import MoE, replay_context
 
@@ -470,14 +471,19 @@ class NorMuon(torch.optim.Optimizer):
 
     One param group per label, its stacked params split into chunk_size rows per rank. BF16 weights
     (p.master) keep this rank's rows as an FP32 master, their grads arrive reduced into FP32 rows
-    (reduce_to_owner) and their BF16 params are rows of one buffer the owners publish into.
+    (reduce_to_owner) and their BF16 params are rows of one buffer the owners publish into. local: this
+    rank's own params (expert shards, modded_shard), all owned here, their grads reduced into their rows by
+    modded_shard, updates published in place.
     """
 
-    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.95):
+    def __init__(
+        self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.95, local=False
+    ):
         defaults = dict(
             lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2
         )
-        self.world_size = dist.get_world_size()
+        self.local = local
+        self.world_size = 1 if local else dist.get_world_size()
         # params whose broadcast from their owner waits for launch(), after the step's collectives
         self._deferred = [] if DEFER and self.world_size > 1 else None
         groups = defaultdict(list)
@@ -490,7 +496,7 @@ class NorMuon(torch.optim.Optimizer):
             ],
             defaults,
         )
-        rank = dist.get_rank()
+        rank = 0 if local else dist.get_rank()
         self._flat, self._pflat = {}, {}
         for i, group in enumerate(self.param_groups):
             ps, n = group["params"], group["chunk_size"]
@@ -514,7 +520,8 @@ class NorMuon(torch.optim.Optimizer):
                 p.data, p.fresh, p.owner = self._pflat[i][k], True, k // n
                 p.main_grad = self._flat[i][k - lo] if lo <= k < lo + n else None
                 del p.fp32
-                p.register_post_accumulate_grad_hook(reduce_to_owner)
+                if not local:
+                    p.register_post_accumulate_grad_hook(reduce_to_owner)
         # by index: load_state_dict replaces the group dicts
         self._group_of = {
             p: i for i, g in enumerate(self.param_groups) for p in g["params"]
@@ -537,7 +544,9 @@ class NorMuon(torch.optim.Optimizer):
             self._deferred is not None
         ):  # the last step's broadcasts, if a block has not run
             sync_params()
-        rank = dist.get_rank()
+        if self.local:
+            modded_shard.reset()
+        rank = 0 if self.local else dist.get_rank()
         group_infos = []
         for group in self.param_groups:
             params: list[Tensor] = group["params"]
@@ -680,7 +689,7 @@ class NorMuon(torch.optim.Optimizer):
 
             # # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             flat = self._pflat.get(self._group_of[params[0]])
-            direct_publish = owned and self._deferred is not None
+            direct_publish = owned and (self._deferred is not None or self.local)
             updated_params = (
                 flat[start_idx : start_idx + chunk_size]
                 if direct_publish else torch.empty_like(grad_chunk, dtype=params[0].dtype)
@@ -715,7 +724,8 @@ class NorMuon(torch.optim.Optimizer):
             if (
                 direct_publish
             ):  # owners broadcast in launch(); padding rows stay untouched
-                self._deferred += params
+                if not self.local:
+                    self._deferred += params
                 continue
             stacked_params = (
                 torch.empty(
@@ -1526,7 +1536,8 @@ class TrainingManager:
         ]
         muon_params = [
             p for p in model.parameters() if getattr(p, "label", None) in muon_labels
-        ]
+            and not getattr(p, "local", False)
+        ]  # fmt: skip
         assert set(getattr(p, "label", None) for p in model.parameters()) <= set(
             adam_labels + scalar_labels + muon_labels
         ), "All params must have label"
@@ -1547,10 +1558,12 @@ class TrainingManager:
             eps=1e-8,
             weight_decay=0.005,
         )
-        self.muon_opt = NorMuon(
-            muon_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2
-        )
+        muon = dict(lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2)
+        self.muon_opt = NorMuon(muon_params, **muon)
         self.optimizers = [self.adam_opt, self.scalar_opt, self.muon_opt]
+        local = [p for p in model.parameters() if getattr(p, "local", False)]
+        if local:  # expert shards: the same NorMuon, rank-local
+            self.optimizers.append(NorMuon(local, **muon, local=True))
         for opt in self.optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]
@@ -1572,12 +1585,13 @@ class TrainingManager:
 
     def step_optimizers(self, step: int):
         step_lr = self.schedule.lr(step, self.decay_start, self.end_step)
-        for group in self.muon_opt.param_groups:
+        muons = [opt for opt in self.optimizers if isinstance(opt, NorMuon)]
+        for group in (g for opt in muons for g in opt.param_groups):
             group["momentum"] = self.schedule.momentum(step)
 
         for opt in self.optimizers:
             # Adam on odd steps only, unless adam_every
-            if opt is self.muon_opt or self.adam_every or step % 2 == 1:
+            if opt in muons or self.adam_every or step % 2 == 1:
                 for group in opt.param_groups:
                     group["lr"] = group["initial_lr"] * step_lr
                 opt.step()

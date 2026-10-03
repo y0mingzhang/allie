@@ -376,6 +376,9 @@ def combine(expanded, gates):
 
 
 REPLAY = False  # a checkpoint's recompute is running (modded_moe.replay_context)
+# blocks under an eager checkpoint save the [T, k, D] down output (their recompute holds it until their own backward);
+# False: those backwards rerun the scatter too (modded_train --moe-remat)
+SAVE_EXPANDED = True
 
 
 @functools.cache
@@ -403,7 +406,7 @@ class Routed(torch.autograd.Function):
         pre, y = up(x, up_t, order, offsets, k)
         expanded = scatter(y, down, se, order, y.shape[1]).view(*gates.shape, down.shape[-1])
         saved = x, up_t, down, se, order, offsets, gates, pre, y
-        ctx.save_for_backward(*saved, *(() if remat else (expanded,)))
+        ctx.save_for_backward(*saved, *([expanded] * (SAVE_EXPANDED and not remat)))
         ctx.k = k
         return combine_op(expanded, gates)
 
