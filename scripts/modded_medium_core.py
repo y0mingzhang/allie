@@ -439,7 +439,8 @@ def reduce_to_owner(p):
     if dist.get_world_size() > 1:
         work = dist.reduce(g, p.owner, op=dist.ReduceOp.AVG, async_op=True)
     _inflight.append((work, p, g))
-    while sum(x[2].nbytes for x in _inflight) > INFLIGHT_BYTES:
+    # never the reduce just issued: a grad above the cap (width 2048's expert up grads) would stall on it at once
+    while len(_inflight) > 1 and sum(x[2].nbytes for x in _inflight) > INFLIGHT_BYTES:
         _finish(_inflight.pop(0))
 
 

@@ -369,6 +369,12 @@ def main():
         "output from the recompute (bitwise; less memory, one more scatter per MoE layer)",
     )
     p.add_argument(
+        "--moe-chunks",
+        type=int,
+        default=1,
+        help="the routed backward's [T*k, d] products in this many token chunks (bitwise; less memory)",
+    )
+    p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"
     )
     p.add_argument(
@@ -446,7 +452,7 @@ def main():
     # reference config; new kernels keep a poisoned-allocation test
     torch.utils.deterministic.fill_uninitialized_memory = False
     modded_medium.ATTENTION = "triton" if a.attn_kernel else "flex"
-    modded_smoe.SAVE_EXPANDED = not a.moe_remat
+    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = not a.moe_remat, a.moe_chunks
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0

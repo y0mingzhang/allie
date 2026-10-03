@@ -6,8 +6,8 @@ deterministic (FP32 sums in rank order); modded_smoe's Triton kernels and polar 
 replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal, or
 the step's largest difference is printed. resume: a sharded run saved after 3 steps as modded_train saves it
 (model.pt with whole experts, each rank's state), rebuilt, loaded and continued through the embed split equals the
-uninterrupted run bit for bit: losses, model.pt, every rank's optimizer state. --moe-remat (modded_smoe.SAVE_EXPANDED
-off) is bitwise the sharded run. eval: an unsharded model loading the final model.pt gives the sharded model's eval
+uninterrupted run bit for bit: losses, model.pt, every rank's optimizer state. --moe-remat --moe-chunks 4 (the down
+output rerun in checkpointed blocks, the backward's [T*k, D] products in 4 token chunks) is bitwise the sharded run. eval: an unsharded model loading the final model.pt gives the sharded model's eval
 logits.
 
     TORCH_COMPILE_DISABLE=1 python scripts/test_moe_shard.py
@@ -241,10 +241,10 @@ def worker(rank, world, port, tmp):
         assert step or not diff.any(), "step 1 must be bitwise"
     final = got[-1][1], manager.rank_state_dict()
     del model, manager
-    modded_smoe.SAVE_EXPANDED = False
+    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = False, 4
     assert same(train(val, *build(True), range(STEPS)), got) == 0.0
-    modded_smoe.SAVE_EXPANDED = True
-    say("--moe-remat (expanded rerun in checkpointed blocks) bitwise")
+    modded_smoe.SAVE_EXPANDED, modded_smoe.CHUNKS = True, 1
+    say("--moe-remat --moe-chunks 4 bitwise")
 
     model, manager = build(True)
     head = train(val, model, manager, range(SAVE))

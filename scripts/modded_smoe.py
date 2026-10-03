@@ -379,6 +379,39 @@ REPLAY = False  # a checkpoint's recompute is running (modded_moe.replay_context
 # blocks under an eager checkpoint save the [T, k, D] down output (their recompute holds it until their own backward);
 # False: those backwards rerun the scatter too (modded_train --moe-remat)
 SAVE_EXPANDED = True
+# the backward's [T * k, D] products (the down output for the gates' grad, dh before its sum over the k slots) in this
+# many token chunks, each chunk's routes in expert order: the same rows from the same kernels, bit for bit (--moe-chunks)
+CHUNKS = 1
+
+
+def chunks(order, k):
+    """Token chunks of the routes in expert order: (first token, end, the chunk's rows, their routes in the chunk)."""
+    t = order.numel() // k
+    if CHUNKS == 1:
+        return [(0, t, slice(None), order)]
+    assert t % CHUNKS == 0
+    n, inv = t // CHUNKS, torch.empty_like(order)
+    inv[order] = torch.arange(order.numel(), device=order.device)
+    rows = [inv[lo * k : (lo + n) * k].sort().values for lo in range(0, t, n)]
+    return [(i * n, (i + 1) * n, r, order[r] - i * n * k) for i, r in enumerate(rows)]
+
+
+def gates_grad(y, down, se, order, grad, k):
+    """(expanded @ grad) per token, the down scatter rerun chunk by chunk."""
+    parts = [
+        (scatter(y[r], down, se[r], d, y.shape[1]).view(hi - lo, k, -1) @ grad[lo:hi].unsqueeze(-1)).squeeze(-1)
+        for lo, hi, r, d in chunks(order, k)
+    ]  # fmt: skip
+    return torch.cat(parts) if len(parts) > 1 else parts[0]
+
+
+def input_grad(dpre, up, se, order, k):
+    """scatter(dpre, up).view(T, k, D).sum(-2), chunk by chunk; up [E, 2H, D]."""
+    parts = [
+        scatter(dpre[r], up, se[r], d, up.shape[1] // 2).view(hi - lo, k, -1).sum(-2)
+        for lo, hi, r, d in chunks(order, k)
+    ]
+    return torch.cat(parts) if len(parts) > 1 else parts[0]
 
 
 @functools.cache
@@ -413,14 +446,15 @@ class Routed(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad):
         x, up_t, down, se, order, offsets, gates, pre, y, *kept = ctx.saved_tensors
-        expanded = kept[0] if kept else scatter(y, down, se, order, y.shape[1]).view(*gates.shape, -1)
-        dgates = (expanded @ grad.unsqueeze(-1)).squeeze(-1)
-        del expanded, kept
+        if kept:
+            dgates = (kept[0] @ grad.unsqueeze(-1)).squeeze(-1)
+        else:
+            dgates = gates_grad(y, down, se, order, grad, ctx.k)
+        del kept
         ddown = down_wgrad(grad, y, gates, order, offsets)
         dpre = dx(grad, down.permute(0, 2, 1), gates, order, offsets, pre)
         dup = up_wgrad(dpre, x, order, offsets, ctx.k)
-        dh = scatter(dpre, up_t.permute(0, 2, 1), se, order, y.shape[1])
-        dh = dh.view(x.shape[0], ctx.k, dh.shape[-1]).sum(-2)
+        dh = input_grad(dpre, up_t.permute(0, 2, 1), se, order, ctx.k)
         return dh, dup, ddown, None, None, None, None, dgates, None
 
 

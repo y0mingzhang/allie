@@ -115,8 +115,7 @@ def wgrad(
         g = full.new_empty(p.shape)
         work = dist.reduce_scatter_tensor(g, full, op=dist.ReduceOp.AVG, async_op=True)
         _pending.append((work, p, g, full))
-    dh = modded_smoe.scatter(dpre, up, se, order, y.shape[1])
-    return dh.view(x.shape[0], k, dh.shape[-1]).sum(-2)
+    return modded_smoe.input_grad(dpre, up, se, order, k)
 
 
 @wgrad.register_fake
@@ -143,11 +142,11 @@ class Routed(torch.autograd.Function):
         x, se, order, offsets, gates, pre, y, up, down, *kept = ctx.saved_tensors
         if ctx.remat:
             up, down = gather(up, down, grad, ctx.pos, -1)
-        expanded = (
-            kept[0] if kept else modded_smoe.scatter(y, down, se, order, y.shape[1])
-        )
-        dgates = (expanded.view(*gates.shape, -1) @ grad.unsqueeze(-1)).squeeze(-1)
-        del expanded, kept
+        if kept:
+            dgates = (kept[0].view(*gates.shape, -1) @ grad.unsqueeze(-1)).squeeze(-1)
+        else:
+            dgates = modded_smoe.gates_grad(y, down, se, order, grad, ctx.k)
+        del kept
         dpre = modded_smoe.dx(grad, down.permute(0, 2, 1), gates, order, offsets, pre)
         dh = wgrad(grad, y, gates, order, offsets, dpre, x, up, se, ctx.pos, ctx.k)
         return dh, None, None, None, None, None, None, dgates, None, None
