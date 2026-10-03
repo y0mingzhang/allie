@@ -138,6 +138,7 @@ def extra_flops(arch, width, layers):
     if a["moe"]:
         _, k, routed, shared, *_ = moe_dims(width, arch)
         dense = a["moe_dense_first"]
+        assert dense <= layers, "moe_dense_first exceeds the layers"
         m = layers - dense
         extra += 2 * m * width * a["moe"][0]
         extra += 2 * m * (3 * width * (shared + k * routed) - 8 * width * width)
