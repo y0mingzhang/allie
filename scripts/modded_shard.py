@@ -131,11 +131,13 @@ class Routed(torch.autograd.Function):
     def forward(ctx, x, up_s, down_s, k, se, order, offsets, gates, remat, pos):
         up, down = gather(up_s, down_s, x, pos, 1)
         pre, y = modded_smoe.up(x, up.transpose(1, 2), order, offsets, k)
-        expanded = modded_smoe.scatter(y, down, se, order, y.shape[1])
-        kept = [expanded] * (modded_smoe.SAVE_EXPANDED and not remat)
-        w = (up_s, down_s) if remat else (up, down, *kept)
-        ctx.save_for_backward(x, se, order, offsets, gates, pre, y, *w)
+        saved = x, se, order, offsets, gates, pre, y
         ctx.k, ctx.pos, ctx.remat = k, pos, remat
+        if remat or not modded_smoe.SAVE_EXPANDED:
+            ctx.save_for_backward(*saved, *((up_s, down_s) if remat else (up, down)))
+            return modded_smoe.routed_out(y, down, se, order, gates)
+        expanded = modded_smoe.scatter(y, down, se, order, y.shape[1])
+        ctx.save_for_backward(*saved, up, down, expanded)
         return modded_smoe.combine_op(expanded.view(*gates.shape, -1), gates)
 
     @staticmethod

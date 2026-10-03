@@ -6,7 +6,8 @@ deterministic (FP32 sums in rank order); modded_smoe's Triton kernels and polar 
 replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal. resume: a sharded run saved after 3 steps as modded_train saves it
 (model.pt with whole experts, each rank's state), rebuilt, loaded and continued through the embed split equals the
 uninterrupted run bit for bit: losses, model.pt, every rank's optimizer state. --moe-remat --moe-chunks 4 (the down
-output rerun in checkpointed blocks, the backward's [T*k, D] products in 4 token chunks) is bitwise the sharded run. eval: an unsharded model loading the final model.pt gives the sharded model's eval
+output rerun in checkpointed blocks, the [T*k, D] products in 4 token chunks) is bitwise the sharded run (on CPU: on
+GPU the gates' grad, a batched matmul per chunk, may round otherwise). eval: an unsharded model loading the final model.pt gives the sharded model's eval
 logits.
 
     TORCH_COMPILE_DISABLE=1 python scripts/test_moe_shard.py

@@ -53,7 +53,14 @@ SAME = (
     "mix_months", "clock_feats", "input_lr_mul", "aux_time", "aux_wdl", "arch", "attn_kernel",
 )  # fmt: skip
 # later SAME arguments, with the value a checkpoint that predates them ran with
-SAME_SINCE = dict(init_from=None, kd_teacher=None, kd_alpha=0.0, kd_temp=1.0)
+SAME_SINCE = dict(
+    init_from=None,
+    kd_teacher=None,
+    kd_alpha=0.0,
+    kd_temp=1.0,
+    moe_remat=False,
+    moe_chunks=1,
+)
 # Config fields --init-from may change: they leave the function the parent computes unchanged
 INIT_FREE = ("scheduled_steps", "input_lr_mul", "ckpt", "ckpt_frac")
 
@@ -405,14 +412,15 @@ def main():
     p.add_argument(
         "--moe-remat",
         action="store_true",
-        help="checkpointed blocks' backward reruns the routed down scatter instead of keeping its [T, k, d] "
-        "output from the recompute (bitwise; less memory, one more scatter per MoE layer)",
+        help="checkpointed blocks' recompute skips the routed down output [T, k, d] and their backward reruns it "
+        "(bitwise alone; less memory, the same scatters)",
     )
     p.add_argument(
         "--moe-chunks",
         type=int,
         default=1,
-        help="the routed backward's [T*k, d] products in this many token chunks (bitwise; less memory)",
+        help="the routed [T*k, d] products in this many token chunks (less memory; with --moe-remat the gates' "
+        "grad, a batched matmul per chunk, may round otherwise on GPU)",
     )
     p.add_argument(
         "--arch", default="{}", help="model-track switches, JSON (modded_arch.DEFAULTS)"

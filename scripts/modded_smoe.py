@@ -377,10 +377,11 @@ def combine(expanded, gates):
 
 REPLAY = False  # a checkpoint's recompute is running (modded_moe.replay_context)
 # blocks under an eager checkpoint save the [T, k, D] down output (their recompute holds it until their own backward);
-# False: those backwards rerun the scatter too (modded_train --moe-remat)
+# False: their recompute skips it and their backward reruns it (modded_train --moe-remat)
 SAVE_EXPANDED = True
-# the backward's [T * k, D] products (the down output for the gates' grad, dh before its sum over the k slots) in this
-# many token chunks, each chunk's routes in expert order: the same rows from the same kernels, bit for bit (--moe-chunks)
+# the [T * k, D] products (the down output, dh before its sum over the k slots) in this many token chunks, each chunk's
+# routes in expert order: the same rows from the same kernels (--moe-chunks); the gates' grad, a batched matmul per
+# chunk, need not round as the whole batch's does
 CHUNKS = 1
 
 
@@ -433,14 +434,37 @@ def _(expanded, gates):
     return expanded.new_empty(expanded.shape[0], expanded.shape[-1])
 
 
+@torch.library.custom_op("allie_smoe::routed_out", mutates_args=())
+def routed_out(
+    y: torch.Tensor, down: torch.Tensor, se: torch.Tensor, order: torch.Tensor, gates: torch.Tensor
+) -> torch.Tensor:
+    """combine_op(scatter(y, down), gates) chunk by chunk, the down output never whole; a recompute skips it."""
+    out = y.new_empty(gates.shape[0], down.shape[-1])
+    if REPLAY:
+        return out
+    k = gates.shape[1]
+    for lo, hi, r, d in chunks(order, k):
+        e = scatter(y[r], down, se[r], d, y.shape[1]).view(hi - lo, k, -1)
+        out[lo:hi] = (_combine() if y.is_cuda else combine)(e, gates[lo:hi])
+    return out
+
+
+@routed_out.register_fake
+def _(y, down, se, order, gates):
+    return y.new_empty(gates.shape[0], down.shape[-1])
+
+
 class Routed(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, up_t, down, k, se, order, offsets, gates, remat):
         pre, y = up(x, up_t, order, offsets, k)
-        expanded = scatter(y, down, se, order, y.shape[1]).view(*gates.shape, down.shape[-1])
         saved = x, up_t, down, se, order, offsets, gates, pre, y
-        ctx.save_for_backward(*saved, *([expanded] * (SAVE_EXPANDED and not remat)))
         ctx.k = k
+        if remat or not SAVE_EXPANDED:
+            ctx.save_for_backward(*saved)
+            return routed_out(y, down, se, order, gates)
+        expanded = scatter(y, down, se, order, y.shape[1]).view(*gates.shape, down.shape[-1])
+        ctx.save_for_backward(*saved, expanded)
         return combine_op(expanded, gates)
 
     @staticmethod
