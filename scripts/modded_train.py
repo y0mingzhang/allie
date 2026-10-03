@@ -396,7 +396,8 @@ def main():
     p.add_argument(
         "--final-model-only",
         action="store_true",
-        help="the last scheduled step's checkpoint holds model.pt only: evaluable, not resumable",
+        help="the last scheduled step's checkpoint holds model.pt only, published as final.pt (last.pt "
+        "stays at the previous, resumable checkpoint)",
     )
     a = p.parse_args()
     assert 0 <= a.kd_alpha <= 1 and 0 < a.kd_temp < float("inf")
@@ -662,21 +663,16 @@ def main():
         dist.barrier()
         # Save each rank independently: its sharded moments and pending grads
         # cannot be reconstructed from rank0's optimizer state.
+        # snapshotted either way: the model's host buffers keep their snapshot root
+        rank_state = dict(
+            manager=manager.rank_state_dict(saver.snapshot),
+            rng=rng_state(),
+            data=train.state_dict(),
+            useful_training_flops=flops_local,
+            **({"teacher_forward_flops": teacher_flops} if teacher is not None else {}),
+        )
         if not weights_only:
-            saver.add(
-                dict(
-                    manager=manager.rank_state_dict(saver.snapshot),
-                    rng=rng_state(),
-                    data=train.state_dict(),
-                    useful_training_flops=flops_local,
-                    **(
-                        {"teacher_forward_flops": teacher_flops}
-                        if teacher is not None
-                        else {}
-                    ),
-                ),
-                directory / f"rank{rank}.pt",
-            )
+            saver.add(rank_state, directory / f"rank{rank}.pt")
         sync_params()
         if rank == 0:
             inference = dict(
@@ -715,6 +711,9 @@ def main():
             names.append(f"fork-{step}.pt")
         if metrics is not None and metrics["move_ce"] <= best:
             names.append("best.pt")
+        # a failure before done.json, or a stop on the last step, resumes from last.pt
+        if weights_only:
+            names = ["final.pt"]
         torch.cuda.synchronize()  # completes the snapshot's pinned copies
         seconds = time.monotonic() - checkpoint_start
 
