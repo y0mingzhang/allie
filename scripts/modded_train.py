@@ -109,7 +109,7 @@ def init_from(model, cfg, path):
 
 def load_teacher(path, cfg):
     """A frozen eval-mode model of a checkpoint's own config, built before the student so that
-    modded_medium.configure's globals stay the student's. Returns (model, its windows, provenance)."""
+    modded_medium.configure's globals stay the student's. Returns (model, its config, its windows, provenance)."""
     state, path = read_model(path)
     tcfg = Config(**dict(state["config"], ckpt="none", ckpt_frac=1.0))
     assert tcfg.feats == cfg.feats, "teacher reads other clock features"
@@ -124,9 +124,13 @@ def load_teacher(path, cfg):
         digest = hashlib.file_digest(f, "sha256").hexdigest()
     windows = (state["inference"]["ws_short"], state["inference"]["ws_long"])
     info = dict(
-        model=str(path), model_sha256=digest, step=state["step"], config=state["config"]
+        model=str(path),
+        model_sha256=digest,
+        step=state["step"],
+        config=state["config"],
+        source_sha256=state["source_sha256"],
     )
-    return model, windows, info
+    return model, tcfg, windows, info
 
 
 def kd_losses(logits, teacher, targets, mask, temp):
@@ -389,8 +393,13 @@ def main():
         help="move objective: (1 - alpha) * played-move NLL + alpha * teacher CE",
     )
     p.add_argument("--kd-temp", type=float, default=1.0, help="KD softmax temperature")
+    p.add_argument(
+        "--final-model-only",
+        action="store_true",
+        help="the last scheduled step's checkpoint holds model.pt only: evaluable, not resumable",
+    )
     a = p.parse_args()
-    assert 0 <= a.kd_alpha <= 1 and a.kd_temp > 0
+    assert 0 <= a.kd_alpha <= 1 and 0 < a.kd_temp < float("inf")
     assert a.kd_teacher or (a.kd_alpha == 0 and a.kd_temp == 1)
     schedule = Schedule(**json.loads(a.wsd_schedule))
     schedule.validate()
@@ -448,7 +457,7 @@ def main():
     aux = bool(a.aux_time or a.aux_wdl)
     teacher = None
     if a.kd_teacher:
-        teacher, windows, teacher_info = load_teacher(a.kd_teacher, cfg)
+        teacher, tcfg, windows, teacher_info = load_teacher(a.kd_teacher, cfg)
         tnet = torch.compile(teacher, dynamic=False, fullgraph=True)
     torch.manual_seed(a.seed)
     model = create_model(cfg)
@@ -492,6 +501,7 @@ def main():
     )
     vrows = val.rows(val_idx) if rank == 0 else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
+    teacher_flops = 0  # the teacher's forward FLOPs, not in useful_training_flops
     runtime = dict(
         torch=torch.__version__,
         triton=triton.__version__,
@@ -584,6 +594,11 @@ def main():
             shared["elapsed_seconds"],
             local["useful_training_flops"],
         )
+        if teacher is not None:
+            assert (shared.get("kd_teacher") or {}).get("model_sha256") == teacher_info[
+                "model_sha256"
+            ], "Resume changes the teacher"
+            teacher_flops = local["teacher_forward_flops"]
         if a.wsd_fork_from or a.wsd_continue_from:
             # Endpoint model compute includes prefix; branch allocation time does not.
             elapsed_prior, best = 0.0, float("inf")
@@ -634,7 +649,7 @@ def main():
     # checkpoints are written from a thread; pointers move once every rank's files are durable
     saver = AsyncSaver(cpu)
 
-    def save(step, metrics):
+    def save(step, metrics, weights_only=False):
         checkpoint_start = time.monotonic()
         waited = saver.flush()
         total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
@@ -647,15 +662,21 @@ def main():
         dist.barrier()
         # Save each rank independently: its sharded moments and pending grads
         # cannot be reconstructed from rank0's optimizer state.
-        saver.add(
-            dict(
-                manager=manager.rank_state_dict(saver.snapshot),
-                rng=rng_state(),
-                data=train.state_dict(),
-                useful_training_flops=flops_local,
-            ),
-            directory / f"rank{rank}.pt",
-        )
+        if not weights_only:
+            saver.add(
+                dict(
+                    manager=manager.rank_state_dict(saver.snapshot),
+                    rng=rng_state(),
+                    data=train.state_dict(),
+                    useful_training_flops=flops_local,
+                    **(
+                        {"teacher_forward_flops": teacher_flops}
+                        if teacher is not None
+                        else {}
+                    ),
+                ),
+                directory / f"rank{rank}.pt",
+            )
         sync_params()
         if rank == 0:
             inference = dict(
@@ -685,6 +706,7 @@ def main():
                     continuation_provenance=continuation_provenance,
                     source_changes=source_changes,
                     elapsed_seconds=elapsed_prior + time.monotonic() - start,
+                    **({"kd_teacher": teacher_info} if teacher is not None else {}),
                 ),
                 directory / "model.pt",
             )
@@ -748,6 +770,13 @@ def main():
             flops_local += useful_flops(
                 rows, cfg, manager.ws_short * 128, manager.ws_long * 128
             )
+            if teacher is not None:
+                teacher_flops += (
+                    useful_flops(
+                        rows, tcfg, manager.ws_short * 128, manager.ws_long * 128
+                    )
+                    // 3
+                )
             data = to_gpu(rows)
             x, y = data[:, :-1], data[:, 1:]
             context = make_context(
@@ -829,6 +858,7 @@ def main():
                     torch.tensor([flops_local], device="cuda", dtype=torch.float64),
                     aux_sum.double(),
                     kd_sum.double()[None],
+                    torch.tensor([teacher_flops], device="cuda", dtype=torch.float64),
                 )
             )
             dist.all_reduce(stats)
@@ -859,7 +889,10 @@ def main():
                         else {}
                     ),
                     **(
-                        dict(kd_kl=(stats[7] / stats[1]).item())
+                        dict(
+                            kd_kl=(stats[7] / stats[1]).item(),
+                            teacher_forward_flops=stats[8].item(),
+                        )
                         if teacher is not None
                         else {}
                     ),
@@ -919,7 +952,7 @@ def main():
             or step in fork_steps
             or stop_code
         ):
-            save(step, metrics)
+            save(step, metrics, a.final_model_only and step == total_steps)
             window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
             primary_sum.zero_()
             count_sum.zero_()
