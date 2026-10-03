@@ -1,10 +1,11 @@
 [project]
 name = "allie"
-version = "0.2.0"
+version = "3.0.0"
 description = "Human chess move prediction: a mixture-of-experts transformer over the game, ratings and clock"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
-# The big run trained with torch 2.10.0+cu128 and triton 3.6.0 on Linux x86-64.
+# Allie-v3.0 trained with torch 2.10.0+cu128 and triton 3.6.0 on Linux x86-64.
 dependencies = [
     "torch==2.10.*",
     "numpy>=1.26,<3",
@@ -16,11 +17,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# search/: native tree search build and model export
+# allie.search: the native tree search build and model export
 search = ["pybind11>=3.0,<4", "safetensors>=0.4"]
+test = ["pytest>=8"]
 
-[tool.uv]
-package = false
+[project.scripts]
+allie-train = "allie.cli:train"
+allie-eval = "allie.cli:evaluate"
+allie-exp = "allie.experiments.modelexp:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/allie"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
@@ -29,3 +40,12 @@ torch = { index = "pytorch-cu128" }
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "data: reads the game stores or evaluation sets under ALLIE_DATA",
+    "history: compares against an earlier commit, so needs this repository's git history",
+]

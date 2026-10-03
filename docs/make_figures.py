@@ -126,13 +126,13 @@ def logx(ax, ticks, fmt="{:g}".format):
 
 def allie_n():
     """Active and total non-embedding matmul parameters of Allie-v3.0, and its tokens."""
-    sys.path.insert(0, str(ROOT / "scripts"))
-    import modded_arch
+    sys.path.insert(0, str(ROOT / "src"))  # run as a script: this checkout's package
+    from allie.model import arch as model_arch
 
     c = jload(FINAL / "resume-config.json")["config"]
     L, d = c["layers"], c["width"]
-    e, k, routed, shared = modded_arch.moe_dims(d, c["arch"])[:4]
-    base = 4 * L * d * d + 3 * d * modded_arch.swiglu_hidden(d) + (L - 1) * d * e
+    e, k, routed, shared = model_arch.moe_dims(d, c["arch"])[:4]
+    base = 4 * L * d * d + 3 * d * model_arch.swiglu_hidden(d) + (L - 1) * d * e
     act = base + (L - 1) * 3 * d * (shared + k * routed)
     tot = base + (L - 1) * 3 * d * (shared + e * routed)
     return act, tot, c["scheduled_steps"] * 524288

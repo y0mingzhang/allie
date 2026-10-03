@@ -53,7 +53,7 @@ The data is every Lichess month with clock times from May 2017 to August 2026 ex
 
 ![Isoflop curves for dense and MoE models at three training budgets](docs/figures/scaling.png)
 
-Before Allie-v3.0 we trained 45 dense and MoE models at three budgets. The MoE reaches lower loss at every budget: dense models need 2.2x, 2.3x and 2.5x the compute to match it, although the gap between the fitted optima narrows (0.033, 0.025, 0.017 nats). A fitted law L(N, D) = E + A·N^−α + B·D^−β forecast 1.2856 for Allie-v3.0; it scored 1.2533, below even the fitted floor E = 1.27. We don't know why yet. Our recipe changes don't explain it at small scale; a 50x extrapolation may simply exceed what the fit can pin down. Memory, not the law, set the model's size (the law's optimum: 1.8B active parameters on 28B tokens).
+Before Allie-v3.0 we trained 45 dense and MoE models at three budgets. The MoE reaches lower loss at every budget: dense models need 2.2x, 2.3x and 2.5x the compute to match it, although the gap between the fitted optima narrows (0.033, 0.025, 0.017 nats). A fitted law L(N, D) = E + A·N^−α + B·D^−β forecast 1.2856 for Allie-v3.0; it scored 1.2533, below even the fitted floor E = 1.27. This is not a recipe effect: re-run at the sweep's sizes, Allie-v3.0's recipe is slightly worse than the sweep's (+0.008 nats at 6.3e17 FLOPs, +0.004 to +0.006 at 6.2e18), a gap that extrapolates to about −0.002 at Allie-v3.0's compute. The fitted floor looks too high: more compute keeps paying. Memory, not the law, set the model's size (the law's optimum: 1.8B active parameters on 28B tokens).
 
 ## Inference cost
 
@@ -79,4 +79,22 @@ The next run is an MoE with 1.2B active / ~9.2B total parameters (24 blocks of w
 
 ## Reproducing
 
-[scripts/](scripts/) holds the data pipeline ([chessdata.py](scripts/chessdata.py), [chessmix.py](scripts/chessmix.py)), the trainer ([modded_train.py](scripts/modded_train.py)), the model (`modded_*.py`), the main evaluation ([eval_strat.py](scripts/eval_strat.py)) and [modelexp.py](scripts/modelexp.py), which freezes each experiment's code and data before it runs. [runs/](runs/README.md) has Allie-v3.0's frozen study and the launcher of its second anneal; [bench/](bench/README.md) the Maia-3 benchmark and analysis scripts; [search/](search/README.md) the inference engine with tree search. Setup: Python 3.12 and `uv sync`; storage and checkout roots are read from `ALLIE_DATA` and `ALLIE_PROJECT_ROOT`. Data and checkpoints are not in git. [docs/make_figures.py](docs/make_figures.py) regenerates every figure; workflow and file map in [docs/DETAILS.md](docs/DETAILS.md#reproducing). The project is MIT-licensed ([LICENSE](LICENSE)); upstream notices are listed in [LICENSES.md](LICENSES.md).
+The code is one Python package, [`allie`](src/allie): `data` (game stores, the training-time sampler, tokenization), `model` (transformer, mixture-of-experts layer and kernels, board CNN), `train` (trainer, schedule, checkpoints), `eval` (the main evaluation and the Maia-3 benchmark), `search` (the tree-search engine) and `experiments` (frozen studies on Slurm, scaling-law fits). It needs Linux and CUDA 12.8 GPUs. Two environment variables point at storage: `ALLIE_DATA` (game stores and evaluation sets) and `ALLIE_PROJECT_ROOT` (whose `results/` receives runs and scores; default: this checkout).
+
+1. **Install.** `uv sync` installs the package and PyTorch 2.10; add `--extra search` for tree search and `--extra test` for the tests (`uv run pytest`: checks skip when their GPU or data is missing). The commands below run in that environment (`uv run ...` or an activated `.venv`).
+2. **Get the data.** Lichess games come from the monthly database on Hugging Face (`Lichess/standard-chess-games`), every month with clock annotations from May 2017 to August 2026 except the test month, July 2026. For each month:
+   ```sh
+   python -m allie.data.fetch 2024-01 raw/2024-01                  # download, sha256-verified
+   python -m allie.data.fastbuild build --hf raw/2024-01 --out $ALLIE_DATA/data-v1/2024-01
+   python -m allie.data.fastbuild finalize --out $ALLIE_DATA/data-v1/2024-01
+   ```
+   Over-the-board (TWIC, PGN Mentor, Lichess broadcasts) and engine games (CCRL, TCEC) go through `python -m allie.data.external fetch SOURCE`, then `parse` and `finalize`. `allie.data.history` counts the games per bucket and `allie.data.inventory` builds sampling tables such as the Elo ramp. Allie-v3.0's months, stores, counts and table are in [configs/](configs/allie-v3.0.json).
+3. **Build the main evaluation:** `python -m allie.eval.build` (July 2026, 16 cells, excluding the original Allie dev and test games).
+4. **Train Allie-v3.0:** `allie-train configs/allie-v3.0.json --nproc 8` on one node of eight 48 GB GPUs (NVIDIA L40S: 131K tokens/s, 6.6 days). The run stops after each 2-day chunk (`max_seconds`); the same command resumes it.
+5. **Evaluate:** `allie-eval --checkpoint results/pretrain/allie-v3.0/last.pt` writes the 16 cells to `results/lm-eval/allie-v3.0/strat-v1.json`. The Maia-3 benchmark samples its positions with `allie.eval.maia3.positions` and `legal`, then scores Maia-3 (`allie.eval.maia3.score_maia3`, with the Maia-3 code at `MAIA3_REPO`) and Allie (`allie.eval.maia3.score_moe`).
+6. **Search:** see [src/allie/search/README.md](src/allie/search/README.md).
+7. **Figures:** `python docs/make_figures.py` regenerates every figure here from the result files.
+
+**Weights.** TODO: the Allie-v3.0 checkpoint is not published yet.
+
+The project is MIT-licensed ([LICENSE](LICENSE)); upstream notices are in [LICENSES.md](LICENSES.md). More detail, including the record of how Allie-v3.0 was run, is in [docs/DETAILS.md](docs/DETAILS.md#reproducing).

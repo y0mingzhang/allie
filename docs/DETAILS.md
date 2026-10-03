@@ -60,6 +60,8 @@ The rating plot reweights every scored blitz move of the main evaluation (402,10
 
 Compute multiplier of MoE over dense: 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] at the three budgets. The compute-optimal size grows as C^0.66. Allie-v3.0 (N = 0.69B, D = 75B, 109 tokens per parameter) was forecast at 1.2856 and scored 1.2533. B and β are correlated at 0.98 in the fit.
 
+Allie-v3.0's recipe re-run at the sweep's sizes, minus the sweep recipe at the same size (main eval / its ≥2400 cells, nats): +0.0082 / +0.0104 at 6.3e17 FLOPs (12 blocks, width 512), +0.0058 / +0.0086 and +0.0042 / +0.0074 at 6.2e18 (18 × 896 and 20 × 1024). The offset shrinks by about 0.003 per decade of compute and extrapolates to about −0.002 at Allie-v3.0's 3.1e20 FLOPs, so the 0.032 below the forecast comes from the law's form (its floor), not from the recipe.
+
 ## Inference cost
 
 - **Fewer experts, no retraining** (Allie-v3.0; the dropped experts' gates are left out, not renormalized): K = 12, 8, 6, 4, 2 cost +0.0001, +0.0011, +0.0025, +0.0095, +0.0544 nats. Renormalizing the kept gates is far worse (+0.0178 at K = 8).
@@ -72,22 +74,23 @@ Compute multiplier of MoE over dense: 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and
 
 ## Reproducing
 
-| Path | What it is |
+| Module | What it is |
 |---|---|
-| `scripts/hf_fetch.py`, `scripts/fastbuild.py`, `scripts/chessdata.py` | Download Lichess months and build the store: games bucketed by format and rating, pre-shuffled into shards |
-| `scripts/extdata.py` | The same store for over-the-board and engine games, deduplicated against the evaluation games |
-| `scripts/datapin.py`, `scripts/history_counts.py`, `scripts/pool_inventory.py` | Freeze a data selection, count its games per bucket, build sampling tables such as the Elo ramp |
-| `scripts/chessmix.py`, `scripts/chess_vocab.py` | Training-time sampler (mixing policies, on-the-fly tokenization, packing) and the vocabulary |
-| `scripts/modded_train.py` | Resumable distributed trainer; `--init-from` continues from a checkpoint's weights with a fresh optimizer (the second anneal) |
-| `scripts/modded_*.py` | Model, optimizers, MoE layer and Triton kernels, board CNN, architecture switches |
-| `scripts/strateval.py`, `scripts/eval_strat.py` | Build and score the main evaluation |
-| `scripts/modelexp.py` | Freeze a study (source, data, recipe, hashes), run and score it on Slurm |
-| `scripts/test_*.py` | Unit and equivalence tests (some need a GPU or real data rows) |
-| `runs/` | Allie-v3.0's frozen study and the launcher of its second anneal |
-| `bench/` | Maia-3 benchmark scoring, fewer-experts inference, rating plot, scaling readout, search on the MoE |
-| `search/` | Inference engine with tree search, calibration and export |
-| `docs/make_figures.py` | All README figures from the result files |
+| `allie.data.fetch`, `fastbuild`, `store`, `external`, `annotate` | Download Lichess months and build the store (games bucketed by format and rating, pre-shuffled into shards); the same for over-the-board and engine games, deduplicated against the evaluation games |
+| `allie.data.pin`, `history`, `inventory` | Freeze a data selection, count its games per bucket, build sampling tables such as the Elo ramp |
+| `allie.data.mix`, `vocab`, `packed` | Training-time sampler (mixing policies, on-the-fly tokenization, packing), the vocabulary, the original packed validation rows |
+| `allie.model.network`, `nanogpt`, `attention`, `moe`, `moe_kernels`, `board`, `shard`, `arch` | The model (`nanogpt` is the modded-nanoGPT-derived core with its optimizers), the MoE layer and its Triton kernels, the board CNN, expert sharding, architecture switches |
+| `allie.train.trainer`, `schedule`, `checkpoints`, `state`, `runtime`, `provenance` | Resumable distributed trainer (`--init-from` continues from a checkpoint's weights with a fresh optimizer, as the second anneal did), learning-rate schedule, checkpoints, and the source hashes a checkpoint records |
+| `allie.eval.build`, `score`, `maia3` | Build and score the main evaluation; the Maia-3 benchmark |
+| `allie.search` | Tree-search engine; `moe_oracle` serves MoE checkpoints to it |
+| `allie.experiments.modelexp`, `isoflop`, `dmix`, `readout` | Frozen studies on Slurm, scaling-law fits, the sweep readout |
+| `allie.cli` | `allie-train` (a config file to a torchrun of the trainer) and `allie-eval` |
+| `configs/` | `allie-v3.0.json` (the trainer's arguments for Allie-v3.0), `recipes/` (its sampling table), `allie-v3.0/` (the run's record: study plan, round file, launchers, data pin, game counts) |
+| `tests/` | `test_checks.py` runs each check in `tests/checks/` as its own program; `tests/search/` tests the engine |
+| `analysis/` | The analysis scripts behind the search and frontier results, as run |
 
-**Workflow.** Build the stores (`hf_fetch.py`, then `fastbuild.py build` and `finalize` per month; `extdata.py` for the other sources), pin them (`datapin.py`) and build the sampling table (`pool_inventory.py`). Build the evaluation set once (`strateval.py`). Declare runs in a round file, freeze them with `modelexp.py plan ROUND WAVE` and launch with `modelexp.py submit` (a Slurm array) or `modelexp.py task` on a node. A study runs `modded_train.py` under `torchrun`, resumes it across jobs and scores it with `eval_strat.py` at the end; the trainer refuses to resume a run whose source or settings changed. The released model's exact trainer arguments are in `runs/bigrun/resume-config.json`.
+**Experiments.** A round file declares runs; `allie-exp plan ROUND WAVE` freezes the package (`source/allie/`), recipe tables, data pin and history counts into a study directory with their hashes, and `allie-exp submit` / `task` run it on Slurm: the trainer under torchrun, resumed across jobs, then the evaluator. The trainer refuses to resume a run whose source or settings changed.
 
-**Not in git.** Training data, checkpoints and per-run results (scores, logs, reports) live on the group's storage under `ALLIE_DATA` and `results/`.
+**Checkpoints from before the package layout** (Allie-v3.0 included) record flat source file names (`modded_medium.py`, ...). The evaluator, the Maia-3 scorer and the MoE search oracle load them from their run's frozen flat source (`--source`); a checkpoint trained with the package loads with the package, checked against `allie.train.provenance`.
+
+**Not in git.** Training data, checkpoints and per-run results (scores, logs, reports) live on group storage under `ALLIE_DATA` and `results/`.
