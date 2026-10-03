@@ -11,10 +11,19 @@ from allie.lichess.config import Challenge, Config
 from allie.lichess.engine import Engine, Play
 from allie.lichess.mock import MockLichess
 
+STARTED = []
+
 
 @pytest.fixture
 def engine(tiny):
-    return Engine(tiny)
+    e = Engine(tiny)
+    yield e
+    for bot, mock in STARTED:
+        bot.stop()
+        bot.join()
+        mock.close()
+    STARTED.clear()
+    e.close()
 
 
 def start(engine, mock=None, **play):
@@ -22,6 +31,7 @@ def start(engine, mock=None, **play):
     config = Config(max_games=4, play=Play(think_time=False, **play))
     bot = Bot(config, Lichess("tok", mock.url, wait=0.1), engine)
     threading.Thread(target=bot.run, daemon=True).start()
+    STARTED.append((bot, mock))
     wait(lambda: bot.me is not None)
     return mock, bot
 
@@ -99,8 +109,6 @@ def test_clock_features(engine):
     game = bot.games[g.id].game
     known = [(c, h // 1000) for c, h in zip(game.clocks, g.history) if c is not None]
     assert len(known) >= 0.8 * len(game.clocks) and all(c == h for c, h in known)
-    bot.stop()
-    mock.close()
 
 
 def test_draw_offer_and_resign(engine):
@@ -136,3 +144,18 @@ def test_drain(engine):
     mock.challenge("other", "allie", 60, 1)
     wait(lambda: bot.stopped.is_set(), timeout=120)
     assert finished(mock) and mock.declined[-1][1] == "later"
+
+
+def test_quota_counts_accepted_challenges(engine):
+    mock = MockLichess({"tok": "allie"})
+    mock.challenge("someone", "allie", 60, 1)
+    mock.challenge("someone", "allie", 60, 1)  # queued before the first game's gameStart
+    mock, _ = start(engine, mock)
+    wait(lambda: len(mock.declined) == 1)
+    assert len(mock.games) == 1 and mock.declined[0][1] == "later"
+
+
+def test_engine_runs_calls_alone(tiny):
+    e = Engine(tiny)
+    assert e.run(lambda: 42) == 42
+    e.close()

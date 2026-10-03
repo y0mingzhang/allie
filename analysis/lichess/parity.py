@@ -126,7 +126,7 @@ def main():
         ce=float(ce.mean()), reference_ce=float(ref_ce.mean()),
         ce_minus_reference=bootstrap(game, d, rng),
         top1=float(top1.mean()), reference_top1=float(ref_top1.mean()),
-        top1_correct_agreement=float((top1 == ref_top1).mean()),
+        top1_correctness_agreement=float((top1 == ref_top1).mean()),  # not the same move
         played_move_probability_change=dict(mean=float(dp.mean()), p99_abs=float(
             np.percentile(abs(dp), 99)), max_abs=float(abs(dp).max())),
         bands={str(c): float(d[[x["cell"] == c for x in P]].mean()) for c in (4, 5, 6, 7)},

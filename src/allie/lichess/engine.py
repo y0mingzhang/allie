@@ -42,7 +42,12 @@ class Engine:
         self.model, self.max_batch = model, max_batch
         self.requests = queue.SimpleQueue()
         self.forwards = self.tokens = 0
-        threading.Thread(target=self._loop, daemon=True, name="inference").start()
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
+        self.thread.start()
+
+    def close(self):
+        self.requests.put(None)
+        self.thread.join()
 
     def extend(self, cache, ids, feats, boards):
         """Append tokens to a game's cache; logits at the last one."""
@@ -58,25 +63,28 @@ class Engine:
         return f.result()
 
     def _loop(self):
-        while True:
-            batch = [self.requests.get()]
+        while (first := self.requests.get()) is not None:
+            batch = [first]
             while len(batch) < self.max_batch:
                 try:
                     batch.append(self.requests.get_nowait())
                 except queue.Empty:
                     break
+            if None in batch:  # close(): serve what came before it, then stop
+                self.requests.put(None)
+                batch = batch[: batch.index(None)]
             steps = [(r, f) for r, f in batch if isinstance(r, tuple)]
-            try:
-                if steps:
-                    logits = step(self.model, [r for r, _ in steps])
+            if steps:
+                try:
+                    logits = step(self.model, [r for r, _ in steps]).cpu()
+                except Exception as e:  # noqa: BLE001 - every waiting game gets the error
+                    for _, f in steps:
+                        f.set_exception(e)
+                else:
                     self.forwards += 1
                     self.tokens += sum(len(r[1]) for r, _ in steps)
-            except Exception as e:  # noqa: BLE001 - every waiting game gets the error
-                for _, f in steps:
-                    f.set_exception(e)
-            else:
-                for (_, f), z in zip(steps, logits.cpu()):
-                    f.set_result(z)
+                    for (_, f), z in zip(steps, logits):
+                        f.set_result(z)
             for r, f in batch:
                 if callable(r):
                     try:

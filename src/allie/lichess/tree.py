@@ -29,13 +29,14 @@ class Tree:
     """allie.search's oracle interface (reset, handles, new_tokens) for one root: the game's
     current position, whose keys and values are the game's cache."""
 
-    def __init__(self, game, logits, capacity=1024):
+    def __init__(self, game, logits, capacity):
         self.game, self.model, self.cache = game, game.engine.model, game.cache
         self.root_logits = logits[None].double().numpy()
         m = self.model
         kw = dict(dtype=m.dtype, device=m.device)
         self.k = torch.empty(m.layers, m.heads, capacity, m.head_dim, **kw)
         self.v, self.e = torch.empty_like(self.k), torch.empty(capacity, m.width, **kw)
+        self.k[:, :, 0] = self.v[:, :, 0] = 0  # slot 0 (the root's id) pads shorter paths
         self.capacity, self.new_tokens = capacity, 0
 
     def reset(self):
@@ -173,7 +174,7 @@ class Coverage:
         )
 
         def run():
-            tree = Tree(game, z)
+            tree = Tree(game, z, capacity=4 * simulations + 256)
             s = Search(tree, threads=self.threads, calibration=self.parameters)
             return s._batch([row], [feats], "coverage", simulations, "predicted",
                             False, 0.9, 2.0, 1.25)[0]  # fmt: skip

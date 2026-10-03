@@ -45,6 +45,8 @@ class Bot:
             search,
         )
         self.games, self.finished, self.lock = {}, {}, threading.Lock()
+        self.pending = {}  # accepted challenge id -> (challenger, time accepted)
+        self.threads = []
         self.me = None
         self.stopped, self.draining = threading.Event(), False
 
@@ -59,8 +61,10 @@ class Bot:
                     if event:
                         self.on_event(event)
                         backoff = 1
-                    if self.draining and not self.games:
-                        self.stop()
+                    if self.draining:
+                        with self.lock:
+                            if not self.opponents():
+                                self.stop()
                     if self.stopped.is_set():
                         break
             except (OSError, urllib.error.URLError, ValueError) as e:
@@ -71,28 +75,38 @@ class Bot:
     def stop(self):
         self.stopped.set()
 
+    def join(self):
+        """After stop(): wait for the game threads."""
+        for t in list(self.threads):
+            t.join()
+
     def drain(self):
         """Decline new challenges; run() returns once the current games end."""
         log.info("draining: no new games")
         self.draining = True
 
+    def opponents(self):
+        """Under the lock: the opponents of current games and of accepted challenges whose
+        game has not started yet (a challenge's game has its id; reservations last a minute)."""
+        now = time.monotonic()
+        self.pending = {c: v for c, v in self.pending.items() if now - v[1] < 60}
+        return [m.opponent for m in self.games.values()] + [u for u, _ in self.pending.values()]
+
     def on_event(self, event):
         match event["type"]:
             case "challenge":
                 c = event["challenge"]
-                if c["challenger"]["id"] == self.me:
+                who = c["challenger"]["id"]
+                if who == self.me:
                     return
+                rules = self.config.challenge
                 with self.lock:
-                    busy = self.draining or len(self.games) >= self.config.max_games or sum(
-                        m.opponent == c["challenger"]["id"] for m in self.games.values()
-                    ) >= self.config.challenge.per_user
-                reason = screen(c, self.config.challenge, busy)
-                log.info(
-                    "challenge %s from %s: %s",
-                    c["id"],
-                    c["challenger"]["id"],
-                    reason or "accept",
-                )
+                    them = self.opponents()
+                    busy = self.draining or len(them) >= self.config.max_games
+                    reason = screen(c, rules, busy or them.count(who) >= rules.per_user)
+                    if not reason:
+                        self.pending[c["id"]] = (who, time.monotonic())
+                log.info("challenge %s from %s: %s", c["id"], who, reason or "accept")
                 try:
                     if reason:
                         self.client.decline(c["id"], reason)
@@ -100,15 +114,23 @@ class Bot:
                         self.client.accept(c["id"])
                 except urllib.error.HTTPError as e:  # withdrawn meanwhile
                     log.warning("challenge %s: %s", c["id"], e)
+                    with self.lock:
+                        self.pending.pop(c["id"], None)
+            case "challengeCanceled":
+                with self.lock:
+                    self.pending.pop(event["challenge"]["id"], None)
             case "gameStart":
                 g = event["game"]
                 gid = g.get("gameId") or g["id"]
                 with self.lock:
+                    self.pending.pop(gid, None)
                     if gid in self.games:
                         return
                     match = self.games[gid] = Match(self, gid)
                     match.opponent = (g.get("opponent") or {}).get("id")
-                threading.Thread(target=self.play, args=(match,), name=gid, daemon=True).start()
+                    t = threading.Thread(target=self.play, args=(match,), name=gid, daemon=True)
+                    self.threads.append(t)
+                t.start()
 
     def play(self, match):
         gid, backoff = match.gid, 1
@@ -119,10 +141,10 @@ class Bot:
                         if event:
                             match.on_event(event)
                             backoff = 1
-                        if match.over:
+                        if match.over or self.stopped.is_set():
                             break
                     else:
-                        if not match.over:
+                        if not match.over and not self.stopped.is_set():
                             raise ConnectionError("game stream closed")
                 except (OSError, urllib.error.URLError, ValueError) as e:
                     log.warning("game %s stream: %s; retry in %d s", gid, e, backoff)
@@ -195,7 +217,7 @@ class Match:
         moves = s["moves"].split()
         game, play = self.game, self.bot.config.play
         game.update(moves, s["wtime"] / 1000, s["btime"] / 1000)
-        if s["bdraw" if self.white else "wdraw"] and self.answered != len(moves):
+        if s.get("bdraw" if self.white else "wdraw") and self.answered != len(moves):
             self.answered = len(moves)
             self.call(self.bot.client.draw, self.gid, game.accept_draw(play, self.white))
         if (len(moves) % 2 == 0) != self.white:

@@ -39,15 +39,14 @@ def convert(state):
     arch = cfg["arch"]
     n, d = cfg["layers"], cfg["width"]
     assert cfg["feats"] == 3 and inf["split_embed"]
+    # the switches this port implements; anything else would be exported as something else
     assert arch.get("board") == "conv" and arch.get("mlp") == "swiglu"
-    assert not arch.get("key_offset") and not arch.get("header_feats", 0)
     assert arch.get("tc_header", True) and arch.get("x0", True)
-    assert arch.get("moe_score", "sigmoid") == "sigmoid" and arch.get(
-        "moe_shared", True
-    )
-    assert (
-        min(inf["ws_short"], inf["ws_long"]) * 128 >= CONTEXT
-    )  # plain causal per game
+    assert arch.get("moe_score", "sigmoid") == "sigmoid" and arch.get("moe_shared", True)
+    for key in ("key_offset", "header_feats", "moe_log_gates", "moe_keep"):
+        assert not arch.get(key), f"arch {key} is not supported"
+    assert not arch.get("moe_router_center_first"), "arch moe_router_center_first"
+    assert min(inf["ws_short"], inf["ws_long"]) * 128 >= CONTEXT  # plain causal per game
     s = m["scalars"].float()
     bf = lambda t: t.bfloat16().contiguous()
     w = {
@@ -78,7 +77,7 @@ def convert(state):
             continue
         w[f"{i}.router"] = m[b + "mlp.router"].float()
         w[f"{i}.moe_bias"] = m[b + "mlp.bias"].float()
-        w[f"{i}.mu"] = m[b + "mlp.mu"].float()
+        w[f"{i}.mu"] = m.get(b + "mlp.mu", torch.zeros(d)).float()  # router centre
         w[f"{i}.up"] = m[b + "mlp.up"]
         w[f"{i}.down"] = m[b + "mlp.down"].transpose(1, 2)
         w[f"{i}.shared_up"] = m[b + "mlp.shared_up"]

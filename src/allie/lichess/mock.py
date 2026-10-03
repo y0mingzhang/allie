@@ -58,9 +58,8 @@ class MockGame:
             winc=self.inc * 1000,
             binc=self.inc * 1000,
             status=self.status,
-            wdraw=self.draw["white"],
-            bdraw=self.draw["black"],
         )
+        s |= {f"{c[0]}draw": True for c in ("white", "black") if self.draw[c]}  # true only
         if self.winner:
             s["winner"] = self.winner
         return s
@@ -169,7 +168,7 @@ class MockLichess:
 
     def challenge(self, challenger, dest, base=180, inc=2, rated=False, color="random",
                   variant="standard", ratings=(1500, 1500), title=None, kind="clock"):  # fmt: skip
-        cid = self.uid("c")
+        cid = self.uid("g")  # as on Lichess, the game keeps the challenge's id
         tc = (
             dict(type=kind, limit=base, increment=inc)
             if kind == "clock"
@@ -200,7 +199,7 @@ class MockLichess:
         r = c["ratings"][::-1] if flip else c["ratings"]
         tc = c["timeControl"]
         limit, inc = tc["limit"], tc["increment"]
-        g = MockGame(self.uid("g"), white, black, limit, inc, c["rated"], r, self.max_plies)
+        g = MockGame(cid, white, black, limit, inc, c["rated"], r, self.max_plies)
         self.games[g.id] = g
         for u in (white, black):
             if u in self.events:

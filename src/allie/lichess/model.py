@@ -1,8 +1,9 @@
 """Allie-v3.0 in plain PyTorch, CPU or GPU: no Triton kernels, flex attention or training code.
 
-The forward is the training GPT.forward (eval path) of the big run's source, restated over flat
-tokens with each game's keys and values in a Cache. Weights come from export.py: BF16 matrices
-in F.linear layout with the attention lambdas folded in, FP32 router, board CNN and scalars.
+The forward restates the training GPT.forward (allie.model.nanogpt, eval path) over flat tokens,
+with each game's keys and values in a Cache. It matches the trained model up to floating-point
+summation order (analysis/lichess/parity.py). Weights come from export.py: BF16 in F.linear
+layout with the attention lambdas folded in; router, balancing bias, centre and scalars FP32.
 """
 
 import json
@@ -25,6 +26,7 @@ def swiglu(x):
 
 
 MATRICES = ("qkv", "o", "fc", "proj", "up", "down", "shared_up", "shared_down")
+FP32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas")
 
 
 def quantize(w):
@@ -49,17 +51,16 @@ class Model:
         self.topk, self.floor, self.scale = c["topk"], c["gate_floor"], c["attn_scale"]
         self.keep = experts or self.topk
         assert 1 <= self.keep <= self.topk
-        w = load_file(path / "model.safetensors", device=str(self.device))
-        fp32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas")
-        self.w = {
-            k: v.to(torch.float32 if k.split(".")[-1] in fp32 else dtype)
-            for k, v in w.items()
-        }
-        self.scales = {}
-        if int8:
-            assert self.device.type == "cpu" and dtype == torch.bfloat16
-            for k in [k for k in self.w if k.split(".")[-1] in MATRICES]:
-                self.w[k], self.scales[k] = quantize(self.w[k])
+        assert not int8 or (self.device.type == "cpu" and dtype == torch.bfloat16)
+        self.w, self.scales = {}, {}
+        # copies out of the file mapping, so no move waits on paging weights in from disk
+        for k, v in load_file(path / "model.safetensors").items():
+            kind = k.split(".")[-1]
+            if int8 and kind in MATRICES:
+                self.w[k], self.scales[k] = quantize(v)
+            else:
+                dt = torch.float32 if kind in FP32 else dtype
+                self.w[k] = v.to(self.device, dt, copy=True)
         s = self.w["scalars"]
         n = self.layers
         self.lam, self.x0l = s[:n].tolist(), self.w["x0_lambdas"].view(-1, 2).tolist()
@@ -115,6 +116,7 @@ class Model:
         gate = gate * (
             self.topk**0.5 / gate.sum(-1, keepdim=True).clamp_min(self.floor)
         )
+        gate = gate.to(h.dtype).float()  # the trainer combines BF16 gates in FP32
         idx, gate = idx[:, : self.keep].flatten(), gate[:, : self.keep].flatten()
         order = idx.argsort(stable=True)
         experts, counts = torch.unique_consecutive(idx[order], return_counts=True)

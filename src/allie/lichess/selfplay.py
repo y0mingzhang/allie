@@ -44,6 +44,9 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
     for b in bots:
         b.stop()
     mock.close()
+    for b in bots:
+        b.join()
+    engine.close()
     records = [
         dict(
             id=g.id,
@@ -86,9 +89,8 @@ def bench(config, model, search, moves, concurrent=1, base=180, inc=2):
 
     def one(seed):
         rng = np.random.default_rng(seed)
-        sides = [
-            Game(engine, 1500, 1500, base, inc, "blitz", seed + j) for j in range(2)
-        ]
+        elo = play.rating if isinstance(play.rating, int) else 1500
+        sides = [Game(engine, elo, elo, base, inc, "blitz", seed + j) for j in range(2)]
         clocks, moves_so_far = [float(base), float(base)], []
         for ply in range(moves):
             me = sides[ply % 2]
@@ -112,7 +114,9 @@ def bench(config, model, search, moves, concurrent=1, base=180, inc=2):
             t3 = time.perf_counter()
             rows.append((ply, 1000 * (t1 - t0), 1000 * (t3 - t2)))
         board = sides[0].board
-        games.append(dict(moves=" ".join(moves_so_far), result=board.result(claim_draw=True)))
+        games.append(
+            dict(moves=" ".join(moves_so_far), result=board.result(claim_draw=True))
+        )
 
     t0 = time.perf_counter()
     threads = [threading.Thread(target=one, args=(i,)) for i in range(concurrent)]
@@ -121,6 +125,7 @@ def bench(config, model, search, moves, concurrent=1, base=180, inc=2):
     for t in threads:
         t.join()
     wall = time.perf_counter() - t0
+    engine.close()
     decide = [r[1] for r in rows if r[0] >= 2]
     return dict(
         device=str(model.device),
