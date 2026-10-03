@@ -189,7 +189,7 @@ class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
         gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0, center=0.0,
-        gate_floor=0.0, log_gates=False,
+        gate_floor=0.0, log_gates=False, keep=0,
     ):  # fmt: skip
         super().__init__()
         assert update in ("sign", "prop", "quantile")
@@ -255,6 +255,10 @@ class MoE(nn.Module):
         # log_gates: the same gates (and balance-loss affinities) as softmaxes of log-sigmoid scores, which never divide
         assert not log_gates or score == "sigmoid"
         self.log_gates = log_gates
+        # keep: route each token through only the best keep (by score + bias) of its top-k experts, with the gates
+        # they have in the top-k; selection, balance loss, bias updates and their stats stay the top-k's (0: off)
+        assert 0 <= keep < topk
+        self.keep = keep
         if center:
             self.register_buffer("mu", torch.zeros(dim))
             self.register_buffer("mu_steps", torch.zeros(()))
@@ -281,10 +285,14 @@ class MoE(nn.Module):
         else:
             w = s.gather(1, idx)
             w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
-        flat = idx.flatten()
+        ridx = idx
+        if self.keep:
+            best = (s.detach() + self.bias).gather(1, idx).argsort(-1, descending=True)[:, : self.keep]
+            ridx, w = idx.gather(1, best), w.gather(1, best)
+        flat = ridx.flatten()
         order = flat.argsort(stable=True)
         count = counts(flat[order], e)
-        route = k, flat[order], order, count.cumsum(0), w.type_as(h), self.remat
+        route = ridx.shape[1], flat[order], order, count.cumsum(0), w.type_as(h), self.remat
         if self.pos is None:
             up, down = self.up.type_as(h), self.down.type_as(h)
             out = modded_smoe.routed(h, up.transpose(1, 2), down, *route)
@@ -302,6 +310,8 @@ class MoE(nn.Module):
                     torch.full_like(moved, t),
                     margin,
                 ]
+                if self.keep:
+                    count = counts(idx.flatten().sort().values, e)
                 book(
                     self.load,
                     torch.cat((count.float(), torch.stack([v.float() for v in extra]))),

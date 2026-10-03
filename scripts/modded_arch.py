@@ -40,6 +40,9 @@ DEFAULTS = dict(
     # them): the same function as the renormalised sigmoids, finite in forward and backward at any score
     moe_log_gates=False,
     moe_dense_first=1,  # blocks 0 .. n-1 keep the dense MLP, MoE after (DeepSeek-V3: 3)
+    # route each token through only the best moe_keep of its top-k experts, with their top-k gates (0: off); the
+    # weights are the top-k model's, so --init-from may switch it (modded_moe.MoE keep)
+    moe_keep=0,
     # routed experts sharded over the ranks, whole experts, gathered per layer (modded_shard); model.pt keeps them whole
     moe_shard=False,
 )
@@ -91,6 +94,8 @@ def resolve(arch):
     assert isinstance(out["moe_log_gates"], bool)
     assert not out["moe_log_gates"] or out["moe_score"] == "sigmoid"
     assert isinstance(out["moe_dense_first"], int) and out["moe_dense_first"] >= 1
+    assert isinstance(out["moe_keep"], int) and out["moe_keep"] >= 0
+    assert not out["moe_keep"] or (out["moe"] and out["moe_keep"] < out["moe"][1])
     return out
 
 
@@ -118,6 +123,7 @@ def moe_dims(width, arch):
         a["moe_router_center"],
         a["moe_gate_floor"],
         a["moe_log_gates"],
+        a["moe_keep"],
     )
 
 
@@ -142,5 +148,6 @@ def extra_flops(arch, width, layers):
         assert dense <= layers, "moe_dense_first exceeds the layers"
         m = layers - dense
         extra += 2 * m * width * a["moe"][0]
+        k = a["moe_keep"] or k
         extra += 2 * m * (3 * width * (shared + k * routed) - 8 * width * width)
     return extra + 2 * dense * (3 * width * swiglu_hidden(width) - 8 * width * width)

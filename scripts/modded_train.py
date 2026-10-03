@@ -63,6 +63,8 @@ SAME_SINCE = dict(
 )
 # Config fields --init-from may change: they leave the function the parent computes unchanged
 INIT_FREE = ("scheduled_steps", "input_lr_mul", "ckpt", "ckpt_frac")
+# arch switches it may change: the parent's weights, computed otherwise
+INIT_FREE_ARCH = ("moe_keep",)
 
 
 def read_model(path):
@@ -98,7 +100,10 @@ def init_from(model, cfg, path):
     p.fp32, so they are reset to the loaded BF16 weights. Returns its provenance."""
     state, path = read_model(path)
     old, new = asdict(Config(**state["config"])), asdict(cfg)
-    old["arch"], new["arch"] = (modded_arch.resolve(c["arch"]) for c in (old, new))
+    free = lambda arch: {
+        k: v for k, v in modded_arch.resolve(arch).items() if k not in INIT_FREE_ARCH
+    }
+    old["arch"], new["arch"] = free(old["arch"]), free(new["arch"])
     for key in old:
         assert key in INIT_FREE or old[key] == new[key], f"init changes {key}"
     restore(model, state)
