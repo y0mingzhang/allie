@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 
 import torch
-from safetensors.torch import load_file
 from torch.nn import functional as F
 
 from .tokens import CONTEXT
@@ -27,6 +26,23 @@ def swiglu(x):
 
 MATRICES = ("qkv", "o", "fc", "proj", "up", "down", "shared_up", "shared_down")
 FP32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas")
+
+
+def read(path):
+    """(name, CPU tensor) of a safetensors file, read in file order straight into fresh
+    tensors: no file mapping and no second copy, so the resident size is the model's."""
+    dtypes = dict(BF16=torch.bfloat16, F16=torch.float16, F32=torch.float32, I8=torch.int8)
+    with open(path, "rb") as f:
+        n = int.from_bytes(f.read(8), "little")
+        header = json.loads(f.read(n))
+        header.pop("__metadata__", None)
+        for name, h in sorted(header.items(), key=lambda kv: kv[1]["data_offsets"]):
+            t = torch.empty(h["shape"], dtype=dtypes[h["dtype"]])
+            lo, hi = h["data_offsets"]
+            assert t.numel() * t.element_size() == hi - lo, name
+            f.seek(8 + n + lo)
+            f.readinto(t.view(-1).view(torch.uint8).numpy())
+            yield name, t
 
 
 def quantize(w):
@@ -53,14 +69,12 @@ class Model:
         assert 1 <= self.keep <= self.topk
         assert not int8 or (self.device.type == "cpu" and dtype == torch.bfloat16)
         self.w, self.scales = {}, {}
-        # copies out of the file mapping, so no move waits on paging weights in from disk
-        for k, v in load_file(path / "model.safetensors").items():
+        for k, v in read(path / "model.safetensors"):
             kind = k.split(".")[-1]
             if int8 and kind in MATRICES:
                 self.w[k], self.scales[k] = quantize(v)
             else:
-                dt = torch.float32 if kind in FP32 else dtype
-                self.w[k] = v.to(self.device, dt, copy=True)
+                self.w[k] = v.to(self.device, torch.float32 if kind in FP32 else dtype)
         s = self.w["scalars"]
         n = self.layers
         self.lam, self.x0l = s[:n].tolist(), self.w["x0_lambdas"].view(-1, 2).tolist()

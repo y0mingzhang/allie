@@ -127,3 +127,15 @@ def test_int8_close_to_dequantized(tiny_path):
     x = inputs(random_game(5, 20))
     a, b = prefill(q, x, len(x[0])), prefill(ref, x, len(x[0]))
     assert (a - b).abs().max() < 0.05 * b.abs().max()
+
+
+def test_reader_matches_safetensors(tiny_path):
+    from safetensors.torch import load_file
+
+    from allie.lichess.model import read
+
+    ref = load_file(tiny_path / "model.safetensors")
+    ours = dict(read(tiny_path / "model.safetensors"))
+    assert ours.keys() == ref.keys()
+    for k, v in ref.items():
+        assert ours[k].dtype == v.dtype and torch.equal(ours[k], v)
