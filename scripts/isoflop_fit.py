@@ -6,12 +6,16 @@ D tokens. C = N*D is a compute proxy: 6ND ignores embeddings and attention.
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 from scipy.optimize import brentq, minimize, minimize_scalar
 
-STUDY = Path("/home/yimingz3/src/allie/results/recipe10x/isoflop-v1")
+STUDY = (
+    Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
+    / "results/recipe10x/isoflop-v1"
+)
 RECIPES = ("ours", "qwen")
 
 

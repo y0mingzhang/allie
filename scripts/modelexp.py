@@ -44,10 +44,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import datapin
 from modded_arch import extra_flops
 
-ROOT = Path("/home/yimingz3/src/allie")
+ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
+G = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
 STUDIES = ROOT / "results/recipe10x"
 RECIPES = STUDIES / "recipes"  # chessmix.RECIPES
-DATA = "/data/group_data/dei-group/yimingz3/allie/lichess_tokens_v2"  # validation rows
+DATA = str(G / "lichess_tokens_v2")  # validation rows
 # B_3, the final data recipe (data-v1-ledger.md); these keys are provenance, not inputs
 B3 = STUDIES / "data-v1-B3.json"
 B3_META = ("source_study", "source_run", "final_tokens", "history_counts")
@@ -78,7 +79,6 @@ MOE = lambda e, k, **kw: dict(arch=dict(moe=[e, k]) | ROUTER | kw)
 # results/recipe10x/gpu-allocation.md fast types as sinfo names them
 FAST = "RTX_PRO_6000|H200|H100|A100_80GB|A100_80G|L40S|6000Ada"
 QOS = {"dei-group": "dei_group_qos", "preempt": "preempt_qos", "general": "normal"}
-G = Path("/data/group_data/dei-group/yimingz3/allie")
 # one node per line, # comments: every launcher excludes them
 BAD_NODES = G / "bad-nodes"
 # runs that stopped requeueing in a crash loop: main's controller reads them
@@ -869,7 +869,7 @@ def run_one(study, r, gpu):
         NCCL_P2P_DISABLE="1",
         TORCHINDUCTOR_CACHE_DIR=f"/scratch/yimingz3/allie/model-inductor-{gpu}",
         TRITON_CACHE_DIR=f"/scratch/yimingz3/allie/model-triton-{gpu}",
-        PYTHONPATH="/data/group_data/dei-group/yimingz3/allie/envs/chessmix-overlay",
+        PYTHONPATH=str(G / "envs/chessmix-overlay"),
     )
     src = study / "source-ours"
     out, log = pretrained(r), study / "logs" / n

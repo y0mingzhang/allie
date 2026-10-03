@@ -33,9 +33,12 @@ import chessdata as cd
 from chess_vocab import BOS, SECONDS, TERM_NORMAL, TERM_OTHER
 from chessmix import SHARD_GAMES
 
-ROOT = Path("/data/group_data/dei-group/yimingz3/allie/ext-v1")
+ROOT = (
+    Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
+    / "ext-v1"
+)
 RAW, PARTS = ROOT / "raw", ROOT / "parts"
-STRAT = Path("/data/group_data/dei-group/yimingz3/allie/strat-eval-v1/strat.npz")
+STRAT = ROOT.parent / "strat-eval-v1/strat.npz"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",

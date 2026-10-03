@@ -9,6 +9,7 @@ of token j of row i (-1 = unscored), so target j of the evaluator uses labels[:,
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,8 +21,11 @@ import chessmix as cm
 from chess_vocab import BOS
 
 MONTH = cm.STORE / "2026-07"
-OUT = Path("/data/group_data/dei-group/yimingz3/allie/strat-eval-v1")
-SPLITS = Path("/home/yimingz3/src/allie/data")
+OUT = (
+    Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
+    / "strat-eval-v1"
+)
+SPLITS = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie")) / "data"
 FORMATS = ["bullet", "blitz", "rapid", "classical"]  # data-v1 format ids 1..4
 BANDS = ["<1400", "1400-2000", "2000-2400", ">=2400"]
 UPPER = [1400, 2000, 2400, 10**4]

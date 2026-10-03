@@ -53,7 +53,10 @@ EVAL = re.compile(r"\[%eval (#?)(-?[\d.]+)\]")
 EVAL_MISSING = -32768  # a ply of an analysed game that carries no eval
 MOVETEXT = re.compile(r"\{([^}]*)\}|([^\s{}]+)")
 NOT_MOVE = re.compile(r"\d+\.(?:\.\.)?|1-0|0-1|1/2-1/2|\*|\$\d+")
-VAL_CACHE = Path("/data/group_data/dei-group/yimingz3/allie/validation_cache")
+VAL_CACHE = (
+    Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
+    / "validation_cache"
+)
 SCHEMA = pa.schema(
     [
         ("site", pa.string()),

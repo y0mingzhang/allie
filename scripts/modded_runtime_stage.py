@@ -12,7 +12,7 @@ import sys
 import tarfile
 import tempfile
 
-BASE = Path('/data/group_data/dei-group/yimingz3/allie/envs')
+BASE = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie")) / 'envs'
 SOURCE = BASE/'modded-torch210'
 MANIFEST = BASE/'modded-torch210-runtime.json'
 

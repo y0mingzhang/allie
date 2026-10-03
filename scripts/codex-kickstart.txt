@@ -1,9 +1,0 @@
-This is the Allie Slurm controller restarting. Read the latest user messages,
-GOAL.md and CONTROLLER.md before acting. Preserve the current goal
-status: a restart does not resume a blocked/completed goal or authorize training.
-Read /data/group_data/dei-group/yimingz3/allie/controller/STOP before new work.
-Inspect live Slurm jobs, checkpoints, data and the cumulative ledger before any
-submission. Never duplicate completed/running jobs or reset compute charges.
-Never stop the user's tunnel/controller job. Training is independent of this
-controller. The current repository cleanup is not approval for a new experiment.
-Use README.md and analysis/ for the current architecture and scaling results.

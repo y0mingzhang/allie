@@ -8,6 +8,7 @@ curve being the law shifted through the control runs.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +18,10 @@ from scipy.optimize import brentq
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from isoflop_fit import additive
 
-ROOT = Path("/home/yimingz3/src/allie/results/recipe10x")
+ROOT = (
+    Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
+    / "results/recipe10x"
+)
 EVAL = ROOT.parent / "lm-eval"
 
 

@@ -84,13 +84,20 @@ Compute multiplier of MoE over dense: 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and
 
 | Path | What it is |
 |---|---|
-| `scripts/chessdata.py`, `scripts/fastbuild.py`, `scripts/extdata.py` | Build the bucketed game stores from Lichess dumps and other collections |
-| `scripts/chessmix.py`, `scripts/pool_inventory.py`, `scripts/datapin.py` | Training-time sampler, sampling tables, frozen data selections |
+| `scripts/hf_fetch.py`, `scripts/fastbuild.py`, `scripts/chessdata.py` | Download Lichess months and build the store: games bucketed by format and rating, pre-shuffled into shards |
+| `scripts/extdata.py` | The same store for over-the-board and engine games, deduplicated against the evaluation games |
+| `scripts/datapin.py`, `scripts/history_counts.py`, `scripts/pool_inventory.py` | Freeze a data selection, count its games per bucket, build sampling tables such as the Elo ramp |
+| `scripts/chessmix.py`, `scripts/chess_vocab.py` | Training-time sampler (mixing policies, on-the-fly tokenization, packing) and the vocabulary |
 | `scripts/modded_train.py` | Resumable distributed trainer; `--init-from` fine-tunes, `--kd-teacher` distills, arch `moe_keep` trains fewer-experts models |
-| `scripts/modded_*.py` | Model, optimizers, MoE layer and kernels, board CNN, architecture switches |
+| `scripts/modded_*.py` | Model, optimizers, MoE layer and Triton kernels, board CNN, architecture switches |
 | `scripts/strateval.py`, `scripts/eval_strat.py` | Build and score the main evaluation |
 | `scripts/modelexp.py` | Freeze a study (source, data, recipe, hashes), run and score it on Slurm |
-| `search/` | Inference engine with tree search and calibration |
+| `scripts/test_*.py` | Unit and equivalence tests (some need a GPU or real data rows) |
+| `runs/` | The released model's frozen study, and the anneal, fine-tune and student launchers |
+| `bench/` | Maia-3 benchmark scoring, fewer-experts inference, rating plot, scaling readout, search on the MoE |
+| `search/` | Inference engine with tree search, calibration and export |
 | `docs/make_figures.py` | All README figures from the result files |
 
-Studies and results are under `results/recipe10x/` (a link to group storage, not tracked): the big run's frozen study is `bigfix-24x1536d75m4shipv2nf-c8s200f0v4`, the Maia-3 benchmark code and tables `maia3-bench/`, the fine-tunes and students `distill-v2/`, the scaling readout `sweep-readout-c8s200f0v4-w4.json`.
+**Workflow.** Build the stores (`hf_fetch.py`, then `fastbuild.py build` and `finalize` per month; `extdata.py` for the other sources), pin them (`datapin.py`) and build the sampling table (`pool_inventory.py`). Build the evaluation set once (`strateval.py`). Declare runs in a round file, freeze them with `modelexp.py plan ROUND WAVE` and launch with `modelexp.py submit` (a Slurm array) or `modelexp.py task` on a node. A study runs `modded_train.py` under `torchrun`, resumes it across jobs and scores it with `eval_strat.py` at the end; the trainer refuses to resume a run whose source or settings changed. The released model's exact trainer arguments are in `runs/bigrun/resume-config.json`.
+
+**Not in git.** Training data, checkpoints and per-run results (scores, logs, reports) live on the group's storage under `ALLIE_DATA` and `results/`.

@@ -14,6 +14,7 @@ import itertools
 import json
 import math
 import multiprocessing as mp
+import os
 import queue
 import re
 import sys
@@ -30,8 +31,12 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chess_vocab import BOS, INCREMENTS_ID, SECONDS_ID, TERM_NORMAL, TERM_OTHER, UNK
 
-STORE = Path("/data/group_data/dei-group/yimingz3/allie/data-v1")
-RECIPES = Path("/data/group_data/dei-group/yimingz3/allie/results/recipe10x/recipes")
+# storage root of the stores, recipe tables and eval sets
+ALLIE_DATA = Path(
+    os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie")
+)
+STORE = ALLIE_DATA / "data-v1"
+RECIPES = ALLIE_DATA / "results/recipe10x/recipes"
 COLUMNS = [
     "moves",
     "white_elo",

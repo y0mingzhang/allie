@@ -1,6 +1,0 @@
-This Claude session was just restarted by the allie Slurm controller
-(scripts/codex-controller.sbatch). If results/recipe10x/claude-resume.md exists, read it first: it is
-the checklist written before a planned restart. If you were in the middle of a task, goal or
-loop, resume it: check live state before redoing anything, and re-arm any /loop
-or cron job, since those do not survive restarts. If there is nothing to resume,
-do nothing and end your turn without output.

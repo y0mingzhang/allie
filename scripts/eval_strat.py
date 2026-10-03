@@ -22,7 +22,7 @@ import torch
 import torch.distributed as dist
 
 ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[1]))
-G = Path("/data/group_data/dei-group/yimingz3/allie")
+G = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
 REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
 
 
