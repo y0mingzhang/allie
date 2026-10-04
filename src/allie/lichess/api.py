@@ -87,7 +87,7 @@ class Allie:
                         backend=None, threads=None, **hub):  # fmt: skip
         """name: a Hugging Face repo or a local directory with config.json and
         model.safetensors. device: default CUDA if available. int8: int8 weights, the default
-        on CPU (half the memory, twice the speed). active_experts: route each token through only this many
+        on CPU (half the memory, faster). active_experts: route each token through only this many
         of its 16 experts (faster, slightly less accurate). backend: "fast" (C++ kernels, the CPU
         default) or "torch" (the PyTorch reference). threads: the fast backend's CPU threads
         (default torch.get_num_threads()). hub: revision, cache_dir, token, ... for

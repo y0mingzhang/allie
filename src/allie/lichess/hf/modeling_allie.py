@@ -39,7 +39,7 @@ class AllieModel(PreTrainedModel):
                         **kwargs):  # fmt: skip
         """device (or a single-device device_map): default CUDA if available. dtype /
         torch_dtype: bfloat16 (default) or float32. int8: int8 weights, the CPU default with
-        bfloat16 (half the memory, twice the speed). active_experts: route each token through
+        bfloat16 (half the memory, faster). active_experts: route each token through
         only this many of its 16 experts (faster, slightly less accurate). backend: "fast"
         (C++ kernels compiled on first use, the CPU default) or "torch" (the PyTorch
         reference). threads: the fast backend's CPU threads."""
