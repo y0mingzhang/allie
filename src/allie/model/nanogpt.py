@@ -15,6 +15,7 @@ import triton
 import triton.language as tl
 from torch import Tensor, nn
 
+from allie.model import moe_kernels
 from allie.model.arch import swiglu_hidden
 from allie.model.moe import MoE, replay_context
 
@@ -918,7 +919,7 @@ class CastedLinear(nn.Linear):
             self.weight.zero_()  # @Grad62304977 and others
 
     def forward(self, x: Tensor):
-        return F.linear(x, self.weight.type_as(x))
+        return moe_kernels.linear(x, self.weight.type_as(x))
 
 
 # yarn implementation @classiclarryd; the WSD schedule's windows never change, so neither do the tables
@@ -1011,7 +1012,7 @@ class CausalSelfAttention(nn.Module):
             attn_args.bm_size,
         )
 
-        qkv = F.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x)).view(
+        qkv = moe_kernels.linear(x, sa_lambdas[0] * self.qkvo_w[: self.dim * 3].type_as(x)).view(
             B, T, 3 * self.num_heads, self.head_dim
         )
         gate = lambda: torch.sigmoid(
@@ -1031,7 +1032,7 @@ class CausalSelfAttention(nn.Module):
                 qkv, seqlens, bm_size, attn_scale, cos, sin, g,
                 None if ve is None else ve.view(B, T, self.num_heads, self.head_dim), vg,
             )  # fmt: skip
-            return F.linear(
+            return moe_kernels.linear(
                 y.view(B, T, self.dim),
                 sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y),
             )
@@ -1048,7 +1049,7 @@ class CausalSelfAttention(nn.Module):
             B, T, self.num_heads * self.head_dim
         )  # re-assemble all head outputs side by side
         # sa_lambdas[1] pre-multiplied to O @shenberg
-        return F.linear(y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y))
+        return moe_kernels.linear(y, sa_lambdas[1] * self.qkvo_w[self.dim * 3 :].type_as(y))
 
 
 class MLP(nn.Module):

@@ -401,6 +401,12 @@ def main():
         "(FP32 sums in another order than the batched matmul's: not bitwise)",
     )
     p.add_argument(
+        "--dense-triton",
+        action="store_true",
+        help="the big dense forward GEMMs with K 2048 (QKV, O, shared up, head) through a Triton kernel with 128 x 256 "
+        "tiles instead of cuBLAS (the same k16 chain: bitwise where cuBLAS runs one, as on sm_89)",
+    )
+    p.add_argument(
         "--optimizers-reversed",
         action="store_true",
         help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
@@ -473,6 +479,7 @@ def main():
     network.ATTENTION = "triton" if a.attn_kernel else "flex"
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
     moe_kernels.TUNED, moe_kernels.FUSED_DGATES = a.smoe_tuned, a.smoe_fused_dgates
+    moe_kernels.DENSE_TRITON = a.dense_triton
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0

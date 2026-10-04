@@ -289,7 +289,7 @@ class MoE(nn.Module):
                 if self.center:
                     book_once(self.mu_sum, torch.cat((h.float().sum(0), h.new_full((1,), t, dtype=torch.float32))))
         if self.shared:
-            shared = self.act(F.linear(h, self.shared_up.type_as(h)))
+            shared = self.act(moe_kernels.linear(h, self.shared_up.type_as(h)))
             out = out + F.linear(shared, self.shared_down.T.type_as(h))
         out = out.view(shape)
         if self.training and self.seq:

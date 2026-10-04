@@ -354,6 +354,70 @@ def up_wgrad_op(dy: torch.Tensor, x: torch.Tensor, order: torch.Tensor, offsets:
 # fmt: on
 
 
+# fmt: off
+@triton.jit
+def _mm(A, B, C, M, N, K, sam, sak, sbk, sbn, scm, scn, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr,
+        GROUP: tl.constexpr):
+    """C = A @ B, FP32 accumulation over K in order, rounded once to C's dtype."""
+    pid = tl.program_id(0)
+    nm, nn = tl.cdiv(M, BM), tl.cdiv(N, BN)
+    pm, pn = tl.swizzle2d(pid // nn, pid % nn, nm, nn, GROUP)
+    rm = pm * BM + tl.arange(0, BM)
+    rn = pn * BN + tl.arange(0, BN)
+    rk = tl.arange(0, BK)
+    a = A + rm[:, None] * sam + rk[None, :] * sak
+    b = B + rk[:, None] * sbk + rn[None, :] * sbn
+    acc = tl.zeros((BM, BN), tl.float32)
+    for k in range(0, tl.cdiv(K, BK)):
+        x = tl.load(a, mask=(rm[:, None] < M) & (rk[None, :] < K - k * BK), other=0.0)
+        w = tl.load(b, mask=(rk[:, None] < K - k * BK) & (rn[None, :] < N), other=0.0)
+        acc = tl.dot(x, w, acc)
+        a += BK * sak
+        b += BK * sbk
+    c = C + rm[:, None] * scm + rn[None, :] * scn
+    tl.store(c, acc.to(C.dtype.element_ty), mask=(rm[:, None] < M) & (rn[None, :] < N))
+# fmt: on
+
+
+@torch.library.custom_op("allie_smoe::mm", mutates_args=())
+def mm_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """a [M, K] @ b [K, N] (any strides) in BF16."""
+    m, k = a.shape
+    n = b.shape[1]
+    c = torch.empty(m, n, device=a.device, dtype=a.dtype)
+    _mm[(triton.cdiv(m, 128) * triton.cdiv(n, 256),)](a, b, c, m, n, k, *a.stride(), *b.stride(), *c.stride(),
+                                                       128, 256, 64, 8, num_warps=8, num_stages=3)  # fmt: skip
+    return c
+
+
+@mm_op.register_fake
+def _(a, b):
+    return a.new_empty(a.shape[0], b.shape[1])
+
+
+class Linear(torch.autograd.Function):
+    """F.linear(x, w) with mm_op forward and torch.mm backward (cuBLAS, as F.linear's)."""
+
+    @staticmethod
+    def forward(ctx, x, w):
+        ctx.save_for_backward(x, w)
+        return mm_op(x, w.t())
+
+    @staticmethod
+    def backward(ctx, dy):
+        x, w = ctx.saved_tensors
+        return dy @ w, dy.t() @ x
+
+
+def linear(x, w):
+    """F.linear(x, w) for BF16 x [..., K], w [N, K]; DENSE_TRITON: the Triton forward for K 2048 at 2048 or more rows."""
+    big = x.dtype == torch.bfloat16 and x.numel() >= 2048 * w.shape[1]
+    if not DENSE_TRITON or not big or w.shape[1] != 2048:
+        return torch.nn.functional.linear(x, w)
+    x2 = x.reshape(-1, w.shape[1])
+    return Linear.apply(x2, w).view(*x.shape[:-1], w.shape[0])
+
+
 def up(x, w, order, offsets, k, save=True):
     """pre = x[order // k] @ w[expert] (BF16, rows in expert-sorted order) and y = silu(a) * b,
     a | b = pre; w [E, D, 2H]. save=False skips pre (returned empty)."""
@@ -430,6 +494,11 @@ CHUNKS = 1
 # --smoe-fused-dgates: the gates' grad in the down scatter's epilogue, its [T * k, D] output never stored; FP32 sums
 # in another order than the batched matmul's, so not bitwise
 FUSED_DGATES = False
+# --dense-triton: the step's big dense forward GEMMs with K 2048 (QKV, O, shared up, head) through _mm with 128 x 256 x
+# 64 tiles instead of cuBLAS: one sequential k16 MMA chain per output element, which is cuBLAS's on the hardware checked
+# (sm_89, tests/checks/dense_triton.py), so bitwise there, not by construction; the backward keeps torch.mm. Shapes
+# whose cuBLAS kernel splits K (the wgrads) are left alone
+DENSE_TRITON = False
 
 
 def chunks(order, k):

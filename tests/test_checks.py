@@ -83,6 +83,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
             marks=DATA,
         ),
         check("attn_kernel", marks=GPU + DATA),
+        check("dense_triton", marks=GPU),
         check(
             "checkpoint_resume", torchrun=1, marks=GPU + DATA, id="checkpoint_resume-1"
         ),
