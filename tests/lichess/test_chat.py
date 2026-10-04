@@ -96,6 +96,7 @@ def state(moves, status="started", **kw):
 
 def test_clean_and_played():
     assert clean('"Good game!"') == "Good game!" and clean("see https://x.org") == ""
+    assert clean("May the best pawn win.</text>") == "May the best pawn win."
     long = "First sentence here, quite long. " * 3 + "x" * 50
     a, b = chat.parts(long)
     assert a.endswith("long.") and len(a) <= 140 and len(b) <= 140

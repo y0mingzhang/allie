@@ -738,8 +738,10 @@ def played(text, moves):
 
 
 def clean(text):
-    """The model's text as one line: no links, no markdown, no wrapping quotes."""
-    text = " ".join(text.replace("**", "").split()).strip("\"'\u201c\u201d{}")
+    """The model's text as one line: no links, markup or wrapping quotes."""
+    text = " ".join(re.sub(r"</?[a-z_]+>", "", text.replace("**", "")).split()).strip(
+        "\"'\u201c\u201d{}"
+    )
     return "" if re.search(r"https?://|www\.", text) else text
 
 
