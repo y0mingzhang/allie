@@ -90,8 +90,8 @@ class Allie:
         on CPU (half the memory, faster). active_experts: route each token through only this many
         of its 16 experts (faster, slightly less accurate). backend: "fast" (C++ kernels, the CPU
         default) or "torch" (the PyTorch reference). threads: the fast backend's CPU threads
-        (default torch.get_num_threads()). hub: revision, cache_dir, token, ... for
-        huggingface_hub.snapshot_download."""
+        (default torch's count, within one NUMA node). hub: revision, cache_dir, token, ...
+        for huggingface_hub.snapshot_download."""
         path = resolve(name, **hub)
         device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         dtype = dtype or torch.bfloat16
