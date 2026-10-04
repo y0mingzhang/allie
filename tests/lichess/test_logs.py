@@ -76,11 +76,16 @@ def test_bad_records_do_not_stop_the_log(tmp_path, restore):
     listener = logs.setup(str(path))
     log = logging.getLogger("allie")
     log.info("chat from the opponent: %s", "\ud83d")  # a lone surrogate, as json.loads can give
-    log.info("bad %d", "format")
     log.info("still logging")
     listener.stop()
     text = path.read_text()
     assert "\\ud83d" in text and "still logging" in text
+    h = logs.Resilient(str(tmp_path / "direct.log"))  # the queue formats in the caller's thread
+    h.setFormatter(logging.Formatter("%(message)s"))
+    for args in (("bad %d", ("format",)), ("after", None)):
+        h.handle(logging.LogRecord("x", logging.INFO, "f", 1, *args, None))
+    h.close()
+    assert (tmp_path / "direct.log").read_text() == "after\n"
 
 
 def test_chat_reader_stops_when_abandoned():

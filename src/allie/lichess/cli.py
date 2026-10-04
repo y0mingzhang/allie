@@ -72,11 +72,13 @@ def main():
     a = p.parse_args()
     from .logs import setup
 
-    listener = setup(getattr(a, "log", None))
+    path = getattr(a, "log", None)
+    listener = setup(path)
     try:
         run_command(a)
     except Exception:
-        logging.getLogger("allie").exception("allie-bot failed")  # while the writer still runs
+        if path:  # while the writer still runs; the raise prints it on stderr
+            logging.getLogger("allie").exception("allie-bot failed")
         raise
     finally:
         listener.stop()

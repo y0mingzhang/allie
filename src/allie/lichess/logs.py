@@ -95,14 +95,13 @@ def setup(path=None, level=logging.INFO, fmt="%(asctime)s %(message)s"):
     root.handlers[:] = [logging.handlers.QueueHandler(q)]
     root.setLevel(level)
 
-    def thread_hook(
-        a,
-    ):  # also on stderr: the log's own writer may be the thread that died
+    if not path:  # stderr gets every uncaught exception already
+        return listener
+
+    def thread_hook(a):  # also on stderr: the log's own writer may be the thread that died
         if a.exc_type is not SystemExit:
             exc = (a.exc_type, a.exc_value, a.exc_traceback)
-            log.error(
-                "thread %s died", a.thread.name if a.thread else "?", exc_info=exc
-            )
+            log.error("thread %s died", a.thread.name if a.thread else "?", exc_info=exc)
             threading.__excepthook__(a)
 
     def main_hook(*exc):  # also on stderr: on the way out the writer may have stopped
