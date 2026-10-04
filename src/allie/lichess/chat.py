@@ -172,8 +172,9 @@ class Chatter:
         n, k = len(moves), 0
         while k < min(n, len(self.seq)) and moves[k] == self.seq[k]:
             k += 1
-        for j in [j for j in self.views if j > k]:  # a takeback, or a changed history
-            del self.views[j]
+        for d in (self.views, self.clocks):  # a takeback, or a changed history
+            for j in [j for j in d if j > k]:
+                del d[j]
         self.seq = moves
         if g.logits is not None and len(g.used) == len(g.tokens) and g.moves == moves:
             self.views[n] = view(g, m.white)
@@ -379,7 +380,7 @@ class Chatter:
     def run(self, j):
         if j.kind in ("hello", "quiet"):
             lines = [j.text]
-        elif self.muted() or self.cancelled:
+        elif not self.live(j):
             return
         else:
             self.llm = self.llm or model(self.cfg)
@@ -389,20 +390,25 @@ class Chatter:
                     "game %s chat: dropped a mid-game move: %s", self.match.gid, text
                 )
             lines = clean(text, j.lines)
-            now = list(self.match.game.moves)
-            if j.kind == "remark" and (
-                len(now) - len(j.moves) > 2 or now[: len(j.moves)] != list(j.moves)
-            ):
-                return log.info("game %s chat: a remark came late", self.match.gid)
         for line in lines:
             for room in j.rooms:
-                self.post(line, room, j.kind == "quiet")
+                self.post(line, room, j)
 
-    def post(self, text, room, always=False):
-        """Send a line after the gap, unless !quiet or the end of the bot came first."""
+    def live(self, j):
+        """Is the job still worth saying: no !quiet, the bot still on, a remark still fresh?"""
+        if j.kind == "quiet":
+            return True
+        if self.muted() or self.cancelled:
+            return False
+        now, then = self.match.game.moves, list(j.moves)
+        return (
+            j.kind != "remark" or len(now) - len(then) <= 2 and now[: len(then)] == then
+        )
+
+    def post(self, text, room, j):
         time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
-        if not always and (self.muted() or self.cancelled):
-            return
+        if not self.live(j):
+            return log.info("game %s chat: dropped a stale %s", self.match.gid, j.kind)
         try:
             self.match.bot.client.chat(self.match.gid, text, room)
         except OSError as e:  # HTTP and network errors, after the client's retries

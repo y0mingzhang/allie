@@ -197,12 +197,12 @@ def replay(a):
         r.run()
         r.show(a.prompts)
     if calls := getattr(llm, "calls", None):
-        wall = sorted(c[0] for c in calls)
-        api = sorted(c[1] or 0 for c in calls)
+        api = sorted((c[1] or 0) / 1000 for c in calls)
         tokens = {k: sum(c[2].get(k) or 0 for c in calls) for k in calls[0][2]
                   if isinstance(calls[0][2][k], int)}  # fmt: skip
-        print(f"\n{len(calls)} CLI calls: median {wall[len(wall) // 2]:.1f} s wall, "
-              f"{api[len(api) // 2] / 1000:.1f} s API; tokens {tokens}")  # fmt: skip
+        print(
+            f"\n{len(calls)} CLI calls; API seconds {[round(t, 1) for t in api]}; tokens {tokens}"
+        )
     if usage := getattr(llm, "usage", None):
         print("\nAPI usage:", usage)
 
