@@ -57,8 +57,6 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
 
 ## Play on Lichess, and the command line
 
-## Play on Lichess, and the command line
-
 The [allie package](GITHUB_URL) runs the same code as a Lichess bot, and has a
 command line:
 
@@ -116,10 +114,14 @@ human-move prediction, from Ashton Anderson's group; its open weights made this 
 100,000 moves each, CE averaged over cells without legal-move masking: **1.2533**, and 1.1035 over the four
 ≥2400 cells.
 
-**This release's code.** The plain-PyTorch inference here matches the training code within noise. On 5,000
-benchmark positions, each scored as a live game reaches it (the last move added to a cached game), CE minus
-the training code's is −0.0003 [−0.0013, +0.0006] nats on CPU in BF16 and −0.0006 [−0.0015, +0.0003] on GPU.
-int8 weights add +0.0016 ± 0.0011 nats and lower top-1 accuracy from 58.9% to 58.7%.
+**This release's code.** The inference here matches the training code within noise. On 5,000 benchmark
+positions, each scored as a live game reaches it (the last move added to a cached game), CE minus the training
+code's is −0.0005 [−0.0014, +0.0004] nats with the C++ kernels on CPU in BF16 and −0.0003 [−0.0012, +0.0006]
+with the CUDA graphs on GPU (plain PyTorch: −0.0003 [−0.0013, +0.0006] and −0.0006 [−0.0015, +0.0003]). The
+top move agrees with plain PyTorch's on 99.4% of positions on CPU and 99.6% on GPU.
+
+**int8, the CPU default,** costs +0.0021 [+0.0000, +0.0043] nats of CE against BF16 with the C++ kernels
+(plain PyTorch: +0.0016 ± 0.0011), for half the memory and about 1.6 times the speed. `int8=False` keeps BF16.
 
 ## Intended use and limitations
 

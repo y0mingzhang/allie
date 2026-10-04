@@ -1,11 +1,11 @@
-"""Allie 2.0 for transformers (trust_remote_code): plain PyTorch, CPU or GPU.
+"""Allie 2.0 for transformers (trust_remote_code), on CPU or GPU.
 
     from transformers import AutoModel
     model = AutoModel.from_pretrained("yimingzhang/allie-2.0", trust_remote_code=True)
     model.predict(["e2e4", "e7e5", "g1f3"], white_elo=1800, black_elo=1750, time_control="180+2")
 
-The network, its key-value cache and the chess inputs are api.py, model.py and tokens.py, the
-same files as the allie package's allie.lichess (GITHUB_URL).
+The network, its key-value cache, its CPU kernels and the chess inputs are api.py, model.py, fast.py
+and tokens.py, the same files as the allie package's allie.lichess (GITHUB_URL).
 """
 
 import torch
