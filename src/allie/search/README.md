@@ -32,11 +32,15 @@ source). The released Hugging Face weights run search through the Lichess bot in
 [allie.lichess](../lichess/README.md)).
 
 ```python
+import json
+from importlib.resources import files
+
 import numpy as np
 from allie.search import Search
 from allie.search.moe_oracle import MoEOracle
 
-engine = Search(MoEOracle("path/to/model.pt"), threads=8)
+calibration = json.loads(files("allie.lichess").joinpath("calibration-allie-2.0.json").read_text())
+engine = Search(MoEOracle("path/to/model.pt"), threads=8, calibration=calibration)
 # start position, 120+1 seconds, White 1800, Black 1900
 prefix = [2348, 198, 11, 1, 8, 0, 0, 1, 9, 0, 0]
 query = {"prefix": prefix, "cell": 1, "features": np.full((len(prefix), 3), -1, np.float32)}
