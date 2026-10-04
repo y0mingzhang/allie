@@ -65,10 +65,11 @@ trust_remote_code=True)`, see the model card).
 - **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
   63 bins, from 0 s to over an hour, given the position, both clocks and both ratings. It is a draw, not
   the average, so the bot plays obvious moves fast and sometimes thinks long, as people do. Human times
-  are measured by the server, so the bot takes the network lag (`play.lag`, 0.1 s) off the draw. Compute
+  are measured by the server, so the bot takes the lag off the draw (`play.lag`, 0.3 s: live, Lichess charged the bot 0.33 s per move beyond its own think time). Compute
   time counts toward the wait. Each side's first move takes 0.5-2 s.
-- **Clock safety.** The wait never exceeds half of the clock left above a 1 s reserve, plus the increment,
-  and never the clock above the reserve itself (the increment arrives only after the move). Fewer than 1%
+- **Clock safety.** The wait never exceeds half of the clock left above a 2 s reserve, plus the increment,
+  and never the clock above the reserve itself (the increment arrives only after the move). The reserve
+  covers the 99th percentile of live lag, 2.2 s. Fewer than 1%
   of human moves would be cut by this guard.
 - **Resigning.** At each position, the bot resigns with the probability that a human of its rating resigns
   there: on its turn instead of moving, or right after its own move, when the new position shows it is
