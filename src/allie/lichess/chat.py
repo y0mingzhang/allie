@@ -25,9 +25,10 @@ from .tokens import MOVE_ID
 
 log = logging.getLogger(__name__)
 
-RARE = 0.08  # a move this unlikely at the mover's rating is a surprise
-GOOD = 0.12  # a move that shifts the expected score this much is strong (or a mistake)
-DROP = 0.25  # an expected score this far below its high since the last remark: pressure
+# notable moments, in probabilities at the mover's rating and our expected score
+RARE, GOOD = 0.15, 0.10  # their move: a rare and good find
+HURT = 0.15  # their move: costly to us even if expected
+DROP, LOW = 0.25, 0.4  # the game: this far below its high, and under this (once a game)
 LIMIT = 140  # Lichess's longest chat line
 MUTED = set()  # opponents who typed !quiet, for the life of the process
 HELLO = (
@@ -137,8 +138,8 @@ class Chatter:
         self.match, self.cfg, self.llm = match, match.bot.config.chat, llm
         self.views, self.clocks = {}, {}  # by ply: Allie's view, both clocks (ms)
         self.lines, self.info = [], {}  # the chat so far; the gameFull event
-        self.ref, self.last, self.said, self.answered = None, -math.inf, 0, 0
-        self.greeted = self.done = False
+        self.high, self.last, self.said, self.answered = 0.0, -math.inf, 0, 0
+        self.greeted = self.done = self.pressed = False
         self.posted = 0.0
         self.jobs = queue.Queue()
         name = f"chat-{match.gid}"
@@ -211,16 +212,19 @@ class Chatter:
         if not (a and b):
             return
         e0, e1 = score(a[1]), score(b[1])
-        self.ref = max(e0, e0 if self.ref is None else self.ref)
+        self.high = max(self.high, e0)
+        pressure = not self.pressed and e1 <= min(self.high - DROP, LOW)
         if a[0].get(moves[n - 2], 1.0) < RARE and e1 <= e0 - GOOD:
-            task = "Their last move was rare and strong: compliment it, or SKIP."
-        elif e1 <= self.ref - DROP and e1 < 0.45:
-            task = "Your chances dropped: say gracefully that they're pressing you, or SKIP."
+            task = "Their last move was a rare, strong find: compliment it, or SKIP."
+        elif e1 <= e0 - HURT:
+            task = "Their last move hurt you: take it with good grace, no excuses, or SKIP."
+        elif pressure:
+            task = "Your chances have sunk: say gracefully that they're pressing you, or SKIP."
         else:
             return
         if self.said >= self.cfg.remarks or n - self.last < self.cfg.every:
             return
-        self.said, self.last, self.ref = self.said + 1, n, e1
+        self.said, self.last, self.pressed = self.said + 1, n, self.pressed or pressure
         prompt = "\n".join(self.facts(moves, private=True) + [task])
         self.jobs.put(Job("remark", n, self.cfg.rooms, prompt))
 
@@ -361,7 +365,10 @@ class Chatter:
 
     def post(self, text, room):
         time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
-        self.match.bot.client.chat(self.match.gid, text, room)
+        try:
+            self.match.bot.client.chat(self.match.gid, text, room)
+        except OSError as e:  # HTTP and network errors, after the client's retries
+            return log.warning("game %s chat: %s", self.match.gid, e)
         self.posted = time.monotonic()
         self.lines.append(("you", text))
         log.info("game %s chat (%s): %s", self.match.gid, room, text)

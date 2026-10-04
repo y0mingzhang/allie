@@ -105,7 +105,7 @@ def test_compliment_and_privacy():
     f.play(c, ["f2f3"], wdl=(0.2, 0.2, 0.6))  # our view: f3 was strong (0.5 -> 0.3)
     f.play(c, ["f2f3", "e7e5"], {"g1h3": 0.97, "g2g4": 0.03})
     wait(lambda: len(f.posts) == 2)
-    assert "rare and strong" in llm.prompts[0]
+    assert "rare, strong find" in llm.prompts[0]
     assert (
         "1. f3: Allie gave it 1% for a 1480 player (it expected e4 most"
         in llm.prompts[0]
@@ -126,6 +126,25 @@ def test_compliment_and_privacy():
         "Your last move 2...Qh4#" in p and "Their most surprising move: 1. f3 (1%)" in p
     )
     assert len(llm.prompts) == 3  # no remark on the blunder
+
+
+def test_hurt_and_pressure():
+    """White bot. Their expected but costly move: a graceful word; the game sinking from its
+    high: once a game."""
+    f, llm = Fake(white=True, every=0, hello=""), Recorder()
+    f.opponent = "hurt-opp"
+    c = Chatter(f, llm)
+    moves = ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "d2d3", "f8c5"]
+    ours = [0.5, 0.5, 0.3, 0.3, 0.2, 0.2, 0.15, 0.15, 0.1]  # our expected score by ply
+    for k, e in enumerate(ours):
+        mine = (e, 0.0, 1 - e)
+        probs = {moves[k]: 0.9, "a7a6": 0.1} if k % 2 else None  # their moves: expected
+        f.play(c, moves[:k], probs, mine if k % 2 == 0 else mine[::-1], first=k == 0)
+    time.sleep(0.3)
+    tasks = [p.splitlines()[-1] for p in llm.prompts]
+    assert len(tasks) == 2
+    assert "hurt you" in tasks[0] and "1...e5: Allie gave it 90%" in llm.prompts[0]
+    assert "pressing you" in tasks[1]
 
 
 def test_quiet_and_limits():

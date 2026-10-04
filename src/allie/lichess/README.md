@@ -81,10 +81,10 @@ and position, how likely Allie found each move at the mover's rating, Allie's wi
 and how it moved, think times from the clocks, and after the game Stockfish's verdict on each side's
 costliest move.
 
-- **When it speaks.** A hello that mentions `!quiet`; a compliment when the opponent plays a move Allie
-  found rare (under 8% at their rating) and strong (their expected score up 12 points); a gracious word
-  when the bot's prospects fall 25 points from their high; an answer when someone writes; a post-game
-  message. At most `remarks` unprompted remarks a game, `every` plies apart, and `gap` seconds between
+- **When it speaks.** A hello that mentions `!quiet`; a compliment when the opponent finds a move Allie
+  gave under 15% at their rating that moves the expected score 10 points their way; a graceful word when
+  their move costs the bot 15 points, or (once a game) when its expected score sinks 25 points below its
+  high and under 40%; an answer when someone writes; a post-game message. At most `remarks` unprompted remarks a game, `every` plies apart, and `gap` seconds between
   messages. Messages that arrive while the model writes get one answer, to the last.
 - **Fair play.** During the game the model never sees Stockfish, the opponent's mistakes (a move that
   helped the bot) or the bot's estimate when it is above 55%, and is told never to suggest moves or point

@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import chess
 import chess.pgn
 import torch
+
 from allie.lichess import chat
 from allie.lichess.chat import Chat, Chatter
 
