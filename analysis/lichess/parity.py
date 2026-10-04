@@ -25,7 +25,7 @@ from allie.lichess.tokens import HEADER, START, advance
 
 G = paths.DATA / "strat-eval-v1"
 BENCH = paths.DATA / "maia3-bench"
-REFERENCE = BENCH / "bigrun-v2/step-00143051/scores.npz"
+REFERENCE = paths.DATA / "distill-v2/scores/ann-all-p05-t1907.npz"  # the release: the annealed model
 
 
 def positions(index):

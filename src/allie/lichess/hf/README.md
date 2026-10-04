@@ -17,6 +17,10 @@ the time control and the clock. It also predicts how long the player will think 
 It continues the original Allie ([paper](https://arxiv.org/abs/2410.03893),
 [code](https://github.com/ippolito-cmu/allie)).
 
+Allie 2.0 is the annealed model: the main training run's final checkpoint after a short second pass at a
+low learning rate over 1B tokens of recent games, which lowered CE in every time control. The checkpoint
+before that pass stays in this repository under the tag `pre-anneal` (`revision="pre-anneal"`).
+
 ## Quick start
 
 ```sh
@@ -87,8 +91,11 @@ human-like think times, and handles challenges, draws, resignation and reconnect
 - **Data.** Every Lichess month with clock times from May 2017 to August 2026, except the test month, July
   2026: 7.9B games. Over-the-board and engine games are added. The sampler doubles a game's weight for
   every 200 rating points of its stronger player.
-- **Compute.** 75B tokens: 143,051 steps of 524,288 tokens, on 8 NVIDIA L40S GPUs for 6.6 days. 3.1e20 training
-  FLOPs.
+- **Main run.** 75B tokens: 143,051 steps of 524,288 tokens, on 8 NVIDIA L40S GPUs for 6.6 days.
+- **Second anneal.** From the main run's final checkpoint with a fresh optimizer: 1B tokens (1,907 steps) of
+  Lichess games from January 2024 to August 2026 (July 2026 still held out), at no more than 5% of the main
+  run's peak learning rate, decayed over the last 30% of steps. 2.1 hours on the same GPUs.
+- **Compute.** 3.2e20 training FLOPs in all.
 
 ## Evaluation
 
@@ -104,25 +111,26 @@ log-probability, in nats, of the move the human played; lower is better.
 | Maia-3 23M | 22.9M | 2.40 | 1.2475 | 58.34 |
 | Maia-3 79M | 78.9M | 9.23 | 1.2269 | 58.80 |
 | Original Allie | 305M | 0.61 | 1.2848 | 57.06 |
-| **Allie 2.0** | 0.69B active / 5.6B total | 1.39 | **1.2056** | **59.26** |
+| Allie 2.0 before the anneal | 0.69B active / 5.6B total | 1.39 | 1.2056 | 59.26 |
+| **Allie 2.0** | 0.69B active / 5.6B total | 1.39 | **1.2030** | **59.29** |
 
-Allie 2.0 minus Maia-3 79M: −0.0213 [−0.0245, −0.0184] nats of CE and +0.46 [+0.24, +0.67] points of top-1
-accuracy (95% intervals over games). [Maia-3](https://arxiv.org/abs/2605.19091) is the state of the art in
-human-move prediction, from Ashton Anderson's group; its open weights made this comparison possible.
+Allie 2.0 minus Maia-3 79M: −0.0238 [−0.0272, −0.0208] nats of CE and +0.48 [+0.27, +0.70] points of top-1
+accuracy (95% intervals over games); the anneal's share is −0.0026 [−0.0033, −0.0019] nats.
+[Maia-3](https://arxiv.org/abs/2605.19091) is the state of the art in human-move prediction, from Ashton
+Anderson's group; its open weights made this comparison possible.
 
 **Main evaluation.** 16 cells (bullet, blitz, rapid and classical, each in the four rating bands), about
-100,000 moves each, CE averaged over cells without legal-move masking: **1.2533**, and 1.1035 over the four
-≥2400 cells.
+100,000 moves each, CE averaged over cells without legal-move masking: **1.2505**, and 1.1001 over the four
+≥2400 cells (1.2533 and 1.1035 before the anneal; lower in all four time controls).
 
 **This release's code.** The inference here matches the training code within noise. On 5,000 benchmark
 positions, each scored as a live game reaches it (the last move added to a cached game), CE minus the training
-code's is −0.0005 [−0.0014, +0.0004] nats with the C++ kernels on CPU in BF16 and −0.0003 [−0.0012, +0.0006]
-with the CUDA graphs on GPU (plain PyTorch: −0.0003 [−0.0013, +0.0006] and −0.0006 [−0.0015, +0.0003]). The
-top move agrees with plain PyTorch's on 99.4% of positions on CPU and 99.6% on GPU.
+code's is +0.0003 [−0.0007, +0.0012] nats with the C++ kernels on CPU in BF16, and +0.0010 [−0.0011, +0.0032]
+in int8.
 
-**int8, the CPU default,** costs +0.0021 [+0.0001, +0.0042] nats of CE against BF16 with the C++ kernels
-(plain PyTorch: +0.0016, standard error 0.0011), for half the memory and about 1.6 times the speed.
-`int8=False` keeps BF16.
+**int8, the CPU default,** costs +0.0008 [−0.0013, +0.0030] nats of CE against BF16 on those positions, and
+the top move agrees on 97.7% of them, for half the memory and about 1.6 times the speed. `int8=False` keeps
+BF16.
 
 ## Intended use and limitations
 
