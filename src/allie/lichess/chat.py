@@ -224,11 +224,8 @@ class Chatter:
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
-        self.last, self.posted, self.until = (
-            0,
-            -math.inf,
-            math.inf,
-        )  # no remark in the opening
+        self.last = 0  # the ply of the last call: no remark before ply `every`
+        self.posted, self.until = -math.inf, math.inf
         self.heard, self.timings = Counter(), []
         self.seen, self.latest = [], []  # the moves analyzed, and the reader's latest
         name = f"chat-{self.gid}"
