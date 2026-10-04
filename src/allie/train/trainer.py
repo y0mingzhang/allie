@@ -433,6 +433,12 @@ def main():
         "gathering again (bitwise; 0.8 gb per block at width 2048)",
     )
     p.add_argument(
+        "--shard-host-gather",
+        action="store_true",
+        help="moe_shard: gathers copy the whole experts from a node-shared pinned host image of every rank's shards "
+        "(published after each optimizer step) on the copy engines instead of NCCL all-gathers (bitwise)",
+    )
+    p.add_argument(
         "--optimizers-reversed",
         action="store_true",
         help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
@@ -508,6 +514,7 @@ def main():
     moe_kernels.DENSE_TRITON = a.dense_triton
     expert_shard.LATE = a.shard_late_prefetch
     expert_shard.DEPTH, expert_shard.HOLD = a.shard_prefetch, a.shard_hold
+    expert_shard.HOST = a.shard_host_gather
     assert a.shard_prefetch >= 1
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
@@ -683,6 +690,10 @@ def main():
         del shared, local
     elif (out / "last.pt").exists():
         raise ValueError("Existing checkpoint requires explicit resume")
+    if expert_shard.HOST:  # the loaded shards into the host image
+        assert sharded, "--shard-host-gather needs arch moe_shard on more than one rank"
+        expert_shard.host_setup(cpu)
+        expert_shard.publish()
     termination = [False]
 
     def stop_handler(*_):
@@ -907,6 +918,8 @@ def main():
             count_sum += count
             window_tokens += rows.shape[0] * world * a.row_tokens
         manager.step_optimizers(index)
+        if expert_shard.HOST:
+            expert_shard.publish()
         if a.shard_early and sharded:
             expert_shard.start(manager.moe)
         step = index + 1

@@ -9,7 +9,17 @@ reduce-scatters them (BF16, averaged, in flight until the next layer's backward)
 keeps whole experts: state_dict() gathers them, load_state_dict slices them (same world size).
 Schedule knobs (the same collectives on the same data, bitwise): DEPTH layers gathered ahead in forward, start() and
 backward_start() launch a pass's first gather early, HOLD keeps a forward's gather for the backward outside checkpoints.
+HOST (--shard-host-gather, bitwise): no all-gathers. Every rank publishes its shards after the optimizer step into one
+node-shared pinned host image (D2H, 0.1 GB per layer per rank) and a gather copies the whole experts from the image
+(H2D, its own rows D2D) on the copy engines: no NCCL kernel and no SM, faster than the all-gather and unslowed by
+concurrent compute.
 """
+
+import mmap
+import os
+import random
+import time
+import uuid
 
 import torch
 import torch.distributed as dist
@@ -26,9 +36,17 @@ DEPTH = 1  # layers the forward gathers ahead (train.trainer --shard-prefetch)
 # layers out of a checkpoint save their forward's gathered experts, not their shards: no gather in their backward
 # (train.trainer --shard-hold; 0.8 GB per such layer at width 2048, held from its forward to its backward)
 HOLD = False
+HOST = False  # gathers from the host image (host_setup, publish) instead of all-gathers
 _span = []  # per layer: its model's first and end positions
-_ready = {}  # layer position -> (works, up, down): gathers in flight
+_ready = {}  # layer position -> (works, up, down): gathers in flight (works: c10d Works, or the copy's event)
 _pending = []  # (work, shard, its grad, the whole grads it reads): reduce-scatters in flight
+_image = None  # per layer: (up, down) views of the pinned host image, whole experts
+_events = []  # [rank][layer]: the publish events (interprocess) a gather of the layer waits on
+_pub = _copy = None  # streams: this rank's publishes (D2H), the gathers (H2D)
+_group = None  # gloo group: the host barrier after every rank's publish
+# test scaffolding: a random host delay up to this many ms before each host gather's enqueue (per rank, per gather), to
+# skew the ranks' hosts against the publish events' generations (ALLIE_SHARD_STRESS_MS; 0: off)
+_STRESS_MS = float(os.environ.get("ALLIE_SHARD_STRESS_MS", 0))
 
 
 def shard(layers):
@@ -61,13 +79,100 @@ def _whole(p):
     return p.new_empty((p.shape[0] * dist.get_world_size(), *p.shape[1:]))
 
 
+def _rows(p):
+    """This rank's rows of a layer's whole experts."""
+    n, r = p.shape[0], dist.get_rank()
+    return r * n, (r + 1) * n
+
+
 def _launch(i):
-    out = [_whole(p) for p in (SHARDED[i].up, SHARDED[i].down)]
-    works = [
-        dist.all_gather_into_tensor(t, p.detach(), async_op=True)
-        for t, p in zip(out, (SHARDED[i].up, SHARDED[i].down))
+    m = SHARDED[i]
+    out = [_whole(p) for p in (m.up, m.down)]
+    if not HOST:
+        works = [
+            dist.all_gather_into_tensor(t, p.detach(), async_op=True)
+            for t, p in zip(out, (m.up, m.down))
+        ]
+        return works, *out
+    if _STRESS_MS:
+        time.sleep(random.random() * _STRESS_MS / 1e3)
+    done = torch.cuda.Event()
+    # the whole buffers come from the current stream's pool: their blocks may still be read by its queued kernels, so
+    # the copies wait for it (as c10d's collectives do), then for every rank's publish of this layer
+    _copy.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_copy):
+        for events in _events:
+            _copy.wait_event(events[i])
+        for t, h, p in zip(out, _image[i], (m.up, m.down)):
+            lo, hi = _rows(p)
+            t[:lo].copy_(h[:lo], non_blocking=True)
+            t[lo:hi].copy_(p.detach(), non_blocking=True)
+            t[hi:].copy_(h[hi:], non_blocking=True)
+        done.record(_copy)
+    return [done], *out
+
+
+def host_setup(group):
+    """Map the node-shared image of every sharded layer's whole experts (/dev/shm, unlinked once every rank has mapped
+    it), register it with CUDA, exchange the publish events. group: a gloo group of the ranks, all on this host."""
+    global _image, _pub, _copy, _group
+    w, r = dist.get_world_size(), dist.get_rank()
+    hosts = [None] * w
+    dist.all_gather_object(hosts, os.uname().nodename, group=group)
+    assert len(set(hosts)) == 1, f"--shard-host-gather needs one host, got {sorted(set(hosts))}"
+    shapes = [[(m.experts, *p.shape[1:], p.dtype) for p in (m.up, m.down)] for m in SHARDED]
+    size = lambda s: int(torch.Size(s[:-1]).numel()) * torch.empty(0, dtype=s[-1]).element_size()
+    nbytes = sum(size(s) for pair in shapes for s in pair)
+    st = os.statvfs("/dev/shm")
+    assert st.f_bavail * st.f_frsize > nbytes + (1 << 30), f"/dev/shm: {nbytes >> 30} GiB needed"
+    name = [f"/dev/shm/allie-shard-{uuid.uuid4().hex}" if r == 0 else None]
+    dist.broadcast_object_list(name, 0, group=group)
+    if r == 0:
+        with open(name[0], "wb") as f:
+            f.truncate(nbytes)
+    dist.barrier(group=group)
+    with open(name[0], "r+b") as f:
+        mapped = mmap.mmap(f.fileno(), nbytes)
+    dist.barrier(group=group)
+    if r == 0:
+        os.unlink(name[0])
+    flat = torch.frombuffer(mapped, dtype=torch.uint8)
+    rc = torch.cuda.cudart().cudaHostRegister(flat.data_ptr(), nbytes, 0)
+    assert rc == 0 and flat.is_pinned(), f"cudaHostRegister {rc}"
+    _image, at = [], 0
+    for pair in shapes:
+        views = []
+        for s in pair:
+            n = size(s)
+            views.append(flat[at : at + n].view(s[-1]).view(s[:-1]))
+            at += n
+        _image.append(tuple(views))
+    mine = [torch.cuda.Event(interprocess=True) for _ in SHARDED]
+    handles = [None] * w
+    dist.all_gather_object(handles, [e.ipc_handle() for e in mine], group=group)
+    device = torch.cuda.current_device()
+    _events[:] = [
+        mine if k == r else [torch.cuda.Event.from_ipc_handle(device, h) for h in hs]
+        for k, hs in enumerate(handles)
     ]
-    return works, *out
+    _pub, _copy, _group = torch.cuda.Stream(), torch.cuda.Stream(), group
+
+
+def publish():
+    """After the optimizer step (and once at the start): this rank's shards into the image. A host barrier first: every
+    rank has enqueued the last step's gathers, whose waits took the events' last records (a wait enqueued after a record
+    takes that record: a late rank's step-s gather must not wait on the step-s+1 publish, which needs its backward).
+    Then the per-layer publish events in forward order, then a host barrier: no rank's gather waits on an event not yet
+    recorded."""
+    dist.barrier(group=_group)
+    _pub.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_pub):
+        for i, m in enumerate(SHARDED):
+            for h, p in zip(_image[i], (m.up, m.down)):
+                lo, hi = _rows(p)
+                h[lo:hi].copy_(p.detach(), non_blocking=True)
+            _events[dist.get_rank()][i].record(_pub)
+    dist.barrier(group=_group)
 
 
 @torch.library.custom_op("allie_shard::gather", mutates_args=())
@@ -110,12 +215,15 @@ def finish():
 
 
 def reset():
-    """Before the optimizer step: every grad in, no gather of the old experts left (none in flight)."""
+    """Before the optimizer step: every grad in, no gather of the old experts left (none in flight), the last publish
+    done reading them."""
     finish()
     for works, *_ in _ready.values():
         for w in works:
             w.wait()
     _ready.clear()
+    if _pub is not None:
+        torch.cuda.current_stream().wait_stream(_pub)
 
 
 def start(layers):
