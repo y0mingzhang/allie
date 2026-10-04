@@ -293,6 +293,9 @@ struct Pool {
   }
 };
 
+// rows a chunk of an n-row matrix: about three chunks a thread, a multiple of 4, at most `most`
+static inline int chunk_rows(int n, int nt, int most) { return std::max(4, std::min(most, n / (3 * nt) / 4 * 4)); }
+
 static inline void split(int n, int t, int nt, int align, int& lo, int& hi) {
   int chunks = (n + align - 1) / align;
   lo = std::min(n, (int)((long)chunks * t / nt) * align);
@@ -887,7 +890,8 @@ void Engine::blockstep(int i, int t, int nt) {
     resid(i, k, &x[(size_t)k * D], &xs[(size_t)k * D], solo ? &pv.h[(size_t)k * D] : &h[(size_t)k * D], &gs[k * G]);
   if (!solo) sync(t, B_NORM);
   const float* const* hp = solo ? pv.ph.data() : ph.data();
-  chunks(t, (3 * D + 63) / 64, [&](int c) { mm(ly.qkv, D, 64 * c, std::min(64, 3 * D - 64 * c), hp, T, &qkv[64 * c], 3 * D); });
+  int cq = chunk_rows(3 * D, nt, 64);
+  chunks(t, (3 * D + cq - 1) / cq, [&](int c) { mm(ly.qkv, D, cq * c, std::min(cq, 3 * D - cq * c), hp, T, &qkv[cq * c], 3 * D); });
   sync(t, B_QKV);
   float* sc = scratch[t].data();
   if (T == S) {  // one new token a game: rotary and attention in one pass per (game, head)
@@ -903,8 +907,9 @@ void Engine::blockstep(int i, int t, int nt) {
       for (int k = units[3 * (u / H) + 1]; k < units[3 * (u / H) + 2]; k++) attend(i, k, u % H, &gs[k * G], sc);
   }
   sync(t, B_ATTN);
-  chunks(t, (D + 31) / 32, [&](int c) {
-    int lo = 32 * c, n = std::min(32, D - lo);
+  int co = chunk_rows(D, nt, 32);
+  chunks(t, (D + co - 1) / co, [&](int c) {
+    int lo = co * c, n = std::min(co, D - lo);
     mm(ly.o, D, lo, n, py.data(), T, &tmp[lo], D);
     for (int k = 0; k < T; k++) {
       size_t a = (size_t)k * D + lo;
@@ -987,8 +992,9 @@ void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
   Routing& R = solo ? priv[t].r : shared;
   if (!dense) {
     const float* const* fp = solo ? priv[t].phf.data() : phf.data();
-    chunks(t, (E + 15) / 16, [&](int c) {
-      int lo = 16 * c, n = std::min(16, E - lo);
+    int cr = chunk_rows(E, nt, 16);
+    chunks(t, (E + cr - 1) / cr, [&](int c) {
+      int lo = cr * c, n = std::min(cr, E - lo);
       mm(Mat{ly.router, nullptr, 2}, D, lo, n, fp, T, &rs[lo], E);
       for (int k = 0; k < T; k++)
         for (int e = lo; e < lo + n; e++) rs[(size_t)k * E + e] = sigm(rs[(size_t)k * E + e]);
@@ -1022,7 +1028,7 @@ void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
   // down: a share of the output features a chunk (about three a thread: each expert's rows of
   // a chunk are then a longer run), summed over the tokens' experts
   float* tb = scratch[t].data();
-  int dr = std::max(16, std::min(128, D / (3 * nt) / 16 * 16));
+  int dr = std::max(16, chunk_rows(D, nt, 128));
   chunks(t, (D + dr - 1) / dr, [&](int c) {
     int lo = dr * c, n = std::min(dr, D - lo);
     if (dense) {
@@ -1078,8 +1084,9 @@ void Engine::head(int t, int nt) {
     norm(xs, xs, D);
   }
   sync(t, H_NORM);
-  chunks(t, (V + 63) / 64, [&](int c) {
-    int lo = 64 * c, hi = std::min(V, lo + 64);
+  int cv = chunk_rows(V, nt, 64);
+  chunks(t, (V + cv - 1) / cv, [&](int c) {
+    int lo = cv * c, hi = std::min(V, lo + cv);
     mm(Mat{lm_head, nullptr, 0}, D, lo, hi - lo, pxf.data(), S, &z[lo], V);
     for (int s = 0; s < S; s++)
       for (int v = lo; v < hi; v++) out[(size_t)s * V + v] = 23.f * sigm((z[(size_t)s * V + v] + 5.f) / 7.5f);
