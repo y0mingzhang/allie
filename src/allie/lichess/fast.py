@@ -34,6 +34,7 @@ SOURCE = r"""
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -182,7 +183,14 @@ struct Pool {
   std::vector<std::thread> th;
   alignas(64) std::atomic<uint32_t> epoch{0};
   alignas(64) std::atomic<int> left{0};
-  alignas(64) std::atomic<int> count{0};
+  struct alignas(64) Group {
+    std::atomic<int> count{0};
+    int size = 0;
+  };
+  std::vector<int> group;           // thread -> its group (threads sharing a last-level cache)
+  std::unique_ptr<Group[]> groups;  // barrier arrivals counted per group, then once per group
+  int ngroups = 1;
+  alignas(64) std::atomic<int> top{0};
   alignas(64) std::atomic<uint32_t> gen{0};
   std::atomic<uint32_t> pokes{0};
   std::mutex mu;
@@ -191,8 +199,14 @@ struct Pool {
   void (*fn)(void*, int) = nullptr;
   void* arg = nullptr;
 
-  Pool(int n_, const int32_t* cpu, double spin_) : n(n_), pin(cpu != nullptr), spin(spin_) {  // cpu: thread t's CPU
+  // cpu: thread t's CPU (none: unpinned); grp: thread t's group, numbered from 0 (none: one group)
+  Pool(int n_, const int32_t* cpu, const int32_t* grp, double spin_) : n(n_), pin(cpu != nullptr), spin(spin_) {
     if (pin) cpus.assign(cpu, cpu + n);
+    group.assign(n, 0);
+    if (grp) group.assign(grp, grp + n);
+    ngroups = *std::max_element(group.begin(), group.end()) + 1;
+    groups.reset(new Group[ngroups]);
+    for (int t = 0; t < n; t++) groups[group[t]].size++;
     for (int t = 1; t < n; t++) th.emplace_back([this, t] { work(t); });
   }
   ~Pool() {
@@ -259,15 +273,19 @@ struct Pool {
     }
     cv.notify_all();
   }
-  void barrier() {
+  void barrier(int t) {  // the last of a group arrives for it at the top
     if (n == 1) return;
     uint32_t g = gen.load(std::memory_order_acquire);
-    if (count.fetch_add(1, std::memory_order_acq_rel) == n - 1) {
-      count.store(0, std::memory_order_relaxed);
-      gen.store(g + 1, std::memory_order_release);
-    } else {
-      while (gen.load(std::memory_order_acquire) == g) cpu_relax();
+    Group& c = groups[group[t]];
+    if (c.count.fetch_add(1, std::memory_order_acq_rel) == c.size - 1) {
+      c.count.store(0, std::memory_order_relaxed);
+      if (top.fetch_add(1, std::memory_order_acq_rel) == ngroups - 1) {
+        top.store(0, std::memory_order_relaxed);
+        gen.store(g + 1, std::memory_order_release);
+        return;
+      }
     }
+    while (gen.load(std::memory_order_acquire) == g) cpu_relax();
   }
 };
 
@@ -546,7 +564,7 @@ struct Engine {
   // barrier; thread 0 charges the time since the last one to phase p, and clears the work
   // counter of phase p for the phase after next
   void sync(int t, int p) {
-    pool->barrier();
+    pool->barrier(t);
     if (t == 0) {
       ctr[phase[0].v & 1].store(0, std::memory_order_relaxed);
       if (prof) {
@@ -678,10 +696,10 @@ void Engine::embedding(int t, int nt) {
       board_pieces(boards + 68 * k, piece);
       for (int pass = 0; pass < 3; pass++) {
         board_pass(*this, pass, piece, &cnn[pass & 1][0], &cnn[~pass & 1][0], p0, p1);
-        pool->barrier();
+        pool->barrier(t);
       }
       if (t == 0) board_final(*this, boards + 68 * k, &cnn[1][0], &b544[k * 544]);
-      if (k + 1 < T) pool->barrier();  // the next token's first pass overwrites cnn[1]
+      if (k + 1 < T) pool->barrier(t);  // the next token's first pass overwrites cnn[1]
     }
   }
   sync(t, E_CNN);
@@ -1020,7 +1038,7 @@ extern "C" {
 // skip_gate.0-2 value_embed.*. per layer (20): qkv qkv_s o o_s gates fc fc_s proj proj_s router
 // moe_bias mu up up_s down down_s shared_up shared_up_s shared_down shared_down_s
 void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* const* lay, const int32_t* cpus,
-                double spin) {
+                const int32_t* groups, double spin) {
   Engine* m = new Engine();
   m->L = cfg[0], m->D = cfg[1], m->H = cfg[2], m->hd = cfg[3], m->V = cfg[4], m->nve = cfg[5], m->E = cfg[6];
   m->topk = cfg[7], m->keep = cfg[8], m->eh = cfg[9], m->sh = cfg[10], m->dh = cfg[11], m->q8 = cfg[12];
@@ -1059,7 +1077,7 @@ void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* c
     ly.G = c[0], ly.ve = c[1], ly.skin = c[2], ly.skout = c[3];
     m->layers.push_back(ly);
   }
-  m->pool = new Pool(cfg[15], cpus, spin);
+  m->pool = new Pool(cfg[15], cpus, groups, spin);
   return m;
 }
 
@@ -1164,7 +1182,7 @@ int allie_profile(void* h, double* out, int on) {
 // best read bandwidth (GB/s) of `threads` threads streaming a buffer of `bytes` (first touched
 // by the thread that reads it), over `reps` passes
 double allie_bandwidth(int threads, int64_t bytes, int reps, const int32_t* cpus) {
-  Pool pool(threads, cpus, 0.01);
+  Pool pool(threads, cpus, nullptr, 0.01);
   size_t n = bytes / sizeof(float) / threads / 64 * 64;
   std::vector<float*> parts(threads);
   struct Arg { std::vector<float*>* parts; size_t n; int init; std::vector<float> sums; } arg{&parts, n, 1, std::vector<float>(threads)};
@@ -1290,7 +1308,7 @@ def library():
             tmp.unlink(missing_ok=True)
     lib = ctypes.CDLL(str(path))
     P, I, D = ctypes.c_void_p, ctypes.c_int, ctypes.c_double
-    lib.allie_new.restype, lib.allie_new.argtypes = P, [P, P, P, P, P, D]
+    lib.allie_new.restype, lib.allie_new.argtypes = P, [P, P, P, P, P, P, D]
     lib.allie_free.argtypes = [P]
     lib.allie_threads.restype, lib.allie_threads.argtypes = I, [P]
     lib.allie_wake.argtypes = [P]
@@ -1353,7 +1371,9 @@ def cpu_order(n):
                 for g in lists
                 if j < len(g)
             ]
-    return out[:n], [node[c] for c in out[:n]]
+    out = out[:n]
+    caches = sorted({(node[c], l3[c]) for c in out})
+    return out, [node[c] for c in out], [caches.index((node[c], l3[c])) for c in out]
 
 
 PHASES = ("board cnn", "embedding rows", "smear", "norm", "qkv", "rotary", "attention", "o",
@@ -1430,7 +1450,7 @@ class Fast:
                     self.tensors.append(s)
         arr = lambda ty, xs: (ty * len(xs))(*xs)
         order = cpu_order(self.threads) if pin else None
-        self.cpus, nodes = order or (None, None)
+        self.cpus, nodes, groups = order or (None, None, None)
         place = place and os.environ.get("ALLIE_NUMA") != "0"
         if place and nodes and Path("/sys/devices/system/node/node1").exists():
             # weights on the NUMA node of the threads (bound), or spread over theirs (interleaved)
@@ -1441,7 +1461,8 @@ class Fast:
                                  len(ts), arr(ctypes.c_int32, nodes), len(nodes))  # fmt: skip
         self.args = (arr(ctypes.c_int64, cfg), arr(ctypes.c_double, [model.scale, model.floor]),
                      arr(ctypes.c_void_p, ptrs), arr(ctypes.c_void_p, lay),
-                     arr(ctypes.c_int32, self.cpus) if self.cpus else None, spin)  # fmt: skip
+                     arr(ctypes.c_int32, self.cpus) if self.cpus else None,
+                     arr(ctypes.c_int32, groups) if groups else None, spin)  # fmt: skip
         self.handle, self.stale = self.lib.allie_new(*self.args), False
         if hasattr(os, "register_at_fork"):
             ref = weakref.ref(self)
@@ -1575,7 +1596,7 @@ class Graphs:
                  boards=torch.zeros(b, 68, dtype=torch.uint8, device=dev),
                  pos=torch.zeros(b, dtype=torch.long, device=dev),
                  slot=torch.full((b,), self.slots, dtype=torch.long, device=dev))  # fmt: skip
-        keys = torch.arange(span, device=dev)
+        x["keys"] = keys = torch.arange(span, device=dev)  # kept: the graph reads its memory
 
         def previous(e):
             p = self.e[x["slot"], (x["pos"] - 1).clamp(min=0)] * (x["pos"] > 0)[:, None]
