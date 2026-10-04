@@ -3,14 +3,34 @@
 A game is BOS, base time, increment, white Elo (4 digits), black Elo (4 digits), then one token
 per move. The token at position p carries the clock features and board state of the position
 that predicts move p - 10 (allie.data.mix Games.feats, allie/model/board_encode.cpp).
+Self-contained (no allie imports), so the Hugging Face release can ship it as is.
 """
 
-from allie.data.vocab import BOS, INCREMENTS_ID, MOVES, SECONDS_ID, UNK
+HEADER, CONTEXT = 11, 1025
+BOS, UNK, MOVE_START = 2348, 2349, 378
+SECONDS = [0, 15, 30, 45, 60, 90, *range(120, 10801, 60)]
+SECONDS_ID = {s: 192 + i for i, s in enumerate(SECONDS)} | {None: 192 + len(SECONDS)}
+INCREMENTS_ID = {i: 10 + i for i in range(181)} | {None: 191}
 
-MOVE_START = 378
-HEADER = 11
-CONTEXT = 1025
 
+def _moves():
+    """Every queen or knight move between squares, and every promotion, as sorted UCI."""
+    name = lambda s: "abcdefgh"[s % 8] + str(s // 8 + 1)
+    out = set()
+    for a in range(64):
+        for b in range(64):
+            df, dr = abs(a % 8 - b % 8), abs(a // 8 - b // 8)
+            if a != b and (not df or not dr or df == dr or {df, dr} == {1, 2}):
+                out.add(name(a) + name(b))
+        if a // 8 in (1, 6):  # pawns one step from promotion
+            last = 0 if a // 8 == 1 else 56
+            for f in range(max(a % 8 - 1, 0), min(a % 8 + 2, 8)):
+                out |= {name(a) + name(last + f) + p for p in "bnqr"}
+    return sorted(out)
+
+
+MOVES = _moves()
+MOVE_ID = {m: MOVE_START + i for i, m in enumerate(MOVES)}
 _sq = lambda f, r: ord(f) - 97 + (int(r) - 1) * 8
 TABLE = [
     (_sq(m[0], m[1]), _sq(m[2], m[3]), " nbrq".index(m[4]) + 1 if len(m) == 5 else 0)
@@ -29,8 +49,8 @@ def header(base, increment, white_elo, black_elo):
     digits = lambda e: [int(c) for c in f"{min(max(int(e), 0), 9999):04d}"]
     return [
         BOS,
-        SECONDS_ID.get("*" if base is None else str(base), UNK),
-        INCREMENTS_ID.get("*" if increment is None else str(increment), UNK),
+        SECONDS_ID.get(base, UNK),
+        INCREMENTS_ID.get(increment, UNK),
         *digits(white_elo),
         *digits(black_elo),
     ]

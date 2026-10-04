@@ -6,8 +6,7 @@ import pyarrow as pa
 import pytest
 
 from allie.data.mix import Games
-from allie.data.vocab import MOVE_ID
-from allie.lichess.tokens import HEADER, START, advance, features, header
+from allie.lichess.tokens import HEADER, MOVE_ID, START, advance, features, header
 
 
 def random_game(seed, plies=300):
@@ -65,3 +64,15 @@ def test_features_match_training_loader():
 def test_features_unknown():
     assert features(5, None, None, [None] * 5) == [-1, -1, -1]
     assert features(4, 60, 0, [60, 60, None, 58]) == [-1, 58, -1]
+
+
+def test_vocabulary_matches_training():
+    from allie.data import vocab
+    from allie.lichess import tokens
+
+    assert tokens.MOVES == vocab.MOVES and tokens.MOVE_ID == vocab.MOVE_ID
+    assert tokens.BOS == vocab.BOS and tokens.UNK == vocab.UNK
+    for k, i in vocab.SECONDS_ID.items():
+        assert tokens.SECONDS_ID[None if k == "*" else int(k)] == i
+    for k, i in vocab.INCREMENTS_ID.items():
+        assert tokens.INCREMENTS_ID[None if k == "*" else int(k)] == i

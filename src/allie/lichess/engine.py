@@ -10,10 +10,8 @@ import chess
 import numpy as np
 import torch
 
-from allie.data.vocab import MOVE_ID
-
 from .model import Cache, step
-from .tokens import CONTEXT, HEADER, START, advance, features, header
+from .tokens import CONTEXT, HEADER, MOVE_ID, START, advance, features, header
 
 TIME, WDL = slice(2350, 2413), slice(2413, 2416)
 # allie.search's format of each Lichess speed: bullet, blitz, rapid, classical

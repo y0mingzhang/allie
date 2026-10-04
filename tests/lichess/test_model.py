@@ -4,10 +4,9 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from allie.data.vocab import MOVE_ID
 from allie.lichess.engine import Engine, Game
 from allie.lichess.model import Cache, Model, step, swiglu
-from allie.lichess.tokens import HEADER, START, advance, features, header
+from allie.lichess.tokens import HEADER, MOVE_ID, START, advance, features, header
 
 from .test_tokens import random_game
 

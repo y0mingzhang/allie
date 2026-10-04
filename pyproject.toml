@@ -19,8 +19,8 @@ dependencies = [
 [project.optional-dependencies]
 # allie.search: the native tree search build and model export
 search = ["pybind11>=3.0,<4", "safetensors>=0.4"]
-# allie.lichess: exporting weights for the Lichess bot (serving needs only the core dependencies)
-bot = ["safetensors>=0.4"]
+# allie.lichess: weights from the Hugging Face Hub, and exporting them from a training checkpoint
+bot = ["huggingface_hub>=0.20", "safetensors>=0.4"]
 test = ["pytest>=8"]
 
 [project.scripts]
@@ -28,6 +28,7 @@ allie-train = "allie.cli:train"
 allie-eval = "allie.cli:evaluate"
 allie-exp = "allie.experiments.modelexp:main"
 allie-bot = "allie.lichess.cli:main"
+allie-predict = "allie.lichess.api:main"
 
 [build-system]
 requires = ["hatchling>=1.25"]

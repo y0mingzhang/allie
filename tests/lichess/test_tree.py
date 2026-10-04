@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 import torch
 
-from allie.data.vocab import MOVE_ID
 from allie.lichess.engine import Engine, Game, Play
 from allie.lichess.model import Cache, step
+from allie.lichess.tokens import MOVE_ID
 
 from .test_tokens import random_game
 

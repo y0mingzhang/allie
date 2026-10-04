@@ -13,12 +13,11 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from allie.data.vocab import MOVES
 from allie.search import Search
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
 from allie.search.native import from_prefix
 
-from .tokens import CONTEXT, MOVE_START, advance
+from .tokens import CONTEXT, MOVE_START, MOVES, advance
 
 CALIBRATION = Path(__file__).with_name("calibration-allie-2.0.json")
 # simulations -> the output policy fitted for them (8 and 25 reuse 128's, as the benchmark did)
