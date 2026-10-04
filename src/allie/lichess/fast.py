@@ -19,6 +19,7 @@ import os
 import platform
 import subprocess
 import threading
+import warnings
 import weakref
 from pathlib import Path
 
@@ -873,7 +874,9 @@ void Engine::blockstep(int i, int t, int nt) {
   ffn(t, nt, dense, i, solo);
 }
 
-static void route(Engine& m, const Layer& ly, int k) {  // top-k of one token, its gates
+// top-k of one token and its gates. Exact ties in the biased scores go to the lower expert id
+// (torch.topk leaves their order unspecified; distinct balancing biases make them rare)
+static void route(Engine& m, const Layer& ly, int k) {
   const float* s = &m.rs[(size_t)k * m.E];
   float best[64];
   int bi[64], n = 0;
@@ -1493,6 +1496,8 @@ def bandwidth(threads=None, gigabytes=2.0, reps=5, pin=True):
     """This machine's best streaming read bandwidth in GB/s with `threads` threads, pinned as
     Fast pins them, each reading memory it first touched."""
     threads = threads or threads_default()
+    if threads < 1 or gigabytes <= 0 or reps < 1:
+        raise ValueError("threads, gigabytes and reps must be positive")
     order = cpu_order(threads) if pin else None
     cpus = (ctypes.c_int32 * threads)(*order[0]) if order else None
     return library().allie_bandwidth(threads, int(gigabytes * 2**30), reps, cpus)
@@ -1509,7 +1514,7 @@ class Graphs:
     BATCHES = (1, 2, 4, 8, 16, 32)
     SPANS = (128, 256, 512, 1025)
 
-    def __init__(self, model, slots=None):
+    def __init__(self, model, slots=None, strict=False):
         m, ctx = model, model.w["cos"].shape[0]
         per = (
             2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width
@@ -1528,6 +1533,8 @@ class Graphs:
         self.model, self.slots, self.ctx = m, slots, ctx
         self.free = list(range(slots))[::-1]
         self.graphs, self.pool, self.lock = {}, None, threading.Lock()
+        self.stream = torch.cuda.Stream(m.device)  # captures run on the model's device
+        self.strict, self.broken = strict, False  # strict: a failed capture raises
 
     def attach(self, cache):
         """A new cache's storage: a free slot (False when none is left)."""
@@ -1567,7 +1574,7 @@ class Graphs:
                 x["ids"], x["pos"], x["feats"], x["boards"], previous, attend
             )
 
-        side = torch.cuda.Stream(dev)
+        side = self.stream
         side.wait_stream(torch.cuda.current_stream(dev))
         with torch.cuda.stream(side):
             for _ in range(2):  # warm up the libraries outside the capture
@@ -1575,14 +1582,14 @@ class Graphs:
         torch.cuda.current_stream(dev).wait_stream(side)
         self.pool = self.pool or torch.cuda.graph_pool_handle()
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g, pool=self.pool):
+        with torch.cuda.graph(g, pool=self.pool, stream=side):
             out = run()
         return g, x, out
 
     def step(self, items):
         """step()'s logits, or None when the step is not one new token per pooled game."""
-        with self.lock:  # the graphs' inputs are shared
-            return self._step(items)
+        with self.lock, torch.cuda.device(self.model.device):  # the graphs' inputs are shared
+            return None if self.broken else self._step(items)
 
     def _step(self, items):
         n = len(items)
@@ -1592,7 +1599,14 @@ class Graphs:
         b = next(x for x in self.BATCHES if x >= n)
         span = next(x for x in self.SPANS if x > max(c.n for c, *_ in items))
         if (b, span) not in self.graphs:
-            self.graphs[b, span] = self.capture(b, span)
+            try:
+                self.graphs[b, span] = self.capture(b, span)
+            except Exception as e:
+                if self.strict:
+                    raise
+                warnings.warn(f"CUDA graphs failed, running without them: {e}")
+                self.broken = True
+                return None
         g, x, out = self.graphs[b, span]
         for j, k in enumerate(("ids", "feats", "boards"), 1):
             x[k][:n].copy_(torch.cat([it[j] for it in items]))

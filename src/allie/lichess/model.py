@@ -105,7 +105,7 @@ class Model:
                 from .fast import Fast, Graphs
 
                 if self.device.type == "cuda":
-                    self.graphs = Graphs(self)
+                    self.graphs = Graphs(self, strict=backend == "fast")
                 else:
                     self.fast = Fast(self, threads)
             except Exception as e:
