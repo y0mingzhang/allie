@@ -92,6 +92,7 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--save", help="npz of the legal-move probabilities")
     p.add_argument("--against", help="another run's --save npz to compare with")
+    p.add_argument("--reference", default=REFERENCE, help="the training code's scores.npz of this model")
     a = p.parse_args()
     if a.threads:
         torch.set_num_threads(a.threads)
@@ -136,14 +137,15 @@ def main():
             probs[i, : len(lg)] = lg.exp().numpy()
         lo = hi
     seconds = time.perf_counter() - t0
-    with np.load(REFERENCE) as z:
+    with np.load(a.reference) as z:
         ref_ce, ref_top1 = z["ce_legal"][index], z["top1"][index]
     game = np.array([x["game"] for x in P])
     rng = np.random.default_rng(0)
     d = ce - ref_ce
     dp = np.exp(-ce) - np.exp(-ref_ce)
     out = dict(
-        model=a.model, device=a.device, dtype=a.dtype, int8=a.int8, experts=a.active_experts or m.topk,
+        model=a.model, reference=str(a.reference), device=a.device, dtype=a.dtype, int8=a.int8,
+        experts=a.active_experts or m.topk,
         backend="fast" if m.fast else f"graphs ({len(m.graphs.graphs)} captured)" if m.graphs else "torch",
         decode=a.decode, moe=a.moe,
         threads=torch.get_num_threads(), positions=len(P), load_seconds=round(load, 1),
