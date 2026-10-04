@@ -514,6 +514,19 @@ def test_split():
         next(events)
 
 
+def test_split_survives_a_failing_chat(caplog):
+    """A chat whose put raises is left behind, logged once; the game thread still gets
+    every event and the stream's own end."""
+
+    def put(e):
+        raise RuntimeError("chat bug")
+
+    sink = SimpleNamespace(gid="g", done=False, put=put)
+    events = [{"type": "gameFull"}, None, {"type": "gameState"}, {"type": "chatLine"}]
+    assert list(split(iter(events), sink)) == events
+    assert sum("chat: failed" in r.message for r in caplog.records) == 1
+
+
 def test_through_the_bot(engine, monkeypatch):
     """The bot on the mock server: the hello, an answer, the game's moves unchanged."""
     m = Model("thanks, you too!")

@@ -217,8 +217,19 @@ def split(events, chat, abandon=None):
     """The game stream for the game thread, each event also handed to the chat at once by
     a reader thread, so a think-time wait delays the moves but not the chat. The reader
     outlives the game thread's loop while the chat lingers after the game, unless abandon
-    is set (the game thread resumed on a new stream: this one would feed the chat twice)."""
-    q = queue.Queue()
+    is set (the game thread resumed on a new stream: this one would feed the chat twice).
+    A chat that fails is left behind, logged once; the game never sees its errors."""
+    q, alive = queue.Queue(), [True]
+
+    def feed(e):
+        if alive[0]:
+            try:
+                chat.put(e)
+            except Exception:
+                alive[0] = False
+                log.exception(
+                    "game %s chat: failed; the game goes on without it", chat.gid
+                )
 
     def read():
         try:
@@ -226,18 +237,17 @@ def split(events, chat, abandon=None):
                 if abandon is not None and abandon.is_set():
                     break
                 if e:
-                    chat.put(e)
+                    feed(e)
                 q.put(e)
-                if chat.done:
+                if alive[0] and chat.done:
                     break
         except Exception as e:  # noqa: BLE001 - the game thread raises it
             q.put(e)
         finally:
             q.put(END)
-            if (
-                abandon is None or not abandon.is_set()
-            ):  # an abandoned stream's end is not the game's
-                chat.put(END)
+            # an abandoned stream's end is not the game's
+            if abandon is None or not abandon.is_set():
+                feed(END)
             if close := getattr(events, "close", None):
                 close()
 
