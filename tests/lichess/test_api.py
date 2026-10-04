@@ -60,22 +60,66 @@ def test_predict_matches_model_and_reuses_cache(tiny):
     )
 
 
-def test_transformers_remote_code(tiny_path, tmp_path):
+def test_failed_step_drops_its_session(tiny, monkeypatch):
+    from allie.lichess import api
+
+    allie, game = Allie(tiny), "1. e4 e5 2. Nf3"
+    real = api.step
+
+    def broken(*args):
+        raise RuntimeError("out of memory")
+
+    monkeypatch.setattr(api, "step", broken)
+    with pytest.raises(RuntimeError):
+        allie.predict(game)
+    monkeypatch.setattr(api, "step", real)
+    assert allie.predict(game) == Allie(tiny).predict(game)
+
+
+def test_rejects_other_starts_and_samples_cold():
+    fen = '[SetUp "1"]\n[FEN "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]\n\n1. e4 *'
+    with pytest.raises(ValueError):
+        parse_moves(fen)
+    with pytest.raises(ValueError):
+        parse_moves('[Variant "Chess960"]\n\n1. e4 *')
+
+
+def test_play_temperatures(tiny):
+    allie, game = Allie(tiny), "1. e4 e5"
+    best = next(iter(allie.predict(game, 1500, 1500)))
+    assert allie.play(game, temperature=1e-4) == best == allie.play(game, temperature=0)
+    with pytest.raises(ValueError):
+        allie.play(game, temperature=float("nan"))
+
+
+@pytest.fixture
+def release(tiny_path, tmp_path, monkeypatch):
+    """The Hugging Face folder of the tiny model, loaded through a fresh module cache."""
     transformers = pytest.importorskip("transformers")
     from allie.lichess.hub import build
 
+    monkeypatch.setenv("HF_MODULES_CACHE", str(tmp_path / "modules"))
     (tmp_path / "export").mkdir()
     for f in ("config.json", "model.safetensors"):
         (tmp_path / "export" / f).symlink_to(tiny_path / f)
     out = build(tmp_path / "export", tmp_path / "hf")
-    model = transformers.AutoModel.from_pretrained(
-        str(out), trust_remote_code=True, device="cpu", torch_dtype=torch.float32
-    )
-    ref = Allie(Model(tiny_path, dtype=torch.float32))
+    return lambda **kw: transformers.AutoModel.from_pretrained(str(out), trust_remote_code=True, **kw)
+
+
+def test_transformers_remote_code(release, tiny_path):
     game = "1. e4 e5 2. Nf3 Nc6 3. Bb5"
-    assert model.predict(game, 1800, 1750, "180+2") == ref.predict(
-        game, 1800, 1750, "180+2"
-    )
+    ref = Allie(Model(tiny_path, dtype=torch.float32))
+    model = release(device="cpu", dtype="float32")
+    assert model.dtype == torch.float32 and model.allie.model.keep == ref.model.keep
+    assert model.predict(game, 1800, 1750, "180+2") == ref.predict(game, 1800, 1750, "180+2")
+    assert release(device_map="cpu", torch_dtype=torch.float32).dtype == torch.float32
+    assert release(device="cpu").dtype == torch.int8  # the CPU default
+    assert release(device="cpu", int8=False).dtype == torch.bfloat16
+    assert release(device="cpu", active_experts=2).allie.model.keep == 2
+    with pytest.raises(NotImplementedError):
+        model.to("cpu")
+    with pytest.raises(ValueError):
+        release(device="cpu", dtype="float16")
 
 
 @pytest.mark.skipif(

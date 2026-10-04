@@ -18,10 +18,11 @@ STARTED = []
 def engine(tiny):
     e = Engine(tiny)
     yield e
-    for bot, mock in STARTED:
+    for bot, mock, run in STARTED:
         bot.stop()
         bot.join()
         mock.close()
+        run.join()
     STARTED.clear()
     e.close()
 
@@ -30,8 +31,9 @@ def start(engine, mock=None, **play):
     mock = mock or MockLichess({"tok": "allie"})
     config = Config(max_games=4, play=Play(think_time=False, **play))
     bot = Bot(config, Lichess("tok", mock.url, wait=0.1), engine)
-    threading.Thread(target=bot.run, daemon=True).start()
-    STARTED.append((bot, mock))
+    run = threading.Thread(target=bot.run, daemon=True)
+    run.start()
+    STARTED.append((bot, mock, run))
     wait(lambda: bot.me is not None)
     return mock, bot
 
@@ -134,6 +136,7 @@ def test_rejects_bad_token():
     mock = MockLichess({"tok": "allie"})
     with pytest.raises(urllib.error.HTTPError):
         Lichess("wrong", mock.url).account()
+    mock.close()
 
 
 def test_drain(engine):
@@ -170,6 +173,5 @@ def test_restart_resumes_games(engine):
     first.stop()  # the process dies mid-game (preemption)
     first.join()
     _, second = start(engine, mock)
-    wait(lambda: g.status != "started")
+    wait(lambda: g.id in second.finished)
     assert not mock.rejected and g.status != "outoftime" and len(g.board.move_stack) > 12
-    assert g.id in second.finished

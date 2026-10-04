@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from .model import Cache, step
-from .tokens import CONTEXT, HEADER, MOVE_ID, START, advance, features, header
+from .tokens import CONTEXT, HEADER, MOVE_ID, START, advance, features, fill, header
 
 TIME, WDL = slice(2350, 2413), slice(2413, 2416)
 # allie.search's format of each Lichess speed: bullet, blitz, rapid, classical
@@ -137,11 +137,15 @@ class Game:
             self.board.push(move)
             token = MOVE_ID[move.uci()]
             self.moves.append(moves[j])
-            last = j == len(moves) - 1
-            clock = (wtime if j % 2 == 0 else btime) if last else None
-            self.clocks.append(None if clock is None else int(clock))
+            self.clocks.append(None)
             self.tokens.append(token)
             self.boards.append(advance(self.boards[-1], token))
+        # the event's clocks are the last move's mover's and the other side's after its move
+        # before; a new move's clock comes only from the first event that reports it
+        for j in (len(moves) - 1, len(moves) - 2):
+            t = wtime if j % 2 == 0 else btime
+            if j >= common and t is not None:
+                self.clocks[j] = int(t)
 
     def sync(self):
         """Bring the cache up to the last known token; the logits there."""
@@ -163,7 +167,8 @@ class Game:
 
     def features(self, lo=0):
         """Clock features of the tokens from position lo on."""
-        f = lambda p: features(p - HEADER + 1, self.base, self.inc, self.clocks)
+        clocks = fill(self.clocks, self.base)
+        f = lambda p: features(p - HEADER + 1, self.base, self.inc, clocks)
         return [f(p) if p >= HEADER - 1 else [-1] * 3 for p in range(lo, len(self.tokens))]
 
     def decide(self, play, search=None, clock=None):

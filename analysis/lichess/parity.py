@@ -79,7 +79,7 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--device", default="cpu")
     p.add_argument("--dtype", default="bfloat16")
-    p.add_argument("--experts", type=int)
+    p.add_argument("--active-experts", type=int)
     p.add_argument("--int8", action="store_true")
     p.add_argument("--hf", action="store_true", help="--model is a Hugging Face repo: load it with transformers")
     p.add_argument("--decode", type=int, default=0,
@@ -99,12 +99,12 @@ def main():
         from transformers import AutoModel
 
         hf = AutoModel.from_pretrained(a.model, trust_remote_code=True, device=a.device,
-                                       int8=a.int8, experts=a.experts)  # fmt: skip
+                                       int8=a.int8, active_experts=a.active_experts)  # fmt: skip
         m = hf.allie.model
         code = sys.modules[type(m).__module__]  # the release's own model.py
         run, cache = code.step, code.Cache
     else:
-        m = Model(a.model, a.device, getattr(torch, a.dtype), a.experts, a.int8)
+        m = Model(a.model, a.device, getattr(torch, a.dtype), a.active_experts, a.int8)
         run, cache = step, Cache
     m.moe_mode = a.moe
     load = time.perf_counter() - t0
@@ -142,7 +142,7 @@ def main():
     d = ce - ref_ce
     dp = np.exp(-ce) - np.exp(-ref_ce)
     out = dict(
-        model=a.model, device=a.device, dtype=a.dtype, int8=a.int8, experts=a.experts or m.topk,
+        model=a.model, device=a.device, dtype=a.dtype, int8=a.int8, experts=a.active_experts or m.topk,
         decode=a.decode, moe=a.moe,
         threads=torch.get_num_threads(), positions=len(P), load_seconds=round(load, 1),
         seconds=round(seconds, 1), ms_per_position=round(1000 * seconds / len(P), 1),

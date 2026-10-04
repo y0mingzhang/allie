@@ -77,8 +77,9 @@ class Bot:
 
     def join(self):
         """After stop(): wait for the game threads."""
-        for t in list(self.threads):
-            t.join()
+        while alive := [t for t in self.threads if t.is_alive()]:
+            for t in alive:
+                t.join()
 
     def drain(self):
         """Decline new challenges; run() returns once the current games end."""
@@ -124,7 +125,7 @@ class Bot:
                 gid = g.get("gameId") or g["id"]
                 with self.lock:
                     self.pending.pop(gid, None)
-                    if gid in self.games:
+                    if gid in self.games or self.stopped.is_set():
                         return
                     match = self.games[gid] = Match(self, gid)
                     match.opponent = (g.get("opponent") or {}).get("id")

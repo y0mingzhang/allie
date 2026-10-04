@@ -76,3 +76,13 @@ def test_vocabulary_matches_training():
         assert tokens.SECONDS_ID[None if k == "*" else int(k)] == i
     for k, i in vocab.INCREMENTS_ID.items():
         assert tokens.INCREMENTS_ID[None if k == "*" else int(k)] == i
+
+
+def test_fill_clocks():
+    from allie.lichess.tokens import fill
+
+    # each side on its own: white from 180 (before move 0) to 170 (move 2), then held;
+    # black from 180 (before move 1) to 150 (move 5)
+    assert fill([None, None, 170, None, None, 150], 180) == [175, 170, 170, 160, 170, 150]
+    assert fill([None, None, 170, None], None) == [170, None, 170, None]  # no base, no black
+    assert fill([], 60) == []

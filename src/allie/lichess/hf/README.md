@@ -40,7 +40,7 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
   expected think time.
 - **Device:** `device="cuda"` (the default when a GPU is visible) or `device="cpu"`. On CPU the weights
   default to int8 (8 GB, about twice as fast as BF16); `int8=False` keeps BF16 (11 GB).
-  `experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
+  `active_experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
 - **Speed:** calls that extend the previous call's game reuse its key-value cache, so following a game move
   by move costs one new token per call.
 

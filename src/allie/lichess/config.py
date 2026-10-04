@@ -26,7 +26,7 @@ class Config:
     device: str = "cpu"
     dtype: str = "bfloat16"
     threads: int = 0  # torch CPU threads (0: torch's default)
-    experts: int = 0  # routed experts per token (0: all 16; 8 is faster)
+    active_experts: int = 0  # routed experts per token (0: all 16; 8 is faster)
     int8: bool | None = None  # int8 block matrices (None: on CPU): half the memory, faster
     url: str = "https://lichess.org"
     max_games: int = 4

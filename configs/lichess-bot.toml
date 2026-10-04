@@ -5,7 +5,7 @@ model = "yimingzhang/allie-2.0"  # Hugging Face repo (downloaded once, 11 GB), o
 device = "cpu"                # or "cuda"
 dtype = "bfloat16"            # or "float32" (twice the memory, no faster on most CPUs)
 threads = 8                   # torch CPU threads (6-8 is fastest for one game; 0 = all cores)
-experts = 0                   # routed experts per token, 0 = all 16; 8 is faster for ~0.001 nats
+active_experts = 0            # routed experts per token, 0 = all 16; 8 is faster, slightly less accurate
 # int8 = false               # int8 weights are the CPU default (8 GB, about twice as fast); false: BF16
 url = "https://lichess.org"
 max_games = 4                 # concurrent games; the rest are declined with "later"

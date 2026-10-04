@@ -54,18 +54,18 @@ def quantize(w):
 
 
 class Model:
-    """experts: route each token through only the best `experts` of its top-k, with the gates
-    they have in the top-k (the speed knob; None = all). int8: the block matrices as int8
-    weights with per-row scales (CPU, BF16 activations): half the memory."""
+    """active_experts: route each token through only the best `active_experts` of its top-k,
+    with the gates they have in the top-k (the speed knob; None = all). int8: the block
+    matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory."""
 
-    def __init__(self, path, device="cpu", dtype=torch.bfloat16, experts=None, int8=False):
+    def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False):
         path = Path(path)
         self.config = c = json.loads((path / "config.json").read_text())
         self.device, self.dtype = torch.device(device), dtype
         self.layers, self.width = c["layers"], c["width"]
         self.heads, self.head_dim = c["heads"], c["head_dim"]
         self.topk, self.floor, self.scale = c["topk"], c["gate_floor"], c["attn_scale"]
-        self.keep = experts or self.topk
+        self.keep = active_experts or self.topk
         assert 1 <= self.keep <= self.topk
         assert not int8 or (self.device.type == "cpu" and dtype == torch.bfloat16)
         self.w, self.scales = {}, {}

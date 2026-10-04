@@ -93,3 +93,30 @@ def features(k, base, increment, clocks):
     if k >= 4 and c(k - 4) >= 0 and mover >= 0:
         prev = c(k - 4) - mover + (increment or 0)
     return [mover, other, prev if prev >= 0 else -1]
+
+
+def fill(clocks, base):
+    """Each side's unknown clocks (None) linearly interpolated between its known ones, with the
+    base time before its first move; after its last known clock, that clock. The model saw
+    games with every clock or with none, never with gaps, so gaps are filled, not left -1.
+    A side with no known clock and no base time stays unknown."""
+    out = list(clocks)
+    for side in (0, 1):
+        moves = range(side, len(out), 2)
+        known = [(j, out[j]) for j in moves if out[j] is not None]
+        if base is not None:
+            known.insert(0, (side - 2, base))
+        if not known:
+            continue
+        i = 0
+        for j in moves:
+            while i + 1 < len(known) and known[i + 1][0] <= j:
+                i += 1
+            (a, x), nxt = known[i], known[i + 1] if i + 1 < len(known) else None
+            if out[j] is None:
+                if j < a or nxt is None:  # before the first known clock or after the last
+                    out[j] = x
+                else:
+                    b, y = nxt
+                    out[j] = round(x + (y - x) * (j - a) / (b - a))
+    return out

@@ -1,7 +1,7 @@
 """Time allie.lichess's model per new token, as a live game uses it: one token appended to a
 game's cache (batch 1), or one token each for B games at once.
 
-usage: python analysis/lichess/speed.py --model DIR [--device cpu] [--int8] [--experts K]
+usage: python analysis/lichess/speed.py --model DIR [--device cpu] [--int8] [--active-experts K]
        [--threads N] [--batch 1,16] [--profile]
 """
 
@@ -45,7 +45,7 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--device", default="cpu")
     p.add_argument("--int8", action="store_true")
-    p.add_argument("--experts", type=int)
+    p.add_argument("--active-experts", type=int)
     p.add_argument("--threads", type=int)
     p.add_argument("--batch", default="1")
     p.add_argument("--steps", type=int, default=40)
@@ -54,7 +54,7 @@ def main():
     if a.threads:
         torch.set_num_threads(a.threads)
     t0 = time.perf_counter()
-    m = Model(a.model, a.device, torch.bfloat16, a.experts, a.int8)
+    m = Model(a.model, a.device, torch.bfloat16, a.active_experts, a.int8)
     out = dict(device=str(m.device), int8=a.int8, experts=m.keep, threads=torch.get_num_threads(),
                load_seconds=round(time.perf_counter() - t0, 1))  # fmt: skip
     sync = torch.cuda.synchronize if m.device.type == "cuda" else lambda: None

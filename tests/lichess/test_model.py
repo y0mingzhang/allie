@@ -78,7 +78,7 @@ def naive_moe(m, i, h, keep):
 def test_moe_matches_naive(tiny_path):
     h = torch.randn(13, 64)
     for keep in (None, 2):
-        m = Model(tiny_path, dtype=torch.float32, experts=keep)
+        m = Model(tiny_path, dtype=torch.float32, active_experts=keep)
         for i in (1, 3):
             torch.testing.assert_close(m.mlp(i, h), naive_moe(m, i, h, keep or m.topk))
 
@@ -108,14 +108,18 @@ def test_engine_batches_games(tiny):
 def test_takeback_rewinds(tiny):
     engine = Engine(tiny)
     moves = random_game(3, 20)
-    a = Game(engine, 1500, 1500, 180, 2)
-    a.update(moves, 170, 171)
-    a.sync()
-    a.update(moves[:15])
-    b = Game(engine, 1500, 1500, 180, 2)
-    b.update(moves[:15])
+
+    def play(game, n):  # one server event per move, clocks falling a second a move
+        for k in range(1, n + 1):
+            game.update(moves[:k], 180 - k, 179 - k)
+            game.sync()
+
+    a, b = Game(engine, 1500, 1500, 180, 2), Game(engine, 1500, 1500, 180, 2)
+    play(a, 20)
+    a.update(moves[:15], 165, 164)  # the server's state after a takeback
+    play(b, 15)
     torch.testing.assert_close(a.sync(), b.sync(), atol=2e-5, rtol=0)
-    assert a.board.fen() == b.board.fen()
+    assert a.board.fen() == b.board.fen() and a.clocks == b.clocks
 
 
 def test_int8_close_to_dequantized(tiny_path):
