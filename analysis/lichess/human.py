@@ -160,7 +160,8 @@ def simulate(a):
             idx = np.flatnonzero((G["fmt"] == f) & (G["band"] == b) & (np.arange(len(G["fmt"])) % 2 == 1))
             pick += rng.choice(idx, min(a.per_cell, len(idx)), replace=False).tolist()
     engine = Engine(Model(a.model, a.device, torch.bfloat16, int8=a.device == "cpu"))
-    play = Play(rating=0)
+    play = Play(rating=0, lag=a.lag)
+    done = []
     speed = {0: "bullet", 1: "blitz", 2: "rapid", 3: "classical"}
     out = [None] * len(pick)
 
@@ -215,6 +216,10 @@ def simulate(a):
                 one(j, i)
             except Exception as e:  # noqa: BLE001 - reported below, the run fails
                 errors.append(repr(e))
+            with lock:
+                done.append(j)
+                if len(done) % 20 == 0:
+                    print(f"{len(done)} / {len(pick)} games", flush=True)
 
     threads = [threading.Thread(target=worker) for _ in range(a.concurrent)]
     for t in threads:

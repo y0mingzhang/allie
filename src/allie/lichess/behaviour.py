@@ -70,10 +70,11 @@ def hazard(name, x):
     return 1 / (1 + math.exp(-min(max(z, -50), 50)))
 
 
-def think(time_probs, rng, clock, increment, ply):
+def think(time_probs, rng, clock, increment, ply, lag=0.0):
     """Seconds to spend on this move, compute included: a draw from the think-time head (bin,
-    then uniform within it), under a soft guard fitted on human time use (a share of the clock
-    plus the increment) and a hard cap that always leaves the reserve on the clock."""
+    then uniform within it), less the lag the network and server add (human times are server
+    side, their lag included), under a soft guard fitted on human time use (a share of the
+    clock plus the increment) and a hard cap that always leaves the reserve on the clock."""
     if (
         ply < 2
     ):  # no think time is recorded for each side's first move; humans move fast
@@ -83,6 +84,7 @@ def think(time_probs, rng, clock, increment, ply):
         b = int(rng.choice(len(p), p=p / p.sum()))
         u = rng.uniform(-0.5, 0.5)
         t = max(b + u, 0.0) if b < 16 else 16 * math.exp((b - 16 + u) / 7.06)
+        t = max(t - lag, 0.0)
     if clock is None:
         return t
     g = PARAMETERS["guard"]

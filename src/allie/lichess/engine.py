@@ -26,6 +26,7 @@ class Play:
     think_time: bool = True  # wait a think time drawn from the model's think-time head
     resign: bool = True  # resign as often and as late as humans of the bot's rating do
     draws: bool = True  # offer and accept draws as humans do (otherwise: never)
+    lag: float = 0.1  # seconds the network and Lichess add to each move, taken off the think time
 
 
 class Engine:
@@ -210,7 +211,7 @@ class Game:
         x = (wdl, ply, self.elo[ply % 2], FORMATS.get(self.speed, 1), clock, self.base)
         return Decision(
             move=move,
-            think=behaviour.think(time, self.rng, clock, self.inc, ply) if play.think_time else 0.0,
+            think=behaviour.think(time, self.rng, clock, self.inc, ply, play.lag) if play.think_time else 0.0,
             wdl=wdl,
             probability=float(probability),
             resign=play.resign and behaviour.resign(*x, self.rng),
