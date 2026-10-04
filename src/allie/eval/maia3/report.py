@@ -96,7 +96,7 @@ def macro(s, mask, x):
 def overall(s, masks, sc, rng, out, lines):
     for vname, title in (
         ("all", "Every scored move in the cell (our protocol)"),
-        ("maia_protocol", "Maia-3's protocol (ply > 20 and >= 30 s left)"),
+        ("maia_protocol", "Maia-3's protocol (from ply 10, until a player first has under 30 s)"),
     ):
         vm = masks[vname]
         r = out["views"][vname] = {}

@@ -15,8 +15,38 @@ def views():
     with np.load(DATA / "games.npz") as z:
         sel, keep = z["sel"], z["keep"]
     s = sel[keep]  # game, ply, cell, mover clock, opponent clock
-    ours = s[:, 3] >= 30
-    return s, {"all": np.ones(len(s), bool), "maia_protocol": (s[:, 1] >= 20) & ours}
+    protocol = (s[:, 1] >= 10) & (s[:, 1] < pressure()[s[:, 0]])
+    return s, {"all": np.ones(len(s), bool), "maia_protocol": protocol}
+
+
+def pressure():
+    """Per benchmark game, the first ply at which the player to move has under 30 s (else its length). Maia-3
+    reports results on the original Allie test set (Zhang et al. 2025), whose rule (trim_games in its analysis
+    code) drops each game's first 10 plies and every position from this one on."""
+    with np.load(DATA / "games.npz") as z:
+        meta, n = z["meta"], np.diff(z["offsets"])
+    with np.load(paths.DATA / "strat-eval-v1/feats.npz") as z:
+        feats = z["feats"]
+    first = n.copy()
+    for g, (r, s) in enumerate(meta[:, 4:6]):
+        low = np.flatnonzero(feats[r, s + 10 : s + 10 + n[g], 0] < 30)
+        first[g] = low[0] if len(low) else n[g]
+    return first
+
+
+def compare(scores, ref="Maia-3 79M", seed=7):
+    """Per view: each model's CE and top-1 (%), and its paired differences from ref with 95% game-bootstrap
+    intervals, for scores {name: (legal-move CE, top-1) per benchmark position}."""
+    s, masks = views()
+    scores = {k: (np.asarray(ce, float), np.asarray(t, float)) for k, (ce, t) in scores.items()}
+    out = {}
+    for view, m in masks.items():
+        rng, g, (ce0, t0) = np.random.default_rng(seed), s[m, 0], scores[ref]
+        out[view] = dict(positions=int(m.sum()))
+        for name, (ce, t) in scores.items():
+            d = {} if name == ref else dict(d_ce=stats(g, ce[m] - ce0[m], rng), d_top1=stats(g, 100 * (t[m] - t0[m]), rng))
+            out[view][name] = dict(ce=float(ce[m].mean()), top1=float(100 * t[m].mean()), **d)
+    return out
 
 
 def load():

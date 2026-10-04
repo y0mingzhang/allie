@@ -96,7 +96,24 @@ We compare Allie 2.0 with the original Allie and with [Maia-3](https://arxiv.org
 
 Maia-3 follows [Maia](https://arxiv.org/abs/2006.01855) and [Maia-2](https://arxiv.org/abs/2409.20553), the leading work on predicting human moves. We thank its authors for releasing the [weights](https://huggingface.co/collections/MaiaChess/maia3) and code, which made this comparison possible.
 
-The comparison uses 80,000 blitz positions from July 2026, with 20,000 from each of four rating bands. Each model gets its own kind of input, built the way its authors built it.
+Maia-3 trains only on Lichess blitz games, so we compare on blitz. We use 80,000 blitz positions from July 2026, 20,000 from each of four rating bands. Each model gets its own kind of input, built the way its authors built it.
+
+**Maia's protocol.** First we score every model the way the Maia-3 paper reports its results. It skips the first 10 plies of each game, which are easy to memorize. It also drops every position from the moment a player first has under 30 seconds, where moves get noisy. That leaves 56,599 positions.
+
+| Model | Loss (nats) | Top choice correct (%) | Loss vs Maia-3 79M | Top choice vs Maia-3 79M (points) |
+|---|---:|---:|---:|---:|
+| Maia-3 5M | 1.2933 | 57.04 | +0.0753 [+0.0715, +0.0791] | −2.02 [−2.26, −1.77] |
+| Maia-3 23M | 1.2405 | 58.56 | +0.0225 [+0.0204, +0.0247] | −0.50 [−0.70, −0.30] |
+| Maia-3 79M | 1.2180 | 59.06 | | |
+| Original Allie | 1.2883 | 57.09 | +0.0703 [+0.0661, +0.0747] | −1.97 [−2.25, −1.67] |
+| Allie 2.0 | 1.2075 | 59.32 | −0.0105 [−0.0141, −0.0070] | +0.26 [+0.00, +0.52] |
+| Allie 2.0 (annealed) | 1.2048 | 59.37 | −0.0132 [−0.0165, −0.0097] | +0.31 [+0.07, +0.56] |
+
+*Brackets are 95% intervals over games, with each model paired with Maia-3 79M on the same positions.*
+
+On Maia's protocol, Allie 2.0 and Maia-3 79M are close. Allie 2.0's loss is 0.0105 lower, and its accuracy edge of 0.26 points sits at the edge of noise.
+
+**All positions.** Our own evaluation keeps every position, including the opening and time trouble.
 
 | Model | Parameters | Compute per move (GFLOPs) | Loss (nats) | Top choice correct (%) |
 |---|---|---:|---:|---:|
@@ -115,15 +132,15 @@ The comparison uses 80,000 blitz positions from July 2026, with 20,000 from each
 
 *Loss relative to Maia-3 79M, by the players' rating. Below zero is better.*
 
-- **Across ratings.** Allie 2.0 has a lower loss than Maia-3 79M in 22 of 23 rating bins.
+- **Across ratings.** On all positions, Allie 2.0 has a lower loss than Maia-3 79M in 22 of 23 rating bins.
 - **The original Allie** matches Maia-3 79M at low ratings and falls behind as ratings rise.
-- **Different inputs.** Allie reads the clock and the released Maia-3 does not. The biggest gaps are in time trouble and in bullet, which Maia-3 did not train on.
+- **Different inputs.** Allie reads the clock and the released Maia-3 does not. That helps most in time trouble, which Maia's protocol leaves out.
 - **Where Maia-3 is better.** Maia-3 79M predicts better in the middlegame and with one to two minutes left.
 - **Search.** Searching ahead helps Allie 2.0 a little. 128 search steps per move lower the loss by 0.0055, at about 126 times the compute.
 
 Some caveats:
 
-- **Not the same data.** Maia-3 trained on about 2.5 years of blitz games. Allie 2.0 trained on every time control from 2017 to 2026.
+- **Not the same data.** Maia-3 trained on about 2.5 years of Lichess blitz. Allie 2.0 trained on every time control from 2017 to 2026.
 - **Recent data.** Allie 2.0's training data runs up to the test month. August 2026 is in training; July 2026 is not.
 - **Counted, not timed.** Compute here is counted from the model's size. Allie 2.0 also needs 11 GB of memory, against about 0.3 GB for Maia-3 79M.
 - **The annealed version** had its learning rate chosen on these positions.

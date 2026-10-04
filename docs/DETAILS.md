@@ -38,7 +38,15 @@ Allie 2.0 minus Maia-3 79M on slices of the benchmark. The bullet, rapid and cla
 | mover has under 10 s left | 2,852 | −0.2229 [−0.2627, −0.1823] | +3.47 [+1.88, +4.91] |
 | mover has 60-120 s left | 15,719 | +0.0107 [+0.0034, +0.0182] | −0.53 [−1.06, −0.02] |
 | plies 40-59 | 15,997 | +0.0071 [+0.0003, +0.0137] | −0.09 [−0.62, +0.42] |
-| Maia-3's protocol: ply > 20, at least 30 s left | 48,987 | −0.0057 [−0.0095, −0.0019] | +0.12 [−0.16, +0.40] |
+| Maia-3's protocol (below) | 56,599 | −0.0105 [−0.0141, −0.0070] | +0.26 [+0.00, +0.52] |
+
+### Maia-3's protocol
+
+The Maia-3 paper reports its results on the original Allie's test set. In the paper's words, it removes "the first 10 moves from each game" and "positions that occur after the first time a player has fewer than 30 seconds on their clock".
+
+The original Allie's code (`trim_games`) defines the moves as plies. It keeps each game from ply 10 and stops at the first ply where the player to move has under 30 seconds. `allie.eval.maia3.aggregate` applies the same rule to the benchmark, using the recorded clocks.
+
+That keeps 56,599 of the 80,000 positions, in 6,089 games. An earlier version of this page used ply 20 and the mover's clock at each position instead, which kept 48,987.
 
 ### By rating
 
@@ -56,7 +64,7 @@ We score the original Allie's raw policy on the same positions, in its own input
 - **A retrain.** It is not the exact model behind the paper's stored outputs. It reproduces its training run's validation loss of 1.3535, and the paper's test accuracy: 55.73% against 55.7% reported.
 - **Benchmark.** CE 1.2848 [1.2748, 1.2941] and top-1 57.06% [56.70, 57.42].
 - **By rating band.** CE 1.4256, 1.2947, 1.2320 and 1.1870 from the lowest band to the highest. Top-1 is 59.20% on the 2400+ band.
-- **Maia-3's protocol.** CE 1.2778 and top-1 57.36%.
+- **Maia-3's protocol.** CE 1.2883 and top-1 57.09%.
 - **Main evaluation.** 1.3526, against Allie 2.0's 1.2533. Only blitz is in its training data, so bullet, rapid and classical games get its unknown time-control token.
 - **Compute.** 0.61 GFLOPs per move with a cache, counted as for the other models. Its released decoder has no cache: it re-reads the game for each move, about 28 GFLOPs at the benchmark's mean ply.
 - **Search.** Its time-adaptive search averages 50 such passes per move. We do not score it.
