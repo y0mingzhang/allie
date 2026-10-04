@@ -58,8 +58,9 @@ class Model:
     """active_experts: route each token through only the best `active_experts` of its top-k,
     with the gates they have in the top-k (the speed knob; None = all). int8: the block
     matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory.
-    backend: "fast" runs step() in fast.py's C++ kernels (CPU, BF16 activations), "torch" in
-    the PyTorch code below (the reference); None: fast where it applies and compiles."""
+    backend: "fast" runs step() in fast.py: its C++ kernels on CPU (BF16 activations), CUDA
+    graphs of forward() on GPU; "torch" in the PyTorch code below (the reference); None: fast
+    where it applies (CPU with BF16, any GPU) and works."""
 
     def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False,
                  backend=None, threads=None):  # fmt: skip
@@ -94,17 +95,20 @@ class Model:
         self.smear, self.backout = s[3 * n].item(), s[3 * n + 1].item()
         self.skip_lambdas = s[3 * n + 2 : 3 * n + 5]
         self.ve = c["value_embeds"]
-        self.fast = None
+        self.fast = self.graphs = None
         assert backend in (None, "fast", "torch"), backend
-        if backend == "fast" or (backend is None and self.device.type == "cpu" and dtype == torch.bfloat16):
+        if backend != "torch" and (backend or self.device.type == "cuda" or dtype == torch.bfloat16):
             try:
-                from .fast import Fast
+                from .fast import Fast, Graphs
 
-                self.fast = Fast(self, threads)
+                if self.device.type == "cuda":
+                    self.graphs = Graphs(self)
+                else:
+                    self.fast = Fast(self, threads)
             except Exception as e:
                 if backend == "fast":
                     raise
-                warnings.warn(f"Allie's fast CPU kernels are unavailable, using PyTorch: {e}")
+                warnings.warn(f"Allie's fast backend is unavailable, using PyTorch: {e}")
 
     def board(self, states):
         w, dt = self.w, self.dtype
@@ -264,8 +268,9 @@ class Cache:
 
     def __init__(self, model, capacity=128):
         self.model, self.n, self.capacity = model, 0, 0
-        self.k = self.v = self.e = None
-        self.reserve(capacity)
+        self.k = self.v = self.e = self.slot = None
+        if not (model.graphs and model.graphs.attach(self)):  # a slot of the GPU pool, or our own
+            self.reserve(capacity)
 
     def reserve(self, n):
         if n <= self.capacity:
@@ -292,6 +297,8 @@ def step(model, items):
     the logits [len(items), 2432] FP32 at each item's last new token."""
     if model.fast is not None:
         return model.fast.step(items)
+    if model.graphs is not None and (z := model.graphs.step(items)) is not None:
+        return z
     spans, lo = [], 0
     for cache, ids, *_ in items:
         cache.reserve(cache.n + len(ids))

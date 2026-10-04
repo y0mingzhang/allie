@@ -104,3 +104,21 @@ def test_profile_and_bandwidth(tiny_path):
     t = m.fast.profile(False)
     assert set(t) == set(fast.PHASES) and sum(t.values()) > 0
     assert fast.bandwidth(1, 0.01, 1) > 0
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_graphs_match_eager(tiny_path, dtype):
+    """Decode steps replayed from CUDA graphs on pooled caches equal the eager path's."""
+    games = [inputs(random_game(s, 30 + 7 * s)) for s in range(3)]
+    games = [tuple(t.cuda() for t in x) for x in games]
+    lengths = [HEADER + 5, HEADER, HEADER + 9]
+    ref = Model(tiny_path, "cuda", dtype, backend="torch")
+    m = Model(tiny_path, "cuda", dtype)
+    assert m.graphs is not None and ref.graphs is None
+    tol = dict(atol=2e-4, rtol=0) if dtype == torch.float32 else dict(atol=0.1, rtol=0)
+    torch.testing.assert_close(play(m, games, lengths, 20), play(ref, games, lengths, 20), **tol)
+    assert len(m.graphs.graphs) >= 2  # replays happened: batches of three, then one game
+    one = play(m, games[:1], lengths[:1], 5)
+    torch.testing.assert_close(one, play(ref, games[:1], lengths[:1], 5), **tol)

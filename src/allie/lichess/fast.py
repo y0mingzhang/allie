@@ -18,9 +18,11 @@ import hashlib
 import os
 import platform
 import subprocess
+import weakref
 from pathlib import Path
 
 import torch
+from torch.nn import functional as F
 
 SOURCE = r"""
 #include <algorithm>
@@ -180,6 +182,7 @@ struct Pool {
   alignas(64) std::atomic<int> left{0};
   alignas(64) std::atomic<int> count{0};
   alignas(64) std::atomic<uint32_t> gen{0};
+  std::atomic<uint32_t> pokes{0};
   std::mutex mu;
   std::condition_variable cv;
   bool stop = false;
@@ -216,8 +219,10 @@ struct Pool {
       for (int k = 1; epoch.load(std::memory_order_acquire) == seen; k++) {
         cpu_relax();
         if (k % 1024 == 0 && std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() > spin) {
+          uint32_t p = pokes.load();
           std::unique_lock<std::mutex> lk(mu);
-          cv.wait(lk, [&] { return epoch.load(std::memory_order_acquire) != seen; });
+          cv.wait(lk, [&] { return epoch.load(std::memory_order_acquire) != seen || pokes.load() != p; });
+          t0 = std::chrono::steady_clock::now();  // poked: spin again, work is coming
         }
       }
       seen = epoch.load(std::memory_order_acquire);
@@ -244,6 +249,13 @@ struct Pool {
 #if defined(__linux__)
     if (restore) sched_setaffinity(0, sizeof old, &old);
 #endif
+  }
+  void wake() {  // sleeping workers spin again, ready for a step
+    {
+      std::lock_guard<std::mutex> lk(mu);
+      pokes.fetch_add(1);
+    }
+    cv.notify_all();
   }
   void barrier() {
     if (n == 1) return;
@@ -975,6 +987,8 @@ void allie_free(void* h) {
 
 int allie_threads(void* h) { return ((Engine*)h)->pool->n; }
 
+void allie_wake(void* h) { ((Engine*)h)->pool->wake(); }
+
 // meta: per sequence n0 len cap off; caches: per sequence k v e; out: S x V
 void allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, const uint8_t* boards,
                 const int64_t* meta, void* const* caches, float* out) {
@@ -1168,6 +1182,7 @@ def library():
     lib.allie_new.restype, lib.allie_new.argtypes = P, [P, P, P, P, P, D]
     lib.allie_free.argtypes = [P]
     lib.allie_threads.restype, lib.allie_threads.argtypes = I, [P]
+    lib.allie_wake.argtypes = [P]
     lib.allie_step.argtypes = [P, I, I, P, P, P, P, P, P]
     lib.allie_bandwidth.restype = D
     lib.allie_bandwidth.argtypes = [I, ctypes.c_int64, I, P]
@@ -1308,6 +1323,7 @@ class Fast:
         return dict(zip(PHASES, out))
 
     def step(self, items):
+        self.lib.allie_wake(self.handle)  # workers wake while the inputs are gathered
         meta, caches, lo = [], [], 0
         for cache, ids, *_ in items:
             cache.reserve(cache.n + len(ids))
@@ -1338,3 +1354,103 @@ def bandwidth(threads=None, gigabytes=2.0, reps=5, pin=True):
     order = cpu_order(threads) if pin else None
     cpus = (ctypes.c_int32 * threads)(*order[0]) if order else None
     return library().allie_bandwidth(threads, int(gigabytes * 2**30), reps, cpus)
+
+
+class Graphs:
+    """CUDA graphs of model.py's forward for steps that add one token to each of up to 32 games.
+    Each game's cache is a slot of one preallocated pool (Cache gets views into it, so the
+    PyTorch path runs on the same memory); a step of B games replays the graph captured for
+    the smallest batch >= B and attention span > every game's length, with padding rows on a
+    spare slot. Launch overhead, not memory, bounds a single game's step on a GPU: one replay
+    replaces about a thousand kernel launches."""
+
+    BATCHES = (1, 2, 4, 8, 16, 32)
+    SPANS = (128, 256, 512, 1025)
+
+    def __init__(self, model, slots=None):
+        m, ctx = model, model.w["cos"].shape[0]
+        per = 2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width  # elements per slot
+        size = per * torch.tensor([], dtype=m.dtype).element_size()
+        if slots is None:  # a third of the free memory, at most 32 games
+            slots = min(32, int(torch.cuda.mem_get_info(m.device)[0] / 3 // size))
+        if slots < 1:
+            raise RuntimeError("no GPU memory for a cache pool")
+        kw = dict(dtype=m.dtype, device=m.device)
+        self.k = torch.zeros(m.layers, slots + 1, m.heads, ctx, m.head_dim, **kw)  # last: padding
+        self.v = torch.zeros_like(self.k)
+        self.e = torch.zeros(slots + 1, ctx, m.width, **kw)
+        self.model, self.slots, self.ctx = m, slots, ctx
+        self.free = list(range(slots))[::-1]
+        self.graphs, self.pool = {}, None
+
+    def attach(self, cache):
+        """A new cache's storage: a free slot (False when none is left)."""
+        if not self.free:
+            return False
+        j = self.free.pop()
+        cache.k, cache.v, cache.e = self.k[:, j], self.v[:, j], self.e[j]
+        cache.capacity, cache.slot = self.ctx, j
+        weakref.finalize(cache, self.free.append, j)
+        return True
+
+    def capture(self, b, span):
+        m, dev = self.model, self.model.device
+        x = dict(ids=torch.zeros(b, dtype=torch.long, device=dev),
+                 feats=torch.full((b, 3), -1.0, device=dev),
+                 boards=torch.zeros(b, 68, dtype=torch.uint8, device=dev),
+                 pos=torch.zeros(b, dtype=torch.long, device=dev),
+                 slot=torch.full((b,), self.slots, dtype=torch.long, device=dev))  # fmt: skip
+        keys = torch.arange(span, device=dev)
+
+        def previous(e):
+            p = self.e[x["slot"], (x["pos"] - 1).clamp(min=0)] * (x["pos"] > 0)[:, None]
+            self.e[x["slot"], x["pos"]] = e
+            return p
+
+        def attend(i, q, k, v):
+            self.k[i, x["slot"], :, x["pos"]] = k
+            self.v[i, x["slot"], :, x["pos"]] = v
+            mask = (keys <= x["pos"][:, None])[:, None, None]
+            y = F.scaled_dot_product_attention(q[:, :, None], self.k[i, x["slot"], :, :span],
+                                               self.v[i, x["slot"], :, :span], attn_mask=mask,
+                                               scale=m.scale)  # fmt: skip
+            return y[:, :, 0]
+
+        def run():
+            return m.forward(x["ids"], x["pos"], x["feats"], x["boards"], previous, attend)
+
+        side = torch.cuda.Stream(dev)
+        side.wait_stream(torch.cuda.current_stream(dev))
+        with torch.cuda.stream(side):
+            for _ in range(2):  # warm up the libraries outside the capture
+                run()
+        torch.cuda.current_stream(dev).wait_stream(side)
+        self.pool = self.pool or torch.cuda.graph_pool_handle()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, pool=self.pool):
+            out = run()
+        return g, x, out
+
+    def step(self, items):
+        """step()'s logits, or None when the step is not one new token per pooled game."""
+        n = len(items)
+        if n > self.BATCHES[-1] or any(len(ids) != 1 or getattr(c, "slot", None) is None
+                                       for c, ids, *_ in items):  # fmt: skip
+            return None
+        b = next(x for x in self.BATCHES if x >= n)
+        span = next(x for x in self.SPANS if x > max(c.n for c, *_ in items))
+        if (b, span) not in self.graphs:
+            self.graphs[b, span] = self.capture(b, span)
+        g, x, out = self.graphs[b, span]
+        dev = self.model.device
+        pad = b - n
+        cat = lambda j, fill: torch.cat([*(it[j] for it in items), fill.expand(pad, *fill.shape[1:])])
+        x["ids"].copy_(cat(1, torch.zeros(1, dtype=torch.long)), non_blocking=True)
+        x["feats"].copy_(cat(2, torch.full((1, 3), -1.0)), non_blocking=True)
+        x["boards"].copy_(cat(3, torch.zeros(1, 68, dtype=torch.uint8)), non_blocking=True)
+        x["pos"].copy_(torch.tensor([c.n for c, *_ in items] + [0] * pad), non_blocking=True)
+        x["slot"].copy_(torch.tensor([c.slot for c, *_ in items] + [self.slots] * pad), non_blocking=True)
+        g.replay()
+        for c, *_ in items:
+            c.n += 1
+        return out[:n].clone()
