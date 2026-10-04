@@ -277,6 +277,11 @@ static inline void split(int n, int t, int nt, int align, int& lo, int& hi) {
 
 // ---- matrix kernels: rows of W (int8, BF16 or FP32) against FP32 activations ----
 
+#if defined(SIMD) && defined(__GNUC__)
+#define KEEP(v) asm("" : "+v"(v))
+#else
+#define KEEP(v)
+#endif
 #if defined(__clang__)
 #define UNROLL _Pragma("unroll")
 #elif defined(__GNUC__)
@@ -297,6 +302,8 @@ static inline void block(const float* const* x, const W* const* r, int K, float*
     UNROLL for (int i = 0; i < R; i++) b[i] = vzero();
     for (; k + 2 * VL <= kv; k += 2 * VL) {
       vf x0 = vld(x[0] + k), x1 = vld(x[0] + k + VL);
+      KEEP(x0);
+      KEEP(x1);
       UNROLL for (int i = 0; i < R; i++) {
         a[0][i] = vfma(vld(r[i] + k), x0, a[0][i]);
         b[i] = vfma(vld(r[i] + k + VL), x1, b[i]);
@@ -309,6 +316,7 @@ static inline void block(const float* const* x, const W* const* r, int K, float*
     UNROLL for (int i = 0; i < R; i++) w[i] = vld(r[i] + k);  // each weight converted once for M tokens
     UNROLL for (int m = 0; m < M; m++) {
       vf xm = vld(x[m] + k);
+      KEEP(xm);  // one load for the R rows, not one folded into each multiply-add
       UNROLL for (int i = 0; i < R; i++) a[m][i] = vfma(w[i], xm, a[m][i]);
     }
   }
