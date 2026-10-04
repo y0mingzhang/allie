@@ -693,6 +693,8 @@ class Chatter:
         self.want = None
         if self.done or self.cancelled or self.muted():
             return
+        if unprompted and self.status and self.closed:  # a goodbye after one: no call
+            return
         self.last = len(self.sans)  # unprompted calls keep their distance from any call
         if unprompted:
             self.said += 1
@@ -736,7 +738,6 @@ class Chatter:
         why = (
             "quiet" if self.muted() and text != QUIET
             else "cancelled" if self.cancelled or stopped and stopped.is_set()
-            else "said already" if unprompted and self.status and self.closed
             else "late" if unprompted and then is not None
             and (len(now) - len(then) > 2 or now[: len(then)] != then)
             else "stale" if not unprompted and asked is not None

@@ -102,8 +102,10 @@ def replay(c, posts, path, rated, plies, script):
         )
     status = "mate" if board.is_checkmate() else "outoftime" if "Time" in h.get(
         "Termination", "") else "draw" if winner is None else "resign"  # fmt: skip
-    loser = "Allie" if winner and (winner == "white") != white else opp
-    posts.append((len(moves), loser, f"({status})"))
+    who = (
+        "Allie" if winner and (winner == "white") != white else opp
+    )  # the side that ended it
+    posts.append((len(moves), who if winner else "--", f"({status})"))
     feed(state(len(moves), status=status, winner=winner), chat.END)
     for text in after:
         say(len(moves) + 1, text)

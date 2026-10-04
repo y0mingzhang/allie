@@ -340,6 +340,17 @@ def test_one_goodbye(engine):
     assert len(goodbyes) == 1
 
 
+def test_long_goodbye_posts_whole(engine):
+    """A closing line over one chat line is posted in both its parts."""
+    text = (
+        "Thanks for the game, that was a hard fight all the way. " * 3 + "See you soon."
+    )
+    g = Game(engine, opp="long", hello="", quiet_p_moment=1, min_plies=2, linger=5)
+    g.chatter(Model(text))
+    g.feed(g.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
+    assert len(g.posts) == 2 and " ".join(x for _, x in g.posts) == text.strip()
+
+
 def test_recent_keeps_lines_when_a_read_fails(tmp_path, monkeypatch):
     path = tmp_path / "recent.json"
     r = chat.Recent(str(path), 5)
