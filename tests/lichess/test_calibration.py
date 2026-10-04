@@ -24,7 +24,8 @@ def test_the_clock_caps_the_rung_searched():
     for clock, most in ((0.2, 0), (1.0, 0), (10.0, 32), (None, calibration.CAP)):
         cap = calibration.ceiling(clock, reserve=1.0)
         draws = {calibration.pick(n, rng, cap) for n in (0, 5, 40, 200, 256) for _ in range(500)}
-        assert max(draws) <= most and max(draws) * 1.0 / calibration.HW <= (clock or 1e9) / 10 + 1e-9
+        assert max(draws) == most  # the limit, but not tighter
+        assert most / calibration.HW <= (clock or 1e9) / 10 + 1e-9
 
 
 def test_pick_rounds_onto_the_ladder_in_expectation():

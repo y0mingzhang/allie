@@ -111,7 +111,7 @@ class Engine:
 
     @staticmethod
     def _size(r):
-        return len(r) if isinstance(r, list) else 0 if r is None or callable(r) else 1
+        return len(r) if isinstance(r, list) else 0 if callable(r) else 1
 
 
 @dataclass
