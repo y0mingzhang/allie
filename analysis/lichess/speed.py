@@ -40,6 +40,24 @@ def game(n=80, seed=0):
     )
 
 
+def traffic(m, b, n):
+    """Bytes a step of b games, each n tokens into its cache, reads: every matrix but the
+    experts, the experts the batch routes to (expected number of distinct ones), embedding rows,
+    and the caches' keys and values."""
+    size = lambda k: m.w[k].numel() * m.w[k].element_size() + (
+        m.scales[k].numel() * m.scales[k].element_size() if k in m.scales else 0
+    )
+    rows = ("embed", "embed2", "value_embed", "cos", "sin")
+    dense = sum(size(k) for k in m.w if k.split(".")[-1] not in ("up", "down") and not k.startswith(rows))
+    e, keep = m.config["experts"], m.keep
+    experts = sum(size(k) for k in m.w if k.split(".")[-1] in ("up", "down"))
+    experts *= 1 - (1 - keep / e) ** b
+    item = torch.tensor([], dtype=m.dtype).element_size()
+    embed = b * (2 + m.ve) * m.width * item
+    kv = b * 2 * m.layers * m.heads * n * m.head_dim * item
+    return dense + experts + embed + kv
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
@@ -79,7 +97,9 @@ def main():
             sync()
             times.append(1000 * (time.perf_counter() - t))
         q = np.percentile(times[5:], [50, 90])
-        out[f"batch{b}_ms"] = dict(median=round(q[0], 1), p90=round(q[1], 1))
+        gb = traffic(m, b, 80 + a.steps // 2) / 1e9
+        out[f"batch{b}_ms"] = dict(median=round(q[0], 1), p90=round(q[1], 1), gb=round(gb, 3),
+                                   gb_per_s=round(gb / q[0] * 1000, 1))  # fmt: skip
     if a.profile and m.fast:
         c, x = caches[0], games[0]
         m.fast.profile()
