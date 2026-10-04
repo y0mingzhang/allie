@@ -1,15 +1,19 @@
-"""Allie 2.0's fast CPU backend: model.py's step() as one call into C++ kernels.
+"""Allie 2.0's fast backend for model.py's step(): one call into C++ kernels on CPU, one CUDA
+graph replay on GPU.
 
-The kernels (SOURCE) are compiled for this machine on first use with the system C++ compiler
-(a few seconds, cached under ~/.cache/allie/kernels) and loaded with ctypes: no torch headers,
-no build at install, nothing beyond the standard library. They run the whole step (input
-embedding, board CNN, every block, the head) on a pool of pinned threads that stays alive
-between steps, with spin barriers between the phases of a block. Matrices are read in place
-from model.w (int8 with per-row scales, or BF16) and multiplied as they stream from memory;
-the experts of a step are grouped so each expert's weights are read once for all its tokens.
-Activations are rounded to BF16 wherever model.py's BF16 tensors round them, with FP32 sums,
-so the result matches the PyTorch reference up to summation order. Without a compiler,
-model.py falls back to PyTorch.
+CPU: the kernels (SOURCE) are compiled for this machine on first use with the system C++
+compiler (a few seconds, cached under ~/.cache/allie/kernels; ALLIE_CACHE moves the cache, CXX
+and ALLIE_MARCH choose the compiler and target) and loaded with ctypes: no torch headers and no
+build at install. One call runs the whole step (input embedding, board CNN, every block, the
+head) on a pool of threads pinned within one NUMA node, the weights' pages moved there
+(ALLIE_NUMA=0 leaves them), with barriers between a block's phases and its matrices shared out
+in chunks. Matrices are read in place from model.w (int8 with per-row scales, or BF16) as they
+stream from memory, a step's tokens grouped by expert so each expert is read once. Activations
+are rounded to BF16 wherever model.py rounds them, with FP32 sums, so the logits match the
+reference up to summation order. Without a compiler, model.py falls back to PyTorch.
+
+GPU: Graphs replays model.py's forward, captured once per batch and attention span, for steps
+that add one token to each game; a game's cache is a slot of one preallocated pool.
 """
 
 import ctypes
@@ -1200,7 +1204,7 @@ int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, co
   }
   for (int s = 0; s < S; s++) m.pxf[s] = &m.xf[(size_t)s * D];
   for (size_t a = 0; a < (size_t)T * m.keep; a++) m.phid[a] = &m.hid[a * m.eh];
-  size_t need = std::max({(size_t)m.ctx + 64, (size_t)D, (size_t)T * 128, (size_t)T * (D / nt + 8)});
+  size_t need = std::max({(size_t)m.ctx + 64, (size_t)D, (size_t)T * 64});  // scores, previous, up / down blocks
   m.scratch.resize(nt);
   for (auto& s : m.scratch)
     if (s.size() < need) s.resize(need);
