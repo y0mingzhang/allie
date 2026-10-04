@@ -8,6 +8,7 @@ not yet played is dropped. A move never waits for the chat: each game's chat has
 """
 
 import functools
+import json
 import logging
 import math
 import os
@@ -16,6 +17,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 import chess
@@ -100,8 +102,13 @@ class Chat:
     effort: str = "low"  # output_config.effort ("" = the model's default)
     thinking: str = "between_tools"  # Sonnet 5.5's lowest setting ("" = the default)
     max_tokens: int = 200
-    timeout: float = 3.0  # seconds per model call; on a timeout the message is dropped
+    timeout: float = 6.0  # seconds per model call; on a timeout the message is dropped
     key_file: str = "~/.config/allie/anthropic_key"  # if ANTHROPIC_API_KEY is unset
+    day_cap: float = 1.0  # USD a UTC day, then silent until the next day
+    month_cap: float = 15.0  # USD a UTC month
+    ledger: str = (
+        "~/.config/allie/chat-spend.json"  # spend by day and month, across restarts
+    )
     every: int = 10  # plies between two unprompted remarks, at least
     remarks: int = 4  # unprompted remarks per game (the hello and post-game aside)
     replies: int = 8  # answers to chat messages per game
@@ -586,6 +593,9 @@ def make(cfg):
     if cfg.llm == "mock":
         return mock
     silent = lambda system, prompt: ""
+    if cfg.model not in PRICES:
+        log.error("chat: no price for %s, so no spend cap: fixed lines only", cfg.model)
+        return silent
     if not (k := key(cfg.key_file)):
         log.error("chat: no ANTHROPIC_API_KEY or %s: fixed lines only", cfg.key_file)
         return silent
@@ -611,9 +621,71 @@ def key(path):
     return k or None
 
 
+PRICES = {  # USD per million tokens: input, cache write (5 min), cache read, output
+    "claude-sonnet-5-5": (2.0, 2.5, 0.2, 10.0),
+    "claude-sonnet-5": (2.0, 2.5, 0.2, 10.0),  # Sonnet 5.5's refusal fallback
+    "claude-haiku-4-5": (1.0, 1.25, 0.1, 5.0),
+}
+
+
+class Ledger:
+    """Spend in USD by UTC day and month ("2026-10-04", "2026-10"), kept in a JSON file
+    across restarts. allows() is False from the call that reaches a cap until the window
+    turns over."""
+
+    def __init__(self, path, day_cap, month_cap, now=lambda: datetime.now(UTC)):
+        self.path, self.caps, self.now = (
+            os.path.expanduser(path),
+            (day_cap, month_cap),
+            now,
+        )
+        self.lock, self.warned = threading.Lock(), set()
+        try:
+            with open(self.path) as f:
+                self.spent = json.load(f)
+        except (OSError, ValueError):
+            self.spent = {}
+
+    def windows(self):
+        t = self.now()
+        return t.strftime("%Y-%m-%d"), t.strftime("%Y-%m")
+
+    def allows(self):
+        with self.lock:
+            for w, cap in zip(self.windows(), self.caps):
+                if self.spent.get(w, 0.0) >= cap:
+                    if w not in self.warned:
+                        self.warned.add(w)
+                        log.warning("chat: spent $%.2f in %s, the cap: silent until it ends",
+                                    self.spent[w], w)  # fmt: skip
+                    return False
+            return True
+
+    def add(self, usd):
+        with self.lock:
+            for w in self.windows():
+                self.spent[w] = self.spent.get(w, 0.0) + usd
+            try:
+                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+                with open(self.path + ".tmp", "w") as f:
+                    json.dump(self.spent, f, indent=0, sort_keys=True)
+                os.replace(self.path + ".tmp", self.path)
+            except OSError as e:
+                log.warning("chat: ledger %s: %s", self.path, e)
+            return [self.spent[w] for w in self.windows()]
+
+
+def cost(model, u):
+    p = PRICES[model]
+    n = (u.input_tokens, u.cache_creation_input_tokens or 0, u.cache_read_input_tokens or 0,
+         u.output_tokens)  # fmt: skip
+    return sum(a * b for a, b in zip(n, p)) / 1e6
+
+
 class Claude:
     """Claude through the Anthropic SDK. Errors drop one message: a bad key, model or request
-    turns the model off, a rate limit pauses it for a minute. Keeps token totals in usage."""
+    turns the model off, a rate limit pauses it for a minute. Spend is capped by the ledger;
+    usage keeps token totals."""
 
     def __init__(self, cfg, key):
         import anthropic
@@ -622,9 +694,10 @@ class Claude:
         self.client = anthropic.Anthropic(
             api_key=key, timeout=cfg.timeout, max_retries=0
         )
-        self.usage = {
-            k: 0 for k in ("calls", "input", "cached", "written", "output", "seconds")
-        }
+        self.ledger = Ledger(cfg.ledger, cfg.day_cap, cfg.month_cap)
+        self.usage = dict.fromkeys(
+            ("calls", "input", "cached", "written", "output", "usd"), 0
+        )
         self.extra = {}
         if cfg.effort:
             self.extra["output_config"] = {"effort": cfg.effort}
@@ -633,7 +706,7 @@ class Claude:
 
     def __call__(self, system, prompt):
         a, start = self.sdk, time.monotonic()
-        if start < self.until:
+        if start < self.until or not self.ledger.allows():
             return ""
         try:
             r = self.client.beta.messages.create(
@@ -664,16 +737,14 @@ class Claude:
             log.warning("chat model: %s", e)
             return ""
         u, t = r.usage, time.monotonic() - start
-        cached, written = (
-            u.cache_read_input_tokens or 0,
-            u.cache_creation_input_tokens or 0,
-        )
-        for k, v in zip(
-            self.usage, (1, u.input_tokens, cached, written, u.output_tokens, t)
-        ):
+        usd = cost(r.model if r.model in PRICES else self.cfg.model, u)
+        day, month = self.ledger.add(usd)
+        n = (1, u.input_tokens, u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0,
+             u.output_tokens, usd)  # fmt: skip
+        for k, v in zip(self.usage, n):
             self.usage[k] += v
-        log.info("chat model %s: %d in + %d cached + %d written, %d out, %.2f s, %s", r.model,
-                 u.input_tokens, cached, written, u.output_tokens, t, r.stop_reason)  # fmt: skip
+        log.info("chat model %s: %d in + %d cached + %d written, %d out, $%.4f (day $%.2f, month "
+                 "$%.2f), %.2f s, %s", r.model, *n[1:], day, month, t, r.stop_reason)  # fmt: skip
         if r.stop_reason in ("refusal", "max_tokens"):
             return ""
         return "".join(b.text for b in r.content if b.type == "text")

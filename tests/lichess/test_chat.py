@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 from types import SimpleNamespace
@@ -310,6 +311,29 @@ def test_config_section(tmp_path):
         load(p)
 
 
+def test_ledger(tmp_path, caplog):
+    """Caps per UTC day and month; silent once reached, logged once, until the window turns;
+    the spend survives a restart."""
+    t = [chat.datetime(2026, 10, 4, 23, tzinfo=chat.UTC)]
+    path = tmp_path / "spend.json"
+    ledger = lambda: chat.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
+    a = ledger()
+    assert a.allows()
+    assert a.add(0.6) == [0.6, 0.6] and a.allows()
+    a.add(0.5)
+    assert not a.allows() and not a.allows()
+    assert sum("2026-10-04" in r.message for r in caplog.records) == 1
+    b = ledger()  # a restart
+    assert not b.allows()
+    t[0] = chat.datetime(2026, 10, 5, 1, tzinfo=chat.UTC)  # a new day, the same month
+    assert b.allows()
+    assert b.add(0.4) == pytest.approx([0.4, 1.5]) and not b.allows()  # the month's cap
+    t[0] = chat.datetime(2026, 11, 1, tzinfo=chat.UTC)
+    assert b.allows()
+    path.write_text("{not json")
+    assert ledger().allows()  # a corrupt ledger starts over
+
+
 class FakeAPI:
     """A local Messages API: records each request, answers from a script of
     ("text", stop_reason) or (HTTP status,) or ("sleep", seconds)."""
@@ -368,7 +392,8 @@ def test_claude_requests(monkeypatch, tmp_path):
     path = tmp_path / "key"
     path.write_text("sk-test-123\n")
     path.chmod(0o600)
-    cfg = Chat(enabled=True, timeout=1.0, key_file=str(path))
+    ledger = tmp_path / "spend" / "ledger.json"
+    cfg = Chat(enabled=True, timeout=1.0, key_file=str(path), ledger=str(ledger))
     m = chat.make(cfg)
     assert m("system text", "facts") == "Nice move!"
     headers, body = api.requests[0]
@@ -388,5 +413,15 @@ def test_claude_requests(monkeypatch, tmp_path):
     assert m("s", "p") == ""  # 401: off
     assert m("s", "p") == "" and len(api.requests) == 4
     assert m.usage["calls"] == 2 and m.usage["cached"] == 1400
+    usd = (300 * 2 + 700 * 0.2 + 12 * 10) / 1e6  # each answered call, refusals too
+    assert m.usage["usd"] == pytest.approx(2 * usd)
+    day = chat.datetime.now(chat.UTC).strftime("%Y-%m-%d")
+    assert json.loads(ledger.read_text())[day] == pytest.approx(2 * usd)
+    api.script = [("over the cap", "end_turn")] * 2
+    capped = chat.make(
+        Chat(enabled=True, key_file=str(path), ledger=str(ledger), day_cap=3 * usd)
+    )
+    assert capped("s", "p") == "over the cap"  # $0.0017 of $0.0026: one more call
+    assert capped("s", "p") == "" and len(api.script) == 1
     path.unlink()
     assert chat.make(cfg)("s", "p") == ""  # no key: fixed lines only

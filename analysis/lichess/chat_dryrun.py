@@ -6,11 +6,13 @@ chat as the bot would, with scripted opponent messages, and prints the transcrip
 
 usage: python analysis/lichess/chat_dryrun.py record --config bot.toml --out rec.pt GAME.pgn...
        python analysis/lichess/chat_dryrun.py replay rec.pt [--llm mock|cli|claude]
-           [--cli-model claude-sonnet-5-5] [--stockfish PATH] [--prompts]
+           [--cli-model claude-sonnet-5-5] [--stockfish PATH] [--prompts] [--games N]
+           [--ledger PATH]
 """
 
 import argparse
 import json
+import logging
 import subprocess
 import time
 from types import SimpleNamespace
@@ -191,8 +193,12 @@ class Replay:
 
 def replay(a):
     cfg = Chat(enabled=True, gap=0, stockfish=a.stockfish or "", llm=a.llm)
+    if a.ledger:
+        cfg.ledger = a.ledger
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    logging.getLogger("allie").setLevel(logging.INFO)  # the model's per-call usage
     llm = Cli(a.cli_model) if a.llm == "cli" else chat.model(cfg)
-    for i, g in enumerate(torch.load(a.recording, weights_only=False)):
+    for i, g in enumerate(torch.load(a.recording, weights_only=False)[: a.games]):
         r = Replay(g, SCRIPTS[i % len(SCRIPTS)], cfg, llm)
         r.run()
         r.show(a.prompts)
@@ -220,6 +226,10 @@ def main():
     s.add_argument("--cli-model", default="claude-sonnet-5-5")
     s.add_argument("--stockfish")
     s.add_argument("--prompts", action="store_true", help="print every prompt")
+    s.add_argument("--games", type=int, help="replay only the first N games")
+    s.add_argument(
+        "--ledger", help="--llm claude: the spend ledger (default: the config's)"
+    )
     a = p.parse_args()
     record(a) if a.command == "record" else replay(a)
 

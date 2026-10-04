@@ -93,11 +93,15 @@ costliest move.
   played is dropped. `!quiet` from the opponent mutes the bot for that game and their rematches, including
   a message already being written.
 - **Never in the way.** Each game's chat runs on its own thread (the game thread only notes Allie's view
-  and queues work); a call that takes over `timeout` (3 s) is dropped, a remark is dropped if the game
+  and queues work); a call that takes over `timeout` (6 s) is dropped, a remark is dropped if the game
   moved on two plies, and an error only skips a message. A game that ends without a final state (a
   crash, shutdown) drops what is queued.
   A bad key or model turns the model off (the hello and `!quiet` reply stay); a rate limit pauses it a
   minute.
+- **Spend cap.** Each response's tokens are priced (Sonnet 5.5: $2 input, $2.50 cache write, $0.20
+  cache read, $10 output per million) into a ledger file (`ledger`) by UTC day and month. At `day_cap`
+  ($1) or `month_cap` ($15) the chat goes silent, logged once, until the window turns over. A spend limit
+  on the key in the Anthropic Console is the backstop.
 - **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`
   (`chmod 600`) or `ANTHROPIC_API_KEY`. The bot logs each call's tokens (cached and not) and latency,
   never the key.

@@ -41,8 +41,11 @@ rooms = ["player"]            # remarks go here; add "spectator" to answer spect
 model = "claude-sonnet-5-5"
 effort = "low"                # output_config.effort; thinking "between_tools" = off, for latency
 max_tokens = 200
-timeout = 3.0                 # seconds; a late message is dropped, a move never waits
+timeout = 6.0                 # seconds; a late message is dropped, a move never waits
 key_file = "~/.config/allie/anthropic_key"  # chmod 600; ANTHROPIC_API_KEY wins if set
+day_cap = 1.0                 # USD per UTC day, counted from each response's usage; then silent
+month_cap = 15.0              # USD per UTC month
+ledger = "~/.config/allie/chat-spend.json"  # the spend, kept across restarts
 every = 10                    # plies between two unprompted remarks, at least
 remarks = 4                   # unprompted remarks per game (besides hello and post-game)
 replies = 8                   # answers to chat messages per game
