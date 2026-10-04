@@ -184,8 +184,8 @@ class Bot:
                         except Exception:  # noqa: BLE001 - the game ends on time anyway
                             log.exception("game %s: resign failed", gid)
                         break
-                    self.stopped.wait(backoff)
-                    backoff = min(2 * backoff, 5)  # the bot's clock may be running
+                    self.stopped.wait(min(backoff, 5))  # the bot's clock may be running
+                    backoff = min(2 * backoff, 5)
         finally:
             with self.lock:
                 self.games.pop(gid, None)
