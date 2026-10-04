@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import signal
+import threading
 import time
 import uuid
 from dataclasses import asdict
@@ -230,6 +232,41 @@ def migratable(key, old, new):
     return False
 
 
+def keep_model(src, kept, away=None):
+    """Hard-link src into kept/ (instant; prune cannot free it); away: then move it there from a thread, durably,
+    dropping the link only once the copy is synced (a failed or cut copy leaves the link)."""
+    if kept.exists() or (away and away.exists()):
+        return  # kept before an interruption
+    kept.parent.mkdir(exist_ok=True)
+    os.link(src, kept)
+    if away is None:
+        return
+
+    def move():
+        away.parent.mkdir(parents=True, exist_ok=True)
+        tmp = away.with_suffix(".partial")
+        with kept.open("rb") as f, tmp.open("wb") as g:
+            shutil.copyfileobj(f, g, 64 << 20)
+            g.flush()
+            os.fsync(g.fileno())
+        tmp.replace(away)
+        d = os.open(away.parent, os.O_RDONLY)
+        try:
+            os.fsync(d)  # the rename itself, before the link goes
+        finally:
+            os.close(d)
+        kept.unlink()
+
+    threading.Thread(target=move, daemon=True).start()
+
+
+def last_checkpoint(out):
+    """The step of the run's last committed checkpoint before this one (0: none)."""
+    f = out / "checkpoints.jsonl"
+    rows = f.read_text().splitlines() if f.exists() else []
+    return max((json.loads(x)["step"] for x in rows if x.endswith("}")), default=0)
+
+
 def init_triton_signals():
     """Let LLVM register its handlers before installing the trainer's callbacks.
 
@@ -270,6 +307,15 @@ def main():
         type=int,
         default=0,
         help="0 keeps all; otherwise retain the latest N plus best (a save of nonfinite weights is refused)",
+    )
+    p.add_argument(
+        "--keep-model-every",
+        type=int,
+        default=0,
+        help="hard-link the first model.pt at or after each multiple of this step into kept/ (never pruned)",
+    )
+    p.add_argument(
+        "--keep-model-dir", help="move the kept copies to DIR/NAME (another filesystem)"
     )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
@@ -673,6 +719,11 @@ def main():
 
         def commit():
             publish(out, directory, step, world, names)
+            n = a.keep_model_every  # the first checkpoint at or after each multiple
+            if n and step // n > last_checkpoint(out) // n:
+                name = f"model-{step:08d}.pt"
+                away = a.keep_model_dir and Path(a.keep_model_dir) / a.name / name
+                keep_model(directory / "model.pt", out / "kept" / name, away)
             removed = prune_checkpoints(out, a.keep_checkpoints, directory)
             row = {
                 "step": step,
