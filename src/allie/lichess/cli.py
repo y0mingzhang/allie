@@ -26,7 +26,7 @@ def model(c):
 
 
 def coverage(c):
-    if not (c.play.mode == "strongest" and c.play.search):
+    if not (c.play.mode == "calibrated" or c.play.mode == "strongest" and c.play.search):
         return None
     from .tree import Coverage
 

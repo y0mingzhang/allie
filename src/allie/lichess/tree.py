@@ -20,8 +20,8 @@ from allie.search.native import from_prefix
 from .tokens import CONTEXT, MOVE_START, MOVES, advance
 
 CALIBRATION = Path(__file__).with_name("calibration-allie-2.0.json")
-# simulations -> the output policy fitted for them (8 and 25 reuse 128's)
-POLICY = {5: "5", 8: "128", 25: "128", 128: "128"}
+# simulations -> the output policy fitted for them (8, 25 and 32 reuse 128's)
+POLICY = {5: "5", 8: "128", 25: "128", 32: "128", 128: "128", 256: "256"}
 
 
 class Tree:

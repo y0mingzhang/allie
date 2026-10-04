@@ -9,7 +9,7 @@ import chess
 import numpy as np
 import torch
 
-from . import behaviour
+from . import behaviour, calibration
 from .behaviour import FORMATS
 from .model import Cache, step
 from .tokens import CONTEXT, HEADER, MOVE_ID, START, advance, features, fill, header
@@ -19,7 +19,8 @@ TIME, WDL = slice(2350, 2413), slice(2413, 2416)
 
 @dataclass
 class Play:
-    mode: str = "human"  # a key of MODES: human samples the policy; strongest: argmax (or search)
+    mode: str = "human"  # a key of MODES: human samples the policy; strongest: argmax (or search);
+    # calibrated: plays at the strength of humans of its rating (calibration.py)
     rating: int | str = 1500  # the bot's header Elo, or "opponent" to mirror it
     temperature: float = 1.0  # human mode
     search: int = 0  # strongest mode: coverage-search simulations (0 = policy argmax)
@@ -260,7 +261,26 @@ def strongest(game, play, search, clock):
     return game.behave(play, clock, legal[i], p[i], wdl, time)
 
 
+def calibrated(game, play, search, clock):
+    """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
+    the policy, or coverage search's distribution with a budget that grows with the predicted human
+    think time, sharpened by a temperature that falls with the rating."""
+    legal, p, wdl, time = game.position()
+    rating = game.elo[len(game.moves) % 2]
+    n = 0
+    if search is not None and len(legal) > 1:
+        n = calibration.pick(calibration.budget(rating, time, clock), game.rng)
+    s = p
+    if n:
+        moves, q = search(game, n)
+        s = np.zeros(len(legal))
+        s[[legal.index(m) for m in moves]] = q
+    pi = calibration.sharpen(s, calibration.temperature(rating))
+    i = int(game.rng.choice(len(legal), p=pi))
+    return game.behave(play, clock, legal[i], p[i], wdl, time)
+
+
 # play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and
 # usually leaves timing, resignation and draws to game.behave.
-MODES = dict(human=human, strongest=strongest)
+MODES = dict(human=human, strongest=strongest, calibrated=calibrated)
 

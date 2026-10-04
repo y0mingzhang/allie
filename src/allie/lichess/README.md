@@ -61,6 +61,7 @@ trust_remote_code=True)`, see the model card).
 |---|---|
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
 | `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
+| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control: the policy, sharpened by a temperature that falls with the rating, or above about 2000 `allie.search`'s coverage distribution with simulations in proportion to the predicted human think time (`calibration.py`). On held-out human positions its move accuracy and blunder rate are within about 150 rating points of humans' from 1000 to 2400 (sampling at temperature 1: about 250 below in blitz, rapid and classical); classical players above 2400 stay 150-350 stronger, because a 6-CPU bot cannot search longer. Needs `--extra search`. |
 
 - **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
   63 bins, from 0 s to over an hour, given the position, both clocks and both ratings. It is a draw, not

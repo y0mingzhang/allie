@@ -25,7 +25,8 @@ bots = false
 per_user = 1                  # concurrent games with one opponent
 
 [play]
-mode = "human"                # human: sample the policy; strongest: argmax (or search); see engine.MODES
+mode = "human"                # human: sample the policy; strongest: argmax (or search); calibrated: play at
+                              # the strength of humans of the rating (calibration.py); see engine.MODES
 rating = "opponent"           # the bot's Elo in the game header: a number, or "opponent" to mirror it
 temperature = 1.0             # human mode; 1 is the model's own distribution
 search = 0                    # strongest mode: 0 or 5 / 8 / 25 / 128 coverage-search simulations
