@@ -123,8 +123,8 @@ def test_takeback_rewinds(tiny):
 
 
 def test_int8_close_to_dequantized(tiny_path):
-    q = Model(tiny_path, dtype=torch.bfloat16, int8=True)
-    ref = Model(tiny_path, dtype=torch.bfloat16)
+    q = Model(tiny_path, dtype=torch.bfloat16, int8=True, backend="torch")
+    ref = Model(tiny_path, dtype=torch.bfloat16, backend="torch")
     for k, s in q.scales.items():
         ref.w[k] = (q.w[k].float() * s.float()[..., None]).bfloat16()
     x = inputs(random_game(5, 20))

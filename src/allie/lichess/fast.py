@@ -79,6 +79,11 @@ static inline vf vfloor(vf a) { return _mm512_roundscale_ps(a, _MM_FROUND_TO_NEG
 static inline vf vpow2(vf n) {
   return _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_add_epi32(_mm512_cvtps_epi32(n), _mm512_set1_epi32(127)), 23));
 }
+static inline vf vrb(vf x) {
+  __m512i u = _mm512_castps_si512(x);
+  u = _mm512_add_epi32(u, _mm512_add_epi32(_mm512_set1_epi32(0x7fff), _mm512_and_si512(_mm512_srli_epi32(u, 16), _mm512_set1_epi32(1))));
+  return _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xffff0000u)));
+}
 #define SIMD 1
 #elif defined(__AVX2__) && defined(__FMA__)
 #define VL 8
@@ -110,6 +115,11 @@ static inline vf vfloor(vf a) { return _mm256_floor_ps(a); }
 static inline vf vpow2(vf n) {
   return _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_add_epi32(_mm256_cvtps_epi32(n), _mm256_set1_epi32(127)), 23));
 }
+static inline vf vrb(vf x) {
+  __m256i u = _mm256_castps_si256(x);
+  u = _mm256_add_epi32(u, _mm256_add_epi32(_mm256_set1_epi32(0x7fff), _mm256_and_si256(_mm256_srli_epi32(u, 16), _mm256_set1_epi32(1))));
+  return _mm256_castsi256_ps(_mm256_and_si256(u, _mm256_set1_epi32((int)0xffff0000u)));
+}
 #define SIMD 1
 #else
 #define VL 8
@@ -125,6 +135,7 @@ static inline void vst(float* p, vf a) { memcpy(p, a.v, sizeof a.v); }
 static inline vf vfma(vf a, vf b, vf c) { vf r; for (int i = 0; i < VL; i++) r.v[i] = a.v[i] * b.v[i] + c.v[i]; return r; }
 static inline float vsum(vf a) { float s = 0; for (int i = 0; i < VL; i++) s += a.v[i]; return s; }
 static inline vf vexp(vf a) { vf r; for (int i = 0; i < VL; i++) r.v[i] = expf(a.v[i]); return r; }
+static inline vf vrb(vf a) { vf r; for (int i = 0; i < VL; i++) r.v[i] = rb(a.v[i]); return r; }
 #endif
 
 #ifdef SIMD
@@ -333,10 +344,14 @@ static void mm(const Mat& A, int K, int r0, int n, const float* const* x, int M,
   else return dots(x, M, (const float*)A.w + (size_t)r0 * K, K, n, y, ldy);
   for (int m = 0; m < M; m++) {
     float* ym = y + (size_t)m * ldy;
-    if (A.s)
-      for (int j = 0; j < n; j++) ym[j] = rb(ym[j] * f32(A.s[r0 + j]));
-    else
-      for (int j = 0; j < n; j++) ym[j] = rb(ym[j]);
+    int j = 0;
+    if (A.s) {
+      for (; j + VL <= n; j += VL) vst(ym + j, vrb(vmul(vld(ym + j), vld(A.s + r0 + j))));
+      for (; j < n; j++) ym[j] = rb(ym[j] * f32(A.s[r0 + j]));
+    } else {
+      for (; j + VL <= n; j += VL) vst(ym + j, vrb(vld(ym + j)));
+      for (; j < n; j++) ym[j] = rb(ym[j]);
+    }
   }
 }
 
@@ -373,10 +388,29 @@ static inline float dot(const float* a, const bf16* b, int n) {
 }
 
 static void norm(const float* x, float* y, int n) {  // rms_norm, eps = FP32 epsilon, to BF16
-  float s = 0;
-  for (int i = 0; i < n; i++) s += x[i] * x[i];
+  vf a = vzero();
+  int i = 0;
+  for (; i + VL <= n; i += VL) a = vfma(vld(x + i), vld(x + i), a);
+  float s = vsum(a);
+  for (; i < n; i++) s += x[i] * x[i];
   float r = 1.f / sqrtf(s / n + 1.1920928955078125e-07f);
-  for (int i = 0; i < n; i++) y[i] = rb(x[i] * r);
+  vf vr = vset(r);
+  for (i = 0; i + VL <= n; i += VL) vst(y + i, vrb(vmul(vld(x + i), vr)));
+  for (; i < n; i++) y[i] = rb(x[i] * r);
+}
+
+// y = rb(a + rb(c * b))
+static void axpy_rb(float* y, const float* a, float c, const float* b, int n) {
+  int i = 0;
+  for (; i + VL <= n; i += VL) vst(y + i, vrb(vadd(vld(a + i), vrb(vmul(vset(c), vld(b + i))))));
+  for (; i < n; i++) y[i] = rb(a[i] + rb(c * b[i]));
+}
+
+// y = rb(y + b)
+static void add_rb(float* y, const float* b, int n) {
+  int i = 0;
+  for (; i + VL <= n; i += VL) vst(y + i, vrb(vadd(vld(y + i), vld(b + i))));
+  for (; i < n; i++) y[i] = rb(y[i] + b[i]);
 }
 
 static void gelu(float* a, int n) {  // tanh approximation, to BF16
@@ -401,26 +435,6 @@ static void silu_mul(const float* a, const float* b, float* y, int n) {  // rb(r
     for (int j = 0; j < VL; j++) y[i + j] = rb(rb(t[j]) * b[i + j]);
   }
   for (; i < n; i++) y[i] = rb(rb(a[i] / (1.f + expf(-a[i]))) * b[i]);
-}
-
-// out[co][64] = conv3x3(in[C][8][8], w[Co][C][3][3]), zero padding
-static void conv3(const float* in, int C, const bf16* w, int Co, float* out) {
-  float pad[32][10][10];
-  memset(pad, 0, sizeof pad);
-  for (int c = 0; c < C; c++)
-    for (int r = 0; r < 8; r++)
-      for (int f = 0; f < 8; f++) pad[c][r + 1][f + 1] = in[c * 64 + r * 8 + f];
-  for (int co = 0; co < Co; co++) {
-    float acc[64] = {0};
-    for (int c = 0; c < C; c++)
-      for (int dy = 0; dy < 3; dy++)
-        for (int dx = 0; dx < 3; dx++) {
-          float wv = f32(w[((co * C + c) * 3 + dy) * 3 + dx]);
-          for (int r = 0; r < 8; r++)
-            for (int f = 0; f < 8; f++) acc[r * 8 + f] += wv * pad[c][r + dy][f + dx];
-        }
-    for (int p = 0; p < 64; p++) out[co * 64 + p] = rb(acc[p]);
-  }
 }
 
 // ---- the model ----
@@ -456,6 +470,7 @@ struct Engine {
   const bf16 *embed, *embed2, *lm_head, *feat, *smear_gate, *cosv, *sinv, *bfirst, *bres[2], *bsq, *bmeta, *bout,
       *skip_gate[3];
   const float *scal, *x0l;
+  std::vector<float> w1, wr, wsq;  // board CNN weights, FP32, [piece][tap][co], [conv][tap][ci][co], [o][ci]
   std::vector<const bf16*> ve;
   std::vector<Layer> layers;
   Pool* pool;
@@ -516,20 +531,49 @@ static void clockfeat(const float* t, float* f) {
   }
 }
 
-static void boardcnn(const Engine& m, const uint8_t* st, float* v) {
-  float in[13 * 64] = {0}, a[32 * 64], b[32 * 64];
-  for (int p = 0; p < 64; p++) in[st[p] * 64 + p] = 1.f;
-  conv3(in, 13, m.bfirst, 32, a);
-  gelu(a, 32 * 64);
-  for (int i = 0; i < 2; i++) {
-    conv3(a, 32, m.bres[i], 32, b);
-    gelu(b, 32 * 64);
-    for (int p = 0; p < 32 * 64; p++) a[p] = rb(a[p] + b[p]);
+static void boardcnn(const Engine& m, const uint8_t* st, float* v) {  // channels last, zero border
+  enum { C = 32 / VL, NP = 8 / C };  // NP squares at once: eight independent sums
+  alignas(64) float a[100 * 32] = {0}, b[64 * 32];
+  int piece[100];
+  for (int q = 0; q < 100; q++) piece[q] = 13;  // off the board: a zero weight row
+  for (int p = 0; p < 64; p++) piece[(p / 8 + 1) * 10 + p % 8 + 1] = st[p];
+  for (int pass = 0; pass < 3; pass++) {
+    for (int p = 0; p < 64; p += NP) {
+      vf acc[NP][C];
+      for (int j = 0; j < NP; j++)
+        for (int c = 0; c < C; c++) acc[j][c] = vzero();
+      for (int tap = 0; tap < 9; tap++) {
+        int q[NP];
+        for (int j = 0; j < NP; j++) q[j] = ((p + j) / 8 + tap / 3) * 10 + (p + j) % 8 + tap % 3;
+        if (pass == 0) {  // one-hot input: the weights of the piece on each neighbour
+          for (int j = 0; j < NP; j++)
+            for (int c = 0; c < C; c++) acc[j][c] = vadd(acc[j][c], vld(&m.w1[(piece[q[j]] * 9 + tap) * 32 + c * VL]));
+          continue;
+        }
+        const float* w = &m.wr[((pass - 1) * 9 + tap) * 32 * 32];
+        for (int ci = 0; ci < 32; ci++) {
+          vf wc[C];
+          for (int c = 0; c < C; c++) wc[c] = vld(w + ci * 32 + c * VL);
+          for (int j = 0; j < NP; j++) {
+            vf x = vset(a[q[j] * 32 + ci]);
+            for (int c = 0; c < C; c++) acc[j][c] = vfma(x, wc[c], acc[j][c]);
+          }
+        }
+      }
+      for (int j = 0; j < NP; j++)
+        for (int c = 0; c < C; c++) vst(b + (p + j) * 32 + c * VL, vrb(acc[j][c]));
+    }
+    gelu(b, 64 * 32);
+    for (int p = 0; p < 64; p++) {
+      float* ap = a + ((p / 8 + 1) * 10 + p % 8 + 1) * 32;
+      for (int c = 0; c < 32; c++) ap[c] = pass ? rb(ap[c] + b[p * 32 + c]) : b[p * 32 + c];
+    }
   }
   for (int o = 0; o < 8; o++)
     for (int p = 0; p < 64; p++) {
+      const float* ap = a + ((p / 8 + 1) * 10 + p % 8 + 1) * 32;
       float s = 0;
-      for (int c = 0; c < 32; c++) s += f32(m.bsq[o * 32 + c]) * a[c * 64 + p];
+      for (int c = 0; c < 32; c++) s += m.wsq[o * 32 + c] * ap[c];
       v[o * 64 + p] = rb(s);
     }
   for (int j = 0; j < 32; j++)
@@ -576,7 +620,7 @@ void Engine::embedding(int t, int nt) {
       memset(prev.data(), 0, D * sizeof(float));
     float c = rb(smear * rb(sigm(rb(dot(ek, smear_gate, 16)))));
     float* xk = &x[(size_t)k * D];
-    for (int d = 0; d < D; d++) xk[d] = rb(ek[d] + rb(c * prev[d]));
+    axpy_rb(xk, ek, c, prev.data(), D);
     norm(xk, xk, D);
     memcpy(&x0[(size_t)k * D], xk, D * sizeof(float));
     const bf16* e2 = embed2 + (size_t)ids[k] * D;
@@ -600,15 +644,21 @@ void Engine::blockstep(int i, int t, int nt) {
       int j = ly.skout;
       float gs = sigm(scal[3 * L + 2 + j]) * 2;
       float gg = rb(gs * rb(sigm(rb(dot(a, skip_gate[j], 16)))));
-      const float* sk = &skip[2 - j][(size_t)k * D];
-      for (int d = 0; d < D; d++) xk[d] = rb(xk[d] + rb(gg * sk[d]));
+      axpy_rb(xk, xk, gg, &skip[2 - j][(size_t)k * D], D);
     }
     float c0 = x0l[2 * i], c1 = x0l[2 * i + 1], lam = scal[i];
+    int d = 0;
     if (i == 0) {
       float c = (float)((double)lam + (double)c0);
-      for (int d = 0; d < D; d++) xk[d] = rb(rb(c * xk[d]) + rb(c1 * b[d]));
+      for (; d + VL <= D; d += VL)
+        vst(xk + d, vrb(vadd(vrb(vmul(vset(c), vld(xk + d))), vrb(vmul(vset(c1), vld(b + d))))));
+      for (; d < D; d++) xk[d] = rb(rb(c * xk[d]) + rb(c1 * b[d]));
     } else {
-      for (int d = 0; d < D; d++) xk[d] = rb(rb(rb(c0 * a[d]) + rb(c1 * b[d])) + lam * xk[d]);
+      for (; d + VL <= D; d += VL) {
+        vf s = vrb(vadd(vrb(vmul(vset(c0), vld(a + d))), vrb(vmul(vset(c1), vld(b + d)))));
+        vst(xk + d, vrb(vfma(vset(lam), vld(xk + d), s)));
+      }
+      for (; d < D; d++) xk[d] = rb(rb(rb(c0 * a[d]) + rb(c1 * b[d])) + lam * xk[d]);
     }
     float* hk = &h[(size_t)k * D];
     norm(xk, hk, D);
@@ -693,8 +743,7 @@ void Engine::blockstep(int i, int t, int nt) {
   sync(t, B_ATTN);
   split(D, t, nt, 4, lo, hi);
   mm(ly.o, D, lo, hi - lo, py.data(), T, &tmp[lo], D);
-  for (int k = 0; k < T; k++)
-    for (int d = lo; d < hi; d++) x[(size_t)k * D + d] = rb(x[(size_t)k * D + d] + tmp[(size_t)k * D + d]);
+  for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tmp[(size_t)k * D + lo], hi - lo);
   sync(t, B_O);
   for (int k = t; k < T; k += nt) {
     norm(&x[(size_t)k * D], &h[(size_t)k * D], D);
@@ -790,8 +839,7 @@ void Engine::ffn(int t, int nt, int dense, int i) {
   if (n > 0) {
     if (dense) {
       mm(ly.proj, dh, lo, n, pshid.data(), T, tb, n);
-      for (int k = 0; k < T; k++)
-        for (int j = 0; j < n; j++) x[(size_t)k * D + lo + j] = rb(x[(size_t)k * D + lo + j] + tb[(size_t)k * n + j]);
+      for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tb[(size_t)k * n], n);
     } else {
       for (int k = 0; k < T; k++) memset(&acc[(size_t)k * D + lo], 0, n * sizeof(float));
       size_t es = (size_t)D * eh * (q8 ? 1 : 2);
@@ -802,15 +850,20 @@ void Engine::ffn(int t, int nt, int dense, int i) {
         mm(A, eh, lo, n, &phid[s0], cnt[e], tb, n);
         for (int m = 0; m < cnt[e]; m++) {
           float gt = sgate[s0 + m], *ak = &acc[(size_t)stok[s0 + m] * D + lo];
-          for (int j = 0; j < n; j++) ak[j] += gt * tb[(size_t)m * n + j];
+          const float* bm = &tb[(size_t)m * n];
+          int j = 0;
+          for (; j + VL <= n; j += VL) vst(ak + j, vfma(vset(gt), vld(bm + j), vld(ak + j)));
+          for (; j < n; j++) ak[j] += gt * bm[j];
         }
       }
       mm(ly.sdown, sh, lo, n, pshid.data(), T, tb, n);
-      for (int k = 0; k < T; k++)
-        for (int j = 0; j < n; j++) {
-          size_t a = (size_t)k * D + lo + j;
-          x[a] = rb(x[a] + rb(rb(acc[a]) + tb[(size_t)k * n + j]));
-        }
+      for (int k = 0; k < T; k++) {
+        float *xa = &x[(size_t)k * D + lo], *aa = &acc[(size_t)k * D + lo];
+        const float* bb = &tb[(size_t)k * n];
+        int j = 0;
+        for (; j + VL <= n; j += VL) vst(xa + j, vrb(vadd(vld(xa + j), vrb(vadd(vrb(vld(aa + j)), vld(bb + j))))));
+        for (; j < n; j++) xa[j] = rb(xa[j] + rb(rb(aa[j]) + bb[j]));
+      }
     }
     for (int k = 0; k < T; k++) {
       size_t a = (size_t)k * D + lo;
@@ -858,6 +911,14 @@ void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* c
   m->cosv = B(7), m->sinv = B(8), m->bfirst = B(9), m->bres[0] = B(10), m->bres[1] = B(11);
   m->bsq = B(12), m->bmeta = B(13), m->bout = B(14);
   for (int j = 0; j < 3; j++) m->skip_gate[j] = B(15 + j);
+  m->w1.assign(14 * 9 * 32, 0.f), m->wr.resize(2 * 9 * 32 * 32), m->wsq.resize(8 * 32);
+  for (int co = 0; co < 32; co++)
+    for (int tap = 0; tap < 9; tap++) {
+      for (int ci = 0; ci < 13; ci++) m->w1[(ci * 9 + tap) * 32 + co] = f32(m->bfirst[(co * 13 + ci) * 9 + tap]);
+      for (int j = 0; j < 2; j++)
+        for (int ci = 0; ci < 32; ci++) m->wr[((j * 9 + tap) * 32 + ci) * 32 + co] = f32(m->bres[j][(co * 32 + ci) * 9 + tap]);
+    }
+  for (int i = 0; i < 8 * 32; i++) m->wsq[i] = f32(m->bsq[i]);
   for (int j = 0; j < m->nve; j++) m->ve.push_back(B(18 + j));
   int t8 = m->q8 ? 1 : 0;
   for (int i = 0; i < m->L; i++) {
@@ -1111,13 +1172,14 @@ class Fast:
                 "cos", "sin", "board.first", "board.residual.0", "board.residual.1",
                 "board.squeeze", "board.meta", "board.output", "skip_gate.0", "skip_gate.1",
                 "skip_gate.2", *[f"value_embed.{j}" for j in range(model.ve)]]  # fmt: skip
-        ptrs = []
+        ptrs, self.tensors = [], []  # the kernels read these in place: keep them alive
         for k in glob:
             t = w[k]
             assert t.is_contiguous() and t.dtype == (
                 torch.float32 if k in ("scalars", "x0_lambdas") else torch.bfloat16
             ), k
             ptrs.append(t.data_ptr())
+            self.tensors.append(t)
         lay = []
         for i in range(n):
             for k in LAYER:
@@ -1132,10 +1194,12 @@ class Fast:
                     )
                     assert t.is_contiguous() and t.dtype == want, (i, k, t.dtype)
                 lay.append(0 if t is None else t.data_ptr())
+                self.tensors.append(t)
                 if k in SCALED:
                     s = model.scales.get(f"{i}.{k}")
                     assert (s is not None) == (int8 and t is not None), (i, k)
                     lay.append(0 if s is None else s.data_ptr())
+                    self.tensors.append(s)
         arr = lambda ty, xs: (ty * len(xs))(*xs)
         self.handle = self.lib.allie_new(
             arr(ctypes.c_int64, cfg), arr(ctypes.c_double, [model.scale, model.floor]),

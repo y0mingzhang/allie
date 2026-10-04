@@ -84,18 +84,20 @@ class Allie:
 
     @classmethod
     def from_pretrained(cls, name=REPO, device=None, dtype=None, int8=None, active_experts=None,
-                        **hub):  # fmt: skip
+                        backend=None, threads=None, **hub):  # fmt: skip
         """name: a Hugging Face repo or a local directory with config.json and
         model.safetensors. device: default CUDA if available. int8: int8 weights, the default
         on CPU (half the memory, twice the speed). active_experts: route each token through only this many
-        of its 16 experts (faster, slightly less accurate). hub: revision, cache_dir, token, ...
-        for huggingface_hub.snapshot_download."""
+        of its 16 experts (faster, slightly less accurate). backend: "fast" (C++ kernels, the CPU
+        default) or "torch" (the PyTorch reference). threads: the fast backend's CPU threads
+        (default torch.get_num_threads()). hub: revision, cache_dir, token, ... for
+        huggingface_hub.snapshot_download."""
         path = resolve(name, **hub)
         device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         dtype = dtype or torch.bfloat16
         if int8 is None:
             int8 = device.type == "cpu" and dtype == torch.bfloat16
-        return cls(Model(path, device, dtype, active_experts, int8))
+        return cls(Model(path, device, dtype, active_experts, int8, backend, threads))
 
     def analyze(self, moves=(), white_elo=1500, black_elo=1500, time_control=None,
                 clocks=None):  # fmt: skip
@@ -212,12 +214,15 @@ def main(argv=None):
     p.add_argument("--device")
     p.add_argument("--bf16", action="store_true", help="BF16 weights on CPU (default int8)")
     p.add_argument("--active-experts", type=int, help="routed experts per token (default 16)")
+    p.add_argument("--backend", choices=["fast", "torch"], help="CPU: fast (default) or torch")
+    p.add_argument("--threads", type=int, help="CPU threads")
     p.add_argument("--top", type=int, default=5)
     a = p.parse_args(argv)
     clocks = (
         [float(c) if c else None for c in a.clocks.split(",")] if a.clocks else None
     )
-    allie = Allie.from_pretrained(a.model, a.device, int8=False if a.bf16 else None, active_experts=a.active_experts)
+    allie = Allie.from_pretrained(a.model, a.device, int8=False if a.bf16 else None, active_experts=a.active_experts,
+                                  backend=a.backend, threads=a.threads)  # fmt: skip
     white, black = a.white_elo or a.elo, a.black_elo or a.elo
     out = allie.analyze(a.moves, white, black, a.tc, clocks)
     board = chess.Board()
