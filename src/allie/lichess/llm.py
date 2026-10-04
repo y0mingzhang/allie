@@ -94,7 +94,8 @@ def cost(model, u):
 class Ledger:
     """Spend in USD by UTC day and month ("2026-10-04", "2026-10"), in a JSON file shared by
     processes (read before each check, locked to add). allows() is False from the call that
-    reaches a cap until the window ends."""
+    reaches a cap until the window ends, and for good once the file can't be read or written
+    (a missing file is a new ledger)."""
 
     def __init__(self, path, day_cap, month_cap, now=lambda: datetime.now(UTC)):
         self.path, self.caps, self.now = (
@@ -102,14 +103,24 @@ class Ledger:
             (day_cap, month_cap),
             now,
         )
-        self.lock, self.warned = threading.Lock(), set()
+        self.lock, self.warned, self.broken = threading.Lock(), set(), False
 
     def read(self):
         try:
             with open(self.path) as f:
-                return json.load(f)
-        except (OSError, ValueError):
+                spent = json.load(f)
+        except FileNotFoundError:
             return {}
+        except (OSError, ValueError) as e:
+            return self.fail(e)
+        return spent if isinstance(spent, dict) else self.fail("not a JSON object")
+
+    def fail(self, e):
+        if not self.broken:
+            log.error(
+                "chat: ledger %s: %s; no paid calls until this is fixed", self.path, e
+            )
+        self.broken = True
 
     def windows(self):
         t = self.now()
@@ -117,6 +128,8 @@ class Ledger:
 
     def allows(self):
         spent = self.read()
+        if spent is None or self.broken:
+            return False
         for w, cap in zip(self.windows(), self.caps):
             if spent.get(w, 0.0) >= cap:
                 if w not in self.warned:
@@ -127,20 +140,22 @@ class Ledger:
         return True
 
     def add(self, usd):
+        """Charge usd; the window totals (infinite if the charge can't be recorded)."""
         with self.lock:
             try:
                 os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
                 with open(self.path + ".lock", "a") as lock:
                     fcntl.flock(lock, fcntl.LOCK_EX)
-                    spent = self.read()
+                    if (spent := self.read()) is None:
+                        return [math.inf] * 2
                     for w in self.windows():
                         spent[w] = spent.get(w, 0.0) + usd
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(spent, f, indent=0, sort_keys=True)
                     os.replace(self.path + ".tmp", self.path)
             except OSError as e:
-                log.warning("chat: ledger %s: %s", self.path, e)
-                return [usd, usd]
+                self.fail(e)
+                return [math.inf] * 2
             return [spent[w] for w in self.windows()]
 
 

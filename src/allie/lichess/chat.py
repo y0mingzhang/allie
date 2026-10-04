@@ -202,13 +202,16 @@ class Chatter:
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
         self.last, self.posted, self.until = -math.inf, -math.inf, math.inf
-        self.heard, self.timings = Counter(), []
+        self.heard, self.timings, self.latest = Counter(), [], []
         name = f"chat-{self.gid}"
         threading.Thread(target=self.serve, daemon=True, name=name).start()
 
     def put(self, event):
+        """From the reader thread: note what can't wait, queue the event."""
         if quiet(event) and (event.get("username") or "").lower() == self.opp:
             MUTED.add(self.opp)  # at once: a reply being written is not posted
+        if event and event.get("type") in ("gameFull", "gameState"):
+            self.latest = event.get("state", event)["moves"].split()
         self.q.put((time.monotonic(), event))
 
     def close(self):
@@ -340,14 +343,16 @@ class Chatter:
             del self.sans[k:]
             while len(self.board.move_stack) > k:
                 self.board.pop()
+            self.see(moves[:k], None, None)  # the chat's Game rewinds too
         if not self.views:
             self.see([], None, None)
         for j in range(k, len(moves)):
-            last = j == len(moves) - 1
             self.sans.append(self.board.san(m := self.board.parse_uci(moves[j])))
             self.board.push(m)
-            w, b = (s["wtime"], s["btime"]) if last else (None, None)
-            self.clocks[j + 1] = (w, b)
+            # the event's clocks: the last move's mover's and the other side's after its
+            # move before; the Game takes each at the step of that move
+            w, b = (s["wtime"], s["btime"]) if j >= len(moves) - 2 else (None, None)
+            self.clocks[j + 1] = (w, b) if j == len(moves) - 1 else (None, None)
             self.see(moves[: j + 1], w, b)
             self.ply(t, j)
         self.clocks[len(moves)] = s["wtime"], s["btime"]
@@ -532,29 +537,16 @@ class Chatter:
         turn = "\n".join([*self.pending, self.now(), f"(You are called for {reason}.)"])
         messages = [*self.convo, {"role": "user", "content": turn}]
         self.llm = self.llm or model(self.cfg)
-        start, n = time.monotonic(), len(self.sans)
+        start, then = time.monotonic(), list(self.latest)
         r = self.llm(self.system, messages)
         if r is None:  # an error, a refusal, the spend cap: the updates wait
             return
         self.convo = [*messages, {"role": "assistant", "content": r.content}]
         self.pending = []
         text = clean(r.text) if r.speak else ""
-        if (
-            text
-            and not self.status
-            and self.info.get("rated")
-            and not played(text, self.board)
-        ):
-            log.info(
-                "game %s chat: dropped an unplayed move, rated: %s", self.gid, text
-            )
-            text = ""
-        if text and unprompted and len(self.sans) - n > 2:
-            log.info("game %s chat: a remark came late", self.gid)
-            text = ""
         posted = None
         for part in parts(text):
-            posted = self.post(part, room, unprompted)
+            posted = self.post(part, room, unprompted, then)
         total = time.monotonic() - t
         self.timings.append({"reason": reason, "wait": start - t, "first": r.first,
                              "model": r.seconds, "post": posted, "total": total,
@@ -564,11 +556,24 @@ class Chatter:
                  r.first, r.seconds, "-" if posted is None else f"{posted:.2f} s", total,
                  r.usd)  # fmt: skip
 
-    def post(self, text, room, unprompted):
-        """Send a line (an unprompted one after the gap); the seconds it took, or None."""
+    def post(self, text, room, unprompted, then=None):
+        """Send a line (an unprompted one after the gap) unless, by then, !quiet, the end
+        of the bot, a game that moved on from an unprompted line's moves (then), or, in a
+        rated game, a move it names not yet played; the seconds it took, or None."""
         if unprompted:
             time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
-        if self.cancelled or (self.muted() and text != QUIET):
+        now = list(self.latest)
+        why = (
+            "quiet" if self.muted() and text != QUIET
+            else "cancelled" if self.cancelled
+            else "late" if unprompted and then is not None
+            and (len(now) - len(then) > 2 or now[: len(then)] != then)
+            else "an unplayed move, rated" if self.info.get("rated") and not self.status
+            and text != QUIET and not played(text, now)
+            else None
+        )  # fmt: skip
+        if why:
+            log.info("game %s chat: not posted (%s): %s", self.gid, why, text)
             return None
         start = time.monotonic()
         try:
@@ -709,14 +714,14 @@ SAN = re.compile(
 )
 
 
-def played(text, board):
-    """Does text name only moves already played in board's game?"""
+def played(text, moves):
+    """Does text name only moves already played (UCI moves)?"""
     named = set(SAN.findall(text))
     if not named:
         return True
     b, seen = chess.Board(), set()
-    for m in board.move_stack:
-        seen.add(b.san(m).rstrip("+#"))
+    for u in moves:
+        seen.add(b.san(m := b.parse_uci(u)).rstrip("+#"))
         b.push(m)
     return named <= seen
 

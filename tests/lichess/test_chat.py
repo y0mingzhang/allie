@@ -103,8 +103,9 @@ def test_clean_and_played():
     b = chess.Board()
     for u in ("e2e4", "e7e5", "g1f3"):
         b.push_uci(u)
-    assert played("Nf3, the classic", b) and played("nice game", b)
-    assert not played("try Nc6 here", b)
+    moves = [m.uci() for m in b.move_stack]
+    assert played("Nf3, the classic", moves) and played("nice game", moves)
+    assert not played("try Nc6 here", moves)
 
 
 def test_conversation(engine):
@@ -193,6 +194,30 @@ def test_quiet_rated_and_close(engine):
     del c
 
 
+def test_clocks_takeback_and_late(engine):
+    """A reconnect's plies get both clocks as the bot's Game does; a takeback rewinds the
+    chat's Game; an unprompted line is dropped if the game moved on while it was written."""
+    from allie.lichess.engine import Game as Reference
+
+    m = Model("What a move!", gated=True)
+    g = Game(engine, p_moment=0, hello="")
+    c = g.chatter(m)
+    g.feed(g.full("e2e4 e7e5"))
+    ref = Reference(engine, 1500, 1500, 180, 2, "blitz")
+    ref.update(["e2e4", "e7e5"], 170, 171)
+    assert c.game.clocks == ref.clocks == [170, 171]
+    g.feed(state("e2e4 e7e5 g1f3"), state("e2e4"))  # a takeback of two plies
+    assert c.game.moves == ["e2e4"] and c.sans == ["e4"] and max(c.views) == 1
+    c.want = ("a test", "player", True, time.monotonic())
+    c.put({"type": "opponentGone", "gone": False})
+    wait(lambda: m.calls)
+    for k in range(2, 6):
+        c.put(state(" ".join("e2e4 e7e5 g1f3 b8c6 f1c4".split()[:k])))
+    m.gate.set()
+    c.q.join()
+    assert g.posts == []  # late
+
+
 def test_split():
     """The chat gets each event at once even while the game thread is busy; the game thread
     gets them all in order, then the stream's error."""
@@ -257,8 +282,10 @@ def test_ledger(tmp_path, caplog):
     assert b.allows() and b.add(0.4) == pytest.approx([0.4, 1.5]) and not b.allows()
     t[0] = llm.datetime(2026, 11, 1, tzinfo=llm.UTC)
     assert b.allows()
-    path.write_text("{not json")
-    assert ledger().allows()
+    path.write_text("{not json")  # corrupt: no paid calls, and the evidence stays
+    c = ledger()
+    assert not c.allows() and c.add(0.1) == [float("inf")] * 2
+    assert path.read_text() == "{not json" and not c.allows()
 
 
 class FakeAPI:
