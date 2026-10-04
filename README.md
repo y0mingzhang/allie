@@ -180,7 +180,7 @@ Allie 2.0 plays on Lichess as [**AllieTheChessBot**](https://lichess.org/@/Allie
 - **Time controls.** Bullet to classical: 1 to 60 minutes, with up to 180 seconds of increment.
 - **Games.** Rated or casual, standard chess from the starting position.
 - **It plays at your level.** The bot takes on your rating. Then it plays a move a player of that rating would likely make.
-- **It is not out to crush you.** It tries to play like you, not to win at all costs.
+- **It plays like a human opponent at your level.**
 - **It thinks like a human.** Before each move, it waits about as long as a person would.
 - **Availability.** It plays humans only, two games at a time and one game per opponent.
 
