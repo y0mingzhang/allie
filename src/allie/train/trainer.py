@@ -484,6 +484,9 @@ def main():
             if not same and a.resume_new_source:
                 same = migratable(key, shared["args"][key], vars(a)[key])
             assert same, f"Resume changes {key}"
+        assert not shared["args"].get("kd_teacher"), (
+            "a distillation run: resume it with the trainer that trained it"
+        )
         for key, default in SAME_SINCE.items():
             assert shared["args"].get(key, default) == vars(a)[key], (
                 f"Resume changes {key}"

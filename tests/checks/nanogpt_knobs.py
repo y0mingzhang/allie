@@ -2,7 +2,8 @@
 
 off: a small compiled MoE trains 6 steps (MTP phase and the embed split inside) with the default arch;
 its losses and a digest of every parameter go to --dump, to compare with --ref, the same dump from
-another commit (made by that commit's own copy of this check).
+another commit (made by that commit's own copy of this check; a86c10a4 or later: earlier copies call
+forward with a target argument and pass arch switches this code retired).
 adam_every: the Adam and scalar groups run at half the default lr, twice its weight decay and
 square-rooted betas, and step on every step (their Adam step counts equal the training steps, and
 Adam-trained weights move on even steps too), where the default leaves them untouched on even steps.

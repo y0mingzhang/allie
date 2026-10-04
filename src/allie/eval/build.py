@@ -60,10 +60,23 @@ def per_cell(wc, bc, wn, bn):
     return out
 
 
+def clocks(g, i, size):
+    """Time left on the next mover's clock before each move (data.mix.clock_bucket), at the position predicting it:
+    the base time for each side's first move, else that side's clock after its previous move; 0 elsewhere and for
+    games without clocks."""
+    out = np.zeros(size, np.int16)
+    moves = g.off[i + 1] - g.off[i]
+    c = g.cval[g.coff[i] : g.coff[i + 1]].astype(np.int64)
+    if len(c) == moves and g.base[i] >= 0:
+        before = np.concatenate([[g.base[i], g.base[i]], c])[:moves]
+        out[10 : 10 + moves] = cm.clock_bucket(before)
+    return out
+
+
 def build(side=None):
     """side ("clocks" or "feats") reruns the same deterministic selection, checks the rows are
-    byte-identical to strat.npz and writes the aligned side channel (data.mix.Games.clock or
-    Games.feats, no dropout) to <side>.npz."""
+    byte-identical to strat.npz and writes the aligned side channel (clocks() or data.mix.Games.feats,
+    no dropout) to <side>.npz."""
     clock = side is not None
     skip = excluded()
     buckets = [
@@ -99,8 +112,11 @@ def build(side=None):
                 toks.append(t)
                 labels.append(lab)
                 if clock:
-                    side_of = g.clock if side == "clocks" else g.feats
-                    clks.append(side_of(i, len(t), drop=False))
+                    clks.append(
+                        clocks(g, i, len(t))
+                        if side == "clocks"
+                        else g.feats(i, len(t), drop=False)
+                    )
                 games += 1
             counts += per_cell(np.where(wsel, wc, -1), np.where(bsel, bc, -1), wn, bn)
             seen += len(wc)
