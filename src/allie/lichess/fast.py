@@ -1442,32 +1442,36 @@ class Fast:
         self.args = (arr(ctypes.c_int64, cfg), arr(ctypes.c_double, [model.scale, model.floor]),
                      arr(ctypes.c_void_p, ptrs), arr(ctypes.c_void_p, lay),
                      arr(ctypes.c_int32, self.cpus) if self.cpus else None, spin)  # fmt: skip
-        self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
+        self.handle, self.stale = self.lib.allie_new(*self.args), False
+        if hasattr(os, "register_at_fork"):
+            ref = weakref.ref(self)
+            os.register_at_fork(after_in_child=lambda: ref() is not None and ref().forked())
 
     def __del__(self):
-        if (
-            getattr(self, "handle", None) and os.getpid() == self.pid
-        ):  # a fork's copy: leaked
+        if getattr(self, "handle", None) and not self.stale:  # a fork's copy is leaked
             self.lib.allie_free(self.handle)
             self.handle = None
 
     def forked(self):
-        """In a forked child: the parent's pool threads are gone and its lock may be held."""
-        if os.getpid() != self.pid:
-            self.lock, self.pid = threading.Lock(), os.getpid()
-            self.handle = self.lib.allie_new(*self.args)
+        """In a fork's child, before its threads run: the parent's pool threads are gone and
+        its lock may have been held. A fresh lock; the pool is rebuilt under it on first use."""
+        self.lock, self.stale = threading.Lock(), True
+
+    def native(self):
+        if self.stale:
+            self.handle, self.stale = self.lib.allie_new(*self.args), False
+        return self.handle
 
     def profile(self, on=True):
         """Seconds spent in each phase of step() since the last call; on: keep counting."""
-        self.forked()
         out = (ctypes.c_double * len(PHASES))()
         with self.lock:
-            assert self.lib.allie_profile(self.handle, out, int(on)) == len(PHASES)
+            assert self.lib.allie_profile(self.native(), out, int(on)) == len(PHASES)
         return dict(zip(PHASES, out))
 
     def step(self, items):
-        self.forked()
         with self.lock:  # one step at a time: the engine's buffers and threads are shared
+            self.native()
             return self._step(items)
 
     def check(self, cache, ids, feats, boards):

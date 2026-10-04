@@ -144,9 +144,20 @@ def test_fast_rejects_bad_inputs(tiny_path):
 FORKED = {}
 
 
-def _forked_step():
+def _forked_step():  # several first callers at once in the child
     m, x = FORKED["model"], FORKED["x"]
-    return step(m, [(Cache(m), *x)])[0]
+    out = [None] * 3
+
+    def run(j):
+        out[j] = step(m, [(Cache(m), *x)])[0]
+
+    threads = [threading.Thread(target=run, args=(j,)) for j in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert all(torch.equal(z, out[0]) for z in out)
+    return out[0]
 
 
 @pytest.mark.filterwarnings("ignore:This process .* is multi-threaded")
