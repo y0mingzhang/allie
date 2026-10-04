@@ -244,6 +244,7 @@ def test_game_survives_unexpected_errors(engine, monkeypatch, caplog):
     g = next(iter(mock.games.values()))
     assert g.status in ("mate", "draw", "stalemate") and len(g.board.move_stack) > 10
     failures[0] = 10**9  # from now on every state fails: the bot resigns its game
+    wait(lambda: not bot.games)  # else the same challenger may meet per_user = 1 ("later")
     mock.challenge("random", "allie", 60, 1, color="black")
     wait(lambda: finished(mock, 2))
     g2 = list(mock.games.values())[1]
