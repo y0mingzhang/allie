@@ -75,7 +75,7 @@ trust_remote_code=True)`, see the model card).
   there: on its turn instead of moving, or right after its own move, when the new position shows it is
   lost. The probability is a hazard fitted on held-out human games, from the model's win / draw / loss
   estimate, the ply, the rating, the time control and the clock. It never resigns below the P(loss) under
-  which humans almost never resign (the 5th percentile of their resignations, 0.56). `play.resign = false`
+  which humans almost never resign (the 5th percentile of their resignations, 0.57). `play.resign = false`
   turns it off.
 - **Draws.** It ends games by agreement about as often as humans do in the same situation, by offering a
   draw with its move. It accepts an offer unless it is clearly better: above an expected score of 0.62,
