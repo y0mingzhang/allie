@@ -42,11 +42,11 @@ Also following Chinchilla, we fit a scaling law, L(N, D) = E + A·N^−α + B·D
 
 ![Main-evaluation CE against training compute: the sweep's minima, each family's law extrapolated, and Allie 2.0 below its forecast](docs/figures/frontier.png)
 
-*Main-evaluation CE against training compute. Points are the sweep's isoflop minima; lines are each family's law at its compute-optimal size, dashed beyond the sweep. The hollow point is the law's forecast for Allie 2.0's actual size and tokens (1.2856); Allie 2.0 scored 0.032 lower, below the fitted floor.*
+*Best loss at each training budget. Dashed: the law's extrapolation. Allie 2.0 landed 0.032 below its forecast.*
 
-This is not a recipe effect. We re-ran Allie 2.0's recipe at the sweep's sizes, and it was slightly worse than the sweep's recipe there, by a margin that shrinks to about zero at Allie 2.0's compute. So the law's floor looks too high: more compute keeps paying.
+Allie 2.0's recipe isn't the reason: at small scale it is slightly worse than the sweep's. More likely, the law underestimates how far loss keeps falling with compute.
 
-The law also suggested a different shape. At Allie 2.0's compute, its extrapolated optimum is 1.8B active parameters on 28B tokens, far beyond the sizes it was fitted on. Memory decided instead: 24 blocks of width 1536, 0.69B active on 75B tokens, was the largest shape that trained on our 8-GPU node. A plot of the optimum is in [DETAILS](docs/DETAILS.md#scaling-laws).
+The law would have picked a bigger model on fewer tokens (1.8B active parameters, 28B tokens). We trained the largest model that fit on one 8-GPU node instead: 0.69B active on 75B tokens.
 
 ### Other findings that shaped it
 
