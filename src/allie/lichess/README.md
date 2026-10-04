@@ -13,7 +13,7 @@ process holds the model once and plays several games at a time.
 
 ## Setup
 
-1. **Install.** `uv sync --extra bot`. Add `--extra search` for the `strongest` mode's search.
+1. **Install.** `uv sync --extra bot` (the extra is only for exporting weights). Add `--extra search` for the `strongest` mode's search.
 2. **Export the weights** from a training checkpoint, once:
    ```sh
    allie-bot export results/pretrain/allie-v3.0/last.pt exports/allie-v3.0

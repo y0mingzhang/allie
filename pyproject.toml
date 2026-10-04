@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 # allie.search: the native tree search build and model export
 search = ["pybind11>=3.0,<4", "safetensors>=0.4"]
-# allie.lichess: the Lichess bot and its CPU inference engine
+# allie.lichess: exporting weights for the Lichess bot (serving needs only the core dependencies)
 bot = ["safetensors>=0.4"]
 test = ["pytest>=8"]
 
