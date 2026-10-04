@@ -107,7 +107,7 @@ def test_compliment_and_privacy():
     wait(lambda: len(f.posts) == 2)
     assert "rare, strong find" in llm.prompts[0]
     assert (
-        "1. f3: Allie gave it 1% for a 1480 player (it expected e4 most"
+        "1. f3: Allie gave it 1% for a 1480 player (not its top prediction)"
         in llm.prompts[0]
     )
     f.play(c, ["f2f3", "e7e5", "g2g4"], wdl=(0.8, 0.1, 0.1))  # a blunder: 0.5 -> 0.85

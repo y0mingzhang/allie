@@ -271,7 +271,7 @@ class Chatter:
                 out.append(
                     f"Their last move {san(moves, j)}: Allie gave it "
                     f"{pct(probs.get(moves[j], 1.0))} for a {rating} player "
-                    f"({top(moves, j, probs)}); they thought {self.think(j)}. {effect(d)}"
+                    f"({top(moves, j, probs, private)}); they thought {self.think(j)}. {effect(d)}"
                 )
         if k < n and k in views:
             out.append(
@@ -412,10 +412,14 @@ def movetext(moves, last=30):
     return ("... " if j else "") + san(moves, j, len(moves)) if moves else "(none yet)"
 
 
-def top(moves, j, probs):
+def top(moves, j, probs, private=False):
+    """Was move j Allie's top prediction; if not, which was (unless private: it may still be
+    on the board)."""
     best = max(probs, key=probs.get)
     if best == moves[j]:
         return "its top prediction"
+    if private:
+        return "not its top prediction"
     b = board_at(moves, j)
     return f"it expected {b.san(chess.Move.from_uci(best))} most, {pct(probs[best])}"
 
