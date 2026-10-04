@@ -177,15 +177,18 @@ class View(NamedTuple):
     think: float
 
 
-def split(events, chat):
+def split(events, chat, abandon=None):
     """The game stream for the game thread, each event also handed to the chat at once by
     a reader thread, so a think-time wait delays the moves but not the chat. The reader
-    outlives the game thread's loop while the chat lingers after the game."""
+    outlives the game thread's loop while the chat lingers after the game, unless abandon
+    is set (the game thread resumed on a new stream: this one would feed the chat twice)."""
     q = queue.Queue()
 
     def read():
         try:
             for e in events:
+                if abandon is not None and abandon.is_set():
+                    break
                 if e:
                     chat.put(e)
                 q.put(e)

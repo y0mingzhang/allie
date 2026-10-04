@@ -285,11 +285,18 @@ def test_plays_through_a_full_disk(engine, tmp_path, monkeypatch):
         mock.challenge("random", "allie", 60, 1, color="black")
         mock.challenge("other", "allie", 60, 1, color="white")
         wait(lambda: len(mock.games) == 2)
-        listener.handlers[0].close_stream()  # the open handle fails too
+
+        class Stale:  # the open handle fails too (swapped in, not closed under the writer)
+            def write(self, text):
+                raise OSError(errno.EDQUOT, "Disk quota exceeded")
+
+            flush = close = lambda self: None
+
         full[0] = True
+        listener.handlers[0].stream = Stale()
         wait(lambda: finished(mock, 2))
         assert not mock.rejected and all(g.status != "outoftime" for g in mock.games.values())
-        wait(lambda: len(bot.finished) == 2)
+        wait(lambda: len(bot.finished) == 2 and not any(t.is_alive() for t in bot.threads))
         full[0] = False
         logging.getLogger("allie").info("disk back")
     finally:

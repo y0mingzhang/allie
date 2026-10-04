@@ -53,7 +53,7 @@
   "min_ply": 20
  },
  "guard": {
-  "reserve": 2.0,
+  "reserve": 2.5,
   "share": 0.5
  },
  "provenance": {

@@ -69,3 +69,43 @@ def test_uncaught_thread_errors_are_logged(tmp_path, restore):
         and "ZeroDivisionError" in text
         and "still logging" in text
     )
+
+
+def test_bad_records_do_not_stop_the_log(tmp_path, restore):
+    path = tmp_path / "bot.log"
+    listener = logs.setup(str(path))
+    log = logging.getLogger("allie")
+    log.info("chat from the opponent: %s", "\ud83d")  # a lone surrogate, as json.loads can give
+    log.info("bad %d", "format")
+    log.info("still logging")
+    listener.stop()
+    text = path.read_text()
+    assert "\\ud83d" in text and "still logging" in text
+
+
+def test_chat_reader_stops_when_abandoned():
+    from allie.lichess.chat import END, split
+
+    fed, abandon, gate = [], threading.Event(), threading.Event()
+
+    class Chat:
+        gid, done = "g", False
+
+        def put(self, e):
+            fed.append(e)
+
+    def events():
+        yield {"type": "gameState", "n": 1}
+        gate.wait(5)
+        yield {"type": "gameState", "n": 2}
+        yield {"type": "gameState", "n": 3}
+
+    stream = split(events(), Chat(), abandon)
+    assert next(stream)["n"] == 1
+    abandon.set()  # the game thread resumes on a new stream
+    gate.set()
+    for _ in range(500):
+        if fed and fed[-1] is END:
+            break
+        threading.Event().wait(0.01)
+    assert fed[-1] is END and [e["n"] for e in fed if e is not END] == [1]

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import os
 import signal
 import sys
@@ -74,6 +75,9 @@ def main():
     listener = setup(getattr(a, "log", None))
     try:
         run_command(a)
+    except Exception:
+        logging.getLogger("allie").exception("allie-bot failed")  # while the writer still runs
+        raise
     finally:
         listener.stop()
 
@@ -100,6 +104,7 @@ def run_command(a):
             threading.Thread(target=watch, args=(bot, a.drain_file), daemon=True).start()
         signal.signal(signal.SIGUSR1, lambda *_: bot.drain())
         bot.run()
+        bot.join()  # the games' last lines are logged before the log stops
         return
     from .selfplay import bench, selfplay
 

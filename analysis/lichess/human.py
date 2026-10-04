@@ -392,7 +392,7 @@ def fit(a):
     inc, half = P["inc"][played], P["half"][played]
     # the reserve covers live lag: Lichess charged the bot 0.33 s more than its own think time
     # per move on average, 2.2 s at the 99th percentile (634 moves, 2026-10-04)
-    reserve = 2.0
+    reserve = 2.5
     ratio = (s - inc) / np.maximum(c - reserve, 1)
     share = float(np.clip(np.percentile(ratio[half == fit_half], 99.9), 0.1, 0.5))
     guard = dict(reserve=reserve, share=round(share, 3))

@@ -1,10 +1,10 @@
 """Logging that survives the shared filesystem failing under a running bot.
 
 A writer thread takes the records off a queue, so no game ever waits on the disk. It appends to
-the log file by path and reopens it after a failed write: a remounted filesystem leaves old file
-handles failing (with EDQUOT or ESTALE) while the path works again. While the path fails, the
-lines go to a node-local file, and the log notes the gap once it can be written again. Uncaught
-exceptions in any thread are logged.
+the log file by path and reopens it after a failed write: a full quota fails writes (EDQUOT)
+until space is freed, and a remounted filesystem leaves old handles failing while the path works
+again. While the path fails, the lines go to a node-local file, and the log notes the gap once it
+can be written again. Uncaught exceptions in any thread are logged, and also printed to stderr.
 """
 
 import logging
@@ -18,24 +18,38 @@ import threading
 log = logging.getLogger(__name__)
 
 
+def local(name):
+    """A path for name on node-local disk that outlives the job (/scratch/$USER), else in the
+    temporary directory."""
+    for d in (
+        os.path.join("/scratch", os.environ.get("USER", "allie")),
+        tempfile.gettempdir(),
+    ):
+        if os.path.isdir(d) and os.access(d, os.W_OK):
+            return os.path.join(d, name)
+    return os.path.join(tempfile.gettempdir(), name)
+
+
 class Resilient(logging.Handler):
     def __init__(self, path, fallback=None):
         super().__init__()
         self.path = path
-        name = f"allie-bot-{os.getpid()}.log"
-        self.fallback = fallback or os.path.join(tempfile.gettempdir(), name)
+        self.fallback = fallback or local(f"allie-bot-{os.getpid()}.log")
         self.stream, self.missed = None, 0
+
+    def open(self, path):
+        return open(path, "a", encoding="utf-8", errors="backslashreplace")
 
     def write(self, text):
         """Append text to the path, reopening it once if the open handle fails."""
         for _ in range(2):
             try:
                 if self.stream is None:
-                    self.stream = open(self.path, "a")
+                    self.stream = self.open(self.path)
                 self.stream.write(text)
                 self.stream.flush()
                 return True
-            except OSError:
+            except Exception:  # noqa: BLE001 - OSError from the disk, anything from a bad handle
                 self.close_stream()
         return False
 
@@ -43,29 +57,26 @@ class Resilient(logging.Handler):
         try:
             if self.stream is not None:
                 self.stream.close()
-        except OSError:
+        except Exception:  # noqa: BLE001
             pass
         self.stream = None
 
     def emit(self, record):
+        """Never raises: an exception here would end the writer thread, and the log with it."""
         try:
             text = self.format(record) + "\n"
-        except Exception:  # noqa: BLE001 - a bad record must not stop the writer
-            self.handleError(record)
-            return
-        if self.missed and self.write(
-            f"{self.formatter.formatTime(record)} log: {self.missed} lines could not be "
-            f"written here; they are in {self.fallback} on {os.uname().nodename}\n"
-        ):
-            self.missed = 0
-        if self.write(text):
-            return
-        self.missed += 1
-        try:
-            with open(self.fallback, "a") as f:
+            if self.missed and self.write(
+                f"{self.formatter.formatTime(record)} log: {self.missed} lines could not be "
+                f"written here; they are in {self.fallback} on {os.uname().nodename}\n"
+            ):
+                self.missed = 0
+            if self.write(text):
+                return
+            self.missed += 1
+            with self.open(self.fallback) as f:
                 f.write(text)
-        except OSError:
-            pass
+        except Exception:  # noqa: BLE001
+            self.handleError(record)
 
     def close(self):
         self.close_stream()
@@ -84,17 +95,19 @@ def setup(path=None, level=logging.INFO, fmt="%(asctime)s %(message)s"):
     root.handlers[:] = [logging.handlers.QueueHandler(q)]
     root.setLevel(level)
 
-    def thread_hook(a):
+    def thread_hook(
+        a,
+    ):  # also on stderr: the log's own writer may be the thread that died
         if a.exc_type is not SystemExit:
-            name = a.thread.name if a.thread else "?"
+            exc = (a.exc_type, a.exc_value, a.exc_traceback)
             log.error(
-                "thread %s died",
-                name,
-                exc_info=(a.exc_type, a.exc_value, a.exc_traceback),
+                "thread %s died", a.thread.name if a.thread else "?", exc_info=exc
             )
+            threading.__excepthook__(a)
 
-    def main_hook(*exc):
+    def main_hook(*exc):  # also on stderr: on the way out the writer may have stopped
         log.error("uncaught exception", exc_info=exc)
+        sys.__excepthook__(*exc)
 
     threading.excepthook = thread_hook
     sys.excepthook = main_hook

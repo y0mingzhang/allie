@@ -123,7 +123,7 @@ class Ledger:
         return spent if isinstance(spent, dict) else self.fail("not a JSON object")
 
     def fail(self, e, transient=False):
-        if not self.broken and self.retry is None:
+        if not self.broken and (self.retry is None or not transient):
             until = "it can be written again" if transient else "this is fixed"
             log.error("chat: ledger %s: %s; no paid calls until %s", self.path, e, until)
         if transient:
@@ -138,8 +138,8 @@ class Ledger:
     def allows(self):
         if self.broken:
             return False
-        if self.retry is not None:
-            if self.now() < self.retry or math.isinf(self.add(0.0)[0]):
+        if (retry := self.retry) is not None:
+            if self.now() < retry or math.isinf(self.add(0.0)[0]):
                 return False
         spent = self.read()
         if spent is None or self.broken:

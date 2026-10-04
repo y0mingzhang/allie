@@ -1,5 +1,6 @@
 """The bot: accept challenges by the config's rules, play every game in its own thread."""
 
+import json
 import logging
 import random
 import threading
@@ -71,7 +72,7 @@ class Bot:
                                 self.stop()
                     if self.stopped.is_set():
                         break
-            except (OSError, urllib.error.URLError, ValueError) as e:
+            except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
                 log.warning("event stream: %s; reconnecting in %d s", e, backoff)
                 self.stopped.wait(backoff)
                 backoff = min(2 * backoff, 60)
@@ -149,8 +150,9 @@ class Bot:
         try:
             while not match.over and not self.stopped.is_set():
                 try:
+                    abandon = threading.Event()  # set: the chat's reader of this stream stops
                     events = self.client.stream(f"/api/bot/game/stream/{gid}")
-                    for event in split(events, match.chat) if match.chat else events:
+                    for event in split(events, match.chat, abandon) if match.chat else events:
                         if event:
                             match.on_event(event)
                             backoff = 1
@@ -159,11 +161,12 @@ class Bot:
                     else:
                         if not match.over and not self.stopped.is_set():
                             raise ConnectionError("game stream closed")
-                except (OSError, urllib.error.URLError, ValueError) as e:
+                except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
                     log.warning("game %s stream: %s; retry in %d s", gid, e, backoff)
                     self.stopped.wait(backoff)
                     backoff = min(2 * backoff, 30)
                 except Exception:
+                    abandon.set()
                     errors += 1
                     log.exception("game %s: error %d of %d; resuming", gid, errors, ERRORS)
                     if errors >= ERRORS:
