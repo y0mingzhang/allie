@@ -246,13 +246,57 @@ def test_game_survives_unexpected_errors(engine, monkeypatch, caplog):
     g = next(iter(mock.games.values()))
     assert g.status in ("mate", "draw", "stalemate") and len(g.board.move_stack) > 10
     assert not scattered and sum("error 1 of 3" in r.message for r in caplog.records) == 4
-    every[0] = True  # from now on every state fails: the bot resigns its game
     wait(lambda: not bot.games)  # else the same challenger may meet per_user = 1 ("later")
+    every[0] = True  # from now on every state fails: the bot resigns its game
     mock.challenge("random", "allie", 60, 1, color="black")
     wait(lambda: finished(mock, 2))
     g2 = list(mock.games.values())[1]
     assert g2.status == "resign" and g2.winner == "black"  # the challenger; the bot was white
     assert sum("giving up" in r.message for r in caplog.records) == 1
+
+
+def test_errors_on_the_opponents_turn_do_not_resign(engine, monkeypatch, caplog):
+    """A persistent error while the opponent thinks: the bot's clock is not running, so it
+    waits instead of resigning, and plays on once the opponent moves."""
+    from allie.lichess import bot as botmod
+
+    real = botmod.Match.on_state
+
+    def flaky(self, s):
+        if len(s["moves"].split()) == 5:  # black to move: the opponent, as the bot is white
+            raise RuntimeError("injected")
+        return real(self, s)
+
+    def slow(board):
+        if len(board.move_stack) == 5:
+            time.sleep(8)
+        return next(iter(board.legal_moves)).uci()
+
+    monkeypatch.setattr(botmod.Match, "on_state", flaky)
+    monkeypatch.setattr(botmod, "ERRORS", 2)
+    mock, _ = start(engine, MockLichess({"tok": "allie"}, house=slow))
+    mock.challenge("slow", "allie", 60, 1, color="black")
+    wait(lambda: len(mock.games) == 1)
+    g = next(iter(mock.games.values()))
+    wait(lambda: len(g.board.move_stack) >= 8, timeout=60)
+    assert g.status == "started"
+    assert sum("injected" in r.exc_text for r in caplog.records if r.exc_text) >= 3
+    assert not any("giving up" in r.message for r in caplog.records)
+
+
+def test_refused_move_resyncs(engine, caplog):
+    """Lichess refuses a move and the game goes on (a desync, not the opponent resigning
+    meanwhile): the bot resyncs from a fresh stream and moves again instead of flagging."""
+    mock = MockLichess({"tok": "allie"})
+    mock.fail["/api/bot/game/g"] = [400]  # the bot's first move
+    mock, _ = start(engine, mock)
+    mock.challenge("random", "allie", 60, 1, color="black")  # the bot is white
+    wait(lambda: finished(mock))
+    g = next(iter(mock.games.values()))
+    assert g.status != "outoftime" and len(g.board.move_stack) > 10 and not mock.fail[
+        "/api/bot/game/g"
+    ]
+    assert sum("resyncing" in str(r.exc_info[1]) for r in caplog.records if r.exc_info) == 1
 
 
 def test_plays_through_a_full_disk(engine, tmp_path, monkeypatch):

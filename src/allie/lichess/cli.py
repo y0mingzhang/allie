@@ -82,11 +82,13 @@ def main():
             logging.getLogger("allie").exception("allie-bot failed")
         raise
     finally:
-        if not listener.stop(timeout=30):  # its handler's lock would hang the exit, too
-            print("allie-bot: the log writer is stuck; exiting without it", file=sys.stderr)
-            if sys.exc_info()[1]:  # the error on its way out, which the log never got
-                traceback.print_exc()
-            sys.stderr.flush()
+        # the games are over: a slow disk gets minutes, a dead one would hang the exit, the
+        # writer's handler lock with it
+        if not listener.stop(timeout=300):
+            note = "allie-bot: the log writer is stuck; exiting without it\n"
+            if sys.exc_info()[1]:  # the error on its way out
+                note += traceback.format_exc()
+            listener.abandon(note)
             os._exit(1)
 
 

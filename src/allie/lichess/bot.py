@@ -146,9 +146,9 @@ class Bot:
 
     def play(self, match):
         """Serve one game's stream until it ends. Network errors reconnect; any other error
-        is logged and the game resumes from a fresh stream, until ERRORS of them with no move
-        of the bot's between (a persistent bug), when the bot resigns rather than leave the game
-        to time out."""
+        is logged and the game resumes from a fresh stream. After ERRORS of them with no move of
+        the bot's between (a persistent bug), the bot resigns on its own turn rather than leave
+        the game to time out; on the opponent's turn its clock is not running, so it waits."""
         gid, backoff, errors, since = match.gid, 1, 0, match.moved
         try:
             while not match.over and not self.stopped.is_set():
@@ -177,7 +177,7 @@ class Bot:
                         errors, since = 0, match.moved
                     errors += 1
                     log.exception("game %s: error %d of %d; resuming", gid, errors, ERRORS)
-                    if errors >= ERRORS:
+                    if errors >= ERRORS and match.to_move():
                         log.error("game %s: giving up; resigning", gid)
                         try:
                             match.call(self.client.resign, gid)
@@ -201,10 +201,13 @@ class Match:
         self.game, self.white, self.over, self.opponent = None, None, False, None
         self.moved = self.answered = self.conceded = -1
         self.claim, self.waiting = None, None  # waiting: since when the opponent owes a first move
+        self.refused, self.ply = None, 0  # refused: when Lichess refused the bot's last move
         self.stats = []
         self.chat = Chatter(self) if bot.config.chat.enabled else None
 
     def on_event(self, event):
+        if "moves" in (s := event.get("state", event)):  # recorded before anything can fail
+            self.ply = len(s["moves"].split())
         match event["type"]:
             case "gameFull":
                 self.on_full(event)
@@ -282,12 +285,22 @@ class Match:
             return
         if d.think > spent:
             self.bot.stopped.wait(d.think - spent)
-        if self.call(self.bot.client.move, self.gid, d.move, d.offer_draw) is not None:
-            self.moved = len(moves)
+        if self.call(self.bot.client.move, self.gid, d.move, d.offer_draw) is None:
+            self.refused = time.monotonic()  # mostly the opponent resigned meanwhile: see tick()
+            return
+        self.moved, self.refused = len(moves), None
+
+    def to_move(self):
+        """Whether the bot's clock runs, by Lichess's last state (unknown color: assume so)."""
+        return self.white is None or (self.ply % 2 == 0) == self.white
 
     def tick(self):
         """Abort a game whose opponent has not made a first move in config.abort seconds:
-        Lichess can leave it open for an hour, holding a slot and blocking a drain."""
+        Lichess can leave it open for an hour, holding a slot and blocking a drain. Resync a
+        game that goes on after Lichess refused the bot's move: the board must disagree."""
+        if self.refused and time.monotonic() - self.refused > 3 and not self.over:
+            self.refused = None
+            raise RuntimeError("move refused and the game goes on; resyncing")
         wait = self.bot.config.abort
         if self.waiting and wait and not self.over and time.monotonic() - self.waiting > wait:
             log.info("game %s: no first move from the opponent in %g s; aborting", self.gid, wait)

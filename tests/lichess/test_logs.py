@@ -88,9 +88,10 @@ def test_bad_records_do_not_stop_the_log(tmp_path, restore):
     assert (tmp_path / "direct.log").read_text() == "after\n"
 
 
-def test_stuck_writer_does_not_hang_the_exit(tmp_path, monkeypatch, capsys, restore):
-    """A log write that never returns (a dead filesystem): the bot exits anyway, with the
-    error it was exiting on printed to stderr."""
+@pytest.mark.parametrize("stuck", [False, True])
+def test_exit_with_a_stuck_writer(tmp_path, monkeypatch, capsys, restore, stuck):
+    """A log write that never returns (a dead filesystem): the bot exits anyway. The error it
+    was exiting on and the lines the writer never took go to node-local disk."""
     from allie.lichess import cli
 
     gate = threading.Event()
@@ -101,23 +102,39 @@ def test_stuck_writer_does_not_hang_the_exit(tmp_path, monkeypatch, capsys, rest
 
     real, stop = logs.setup, logs.Listener.stop
 
-    def stuck(path):
+    def setup(path):
         listener = real(path)
-        listener.handlers = (Stuck(),)
+        if stuck:
+            listener.handlers = (Stuck(),)
         return listener
 
-    exits = []
-    monkeypatch.setattr(logs, "setup", stuck)
+    def run(a):
+        for i in range(3):
+            logging.getLogger("allie").info("line %d", i)
+        raise ZeroDivisionError("injected")
+
+    exits, local = [], tmp_path / "local.log"
+    monkeypatch.setattr(logs, "setup", setup)
+    monkeypatch.setattr(logs, "local", lambda name: str(local))
     monkeypatch.setattr(logs.Listener, "stop", lambda self, timeout: stop(self, 0.5))
-    monkeypatch.setattr(cli, "run_command", lambda a: 1 / 0)
+    monkeypatch.setattr(cli, "run_command", run)
     monkeypatch.setattr(cli.os, "_exit", exits.append)
     argv = ["allie-bot", "play", "--config", "x.toml", "--log", str(tmp_path / "bot.log")]
     monkeypatch.setattr(sys, "argv", argv)
-    with pytest.raises(ZeroDivisionError):  # here, since os._exit returns
-        cli.main()
-    gate.set()
+    try:
+        with pytest.raises(ZeroDivisionError):  # here, since os._exit returns
+            cli.main()
+    finally:
+        gate.set()
     err = capsys.readouterr().err
-    assert exits == [1] and "log writer is stuck" in err and "ZeroDivisionError" in err
+    if not stuck:
+        assert not exits and not local.exists()
+        assert "allie-bot failed" in (tmp_path / "bot.log").read_text()
+        return
+    kept = local.read_text()  # "line 0" is the record the stuck writer holds
+    assert exits == [1] and "line 1" in kept and "line 2" in kept and "allie-bot failed" in kept
+    assert kept.count("ZeroDivisionError: injected") == 2  # the logged failure, the note
+    assert "log writer is stuck" in err and str(local) in err
 
 
 def test_chat_reader_stops_when_abandoned():

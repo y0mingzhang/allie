@@ -91,6 +91,31 @@ class Listener(logging.handlers.QueueListener):
         self._thread.join(timeout)
         return not self._thread.is_alive()
 
+    def abandon(self, note):
+        """After a stop that timed out: the note and the lines the stuck writer never took go
+        to node-local disk, and to stderr if it answers in 5 s (it may be on the same stuck
+        filesystem). Returns the node-local path."""
+        path = local(f"allie-bot-{os.getpid()}.log")
+        fmt = self.handlers[0].formatter or logging.Formatter()
+        with open(path, "a", encoding="utf-8", errors="backslashreplace") as f:
+            while True:
+                try:
+                    record = self.queue.get_nowait()
+                except queue.Empty:
+                    break
+                if record is not self._sentinel:
+                    f.write(fmt.format(record) + "\n")
+            f.write(note)
+
+        def say():
+            sys.stderr.write(f"{note}(and in {path} on {os.uname().nodename})\n")
+            sys.stderr.flush()
+
+        t = threading.Thread(target=say, daemon=True)
+        t.start()
+        t.join(5)
+        return path
+
 
 def setup(path=None, level=logging.INFO, fmt="%(asctime)s %(message)s"):
     """Log through a queue to path (or stderr); with a path, every thread's uncaught exception too.
