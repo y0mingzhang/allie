@@ -1,8 +1,10 @@
+import time
+
 import numpy as np
 import pytest
 import torch
 
-from allie.lichess import calibration
+from allie.lichess import behaviour, calibration
 from allie.lichess.engine import Engine, Game, Play
 from allie.lichess.model import Model
 
@@ -40,10 +42,13 @@ class Search:
     """Records budgets; returns the legal moves with the last one certain."""
 
     def __init__(self):
-        self.budgets = []
+        self.budgets, self.deadlines, self.late = [], [], False
 
-    def __call__(self, game, n):
+    def __call__(self, game, n, deadline=np.inf):
         self.budgets.append(n)
+        self.deadlines.append(deadline)
+        if self.late:
+            return None
         moves = [m.uci() for m in game.board.legal_moves]
         return moves, np.eye(len(moves))[-1]
 
@@ -71,6 +76,12 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     monkeypatch.setattr(calibration, "K", 0.0)
     game.decide(play, search, 590)
     assert search.budgets == [calibration.CAP]  # budget 0: no search
+    monkeypatch.setattr(calibration, "K", 1e6)
+    t = time.monotonic()
+    reserve = behaviour.PARAMETERS["guard"]["reserve"]
+    search.late = True  # past its deadline: the move comes from the policy
+    assert game.decide(play, search, 590).move in legal_of(game)
+    assert search.deadlines[-1] - t == pytest.approx((590 - reserve) / 10, abs=0.5)
 
 
 def test_close_serves_queued_requests(tiny):

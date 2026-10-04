@@ -8,6 +8,7 @@ calibration.json hurts this model at every budget.
 
 import json
 from pathlib import Path
+from time import monotonic
 
 import numpy as np
 import torch
@@ -15,7 +16,7 @@ from torch.nn import functional as F
 
 from allie.search import Search
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
-from allie.search.native import from_prefix
+from allie.search.native import from_prefix, load
 
 from .model import Cache
 from .tokens import CONTEXT, MOVE_START, MOVES, advance
@@ -23,6 +24,10 @@ from .tokens import CONTEXT, MOVE_START, MOVES, advance
 CALIBRATION = Path(__file__).with_name("calibration-allie-2.0.json")
 # simulations -> the output policy fitted for them (8, 25 and 32 reuse 128's)
 POLICY = {5: "5", 8: "128", 25: "128", 32: "128", 128: "128", 256: "256"}
+
+
+class Late(Exception):
+    """A search ran past its deadline."""
 
 
 class Tree:
@@ -39,6 +44,7 @@ class Tree:
         self.k[:, :, 0] = self.v[:, :, 0] = 0  # slot 0 (the root's id) pads shorter paths
         self.capacity, self.new_tokens = capacity, 0
         self.concurrent = False  # nodes through the engine's queue (a search on the game's thread)
+        self.deadline = np.inf  # time.monotonic() past which no further nodes run (Late)
         self.caches = []  # the fast backend's pool
 
     def reset(self):
@@ -83,6 +89,8 @@ class Nodes:
         self.queries, self.per_root_queries = 0, np.zeros(1, np.int64)
 
     def __call__(self, handles):
+        if monotonic() > self.tree.deadline:
+            raise Late
         h = np.asarray(handles, np.int64)
         ids, parents, tokens, lengths = h.T
         assert (self.length[ids] == 0).all() and (
@@ -207,7 +215,8 @@ class Nodes:
 
 
 class Coverage:
-    """search(game, simulations) -> (legal moves, searched human-move probabilities)."""
+    """search(game, simulations, deadline) -> (legal moves, searched human-move probabilities), or
+    None if the search runs past deadline (time.monotonic())."""
 
     def __init__(self, threads=4):
         self.parameters = json.loads(CALIBRATION.read_text())
@@ -215,8 +224,9 @@ class Coverage:
         for b, key in POLICY.items():
             bp.setdefault(str(b), bp[key])
         self.threads = threads
+        load(), load("value")  # built or loaded now, not in a game's first search
 
-    def __call__(self, game, simulations):
+    def __call__(self, game, simulations, deadline=np.inf):
         z = game.sync()
         feats = np.array(game.features(), np.float32)
         elo = game.elo[len(game.moves) % 2]
@@ -230,12 +240,15 @@ class Coverage:
 
         def run():
             tree = Tree(game, z, capacity=4 * simulations + 256)
-            tree.concurrent = concurrent
+            tree.concurrent, tree.deadline = concurrent, deadline
             s = Search(tree, threads=1 if concurrent else self.threads, calibration=self.parameters)
             return s._batch([row], [feats], "coverage", simulations, "predicted",
                             False, 0.9, 2.0, 1.25)[0]  # fmt: skip
 
         # on the fast backend, the search runs on this game's thread and its nodes join the
         # engine's batches with other games' moves and searches; otherwise it has the engine alone
-        out = run() if concurrent else game.engine.run(run)
+        try:
+            out = run() if concurrent else game.engine.run(run)
+        except Late:
+            return None
         return [MOVES[t - MOVE_START] for t in out["tokens"]], out["probabilities"]

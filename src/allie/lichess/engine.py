@@ -295,11 +295,13 @@ def calibrated(game, play, search, clock):
     n = 0  # search costs what calibration.HW assumes only on the fast CPU backend
     if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
         left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
-        most = calibration.ceiling(left, behaviour.PARAMETERS["guard"]["reserve"])
+        reserve = behaviour.PARAMETERS["guard"]["reserve"]
+        most = calibration.ceiling(left, reserve)
         n = calibration.pick(calibration.budget(rating, time, game.speed), game.rng, most)
+        deadline = monotonic() + calibration.limit(left, reserve)
     s = p
-    if n:
-        moves, q = search(game, n)
+    if n and (found := search(game, n, deadline)) is not None:
+        moves, q = found
         s = np.zeros(len(legal))
         s[[legal.index(m) for m in moves]] = q
     i = int(game.rng.choice(len(legal), p=s / s.sum()))

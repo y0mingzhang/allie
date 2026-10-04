@@ -8,8 +8,9 @@ calibrated human-move distribution after
 simulations, t being the predicted human think time (s) for the position. The time control enters
 through t: humans think longer in slower games and on harder moves, and the search follows. N goes
 onto LADDER by random rounding in log2(1 + N), as the fit interpolated, and the rung it lands on
-never exceeds a tenth of the clock left above the reserve. No search in bullet: there it raises the
-human-move cross-entropy above the policy's.
+never exceeds a tenth of the clock left above the reserve at HW simulations a second; a search
+still running after that tenth of the clock (a loaded machine) stops, and the move comes from the
+policy. No search in bullet: there it raises the human-move cross-entropy above the policy's.
 
 HW is what a 6-CPU bot playing two games searches per second on the fast backend (about 17 ms a
 simulation), so the search costs about three quarters of the think time the bot waits anyway at
@@ -41,10 +42,14 @@ def budget(rating, time, speed="blitz"):
     return float(min(CAP, K * t**ALPHA * np.exp(GAMMA * (rating - 1700) / 1000), HW * t))
 
 
+def limit(clock, reserve=1.0):
+    """Seconds a search may take: a tenth of the clock left above the reserve (None: no clock)."""
+    return np.inf if clock is None else max(clock - reserve, 0.0) / 10
+
+
 def ceiling(clock, reserve=1.0):
-    """The most simulations the clock allows: a tenth of the seconds left above the reserve, at HW
-    simulations a second (None: no clock)."""
-    return np.inf if clock is None else HW * max(clock - reserve, 0.0) / 10
+    """The most simulations the clock allows: limit()'s seconds at HW simulations a second."""
+    return HW * limit(clock, reserve)
 
 
 def pick(n, rng, most=np.inf):

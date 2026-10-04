@@ -175,3 +175,29 @@ def test_concurrent_searches_match_sequential(tiny_path):
         assert np.abs(np.asarray(p1) - np.asarray(p2)).max() < 2e-3
     p, q = (torch.softmax(z[378:2346].float(), -1) for z in (got[0], expected))
     assert (p - q).abs().max() < 1e-3
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_a_search_past_its_deadline_stops(tiny_path, monkeypatch):
+    """A search past its deadline stops at its next nodes and gives no distribution; the game
+    searches again after."""
+    pytest.importorskip("pybind11")
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2)
+    game, search = Game(Engine(model), 2400, 2400, 1800, 20, "classical"), tree.Coverage()
+    game.update(random_game(5, 14), 1700, 1690)
+    calls, inner = [], tree.Nodes.__call__
+    monkeypatch.setattr(tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h))
+    assert search(game, 32, deadline=time.monotonic() - 1) is None
+    assert len(calls) == 1
+    moves, p = search(game, 32)
+    assert len(calls) > 2
+    assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves) and abs(p.sum() - 1) < 1e-9
