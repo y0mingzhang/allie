@@ -31,11 +31,14 @@ ORIGINAL = Path(
 )
 OUT = ROOT / "docs" / "figures"
 FONTS = ROOT / "docs" / "fonts"
-FINAL = R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"  # Allie 2.0
+FINAL = (
+    R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"
+)  # the big run
+ANN = "ann-all-p05-t1907"  # Allie 2.0: the big run's second anneal
 SEARCH = DATA / "maia3-bench/search"
 SWEEP = X / "sweep-readout-c8s200f0v4-w4.json"
 C_ALLIE = (
-    3.142088554411623e20  # Allie 2.0's useful training FLOPs (bigrun-trajectory-v2)
+    3.142088554411623e20  # the big run's useful training FLOPs (bigrun-trajectory-v2)
 )
 MAIA = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
 
@@ -149,7 +152,7 @@ def diverging(rows, order, dom, nd, ticks, name, highlight, label_axis=True, wid
 
 
 def allie_n():
-    """Active and total non-embedding matmul parameters of Allie 2.0, and its tokens."""
+    """Active and total non-embedding matmul parameters of Allie 2.0, and the big run's tokens."""
     sys.path[:0] = [
         str(ROOT / "src"),
         str(ROOT / "scripts"),
@@ -204,7 +207,7 @@ def optimum(fam, c):
 
 
 def law_layers(x, y, key, lab):
-    """Each family's law at its compute-optimal size (solid over the sweep, dashed up to Allie 2.0's compute),
+    """Each family's law at its compute-optimal size (solid over the sweep, dashed up to the big run's compute),
     its isoflop minima, and a label per family at lab[fam] = (c, value)."""
     cells = macro()["cells"]
     layers = []
@@ -232,32 +235,43 @@ def law_layers(x, y, key, lab):
 
 
 def training():
-    """Allie 2.0's main-eval CE over training, and the scaling law's forecast for the finished run."""
+    """The big run's main-eval CE over training, the scaling law's forecast for it, and Allie 2.0 after the second
+    anneal."""
     rows = sorted(
         jsonl(X / "maia3-bench/bigrun-trajectory-v2.jsonl"), key=lambda r: r["step"]
     )
     curve = [dict(t=r["tokens"] / 1e9, v=r["golden_macro"]) for r in rows]
     act, _, D = allie_n()
     forecast = law("s16")(act, D)
+    t_ann = (
+        curve[-1]["t"]
+        + jload(R / f"pretrain/{ANN}/done.json")["tokens_processed"] / 1e9
+    )
+    v_ann = jload(R / f"lm-eval/{ANN}/strat-v1.json")["macro"]
     x = alt.X("t:Q", scale=alt.Scale(domain=[20, 80], nice=False), title="Training tokens (billions)",
               axis=alt.Axis(values=[20, 30, 40, 50, 60, 70, 80], grid=False))  # fmt: skip
-    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.24, 1.42], nice=False, zero=False), title="Main-evaluation loss (nats)",
+    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.22, 1.42], nice=False, zero=False), title="Main-evaluation loss (nats)",
               axis=alt.Axis(values=[1.25, 1.30, 1.35, 1.40], grid=True, format=".2f"))  # fmt: skip
-    end = [dict(curve[-1], t_=f"Allie 2.0  {curve[-1]['v']:.4f}")]
+    end = [dict(curve[-1], t_=f"Big run  {curve[-1]['v']:.4f}")]
+    ann = [dict(t=t_ann, v=v_ann, t_=f"Allie 2.0  {v_ann:.4f}")]
     fc = [dict(t=D / 1e9, v=forecast, t_=f"Forecast  {forecast:.4f}")]
     chart = alt.layer(
         values(curve).mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y),
-        values(end).mark_circle(color=ALLIE, size=120, opacity=1).encode(x=x, y=y),
-        values(end).mark_text(align="right", dx=-12, dy=10, color=INK, fontWeight=600).encode(x=x, y=y, text="t_:N"),
+        values(end + ann).mark_line(color=ALLIE, strokeWidth=2, strokeDash=[3, 2]).encode(x=x, y=y),
+        values(end).mark_circle(color=ALLIE, size=60, opacity=1).encode(x=x, y=y),
+        values(end).mark_text(align="right", dx=-12, dy=12).encode(x=x, y=y, text="t_:N"),
+        values(ann).mark_circle(color=ALLIE, size=120, opacity=1).encode(x=x, y=y),
+        values(ann).mark_text(align="right", dx=-22, dy=30, color=INK, fontWeight=600).encode(x=x, y=y, text="t_:N"),
         values(fc).mark_point(color=NEUTRAL_DARK, size=120, strokeWidth=2, filled=False).encode(x=x, y=y),
         values(fc).mark_text(dy=-18).encode(x=x, y=y, text="t_:N"),
     ).properties(width=WIDTH, height=300, title=title(
         "Allie 2.0's loss kept falling to the end of training",
-        "Main-evaluation loss on checkpoints from 22B tokens on, and the scaling law's forecast for the finished",
-        "run. Lower is better."))  # fmt: skip
+        "Main-evaluation loss of the big run's checkpoints from 22B tokens on, the scaling law's forecast for it,",
+        "and Allie 2.0 after a second anneal on 1B recent tokens. Lower is better."))  # fmt: skip
     save(chart, "training")
     print(
-        f"  N {act / 1e6:.1f}M, D {D / 1e9:.1f}B: forecast {forecast:.4f}; final {curve[-1]['v']:.4f} from {curve[0]['t']:.0f}B"
+        f"  N {act / 1e6:.1f}M, D {D / 1e9:.1f}B: forecast {forecast:.4f}; big run {curve[-1]['v']:.4f} from {curve[0]['t']:.0f}B;"
+        f" Allie 2.0 {v_ann:.4f} at {t_ann:.1f}B"
     )
 
 
@@ -356,7 +370,7 @@ def moe_vs_dense():
 
 def frontier():
     """Main-eval CE against training compute: the isoflop minima, each family's law at its compute-optimal size,
-    and Allie 2.0 against the law's forecast for its own size and tokens."""
+    and the big run against the law's forecast for its own size and tokens."""
     act, _, D = allie_n()
     final = jload(R / f"lm-eval/{FINAL.name}/strat-v1.json")["macro"]
     forecast, E = law("s16")(act, D), math.exp(macro()["law"]["s16"]["theta"][0])
@@ -386,15 +400,15 @@ def frontier():
         values([{"c": C_ALLIE, "v": forecast}]).mark_point(color=ALLIE, size=150, strokeWidth=2, filled=False).encode(x=x, y=y),
         values([{"c": C_ALLIE, "v": forecast, "t": f"Forecast  {forecast:.4f}"}]).mark_text(align="left", dx=12, dy=-4).encode(x=x, y=y, text="t:N"),
         values([{"c": C_ALLIE, "v": final}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
-        values([{"c": C_ALLIE, "v": final, "t": f"Allie 2.0  {final:.4f}"}]).mark_text(align="left", dx=12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_ALLIE, "v": final, "t": f"Big run  {final:.4f}"}]).mark_text(align="left", dx=12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
     ).properties(width=WIDTH, height=300, title=title(
-        "Allie 2.0 landed below the scaling law's forecast",
-        "Best main-evaluation loss at each training budget. Dashed: the law's extrapolation. Allie 2.0 landed",
+        "The big run landed below the scaling law's forecast",
+        "Best main-evaluation loss at each training budget. Dashed: the law's extrapolation. The big run landed",
         "0.032 below its forecast, and below the law's floor."))  # fmt: skip
     save(chart, "frontier")
     l_opt, n_opt, d_opt = optimum("s16", C_ALLIE)
     print(
-        f"  Allie 2.0 {C_ALLIE:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}"
+        f"  big run {C_ALLIE:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}"
     )
     print(
         f"  law optimum at that compute: N* {n_opt / 1e9:.2f}B, D* {d_opt / 1e9:.1f}B; floor E {E:.4f}"
@@ -403,7 +417,7 @@ def frontier():
 
 def optimal():
     """Compute-optimal active parameters against training compute: the isoflop minima, each law's optimum, and
-    Allie 2.0's size against the law's extrapolated choice at its compute."""
+    the big run's size against the law's extrapolated choice at its compute."""
     act, _, D = allie_n()
     _, n_opt, d_opt = optimum("s16", C_ALLIE)
     sx, sy = (
@@ -431,7 +445,7 @@ def optimal():
         values([{"c": C_ALLIE, "v": n_opt, "t": ["Extrapolated optimum", f"{n_opt / 1e9:.1f}B, {d_opt / 1e9:.0f}B tokens"]}])
         .mark_text(align="left", dx=14, lineHeight=17).encode(x=x, y=y, text="t:N"),
         values([{"c": C_ALLIE, "v": act}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
-        values([{"c": C_ALLIE, "v": act, "t": ["Allie 2.0", f"{act / 1e9:.2f}B, {D / 1e9:.0f}B tokens"]}])
+        values([{"c": C_ALLIE, "v": act, "t": ["Big run", f"{act / 1e9:.2f}B, {D / 1e9:.0f}B tokens"]}])
         .mark_text(align="left", dx=14, lineHeight=17, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
     ).properties(width=WIDTH, height=300, title=title(
         "The law would have picked a larger model on fewer tokens",
@@ -439,7 +453,7 @@ def optimal():
         "The extrapolation reaches 51 times past the sweep's largest budget."))  # fmt: skip
     save(chart, "optimal")
     print(
-        f"  law optimum at {C_ALLIE:.3e}: {n_opt / 1e9:.2f}B on {d_opt / 1e9:.1f}B; Allie 2.0 {act / 1e9:.3f}B"
+        f"  law optimum at {C_ALLIE:.3e}: {n_opt / 1e9:.2f}B on {d_opt / 1e9:.1f}B; big run {act / 1e9:.3f}B"
     )
 
 
