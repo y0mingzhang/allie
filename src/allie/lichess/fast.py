@@ -1442,14 +1442,12 @@ class Graphs:
         if (b, span) not in self.graphs:
             self.graphs[b, span] = self.capture(b, span)
         g, x, out = self.graphs[b, span]
-        dev = self.model.device
-        pad = b - n
-        cat = lambda j, fill: torch.cat([*(it[j] for it in items), fill.expand(pad, *fill.shape[1:])])
-        x["ids"].copy_(cat(1, torch.zeros(1, dtype=torch.long)), non_blocking=True)
-        x["feats"].copy_(cat(2, torch.full((1, 3), -1.0)), non_blocking=True)
-        x["boards"].copy_(cat(3, torch.zeros(1, 68, dtype=torch.uint8)), non_blocking=True)
-        x["pos"].copy_(torch.tensor([c.n for c, *_ in items] + [0] * pad), non_blocking=True)
-        x["slot"].copy_(torch.tensor([c.slot for c, *_ in items] + [self.slots] * pad), non_blocking=True)
+        for j, k in enumerate(("ids", "feats", "boards"), 1):
+            x[k][:n].copy_(torch.cat([it[j] for it in items]))
+        x["pos"][:n].copy_(torch.tensor([c.n for c, *_ in items]))
+        x["slot"][:n].copy_(torch.tensor([c.slot for c, *_ in items]))
+        if b > n:  # padding rows: a spare slot's first position
+            x["pos"][n:], x["slot"][n:] = 0, self.slots
         g.replay()
         for c, *_ in items:
             c.n += 1
