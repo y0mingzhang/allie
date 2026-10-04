@@ -16,6 +16,7 @@ import numpy as np
 from .native import from_prefix
 
 WDL = slice(2413, 2416)
+CONTEXT = 1025  # the model's longest game, header included
 
 
 def softmax(z):
@@ -96,7 +97,7 @@ class Tree:
             if self.terminal[i] or not live.any():
                 continue
             q, p = -V[k[live]], self.probs[i][live]
-            rest = max(1 - p.sum(), 0.0)
+            rest = 0.0 if live.all() else max(1 - p.sum(), 0.0)
             t = tau / np.sqrt(1 + (sub[i] - 1) / 16)
             hi = max(q.max(), self.value[i]) if rest > 1e-12 else q.max()
             V[i] = hi + t * np.log(
@@ -124,6 +125,7 @@ class Tree:
 def search(bridge, prefix, calls, m=4, k=4, beta=4.0, tau=0.2):
     """(legal move tokens by falling prior, their prior, their searched values Q for the mover)."""
     T = Tree(bridge, prefix)
+    calls = min(calls, CONTEXT - len(prefix))  # a node of depth d is d tokens past the root
     if len(T.moves[0]) > 1 and calls > 0:
         T.expand([(0, j) for j in range(len(T.moves[0]))])
         for _ in range(calls - 1):

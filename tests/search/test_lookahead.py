@@ -84,6 +84,14 @@ def test_backup_and_calls(m, k, calls):
     np.testing.assert_allclose(q, -V[T.kids[0]], atol=1e-12)
 
 
+def test_context_limit(monkeypatch):
+    prefix = START + [MOVE_ID["e2e4"], MOVE_ID["e7e5"]]
+    monkeypatch.setattr(lookahead, "CONTEXT", len(prefix) + 3)
+    b = Bridge(prefix)
+    lookahead.search(b, prefix, 8, 2, 2)
+    assert max(map(len, b.paths.values())) <= lookahead.CONTEXT and b.calls == 3
+
+
 def test_mate_in_one_scores_a_win():
     # 1. f3 e5 2. g4: Qh4 mates
     prefix = START + [MOVE_ID[u] for u in ("f2f3", "e7e5", "g2g4")]
