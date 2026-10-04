@@ -114,7 +114,9 @@ def patch():
             pre.dtype
         )
 
-    def scatter(x, w, se, order, h):
+    def scatter(x, w, se, order, h, rows=None):
+        if rows is not None:
+            x, se = x[rows], se[rows]
         out = x.new_empty(order.numel(), w.shape[-1])
         out[order] = mm(x, w[se]).to(x.dtype)
         return out

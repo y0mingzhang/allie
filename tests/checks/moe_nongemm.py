@@ -5,12 +5,14 @@ runs check indexing, masking, rounding points and autograd wiring, not MMA order
 layer: one MoE layer as --ckpt eager runs it (x + moe(norm(x)) compiled whole and checkpointed with
 replay_context, deterministic; CPU: eager, d64 E16 top-4, 2048 tokens), 3 micro-batches plus a
 no-grad training forward with the bias nonzero, against a base commit's layer (--base, with its
-shipped flags --set) bit for bit: outputs, input and parameter gradients and the load buffer after
-every micro-batch. Each implementation runs in its own process.
+shipped flags --set; --both and --new set module flags on both sides or the new one) bit for bit:
+outputs, input and parameter gradients and the load buffer after every micro-batch. Each
+implementation runs in its own process.
 
 kernels: moe_kernels.routed (output, input, weight and gate grads, and the no-grad path) against an
-FP32 torch reference on ragged shapes with empty experts; its grads with expanded recomputed equal
-those with it saved, bit for bit.
+FP32 torch reference on ragged shapes with empty experts, plain, chunked with TUNED, and with
+FUSED_DGATES; its grads with expanded recomputed equal those with it saved, bit for bit (but with
+FUSED_DGATES).
 
 topk: moe_kernels.route against torch.topk (CUDA; CPU: aten_topk, an emulation of ATen's kernels)
 on live, tie-heavy and special (+-0, +-inf, NaN, subnormal) scores.
@@ -19,6 +21,9 @@ counts: moe_layer.counts against the scatter_add_ histogram, eager and compiled.
 
     <runtime python> tests/checks/moe_nongemm.py [layer|kernels|topk|counts ...] [--base COMMIT]
     Allie 2.0's h192: layer --experts 256 --topk 16 --arch moe_shared_frac=0.25 --arch moe_round=16
+    Allie 2.1's --smoe-tuned: layer --base BASE --experts 256 --topk 16 --width 2048 --arch moe_shared_frac=0.25
+        --arch moe_round=16 --both modded_smoe.CHUNKS=4 --both modded_smoe.SAVE_EXPANDED=False
+        --new modded_smoe.TUNED=True
     .venv/bin/python tests/checks/moe_nongemm.py    # CPU: reruns itself under TRITON_INTERPRET=1
 """
 
@@ -101,6 +106,9 @@ def base_scripts(base):
     return out
 
 
+PACKAGE = {"modded_smoe": "allie.model.moe_kernels", "modded_moe": "allie.model.moe"}
+
+
 def run(a):
     """One implementation's layer record (subprocess): a base commit's flat scripts (--impl) or this package."""
     if a.impl:
@@ -116,6 +124,7 @@ def run(a):
     for s in a.set:
         target, _, value = s.partition("=")
         mod, _, name = target.rpartition(".")
+        mod = mod if a.impl else PACKAGE.get(mod, mod)  # flat module names (--both) on the package side
         assert hasattr(importlib.import_module(mod), name), target
         setattr(importlib.import_module(mod), name, ast.literal_eval(value))
     backend = "nccl" if DEV == "cuda" else "gloo"
@@ -126,7 +135,7 @@ def run(a):
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.manual_seed(0)
     (e, d, t) = (96, 1536, 65536) if DEV == "cuda" else (16, 64, 2048)
-    e = a.experts or e
+    e, d = a.experts or e, a.width or d
     # the base commit predates Quantile Balancing; the bias update rule never runs here
     arch = dict(
         mlp="swiglu", moe=[e, a.topk], moe_kernel="scatter-dualgather", moe_init=0.006,
@@ -177,10 +186,11 @@ def layer(a):
     tmp, out = Path(a.dump or tempfile.mkdtemp()), {}
     tmp.mkdir(parents=True, exist_ok=True)
     shape = [f"--experts={a.experts}"] * bool(a.experts) + [f"--topk={a.topk}"]
+    shape += [f"--width={a.width}"] * bool(a.width)
     shape += [f"--arch={s}" for s in a.arch]
     for name, impl, sets in (
-        ("base", base_scripts(a.base), a.set or BASE_SET * (a.base == BASE)),
-        ("new", None, []),
+        ("base", base_scripts(a.base), (a.set or BASE_SET * (a.base == BASE)) + a.both),
+        ("new", None, a.both + a.new),
     ):
         cmd = [sys.executable, __file__, "run", "--dump", str(tmp / name)]
         cmd += ["--impl", str(impl)] * bool(impl)
@@ -216,7 +226,13 @@ def kernels(a):
     shapes = (
         ((96, 1536, 512, 4, 8192), (128, 768, 256, 4, 4096)) if DEV == "cuda" else ()
     )
-    for e, d, h, k, t in shapes + ((16, 64, 22, 4, 300), (8, 48, 40, 2, 129)):
+    # (CHUNKS, TUNED, FUSED_DGATES); chunked shapes are T % 3 == 0
+    settings = ((1, False, False), (3, True, False), (3, True, True))
+    for (e, d, h, k, t), (chunks, tuned, fused) in itertools.product(
+        shapes + ((16, 64, 22, 4, 300), (8, 48, 40, 2, 129)), settings
+    ):
+        moe_kernels.CHUNKS = chunks if t % chunks == 0 else 1
+        moe_kernels.TUNED, moe_kernels.FUSED_DGATES = tuned, fused
         s = torch.rand(t, e, device=DEV, generator=gen)
         s[:, : e // 4] -= 2  # a quarter of the experts get no routes
         idx = s.topk(k, -1).indices
@@ -252,7 +268,8 @@ def kernels(a):
             kept[3],
             False,
         ).backward(dy)
-        remat = all(torch.equal(u.grad, v.grad) for u, v in zip(leaves, kept))
+        # FUSED_DGATES: the gates' grad alone sums otherwise
+        remat = all(torch.equal(u.grad, v.grad) for u, v in zip(leaves[: 3 if fused else 4], kept))
         with torch.no_grad():
             y0 = moe_kernels.routed(
                 x, up.transpose(1, 2), down, k, flat[order], order, offsets, gates
@@ -269,10 +286,11 @@ def kernels(a):
         exact = torch.equal(y0, y.detach())
         good = max(errs) < 2e-2 and exact and remat
         print(
-            f"  E{e} d{d} h{h} k{k} T{t}: rel err out/dx/dup/ddown/dgates {errs}, no-grad == grad {exact},"
-            f" remat == saved {remat}"
+            f"  E{e} d{d} h{h} k{k} T{t} chunks/tuned/fused {chunks, tuned, fused}: rel err out/dx/dup/ddown/dgates"
+            f" {errs}, no-grad == grad {exact}, remat == saved {remat}"
         )
         ok &= good
+    moe_kernels.CHUNKS, moe_kernels.TUNED, moe_kernels.FUSED_DGATES = 1, False, False
     print(f"{'PASS' if ok else 'FAIL'} routed kernels vs FP32 reference ({DEV})")
     return ok
 
@@ -314,10 +332,11 @@ def aten_topk(x, k):
 
 def topk(a):
     """Router top-ks against torch.topk: routing indices of s + bias for k, values and indices of
-    s for k + 1, and zeros without stats, at E 96 and 128 (the kernel's largest)."""
-    t, k = (65536, 4) if DEV == "cuda" else (256, 4)
+    s for k + 1, and zeros without stats, at E 96 and 128 top-4 and E 256 top-16 (the kernel's
+    largest)."""
+    t = 65536 if DEV == "cuda" else 256
     gen = torch.Generator(DEV).manual_seed(4)
-    return all([topk_at(t, e, k, gen) for e in (96, 128)])
+    return all([topk_at(t, e, k, gen) for e, k in ((96, 4), (128, 4), (256, 16))])
 
 
 def topk_at(t, e, k, gen):
@@ -411,6 +430,9 @@ def main():
         "--experts", type=int, default=0, help="layer: E (default 96, CPU 16)"
     )
     p.add_argument("--topk", type=int, default=4, help="layer: k")
+    p.add_argument("--width", type=int, default=0, help="layer: d (default 1536, CPU 64)")
+    p.add_argument("--both", action="append", default=[], help="layer: MOD.NAME=VALUE (both sides)")
+    p.add_argument("--new", action="append", default=[], help="layer: MOD.NAME=VALUE (new side)")
     p.add_argument(
         "--arch",
         action="append",

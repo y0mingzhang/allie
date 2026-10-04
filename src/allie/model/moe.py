@@ -53,13 +53,13 @@ STATS_REPS = (
 
 
 @contextlib.contextmanager
-def _reps(n, replay=False):
+def _reps(n, replay=False, discard=False):
     global STATS_REPS
-    STATS_REPS, moe_kernels.REPLAY = n, replay
+    STATS_REPS, moe_kernels.REPLAY, moe_kernels.DISCARD = n, replay, discard
     try:
         yield
     finally:
-        STATS_REPS, moe_kernels.REPLAY = 1, False
+        STATS_REPS, moe_kernels.REPLAY, moe_kernels.DISCARD = 1, False, False
 
 
 def replay_context():
@@ -67,7 +67,8 @@ def replay_context():
     and the routed combine (moe_kernels.combine_op). Two in-order adds, not one doubled add, give the
     buffer the bits of a forward and a recompute that both add: a doubled add keeps the counts but not
     a margin sum over micro-batches (fl(fl(2a + b) + b) != 2 fl(a + b))."""
-    return _reps(2 if torch.is_grad_enabled() else 1), _reps(0, True)
+    grad = torch.is_grad_enabled()
+    return _reps(2 if grad else 1, discard=grad), _reps(0, True)
 
 
 # Opaque ops read STATS_REPS when they run, so forward and recompute share one compiled graph: a
@@ -252,7 +253,8 @@ class MoE(nn.Module):
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
         z = F.linear(h.to(g) - self.mu if self.center else h.to(g), self.router.to(g))
         s = torch.sigmoid(z)
-        if e <= 128:  # the kernel holds a row of experts in registers
+        # the kernel holds a row of experts in registers, its sorting network 32 picks
+        if k < 32 and (e <= 128 or moe_kernels.TUNED and e <= 256):
             idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
         else:  # torch.topk here, the stats top-k below
             idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
@@ -262,7 +264,7 @@ class MoE(nn.Module):
             w = s.gather(1, idx)
             w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
         flat = idx.flatten()
-        order = flat.argsort(stable=True)
+        order = (flat.to(torch.uint8) if moe_kernels.TUNED and e <= 256 else flat).argsort(stable=True)
         count = counts(flat[order], e)
         route = idx.shape[1], flat[order], order, count.cumsum(0), w.type_as(h), self.remat
         up, down = self.up.type_as(h), self.down.type_as(h)

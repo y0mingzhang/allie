@@ -56,6 +56,7 @@ SAME_SINCE = dict(
     init_from=None,
     moe_remat=False,
     moe_chunks=1,
+    smoe_fused_dgates=False,
 )
 # SAME arguments --resume-retune may change (recorded in source_changes): lr_scale, every optimizer group's lr
 # from this step on (TrainingManager.retune), and mix, a policy that drew identically up to this step
@@ -388,6 +389,18 @@ def main():
         "down output, the gates' grad, a batched matmul per chunk, may round otherwise on GPU)",
     )
     p.add_argument(
+        "--smoe-tuned",
+        action="store_true",
+        help="routed experts: kernel tiles tuned at d2048 E256 top-16, the router's one-pass top-ks up to 256 "
+        "experts, one-byte sorts (bitwise)",
+    )
+    p.add_argument(
+        "--smoe-fused-dgates",
+        action="store_true",
+        help="routed experts: the gates' grad in the down scatter's epilogue, its [T*k, d] output never stored "
+        "(FP32 sums in another order than the batched matmul's: not bitwise)",
+    )
+    p.add_argument(
         "--optimizers-reversed",
         action="store_true",
         help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
@@ -459,6 +472,7 @@ def main():
     torch.utils.deterministic.fill_uninitialized_memory = False
     network.ATTENTION = "triton" if a.attn_kernel else "flex"
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
+    moe_kernels.TUNED, moe_kernels.FUSED_DGATES = a.smoe_tuned, a.smoe_fused_dgates
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0
