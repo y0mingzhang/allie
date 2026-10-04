@@ -275,6 +275,52 @@ def test_facts_and_kinds(engine):
     assert c.kinds[0] == "mistake" and c.kinds[-1] == "scramble"  # the opening between
 
 
+def test_recent_survives_an_outage(engine, tmp_path, caplog, monkeypatch):
+    """A full disk (or any filesystem error) on the recent lines, or their lock held: the
+    chat carries on without them, logged once, and a game still gets its lines posted."""
+    import fcntl
+
+    path = tmp_path / "recent.json"
+    r = chat.Recent(str(path), 5)
+    r.add("one")
+    assert r.read() == ["one"]
+    with open(str(path) + ".lock", "a") as held:  # another process holds the lock
+        fcntl.flock(held, fcntl.LOCK_EX)
+        start = time.monotonic()
+        r.add("two")
+        assert time.monotonic() - start < 2 and r.read() == []  # gave up; left alone
+    r.retry = 0.0
+    assert r.read() == ["one"]
+    real = open
+
+    def full(file, *args, **kwargs):
+        if str(file).startswith(str(path)):
+            raise OSError(122, "Disk quota exceeded")
+        return real(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", full)
+    r.retry = 0.0
+    r.add("three")
+    r.add("four")  # inside the wait: not even tried
+    assert r.read() == []
+    assert (
+        sum("recent lines" in x.message for x in caplog.records) == 2
+    )  # lock, then quota
+    g = Game(engine, opp="disk", hello="", quiet_p_moment=1, every=0, recent=5,
+             recent_file=str(path))  # fmt: skip
+    g.chatter(Model("Still talking."))
+    g.feed(g.full())
+    for k in range(1, 7):
+        g.feed(state(" ".join("e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()[:k])))
+    assert g.posts and g.posts[-1] == ("player", "Still talking.")
+    path.write_text("{corrupt")
+    monkeypatch.setattr("builtins.open", real)
+    r.retry = 0.0
+    assert r.read() == []  # corrupt: empty, and rewritten with the next line
+    r.add("five")
+    assert r.read() == ["five"]
+
+
 def test_traded_and_hanging():
     b = chess.Board("4k3/8/8/3p4/4K3/8/8/8 w - - 0 1")
     b.push_uci("e4d5")  # the king takes: never a trade square, never hanging

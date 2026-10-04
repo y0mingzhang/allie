@@ -944,33 +944,67 @@ def hanging(board, color, skip=None):
 
 class Recent:
     """The last n unprompted lines, across games and restarts: a JSON list in a file shared
-    by processes (locked to add)."""
+    by processes. Best effort, on the chat thread only: a corrupt file reads as empty; a
+    filesystem error (or a lock held over a second) leaves the file alone for RETRY seconds,
+    logged once."""
+
+    RETRY = 300
 
     def __init__(self, path, n):
-        self.path, self.n, self.lock = path, n, threading.Lock()
+        self.path, self.n, self.lock, self.retry = path, n, threading.Lock(), 0.0
 
     def read(self):
+        if not self.n or time.monotonic() < self.retry:
+            return []
         try:
             with open(self.path) as f:
                 lines = json.load(f)
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return []
-        return [x for x in lines if isinstance(x, str)][-self.n :] if self.n else []
+        except ValueError:
+            return []  # rewritten with the next line
+        except OSError as e:
+            return self.fail(e)
+        return (
+            [x for x in lines if isinstance(x, str)][-self.n :]
+            if isinstance(lines, list)
+            else []
+        )
+
+    def fail(self, e):
+        if time.monotonic() >= self.retry:
+            log.warning(
+                "chat: recent lines %s: %s; without them for %d s",
+                self.path,
+                e,
+                self.RETRY,
+            )
+        self.retry = time.monotonic() + self.RETRY
+        return []
 
     def add(self, text):
-        if not self.n:
+        if not self.n or time.monotonic() < self.retry:
             return
         with self.lock:
             try:
                 os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
                 with open(self.path + ".lock", "a") as lock:
-                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    for _ in range(
+                        10
+                    ):  # a lock on a stalled NFS server must not hang the chat
+                        try:
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            time.sleep(0.1)
+                    else:
+                        raise TimeoutError("the lock is held")
                     lines = [*(x for x in self.read() if x != text), text][-self.n :]
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(lines, f, indent=0)
                     os.replace(self.path + ".tmp", self.path)
-            except OSError as e:
-                log.warning("chat: recent lines %s: %s", self.path, e)
+            except OSError as e:  # TimeoutError and BlockingIOError are OSErrors too
+                self.fail(e)
 
 
 RECENTS, LOCK = {}, threading.Lock()
