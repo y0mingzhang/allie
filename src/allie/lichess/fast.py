@@ -790,7 +790,7 @@ void Engine::attend(int i, int k, int hh, const float* gk, float* sc) {
   const bf16* Vv = s.v + ((size_t)i * H + hh) * s.cap * hd;
   int64_t p = s.n0 + (k - s.off);
   const float* qv = &q[(size_t)k * D + hh * hd];
-  vf qr[16];
+  vf qr[256 / VL];
   for (int c = 0; c < hd / VL; c++) qr[c] = vld(qv + c * VL);
   float mx = -INFINITY;
   for (int64_t r = 0; r <= p; r++) {
@@ -808,7 +808,7 @@ void Engine::attend(int i, int k, int hh, const float* gk, float* sc) {
   }
   float sum = vsum(vs);
   for (; r < n; r++) sum += sc[r] = expf(sc[r] - mx);
-  vf o[16];
+  vf o[256 / VL];
   for (int c = 0; c < hd / VL; c++) o[c] = vzero();
   for (r = 0; r < n; r++) {
     vf pr = vset(sc[r]);
@@ -1240,8 +1240,12 @@ def _signature():
 def library():
     """The compiled kernels (ctypes), building them for this CPU on first use."""
     cxx = os.environ.get("CXX", "c++")
-    march = os.environ.get("ALLIE_MARCH")  # e.g. "-march=haswell": an AVX2 build anywhere
-    key = hashlib.sha256(f"{SOURCE}\n{cxx}\n{march}\n{_signature()}".encode()).hexdigest()[:16]
+    march = os.environ.get(
+        "ALLIE_MARCH"
+    )  # e.g. "-march=haswell": an AVX2 build anywhere
+    key = hashlib.sha256(
+        f"{SOURCE}\n{cxx}\n{march}\n{_signature()}".encode()
+    ).hexdigest()[:16]
     cache = (
         Path(os.environ.get("ALLIE_CACHE", Path.home() / ".cache" / "allie"))
         / "kernels"
@@ -1266,7 +1270,9 @@ def library():
             str(tmp),
         ]
         try:
-            for arch in [march.split()] if march else (["-march=native"], ["-mcpu=native"], []):
+            for arch in (
+                [march.split()] if march else (["-march=native"], ["-mcpu=native"], [])
+            ):
                 r = subprocess.run(base + arch, capture_output=True, text=True)
                 if r.returncode == 0:
                     break
@@ -1319,9 +1325,14 @@ def cpu_order(n):
     if len(ids) < n:
         return None
     path = "/sys/devices/system/cpu/cpu{}/"
-    node = {c: next((int(d.name[4:]) for d in Path(path.format(c)).glob("node[0-9]*")), 0) for c in ids}
+    node = {
+        c: next((int(d.name[4:]) for d in Path(path.format(c)).glob("node[0-9]*")), 0)
+        for c in ids
+    }
     l3 = {c: _sys(path.format(c) + "cache/index3/id") for c in ids}
-    first = {c: _sys(path.format(c) + "topology/thread_siblings_list", c) == c for c in ids}
+    first = {
+        c: _sys(path.format(c) + "topology/thread_siblings_list", c) == c for c in ids
+    }
     nodes = sorted(set(node.values()), key=lambda k: -sum(node[c] == k for c in ids))
     big = [c for c in ids if node[c] == nodes[0]]
     out = []
@@ -1332,7 +1343,12 @@ def cpu_order(n):
                 if node[c] == k and first[c] == primary:
                     groups.setdefault(l3[c], []).append(c)
             lists = list(groups.values())
-            out += [g[j] for j in range(max(map(len, lists), default=0)) for g in lists if j < len(g)]
+            out += [
+                g[j]
+                for j in range(max(map(len, lists), default=0))
+                for g in lists
+                if j < len(g)
+            ]
     return out[:n], [node[c] for c in out[:n]]
 
 
@@ -1355,7 +1371,9 @@ class Fast:
             and w["board.output"].shape[0] == 544
         )
         self.lib, self.model = library(), model
-        self.threads = min(threads or threads_default(), len(cpus()))  # spinning: never oversubscribe
+        self.threads = min(
+            threads or threads_default(), len(cpus())
+        )  # spinning: never oversubscribe
         int8 = bool(model.scales)
         ve = [None] * n
         for j in range(model.ve):
@@ -1421,7 +1439,9 @@ class Fast:
         self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
 
     def __del__(self):
-        if getattr(self, "handle", None) and os.getpid() == self.pid:  # a fork's copy: leaked
+        if (
+            getattr(self, "handle", None) and os.getpid() == self.pid
+        ):  # a fork's copy: leaked
             self.lib.allie_free(self.handle)
             self.handle = None
 
@@ -1432,7 +1452,9 @@ class Fast:
         return dict(zip(PHASES, out))
 
     def step(self, items):
-        if os.getpid() != self.pid:  # a forked child has none of the pool's threads: new ones
+        if (
+            os.getpid() != self.pid
+        ):  # a forked child has none of the pool's threads: new ones
             self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
         self.lib.allie_wake(self.handle)  # workers wake while the inputs are gathered
         meta, caches, lo = [], [], 0
@@ -1441,12 +1463,16 @@ class Fast:
             meta += [cache.n, len(ids), cache.capacity, lo]
             caches += [cache.k.data_ptr(), cache.v.data_ptr(), cache.e.data_ptr()]
             lo += len(ids)
-        cat = lambda j, dt: torch.cat([it[j] for it in items]).to(dt).contiguous()
+        cat = lambda j, dt: (
+            torch.cat([it[j] for it in items]).to("cpu", dt).contiguous()
+        )
         ids, feats, boards = (
             cat(1, torch.int64),
             cat(2, torch.float32),
             cat(3, torch.uint8),
         )
+        if ids.shape != (lo,) or feats.shape != (lo, 3) or boards.shape != (lo, 68):
+            raise ValueError("items: ids [m], feats [m, 3] and boards [m, 68] each")
         out = torch.empty(len(items), self.model.config["vocab"])
         err = self.lib.allie_step(
             self.handle, lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
@@ -1483,14 +1509,18 @@ class Graphs:
 
     def __init__(self, model, slots=None):
         m, ctx = model, model.w["cos"].shape[0]
-        per = 2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width  # elements per slot
+        per = (
+            2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width
+        )  # elements per slot
         size = per * torch.tensor([], dtype=m.dtype).element_size()
         if slots is None:  # a third of the free memory, at most 32 games
             slots = min(32, int(torch.cuda.mem_get_info(m.device)[0] / 3 // size))
         if slots < 1:
             raise RuntimeError("no GPU memory for a cache pool")
         kw = dict(dtype=m.dtype, device=m.device)
-        self.k = torch.zeros(m.layers, slots + 1, m.heads, ctx, m.head_dim, **kw)  # last: padding
+        self.k = torch.zeros(
+            m.layers, slots + 1, m.heads, ctx, m.head_dim, **kw
+        )  # last: padding
         self.v = torch.zeros_like(self.k)
         self.e = torch.zeros(slots + 1, ctx, m.width, **kw)
         self.model, self.slots, self.ctx = m, slots, ctx
@@ -1531,7 +1561,9 @@ class Graphs:
             return y[:, :, 0]
 
         def run():
-            return m.forward(x["ids"], x["pos"], x["feats"], x["boards"], previous, attend)
+            return m.forward(
+                x["ids"], x["pos"], x["feats"], x["boards"], previous, attend
+            )
 
         side = torch.cuda.Stream(dev)
         side.wait_stream(torch.cuda.current_stream(dev))

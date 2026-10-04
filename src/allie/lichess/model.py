@@ -47,11 +47,14 @@ def read(path):
 
 
 def quantize(w):
-    """Symmetric int8 per output row: (int8 weights, BF16 scales)."""
-    w = w.float()
-    s = w.abs().amax(-1).clamp_min(1e-12) / 127
-    q = (w / s[..., None]).round().clamp(-127, 127).to(torch.int8)
-    return q.contiguous(), s.to(torch.bfloat16)
+    """Symmetric int8 per output row: (int8 weights, BF16 scales). In slices of the first
+    dimension, so the FP32 copy is small."""
+    q, s = torch.empty(w.shape, dtype=torch.int8), torch.empty(w.shape[:-1], dtype=torch.bfloat16)
+    for a in range(0, len(w), 16):
+        x = w[a : a + 16].float()
+        r = x.abs().amax(-1).clamp_min(1e-12) / 127
+        q[a : a + 16], s[a : a + 16] = (x / r[..., None]).round().clamp(-127, 127), r
+    return q, s
 
 
 class Model:
