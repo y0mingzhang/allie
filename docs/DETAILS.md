@@ -26,6 +26,32 @@ Allie 2.0 is the final training checkpoint. Allie 2.0 (annealed) continues it wi
 
 Compute per move counts forward-pass FLOPs with the game so far cached, not measured time. Allie 2.0's top-1 accuracy is 63.0% on the 2400+ band.
 
+### Tables
+
+Maia's protocol (56,599 positions):
+
+| Model | Loss (nats) | Top choice correct (%) | Loss vs Maia-3 79M | Top choice vs Maia-3 79M (points) |
+|---|---:|---:|---:|---:|
+| Maia-3 5M | 1.2933 | 57.04 | +0.0753 [+0.0715, +0.0791] | −2.02 [−2.26, −1.77] |
+| Maia-3 23M | 1.2405 | 58.56 | +0.0225 [+0.0204, +0.0247] | −0.50 [−0.70, −0.30] |
+| Maia-3 79M | 1.2180 | 59.06 | | |
+| Original Allie | 1.2883 | 57.09 | +0.0703 [+0.0661, +0.0747] | −1.97 [−2.25, −1.67] |
+| Allie 2.0 | 1.2075 | 59.32 | −0.0105 [−0.0141, −0.0070] | +0.26 [+0.00, +0.52] |
+| Allie 2.0 (annealed) | 1.2048 | 59.37 | −0.0132 [−0.0165, −0.0097] | +0.31 [+0.07, +0.56] |
+
+*Brackets are 95% intervals over games, with each model paired with Maia-3 79M on the same positions.*
+
+All 80,000 positions:
+
+| Model | Parameters | Compute per move (GFLOPs) | Loss (nats) | Top choice correct (%) |
+|---|---|---:|---:|---:|
+| Maia-3 5M | 5.2M | 0.60 | 1.2955 | 56.95 |
+| Maia-3 23M | 22.9M | 2.40 | 1.2475 | 58.34 |
+| Maia-3 79M | 78.9M | 9.23 | 1.2269 | 58.80 |
+| Original Allie | 305M | 0.61 | 1.2848 | 57.06 |
+| Allie 2.0 | 0.69B active, 5.6B total | 1.39 | 1.2056 | 59.26 |
+| Allie 2.0 (annealed) | 0.69B active, 5.6B total | 1.39 | 1.2030 | 59.29 |
+
 ### Where the differences come from
 
 Allie 2.0 minus Maia-3 79M on slices of the benchmark. The bullet, rapid and classical rows use 5,000 positions per rating band. The other rows are blitz.

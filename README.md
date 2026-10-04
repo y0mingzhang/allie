@@ -98,31 +98,11 @@ Maia-3 follows [Maia](https://arxiv.org/abs/2006.01855) and [Maia-2](https://arx
 
 Maia-3 trains only on Lichess blitz games, so we compare on blitz. We use 80,000 blitz positions from July 2026, 20,000 from each of four rating bands. Each model gets its own kind of input, built the way its authors built it.
 
-**Maia's protocol.** First we score every model the way the Maia-3 paper reports its results. It skips the first 10 plies of each game, which are easy to memorize. It also drops every position from the moment a player first has under 30 seconds, where moves get noisy. That leaves 56,599 positions.
+**Maia's protocol.** First we score every model the way the Maia-3 paper reports its results. It skips the first 10 plies of each game and drops every position after a player first has under 30 seconds.
 
-| Model | Loss (nats) | Top choice correct (%) | Loss vs Maia-3 79M | Top choice vs Maia-3 79M (points) |
-|---|---:|---:|---:|---:|
-| Maia-3 5M | 1.2933 | 57.04 | +0.0753 [+0.0715, +0.0791] | −2.02 [−2.26, −1.77] |
-| Maia-3 23M | 1.2405 | 58.56 | +0.0225 [+0.0204, +0.0247] | −0.50 [−0.70, −0.30] |
-| Maia-3 79M | 1.2180 | 59.06 | | |
-| Original Allie | 1.2883 | 57.09 | +0.0703 [+0.0661, +0.0747] | −1.97 [−2.25, −1.67] |
-| Allie 2.0 | 1.2075 | 59.32 | −0.0105 [−0.0141, −0.0070] | +0.26 [+0.00, +0.52] |
-| Allie 2.0 (annealed) | 1.2048 | 59.37 | −0.0132 [−0.0165, −0.0097] | +0.31 [+0.07, +0.56] |
+On that protocol, Allie 2.0 and Maia-3 79M are close. Allie 2.0's loss is 1.208 against 1.218, and its top choice matches the played move 59.3% of the time against 59.1%, a gap within noise.
 
-*Brackets are 95% intervals over games, with each model paired with Maia-3 79M on the same positions.*
-
-On Maia's protocol, Allie 2.0 and Maia-3 79M are close. Allie 2.0's loss is 0.0105 lower, and its accuracy edge of 0.26 points sits at the edge of noise.
-
-**All positions.** Our own evaluation keeps every position, including the opening and time trouble.
-
-| Model | Parameters | Compute per move (GFLOPs) | Loss (nats) | Top choice correct (%) |
-|---|---|---:|---:|---:|
-| Maia-3 5M | 5.2M | 0.60 | 1.2955 | 56.95 |
-| Maia-3 23M | 22.9M | 2.40 | 1.2475 | 58.34 |
-| Maia-3 79M | 78.9M | 9.23 | 1.2269 | 58.80 |
-| Original Allie | 305M | 0.61 | 1.2848 | 57.06 |
-| Allie 2.0 | 0.69B active, 5.6B total | 1.39 | 1.2056 | 59.26 |
-| Allie 2.0 (annealed) | 0.69B active, 5.6B total | 1.39 | 1.2030 | 59.29 |
+**All positions.** On every position, including the opening and time trouble, Allie 2.0 scores 1.206 against 1.227, with 59.3% against 58.8%. It does this at about a seventh of Maia-3 79M's compute per move. Full tables are in [DETAILS](docs/DETAILS.md#blitz-benchmark).
 
 ![Loss against compute per move for Maia-3, the original Allie, and Allie 2.0 with and without search](docs/figures/pareto.png)
 
