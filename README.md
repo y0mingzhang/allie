@@ -18,7 +18,7 @@ Our main test set covers every time control and rating level. Its games come fro
 
 - Its loss on our main test set is **1.2533**, against 1.3526 for the original Allie.
 - In blitz, its top choice is the move played **59.3%** of the time. For players rated 2400 and above, it is **63.0%**.
-- It runs on an ordinary CPU, at about 80 ms per move.
+- It runs on an ordinary CPU: about 6 ms per move on 8 cores of a server, 10-20 ms on a laptop.
 
 You can [play it on Lichess](#play-against-allie-on-lichess) or [download it](#download-and-run-the-model).
 
@@ -164,7 +164,7 @@ Allie 2.0 plays on Lichess as [**AllieTheChessBot**](https://lichess.org/@/Allie
 - **It thinks like a human.** Before each move, it waits about as long as a person would.
 - **Availability.** It plays humans only, two games at a time and one game per opponent.
 
-You can run your own bot from a clone of [this repository](https://github.com/y0mingzhang/allie). It needs only a CPU: about 80 ms per move and 11 GB of memory.
+You can run your own bot from a clone of [this repository](https://github.com/y0mingzhang/allie). It needs only a CPU: under 10 ms per move on 8 server cores, and 6.4 GB of memory.
 
 ```sh
 uv sync
@@ -190,7 +190,7 @@ model.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="1
 model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player would play it
 ```
 
-`predict` gives every legal move's probability; `analyze` adds the win, draw and loss chances and the expected think time. On a CPU the weights load in int8 (8 GB, about 30 ms a move); on a GPU, in BF16 (about 18 ms). This package has the same code, a command line (`allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2`) and the Lichess bot. See [src/allie/lichess/README.md](src/allie/lichess/README.md).
+`predict` gives every legal move's probability; `analyze` adds the win, draw and loss chances and the expected think time. On a CPU the weights load in int8 (6.4 GB, about 6 ms a move on 8 cores of a recent server, with C++ kernels compiled for the machine on first use); on a GPU, in BF16 (about 7 ms, replayed CUDA graphs). This package has the same code, a command line (`allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2`) and the Lichess bot. See [src/allie/lichess/README.md](src/allie/lichess/README.md).
 
 ---
 

@@ -113,26 +113,45 @@ costliest move.
 
 **Speed and memory.** One cached step, the time a move takes once the opponent's move arrives (median of 35
 steps of a game, `analysis/lichess/speed.py`). The bot appends its own move while the opponent thinks, so
-each decision reads one new token. CPU: 8 threads of an AMD EPYC 9354. GPU: one NVIDIA L40S.
+each decision reads one new token; a step of 16 games reads one token for each. CPU: int8 weights, the
+`fast` backend (the default) unless noted. Memory: the process's resident size.
 
-| Device | Weights | Experts | ms per move | Memory |
-|---|---|---:|---:|---:|
-| CPU | int8 (CPU default) | 16 | 29 | 8 GB |
-| CPU | int8 | 8 | 24 | 8 GB |
-| CPU | BF16 | 16 | 69 | 11 GB |
-| GPU, one game | BF16 | 16 | 18 | 11 GB |
-| GPU, 16 games in one step | BF16 | 16 | 63 per step, 4 per game | 11 GB |
+| Device | Threads | 1 game: ms per move | 16 games: ms per step | 64 games: ms per step | Memory |
+|---|---:|---:|---:|---:|---:|
+| AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 6.3 | 32 (500 moves/s) | 101 | 6.4 GB |
+| AMD EPYC 9755 | 32 | 4.6 | 17 (960 moves/s) | 41 (1,570 moves/s) | 6.4 GB |
+| AMD EPYC 9755, PyTorch reference (`backend = "torch"`) | 8 | 19.5 | 185 | | 6.4 GB |
+| AMD EPYC 9755, AVX2 only (`ALLIE_MARCH=-march=haswell`) | 4 / 8 | 11.7 / 6.7 | 93 / 48 | | 6.4 GB |
+| AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 8.8 / 5.7 / 4.9 | 61 / 33 / 24 | 181 / 98 / 68 | 6.4 GB |
+| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 12.7 / 8.0 | 76 / 42 | 246 / 136 | 6.4 GB |
+| AMD EPYC 9755, BF16 weights | 16 | 7.8 | 30 | | 11 GB |
+| GPU (NVIDIA RTX A6000), CUDA graphs, BF16 | | 7.3 | 25 | | 11 GB |
+| GPU (RTX A6000), PyTorch reference | | 46.5 | 186 | | 11 GB |
 
-- **Threads.** On CPU, 6 to 8 threads are best for one game (4 threads: 32 ms); more than the physical cores
-  slows it down.
-- **Search.** `strongest` mode with 5 simulations takes about 0.4 s a move on CPU (BF16), 25 simulations 1.1-1.4 s.
-- **First move.** It also reads the 11-token header: about 0.3 s.
-- **Batching.** On CPU, two games at once take 47 ms per step instead of 29 for one, so batching saves little.
-  On GPU, a step of 16 games costs 3.5 times a step of one.
-- **How.** int8 weights use PyTorch's int8 weight-only kernel with one scale per output row. One or two new
-  tokens run each token's 16 experts one by one; on GPU, a few tokens gather their experts' weights into one
-  batched product, and a batch of games runs every expert at once. Every path is checked against the same
-  reference below.
+- **Threads.** The default is PyTorch's thread count within one NUMA node (socket), pinned one per core and
+  spread over the node's caches, with the weights moved to that node. One game reads 0.74 GB of weights a
+  move, so it is bound by memory bandwidth: speed rises with threads until about 150-160 GB/s, three
+  quarters of what these servers stream (`analysis/lichess/speed.py` prints the GB/s it reaches). A laptop
+  or desktop streams 50-100 GB/s: about 10-20 ms a move with 6-8 cores. Threads on two sockets are slower
+  than on one.
+- **Batching.** Games in one step share each expert's weights: on CPU, 16 games cost 3.6 to 5 times one
+  game and 64 games 9 to 16 times (fewer threads: more), so a bot with many games should batch them, as
+  `allie-bot` does.
+- **First use** compiles the kernels for the machine (a few seconds; they are cached under
+  `~/.cache/allie`). It needs a C++ compiler (`c++`, or `CXX`); without one the model runs the PyTorch
+  reference, with a warning. `ALLIE_MARCH` picks the target (e.g. `-march=haswell` for an AVX2 build) and
+  `ALLIE_NUMA=0` leaves the weights' memory where it is.
+- **Search.** `strongest` mode's search still runs the PyTorch path for its tree of moves: 5 simulations
+  take about 0.4 s a move on CPU, 25 simulations 1.1-1.4 s.
+- **First move.** It also reads the 11-token header.
+- **How.** `fast.py` runs a whole step (input embedding, board CNN, 24 blocks, head) in one call into C++
+  kernels on a pool of threads that stays alive between steps. Matrices are read in place, int8 rows
+  widened to FP32 as they stream from memory, one row after another; the matrices of a step are split into
+  chunks that threads take as they come free, with a barrier between phases (6 a block for one game). A
+  step's tokens are grouped by expert, so each expert is read once however many games route to it. On GPU,
+  steps that add one token to each game replay a CUDA graph of `model.py`'s forward, captured once per batch
+  size and attention span, with each game's cache a slot of one pool. `backend = "torch"` runs `model.py`
+  itself, the reference everything is checked against.
 
 **Accuracy.** `analysis/lichess/parity.py` scores 5,000 positions of the Maia-3 blitz benchmark, 1,250 per
 rating band, against the trained model's scores (the training forward on a GPU). With `--decode`, each
