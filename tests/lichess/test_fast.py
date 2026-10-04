@@ -135,6 +135,10 @@ def test_fast_rejects_bad_inputs(tiny_path):
     b[:, 65] = 16
     with pytest.raises(ValueError, match="board"):
         step(m, [(Cache(m), ids, feats, b)])
+    with pytest.raises(ValueError, match="an item"):  # lengths that add up but do not match
+        step(m, [(Cache(m), ids[:1], feats[:0], boards[:1]), (Cache(m), ids[1:2], feats[:2], boards[1:2])])
+    with pytest.raises(ValueError, match="another model"):
+        step(m, [(Cache(Model(tiny_path, dtype=torch.bfloat16, backend="torch")), ids, feats, boards)])
 
 
 FORKED = {}
@@ -154,8 +158,9 @@ def test_fast_after_fork(tiny_path):
     x = inputs(random_game(3, 10))
     want = step(m, [(Cache(m), *x)])[0]
     FORKED.update(model=m, x=x)
-    with multiprocessing.get_context("fork").Pool(1) as pool:
-        got = pool.apply_async(_forked_step).get(timeout=120)
+    with m.fast.lock:  # another thread mid-step at the fork: the child must not wait for it
+        with multiprocessing.get_context("fork").Pool(1) as pool:
+            got = pool.apply_async(_forked_step).get(timeout=120)
     torch.testing.assert_close(got, want, atol=0, rtol=0)
 
 

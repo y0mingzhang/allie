@@ -1451,23 +1451,43 @@ class Fast:
             self.lib.allie_free(self.handle)
             self.handle = None
 
+    def forked(self):
+        """In a forked child: the parent's pool threads are gone and its lock may be held."""
+        if os.getpid() != self.pid:
+            self.lock, self.pid = threading.Lock(), os.getpid()
+            self.handle = self.lib.allie_new(*self.args)
+
     def profile(self, on=True):
         """Seconds spent in each phase of step() since the last call; on: keep counting."""
+        self.forked()
         out = (ctypes.c_double * len(PHASES))()
-        assert self.lib.allie_profile(self.handle, out, int(on)) == len(PHASES)
+        with self.lock:
+            assert self.lib.allie_profile(self.handle, out, int(on)) == len(PHASES)
         return dict(zip(PHASES, out))
 
     def step(self, items):
+        self.forked()
         with self.lock:  # one step at a time: the engine's buffers and threads are shared
             return self._step(items)
 
+    def check(self, cache, ids, feats, boards):
+        m, n = self.model, len(ids)
+        if n < 1 or ids.shape != (n,) or feats.shape != (n, 3) or boards.shape != (n, 68):
+            raise ValueError("an item: ids [m], feats [m, 3] and boards [m, 68], m >= 1")
+        if cache.model is not m:
+            raise ValueError("a cache of another model")
+        cache.reserve(cache.n + n)
+        shape, cap = (m.layers, m.heads, cache.capacity, m.head_dim), cache.capacity
+        for t, s in ((cache.k, shape), (cache.v, shape), (cache.e, (cap, m.width))):
+            if t.shape != s or t.dtype != m.dtype or t.device.type != "cpu" or not t.is_contiguous():
+                raise ValueError("a cache whose tensors are not the model's layout")
+
     def _step(self, items):
-        if os.getpid() != self.pid:  # a forked child has none of the pool's threads
-            self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
         self.lib.allie_wake(self.handle)  # workers wake while the inputs are gathered
         meta, caches, lo = [], [], 0
-        for cache, ids, *_ in items:
-            cache.reserve(cache.n + len(ids))
+        for item in items:
+            self.check(*item)
+            cache, ids = item[0], item[1]
             meta += [cache.n, len(ids), cache.capacity, lo]
             caches += [cache.k.data_ptr(), cache.v.data_ptr(), cache.e.data_ptr()]
             lo += len(ids)
@@ -1476,9 +1496,7 @@ class Fast:
             return torch.cat([it[j] for it in items]).to("cpu", dtype).contiguous()
 
         ids, feats, boards = cat(1, torch.int64), cat(2, torch.float32), cat(3, torch.uint8)
-        if ids.shape != (lo,) or feats.shape != (lo, 3) or boards.shape != (lo, 68):
-            raise ValueError("items: ids [m], feats [m, 3] and boards [m, 68] each")
-        out = torch.empty(len(items), self.model.config["vocab"], dtype=torch.float32)
+        out = torch.empty(len(items), self.model.config["vocab"], dtype=torch.float32, device="cpu")
         err = self.lib.allie_step(
             self.handle, lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
             (ctypes.c_int64 * len(meta))(*meta), (ctypes.c_void_p * len(caches))(*caches),
@@ -1587,9 +1605,19 @@ class Graphs:
         return g, x, out
 
     def step(self, items):
-        """step()'s logits, or None when the step is not one new token per pooled game."""
-        with self.lock, torch.cuda.device(self.model.device):  # the graphs' inputs are shared
-            return None if self.broken else self._step(items)
+        """step()'s logits, or None when the step is not one new token per pooled game. The
+        work runs on the graphs' own stream, one call at a time, after the caller's stream."""
+        with self.lock, torch.cuda.device(self.model.device):
+            if self.broken:
+                return None
+            caller = torch.cuda.current_stream()
+            self.stream.wait_stream(caller)
+            with torch.cuda.stream(self.stream):
+                z = self._step(items)
+            caller.wait_stream(self.stream)
+            if z is not None:
+                z.record_stream(caller)
+            return z
 
     def _step(self, items):
         n = len(items)
