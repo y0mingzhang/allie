@@ -429,8 +429,7 @@ def _drain():
 def reduce_to_owner(p):
     """Post-accumulate hook: average this micro-batch's BF16 grad over ranks straight into its
     owner's FP32 row, then drop it. Up to INFLIGHT_BYTES of reduces in flight overlap the rest of
-    the backward: a block's 6-7 grads arrive together, so a count cap made compute wait on reduces
-    it had just issued."""
+    the backward (a byte cap, not a count cap: a block's grads arrive together)."""
     if not _inflight:
         torch.autograd.Variable._execution_engine.queue_callback(_drain)
     g, p.grad = p.grad, None
@@ -984,9 +983,6 @@ class AttnArgs:
     cos: torch.Tensor
     sin: torch.Tensor
     attn_scale: float
-
-
-# Attention backend is supplied by model.network.
 
 
 class CausalSelfAttention(nn.Module):
@@ -1578,7 +1574,7 @@ class TrainingManager:
         for opt in self.optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]
-        self.adam_every = False  # Adam optimizers step on every step, not odd ones only
+        self.adam_every = False  # True: the Adam optimizers step every step, not odd ones only
 
     def get_forward_args(self):
         return ForwardScheduleConfig(

@@ -13,8 +13,8 @@ slot, in expert order; se: their experts; offsets: cumulative routes per expert)
 up and dx give each CTA rows of one expert (tile_prefix maps the launch grid onto expert-aligned
 row tiles); every weight tile of the wgrads is written by one CTA, zeros for unused experts. No
 atomics: deterministic. Each output element's dot is a chain of k16 MMAs from +0 over the same BF16
-operands whatever the tiling, and BF16 rounding happens where the unfused path (git history)
-stored BF16, so the fused SwiGLU epilogues are bitwise that path. The scatter GEMM is vendored from
+operands whatever the tiling, and BF16 rounding happens where unfused ops would store BF16, so the
+fused SwiGLU epilogues are bitwise the unfused ops. The scatter GEMM is vendored from
 ScatterMoE (github.com/shawntan/scattermoe @ 47b5e15, Apache-2.0, (c) Shawn Tan et al.).
 
 route() is torch.topk(s + bias, k).indices and torch.topk(s, k + 1), bit for bit with the tie
@@ -41,10 +41,9 @@ DX = (64, 128, 64, 8, 3)
 SCATTER = (128, 128, 32, 4, 4)
 WGRAD = (32, 128, 128, 4, 4)
 WIDE = dict(up=UP, dx=DX, scatter=SCATTER, up_wgrad=WGRAD)
-# hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256), tuned at sm_89
-# d1536 h192 E256 top16, 64K tokens, every candidate bitwise: up and dx 64-wide hidden tiles (8.75 -> 7.21 ms,
-# 6.53 -> 6.13), scatter BLOCK_K 64 (two forwards and a backward 21.1 -> 19.4), up wgrad BLOCK_N 256 (12.8 -> 8.0;
-# BLOCK_M, its row chain, stays 32). The down wgrad keeps WGRAD: no candidate was faster
+# hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256): up and dx 64-wide
+# hidden tiles, scatter BLOCK_K 64, up wgrad BLOCK_N 256 (BLOCK_M, its row chain, stays 32); the down wgrad keeps
+# WGRAD. Tuned on sm_89 at d1536 h192 E256 top16, every candidate bitwise
 NARROW = dict(up=(256, 64, 64, 8, 2), dx=(64, 64, 128, 8, 2), scatter=(128, 128, 64, 4, 3),
               up_wgrad=(32, 256, 128, 8, 3))
 

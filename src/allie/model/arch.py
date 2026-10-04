@@ -1,6 +1,6 @@
-"""Model-track architecture switches carried in Config.arch (torch-free: modelexp imports it too).
+"""Architecture switches carried in Config.arch (torch-free: experiments.modelexp imports it).
 
-The recipe is Allie 2.0's: SwiGLU MLPs, the board CNN input, QK norm, gates, x0 and a second
+The fixed recipe is Allie 2.0's: SwiGLU MLPs, the board CNN input, QK norm, gates, x0 and a second
 embedding, softcapped logits, NorMuon with cautious weight decay. What stays switchable is the MoE.
 """
 
@@ -22,7 +22,7 @@ DEFAULTS = dict(
     moe_round=0,  # round shared and routed widths to multiples of this (0: exact split)
     # FP32 masters and update math for the BF16 weights that have none: head, embeddings, gates
     fp32_small_masters=False,
-    x0=True,  # off: drop the x0 re-injection, its blend weights held at 0 (screen-1 nox0)
+    x0=True,  # off: drop the x0 re-injection, its blend weights held at 0
     # per-token header features (model.nanogpt.header_features) on every move position:
     # 1 = mover's and opponent's Elo, 2 = + the base time and increment
     header_feats=0,
@@ -139,7 +139,7 @@ def swiglu_hidden(width):
 
 
 def board_macs(width):
-    """Dense multiply-adds per position of the board CNN (Codex's modded_spatial)."""
+    """Dense multiply-adds per position of the board CNN (model.board)."""
     return 64 * (13 * 32 * 9 + 2 * 32 * 32 * 9 + 32 * 8) + 32 * 32 + 544 * width
 
 

@@ -1,4 +1,5 @@
-"""Bound future checkpoint storage while preserving published recovery pointers."""
+"""Checkpoint writing: durable atomic saves, the pointer files, pruning, the async saver and rank 0's
+log writer."""
 
 import copy
 import json
@@ -22,7 +23,7 @@ CHUNK = 16 << 20
 class Paced:
     """Write-through file that fdatasyncs every CHUNK bytes and asks the kernel to drop them from the
     page cache. Buffered, a multi-GB save sits dirty on the node and uncommitted on the server, and
-    the trainer's own small NFS writes were seen waiting behind it (bug-audit/REPORT.md (a))."""
+    the trainer's own small NFS writes wait behind it."""
 
     def __init__(self, f, chunk):
         assert chunk > 0
@@ -132,8 +133,8 @@ def durable_save(state, path, tries=4):
 
 def pinned(like):
     """Page-locked host tensor laid out as torch.empty_like(like) with exactly its bytes, in its
-    own pages. pin_memory=True would pin each block rounded up to a power of two (x1.5 for the
-    E96 expert weights), for the whole run."""
+    own pages. pin_memory=True would pin each block rounded up to a power of two, for the whole
+    run."""
     meta = torch.empty_like(like, device="meta")
     n = meta.untyped_storage().nbytes()
     if n == 0:
@@ -158,8 +159,8 @@ QUIET = {
 
 class RowLog:
     """Rank 0's jsonl rows, appended under out and echoed to stdout by a thread, in order. On NFS
-    an append can wait out a checkpoint write in flight, and every rank waits for rank 0
-    (bug-audit/REPORT.md (a)). A failed write is raised by the next put() or by close()."""
+    an append can wait out a checkpoint write in flight, and every rank waits for rank 0. A failed
+    write is raised by the next put() or by close()."""
 
     def __init__(self, out):
         self.out, self.rows, self.error = out, queue.SimpleQueue(), None

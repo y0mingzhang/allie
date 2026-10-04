@@ -1,9 +1,7 @@
 """Board-state input: a CNN over the causal board state at every position, from the token rows.
 
-The C++ encoder is Codex's (results/recipe10x/board-lr-v1/source): for every position it gives the
-64 squares (0 empty, 1-6 white PNBRQK, 7-12 black), side to move, castling rights, en-passant file
-and an in-game flag, for the position after that token. The branch follows Codex's findings: one-hot
-inputs, zero-init output, FP32 parameters and Adam state with a BF16 forward, LR multiplier 0.1.
+The C++ encoder (board_encode.cpp) gives, for the position after each token, the 64 squares (0 empty,
+1-6 white PNBRQK, 7-12 black), side to move, castling rights, en-passant file and an in-game flag.
 """
 
 import ctypes
@@ -95,10 +93,10 @@ def meta(states):
 
 class Conv3(torch.autograd.Function):
     """3x3 same-padded conv on 8x8 boards. cuDNN's weight gradient for this shape (a reduction over
-    every square of every board into a tiny kernel) picks a slow kernel, 14 of the encoder's 21 ms on
-    an A6000. Here boards are zero-padded to 10 x 10 and flattened, so kernel offset (i, j) is a row
-    shift of 10 i + j of one flat (rows x C) matrix against the padded gradient: 9 copy-free GEMMs,
-    split along the rows (the O x C output is a single tile) and summed in FP32."""
+    every square of every board into a tiny kernel) picks a slow kernel. Here boards are zero-padded
+    to 10 x 10 and flattened, so kernel offset (i, j) is a row shift of 10 i + j of one flat (rows x C)
+    matrix against the padded gradient: 9 copy-free GEMMs, split along the rows (the O x C output is
+    a single tile) and summed in FP32."""
 
     @staticmethod
     def forward(ctx, x, w):
@@ -138,8 +136,8 @@ class Conv3(torch.autograd.Function):
 
 
 class BoardConv(nn.Module):
-    """Codex's BoardConv: 13 planes -> 3x3 conv 32 -> 2 residual 3x3 convs -> 1x1 squeeze 8 ->
-    concat side / castling / en-passant embedding -> layer norm -> zero-init linear."""
+    """13 planes -> 3x3 conv 32 -> 2 residual 3x3 convs -> 1x1 squeeze 8 -> concat side / castling /
+    en-passant embedding -> layer norm -> zero-init linear."""
 
     def __init__(self, width):
         super().__init__()

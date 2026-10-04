@@ -1,6 +1,6 @@
 """The source files a checkpoint records the sha256 of: everything that defines the model and its training.
 
-Torch-free, so experiments.modelexp can compute it for a frozen study's package without importing torch.
+Torch-free, so experiments.modelexp can hash a frozen copy of the package without importing torch.
 """
 
 import hashlib

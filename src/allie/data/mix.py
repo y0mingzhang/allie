@@ -379,8 +379,7 @@ PHASES = {}
 
 def recipe(name):
     """Recipe NAME.json, whose name ends in the first 12 hex digits of its sha256
-    (data.inventory recipe writes them): the frozen copy next to a study's source/ if there is
-    one, else RECIPES."""
+    (data.inventory recipe writes them): from recipes/ beside the source tree if there, else RECIPES."""
     frozen = Path(__file__).resolve().parents[3] / "recipes" / f"{name}.json"
     raw = (frozen if frozen.exists() else RECIPES / f"{name}.json").read_bytes()
     assert hashlib.sha256(raw).hexdigest()[:12] == name[-12:], f"{name} edited"

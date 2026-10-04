@@ -1,4 +1,4 @@
-"""Atomic full-training checkpoints. Load only this project's trusted artifacts."""
+"""Every RNG's state, for exact resume, and a plain atomic save."""
 import os
 import random
 import numpy as np

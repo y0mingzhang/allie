@@ -98,7 +98,7 @@ def ensure():
 
 def reexec_local():
     if not MANIFEST.exists():
-        return  # Bundle preparation may not have finished on the controller.
+        return  # no runtime archive built yet
     target = ensure()
     if Path(sys.prefix).resolve() != target.resolve():
         python = str(target/'bin/python')

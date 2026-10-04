@@ -4,9 +4,9 @@ One shared expert plus E routed experts, top-k by sigmoid affinity; selection ad
 that is nudged toward balanced load after every optimizer step (auxiliary-loss-free balancing,
 DeepSeek-V3), or set outright to the balancing quantile of the step's router margins (Kimi K3's
 Quantile Balancing, update="quantile"); gate weights are the selected affinities renormalised to sum
-to sqrt(k) (V3 uses 2.5 at k = 8, Kimi K2 2.83). Experts are SwiGLU MLPs like the dense one, run dropless by model.moe_kernels's fused
-kernels. Nominal active FLOPs match the dense MLP (shared_hidden + k * expert_hidden =
-swiglu_hidden).
+to sqrt(k) (V3 uses 2.5 at k = 8, Kimi K2 2.83). Experts are SwiGLU MLPs like the dense one, run
+dropless by model.moe_kernels's fused kernels. Nominal active FLOPs match the dense MLP
+(shared_hidden + k * expert_hidden = swiglu_hidden).
 """
 
 import contextlib
@@ -66,10 +66,9 @@ def _reps(n, replay=False):
 
 def replay_context():
     """checkpoint context_fn: the forward adds its loads and stats twice, the recompute skips them
-    and the routed combine (moe_kernels.combine_op). The recompute used to add them again,
-    identically (a deterministic replay). Doubling alone keeps the counts and every rebalance ratio
-    and sign but not a margin sum over micro-batches (fl(fl(2a + b) + b) != 2 fl(a + b)); two
-    in-order adds keep the buffer bitwise."""
+    and the routed combine (moe_kernels.combine_op). Two in-order adds, not one doubled add, give the
+    buffer the bits of a forward and a recompute that both add: a doubled add keeps the counts but not
+    a margin sum over micro-batches (fl(fl(2a + b) + b) != 2 fl(a + b))."""
     return _reps(2 if torch.is_grad_enabled() else 1), _reps(0, True)
 
 
@@ -240,15 +239,13 @@ class MoE(nn.Module):
         self.remat = True  # moe_kernels.routed's: False where a checkpoint recomputes the layer
         self.pos = None  # expert_shard.SHARDED position once its experts are sharded
         # center: EMA decay of the mean router input mu, subtracted before the router (0: off). A shared
-        # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores (Allie 2.0
-        # layer 0: 77% of the input energy in mu, routing nearly token-independent). mu averages past
-        # steps' global batch means, so a token's routing never sees other tokens
+        # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores. mu
+        # averages past steps' global batch means, so a token's routing never sees other tokens
         assert 0 <= center < 1
         self.center = center
         # floor of the sums of sigmoid scores that renormalise a token's gates (its k selected scores) and its
         # balance-loss affinities (all e); 0: off, the plain sums. Below a sum of ~1e-19 the compiled division's
-        # backward overflows (k**0.5 / sum**2 in FP32), below ~1e-38 its forward: Allie 2.0's step 60081 went
-        # nonfinite on one token whose 16 selected layer-1 scores summed to 5.7e-20. Floored, such a token's gates
+        # backward overflows (k**0.5 / sum**2 in FP32), below ~1e-38 its forward. Floored, such a token's gates
         # sum to k**0.5 * sum / floor: its routed output is suppressed, the router's degeneration is not repaired
         assert 0 <= gate_floor < float("inf")
         self.gate_floor = gate_floor
@@ -279,7 +276,7 @@ class MoE(nn.Module):
         )
         if e <= 128:  # the kernel holds a row of experts in registers
             idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
-        else:  # trunk's path: torch.topk here, the stats top-k below
+        else:  # torch.topk here, the stats top-k below
             idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
         if self.log_gates:
             w = k**0.5 * torch.softmax(F.logsigmoid(z.gather(1, idx)), -1)

@@ -1,4 +1,5 @@
-"""Chess data/attention/recovery adapter around the pinned medium implementation."""
+"""The chess model on the modded-nanoGPT core (model.nanogpt): config, attention contexts over packed
+games, model construction, losses and the training manager's per-rank state."""
 
 import copy
 import math
@@ -224,8 +225,8 @@ def moe_layers(cfg):
 def create_model(cfg, device="cuda"):
     configure(cfg, device)
     if torch.device(device).type == "cuda":
-        # Upstream initializes autograd on the device before model/collectives.
-        # Keep that warmup out of module import so CPU inspection still works.
+        # upstream initializes autograd on the device before the model and collectives; here, not at
+        # import, so the module imports without a GPU
         torch.empty(1, device=device, requires_grad=True).backward()
     world = dist.get_world_size()
     shard = model_arch.resolve(cfg.arch)["moe_shard"] and world > 1
@@ -289,13 +290,10 @@ def ratings(rows):
 
 
 def move_losses(logits, inputs, targets, context, weights=None, mask=None):
-    """Sum primary and auxiliary move NLL, with no cross-game auxiliary targets.
-
-    Returns (objective sum, primary sum, primary count). Preserve upstream's
-    summed gradient convention; the driver scales by world_size/8 before the
-    optimizer's distributed average, independently of physical accumulation.
-    Vocabulary padding/metadata never enter the move softmax denominator.
-    """
+    """Summed primary and auxiliary (multi-token) move NLL, with no cross-game auxiliary targets:
+    (objective sum, primary sum, primary count). Sums, as upstream: the trainer scales by world / 8
+    before the optimizer's distributed average, whatever the micro-batching. Only move tokens enter
+    the softmax."""
     values = logits.reshape(-1, logits.size(-1))[:, MOVE_START:MOVE_END].float()
     y = targets.flatten()
     valid = (y >= MOVE_START) & (y < MOVE_END)

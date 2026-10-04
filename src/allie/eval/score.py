@@ -1,15 +1,14 @@
-"""Golden (strat-eval-v1) or original-validation CE of a checkpoint, on one GPU.
+"""Main evaluation (strat-eval-v1) or original-validation CE of a checkpoint, on one GPU.
 
 strat         CE per format x mover-Elo cell (16), their macro, the >= 2400 cells' macro and
               time-trouble CE -> results/lm-eval/RUN/strat-v1.json
 original_val  move / >= 2400 / >= 2600 CE over every original validation row
               -> results/lm-eval/RUN/original-val.json (+ per-row sums)
 
-The model is rebuilt from this package, whose file hashes (train.provenance) must match the
-checkpoint's, so a checkpoint of another architecture fails instead of loading as this one: run a
-study's checkpoints with its frozen package. Checkpoints trained before the package layout record flat
-file names; they load from their run's frozen flat source (--source), or from this package when it is known
-to score them as that source does (EQUIVALENT). The final test splits are not exposed.
+The model is rebuilt from this package, whose hashed files (train.provenance) must be the checkpoint's:
+score a study's checkpoints with its frozen package. Checkpoints from before the package layout load from
+their run's frozen flat source (--source), or from this package where it is known to score them as that
+source does (EQUIVALENT). The final test splits are not exposed.
 """
 
 import argparse
@@ -23,20 +22,17 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from allie import paths
 from allie.train.provenance import source_hashes
 
-ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[3]))
-G = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
 REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
-# pre-package checkpoints that this package, as tested, scores as their frozen source does (main evaluation and
-# MoE search bitwise on the same GPU; the Maia-3 benchmark scorer is not repeat-deterministic in either layout and
-# differs across layouts as much as between repeats): digest of the recorded source_sha256 -> (name, digest of the
-# tested package's source_hashes(); renaming the model in comments of model/arch.py, model/moe.py, data/mix.py
-# and data/vocab.py since moved it from 66dfb5cf..., with their code unchanged)
+# pre-package checkpoints this package scores as their frozen source does (main evaluation and MoE search
+# bitwise on the same GPU; the Maia-3 benchmark scorer is not repeat-deterministic): digest of the recorded
+# source_sha256 -> (name, digest of the tested package's source_hashes(), which any edit to a hashed file moves)
 EQUIVALENT = {
     "3efce06d87e5e5fb22e2d6e79bbc52ab7386b5a3af9923a4eafcbbc42995b944": (
         "Allie 2.0",
-        "2ccea333ff4e074f161554e6008eab466f376ef2fab97b514991fe5d5a53608a",
+        "333a8a0d02c88df8cfbca4ba5d62e86fbac15c70027733009be7556ca3de882b",
     ),
 }
 
@@ -50,10 +46,6 @@ def read_hashed(path):
         sha = hashlib.file_digest(f, "sha256").hexdigest()
         f.seek(0)
         return torch.load(f, map_location="cpu", weights_only=False), sha
-
-
-def cuda(x):
-    return torch.as_tensor(x, device="cuda")
 
 
 def sha(path):
@@ -163,15 +155,14 @@ def main():
         forward_protocol="Compiled BF16 full-sequence forward with saved split/YaRN/window state; no cached-inference performance claim",
         input_tensor_protocol="Inputs constructed inside inference mode, matching the frozen training evaluator",
     )
-    out = ROOT / "results/lm-eval" / run.name
+    out = paths.ROOT / "results/lm-eval" / run.name
     out.mkdir(parents=True, exist_ok=True)
 
     @torch.inference_mode()
     def nll(rows, feat=None):
-        """Next-move NLL over the 1968 move ids. Rows become tensors in inference mode
-        like the training evaluator's (feat, as before, outside it: the tensor kind picks
-        the compiled graph); a short last batch is padded with BOS rows (isolated
-        one-token games) to keep the compiled shape."""
+        """Next-move NLL over the 1968 move ids. rows become tensors inside inference mode, as in
+        the training evaluator, feat outside it (the tensor kind picks the compiled graph); a short
+        last batch is padded with BOS rows (isolated one-token games) to keep the compiled shape."""
         count = len(rows)
         x = torch.as_tensor(rows[:, :-1], device="cuda")
         y = torch.as_tensor(rows[:, 1:], device="cuda")
@@ -190,7 +181,7 @@ def main():
         return scores.logsumexp(-1) - truth, y
 
     if a.split == "strat":
-        cached = G / "strat-eval-v1"
+        cached = paths.DATA / "strat-eval-v1"
         manifest = json.loads((cached / "manifest.json").read_text())
         assert sha(cached / "strat.npz") == manifest["sha256"]
         with np.load(cached / "strat.npz") as z:
@@ -219,8 +210,8 @@ def main():
             acc[:, 1] += torch.bincount(lab, minlength=k).cpu().numpy()
 
         for lo in range(0, len(srows), batch):
-            ft = sfeat[lo : lo + batch] if feats else None
-            loss, _ = nll(srows[lo : lo + batch], ft if ft is None else cuda(ft))
+            ft = torch.as_tensor(sfeat[lo : lo + batch], device="cuda") if feats else None
+            loss, _ = nll(srows[lo : lo + batch], ft)
             lab = torch.as_tensor(slabels[lo : lo + batch], device="cuda")
             keep = lab >= 0
             add(sums, lab[keep], loss[keep])
@@ -266,7 +257,7 @@ def main():
         dist.destroy_process_group()
         return
 
-    cached, data = G / "validation_cache", G / "lichess_tokens_v2"
+    cached, data = paths.DATA / "validation_cache", paths.DATA / "lichess_tokens_v2"
     if (cached / "manifest.json").exists():
         manifest = json.loads((cached / "manifest.json").read_text())
         assert manifest["revision"] == REVISION

@@ -1,4 +1,4 @@
-"""Recoverable training of the pinned medium recipe on data.mix-sampled chess rows."""
+"""Resumable distributed training of the Allie model on data.mix-sampled chess rows."""
 
 import argparse
 import gc
@@ -220,8 +220,8 @@ def useful_flops(rows, cfg, short_window, long_window):
     long_pairs = int(np.minimum(lengths, long_window + 1).sum())
     d, heads, layers = cfg.width, cfg.width // cfg.head_dim, cfg.layers
     # Forward projection + head + attention gates (one per layer) and value-embedding gates,
-    # 3 skip gates and the smear gate, over the actual long/short window layer pattern
-    # (identical to the 16-layer count used before). Embedding lookups are not matmuls.
+    # 3 skip gates and the smear gate, over the actual long/short window layer pattern.
+    # Embedding lookups are not matmuls.
     long = len({round(i * (layers - 1) / 15) for i in (0, 4, 11, 15)})
     gates = layers + 2 * min(5, layers // 2)
     per_token = 24 * layers * d * d + 2 * d * 2432 + 2 * (gates * heads * 16 + 64)
@@ -274,7 +274,7 @@ def continuation(shared, local, args, config, output, pointer):
 
 
 def migratable(key, old, new):
-    """--resume-new-source: another study's byte-identical history counts, or an arch that differs only
+    """--resume-new-source: a byte-identical copy of the history counts, or an arch that differs only
     in switches that guard numerics (model_arch.RESUMABLE)."""
     if key == "mix_history":
         return bool(old and new) and Path(old).read_bytes() == Path(new).read_bytes()
@@ -509,8 +509,8 @@ def main():
     cpu = dist.new_group(backend="gloo")
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(a.deterministic)
-    # deterministic mode NaN-fills every fresh allocation (~1.5K fills/step); skipping it was bit-identical on the
-    # reference config; new kernels keep a poisoned-allocation test
+    # deterministic mode NaN-fills every fresh allocation; skipping it is bitwise neutral while no kernel reads
+    # uninitialized memory (new kernels keep a poisoned-allocation test)
     torch.utils.deterministic.fill_uninitialized_memory = False
     network.ATTENTION = "triton" if a.attn_kernel else "flex"
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
@@ -844,12 +844,12 @@ def main():
     kd_sum = torch.zeros((), device="cuda")  # KL(teacher || student)
     stop_reason = "steps"
     step = first
-    # MEMSNAP also dumps early OOMs; successful diagnostics stop before step3.
+    # MEMSNAP: dump the allocator history before the third step and exit (memsnap dumps earlier OOMs)
     graphs = counters["stats"]["unique_graphs"]
     for index in range(first, total_steps):
         # new graphs (a compile, or a cache hit) can leave GPU tensors in
-        # reference cycles until a full collection: with a cold compile cache
-        # 5.6 GB at 8 x 2048 on 2 GPUs, an OOM in the next backward
+        # reference cycles until a full collection: GBs with a cold compile
+        # cache, enough for an OOM in the next backward
         if graphs != counters["stats"]["unique_graphs"]:
             graphs = counters["stats"]["unique_graphs"]
             gc.collect()
