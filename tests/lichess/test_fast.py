@@ -120,9 +120,9 @@ def test_graphs_match_eager(tiny_path, dtype):
     assert m.graphs is not None and ref.graphs is None
     tol = dict(atol=2e-4, rtol=0) if dtype == torch.float32 else dict(atol=0.1, rtol=0)
     torch.testing.assert_close(play(m, games, lengths, 20), play(ref, games, lengths, 20), **tol)
-    assert len(m.graphs.graphs) >= 2  # replays happened: batches of three, then one game
     one = play(m, games[:1], lengths[:1], 5)
     torch.testing.assert_close(one, play(ref, games[:1], lengths[:1], 5), **tol)
+    assert {b for b, _ in m.graphs.graphs} == {1, 4}  # replayed: three games (padded to 4), one
 
 
 def test_fast_rejects_bad_inputs(tiny_path):
