@@ -2,7 +2,7 @@
 game's cache (batch 1), or one token each for B games at once.
 
 usage: python analysis/lichess/speed.py --model DIR [--device cpu] [--int8] [--active-experts K]
-       [--threads N] [--batch 1,16] [--profile]
+       [--backend fast|torch] [--threads N] [--batch 1,16] [--profile]
 """
 
 import argparse
@@ -46,6 +46,7 @@ def main():
     p.add_argument("--device", default="cpu")
     p.add_argument("--int8", action="store_true")
     p.add_argument("--active-experts", type=int)
+    p.add_argument("--backend", choices=["fast", "torch"])
     p.add_argument("--threads", type=int)
     p.add_argument("--batch", default="1")
     p.add_argument("--steps", type=int, default=40)
@@ -54,12 +55,14 @@ def main():
     if a.threads:
         torch.set_num_threads(a.threads)
     t0 = time.perf_counter()
-    m = Model(a.model, a.device, torch.bfloat16, a.active_experts, a.int8)
-    out = dict(device=str(m.device), int8=a.int8, experts=m.keep, threads=torch.get_num_threads(),
+    m = Model(a.model, a.device, torch.bfloat16, a.active_experts, a.int8, a.backend, a.threads)
+    backend = "fast" if m.fast else "torch"
+    threads = m.fast.threads if m.fast else torch.get_num_threads()
+    out = dict(device=str(m.device), backend=backend, int8=a.int8, experts=m.keep, threads=threads,
                load_seconds=round(time.perf_counter() - t0, 1))  # fmt: skip
     sync = torch.cuda.synchronize if m.device.type == "cuda" else lambda: None
     for b in map(int, a.batch.split(",")):
-        games = [game(80 + a.steps + 1, s) for s in range(b)]
+        games = [game(80 + a.steps + 21, s) for s in range(b)]
         caches = [Cache(m) for _ in games]
         step(m, [(c, x[0][:80], x[1][:80], x[2][:80]) for c, x in zip(caches, games)])
         times = []
@@ -77,7 +80,13 @@ def main():
             times.append(1000 * (time.perf_counter() - t))
         q = np.percentile(times[5:], [50, 90])
         out[f"batch{b}_ms"] = dict(median=round(q[0], 1), p90=round(q[1], 1))
-    if a.profile:
+    if a.profile and m.fast:
+        c, x = caches[0], games[0]
+        m.fast.profile()
+        for i in range(80 + a.steps, 80 + a.steps + 20):
+            step(m, [(c, x[0][i : i + 1], x[1][i : i + 1], x[2][i : i + 1])])
+        out["phase_ms"] = {k: round(50 * v, 3) for k, v in m.fast.profile(False).items()}
+    elif a.profile:
         from torch.profiler import ProfilerActivity, profile
 
         c, x = caches[0], games[0]

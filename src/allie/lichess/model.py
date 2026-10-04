@@ -7,6 +7,7 @@ layout with the attention lambdas folded in; router, balancing bias, centre and 
 """
 
 import json
+import warnings
 from pathlib import Path
 
 import torch
@@ -56,9 +57,12 @@ def quantize(w):
 class Model:
     """active_experts: route each token through only the best `active_experts` of its top-k,
     with the gates they have in the top-k (the speed knob; None = all). int8: the block
-    matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory."""
+    matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory.
+    backend: "fast" runs step() in fast.py's C++ kernels (CPU, BF16 activations), "torch" in
+    the PyTorch code below (the reference); None: fast where it applies and compiles."""
 
-    def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False):
+    def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False,
+                 backend=None, threads=None):  # fmt: skip
         path = Path(path)
         self.config = c = json.loads((path / "config.json").read_text())
         self.device, self.dtype = torch.device(device), dtype
@@ -90,6 +94,17 @@ class Model:
         self.smear, self.backout = s[3 * n].item(), s[3 * n + 1].item()
         self.skip_lambdas = s[3 * n + 2 : 3 * n + 5]
         self.ve = c["value_embeds"]
+        self.fast = None
+        assert backend in (None, "fast", "torch"), backend
+        if backend == "fast" or (backend is None and self.device.type == "cpu" and dtype == torch.bfloat16):
+            try:
+                from .fast import Fast
+
+                self.fast = Fast(self, threads)
+            except Exception as e:
+                if backend == "fast":
+                    raise
+                warnings.warn(f"Allie's fast CPU kernels are unavailable, using PyTorch: {e}")
 
     def board(self, states):
         w, dt = self.w, self.dtype
@@ -275,6 +290,8 @@ def step(model, items):
     """Append tokens to caches in one batched forward. items: (cache, ids, feats, boards) with
     ids [m] int64, feats [m, 3] and boards [m, 68] uint8 tensors on the model's device. Returns
     the logits [len(items), 2432] FP32 at each item's last new token."""
+    if model.fast is not None:
+        return model.fast.step(items)
     spans, lo = [], 0
     for cache, ids, *_ in items:
         cache.reserve(cache.n + len(ids))

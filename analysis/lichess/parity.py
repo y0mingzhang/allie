@@ -85,6 +85,7 @@ def main():
     p.add_argument("--decode", type=int, default=0,
                    help="score the last token in steps of this many games (the live path)")  # fmt: skip
     p.add_argument("--moe", help="force a MoE path: token, group, gather or dense")
+    p.add_argument("--backend", choices=["fast", "torch"], help="default: fast on CPU with BF16")
     p.add_argument("--threads", type=int)
     p.add_argument("--per-band", type=int, default=1250)
     p.add_argument("--tokens", type=int, default=2048, help="tokens per forward")
@@ -98,13 +99,13 @@ def main():
     if a.hf:  # the Hugging Face release, through transformers' remote code
         from transformers import AutoModel
 
-        hf = AutoModel.from_pretrained(a.model, trust_remote_code=True, device=a.device,
-                                       int8=a.int8, active_experts=a.active_experts)  # fmt: skip
+        hf = AutoModel.from_pretrained(a.model, trust_remote_code=True, device=a.device, int8=a.int8,
+                                       active_experts=a.active_experts, backend=a.backend)  # fmt: skip
         m = hf.allie.model
         code = sys.modules[type(m).__module__]  # the release's own model.py
         run, cache = code.step, code.Cache
     else:
-        m = Model(a.model, a.device, getattr(torch, a.dtype), a.active_experts, a.int8)
+        m = Model(a.model, a.device, getattr(torch, a.dtype), a.active_experts, a.int8, a.backend, a.threads)
         run, cache = step, Cache
     m.moe_mode = a.moe
     load = time.perf_counter() - t0
@@ -143,6 +144,7 @@ def main():
     dp = np.exp(-ce) - np.exp(-ref_ce)
     out = dict(
         model=a.model, device=a.device, dtype=a.dtype, int8=a.int8, experts=a.active_experts or m.topk,
+        backend="fast" if getattr(m, "fast", None) else "torch",
         decode=a.decode, moe=a.moe,
         threads=torch.get_num_threads(), positions=len(P), load_seconds=round(load, 1),
         seconds=round(seconds, 1), ms_per_position=round(1000 * seconds / len(P), 1),
