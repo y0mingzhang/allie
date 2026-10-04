@@ -26,9 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 R = ROOT / "results"
 X = R / "recipe10x"
 DATA = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
-ORIGINAL = Path(
-    os.environ.get("ALLIE_ORIGINAL", "/home/yimingz3/allie-equiv/old-allie")
-)
+ORIGINAL = Path(os.environ.get("ALLIE_ORIGINAL", DATA / "original-allie"))
 OUT = ROOT / "docs" / "figures"
 FONTS = ROOT / "docs" / "fonts"
 FINAL = (
