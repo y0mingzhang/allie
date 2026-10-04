@@ -11,9 +11,7 @@ log = logging.getLogger(__name__)
 
 
 class Lichess:
-    def __init__(
-        self, token, url="https://lichess.org", timeout=20, retries=5, wait=60
-    ):
+    def __init__(self, token, url="https://lichess.org", timeout=20, retries=5, wait=60):
         self.url, self.timeout, self.retries = url.rstrip("/"), timeout, retries
         self.wait = wait  # after HTTP 429, as Lichess asks
         self.headers = {"Authorization": f"Bearer {token}", "User-Agent": "allie-bot"}
@@ -25,31 +23,26 @@ class Lichess:
 
     def call(self, method, path, data=None, retries=None, timeout=None):
         """JSON response of one call. 429: wait a minute; server and network errors: retry with
-        backoff; other HTTP errors raise. retries: tries in all (default: the client's)."""
+        backoff; other HTTP errors raise; ConnectionError once `retries` tries (default: the
+        client's) failed."""
         n = retries or self.retries
         for attempt in range(n):
-            last = attempt + 1 == n
+            wait = 0 if attempt + 1 == n else min(2**attempt, 30)
             try:
                 with self._open(method, path, data, timeout) as r:
                     return json.loads(r.read() or b"{}")
             except urllib.error.HTTPError as e:
-                if e.code < 500 and e.code != 429 or last:
+                if e.code < 500 and e.code != 429:
                     raise
                 if e.code == 429:
                     log.warning("rate limited on %s; waiting %d s", path, self.wait)
-                    time.sleep(self.wait)
-                    continue
-                log.warning(
-                    "%s %s: HTTP %d, retry %d", method, path, e.code, attempt + 1
-                )
-                time.sleep(min(2**attempt, 30))
+                    wait = wait and self.wait
+                else:
+                    log.warning("%s %s: HTTP %d, retry %d", method, path, e.code, attempt + 1)
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-                if last:
-                    raise ConnectionError(
-                        f"{method} {path} failed {n} times: {e}"
-                    ) from e
                 log.warning("%s %s failed (%s), retry %d", method, path, e, attempt + 1)
-                time.sleep(min(2**attempt, 30))
+            time.sleep(wait)
+        raise ConnectionError(f"{method} {path} failed {n} times")
 
     def stream(self, path, timeout=30):
         """Events of an ndjson stream, None for each keepalive newline; ends when the server
