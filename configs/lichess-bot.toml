@@ -37,17 +37,20 @@ draw_offer = 0.9              # offer a draw from ply 60 when P(draw) >= this (a
 
 [chat]                        # natural-language chat written by Claude from Allie's numbers (README)
 enabled = false               # needs `uv sync --extra chat` and an Anthropic API key
-rooms = ["player"]            # remarks go here; add "spectator" to answer spectators too
+rooms = ["player"]            # rooms to answer and remark in; add "spectator" for spectators
 model = "claude-sonnet-5-5"
 effort = "low"                # output_config.effort; thinking "between_tools" = off, for latency
-max_tokens = 200
+max_tokens = 300
 timeout = 6.0                 # seconds; a late message is dropped, a move never waits
 key_file = "~/.config/allie/anthropic_key"  # chmod 600; ANTHROPIC_API_KEY wins if set
 day_cap = 1.0                 # USD per UTC day, counted from each response's usage; then silent
 month_cap = 15.0              # USD per UTC month
-ledger = "~/.config/allie/chat-spend.json"  # the spend, kept across restarts
-every = 10                    # plies between two unprompted remarks, at least
-remarks = 4                   # unprompted remarks per game (besides hello and post-game)
-replies = 8                   # answers to chat messages per game
-gap = 4.0                     # seconds between two messages, at least
-stockfish = ""                # a Stockfish binary for the post-game message (never used mid-game)
+ledger = "~/.config/allie/chat-spend.json"  # the spend, shared by processes, kept across restarts
+p_moment = 0.5                # chance of a model call at a surprising move or a swing
+p_draw = 0.5                  # ... once the opponent's draw offer is answered
+p_end = 0.7                   # ... when the game ends
+every = 8                     # plies from any call to an unprompted one, at least
+remarks = 6                   # unprompted calls per game
+replies = 30                  # calls for chat messages per game
+gap = 4.0                     # seconds from our last message to an unprompted one, at least
+linger = 120.0                # seconds of answers after the game (longer after each message)

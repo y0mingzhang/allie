@@ -272,6 +272,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.stream_events(user)
             case "GET", ["api", "bot", "game", "stream", gid]:
                 return self.stream_game(user, m.games.get(gid))
+            case "GET", ["api", "bot", "game", gid, "chat"] if gid in m.games:
+                lines = [e for e in m.games[gid].chat if e["room"] == "player"]
+                return self.reply(200, [{"user": e["username"], "text": e["text"]} for e in lines])
             case "POST", ["api", "challenge", cid, "accept"]:
                 m.accept(cid)
                 return self.reply(200)

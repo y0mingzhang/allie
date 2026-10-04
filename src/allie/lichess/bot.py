@@ -6,7 +6,7 @@ import threading
 import time
 import urllib.error
 
-from .chat import Chatter
+from .chat import Chatter, split
 from .engine import Decision, Game
 
 log = logging.getLogger(__name__)
@@ -139,7 +139,8 @@ class Bot:
         try:
             while not match.over and not self.stopped.is_set():
                 try:
-                    for event in self.client.stream(f"/api/bot/game/stream/{gid}"):
+                    events = self.client.stream(f"/api/bot/game/stream/{gid}")
+                    for event in split(events, match.chat) if match.chat else events:
                         if event:
                             match.on_event(event)
                             backoff = 1
@@ -181,10 +182,6 @@ class Match:
                 self.on_state(event)
             case "opponentGone":
                 self.on_gone(event)
-            case "chatLine" if self.chat:
-                self.chat.heard(event)
-        if self.chat and event["type"] in ("gameFull", "gameState"):
-            self.chat.seen(event)
 
     def on_full(self, event):
         play = self.bot.config.play

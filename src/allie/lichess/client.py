@@ -78,6 +78,9 @@ class Lichess:
     def claim_victory(self, game):
         return self.call("POST", f"/api/bot/game/{game}/claim-victory")
 
+    def chat_lines(self, game):
+        return self.call("GET", f"/api/bot/game/{game}/chat")
+
     def chat(self, game, text, room="player"):
         return self.call(
             "POST", f"/api/bot/game/{game}/chat", {"room": room, "text": text}

@@ -75,39 +75,50 @@ trust_remote_code=True)`, see the model card).
 
 ## Chat
 
-With `[chat] enabled = true` (default off), the bot talks in the game chat in natural language. Claude
-(`claude-sonnet-5-5`, effort low, thinking off) writes each message from facts the bot computes: the moves
-and position, how likely Allie found each move at the mover's rating, Allie's win / draw / loss estimate
-and how it moved, think times from the clocks, and after the game Stockfish's verdict on each side's
-costliest move.
+With `[chat] enabled = true` (default off), the bot talks in the game chat in natural language, written
+by Claude (`claude-sonnet-5-5`, effort low, thinking off) from Allie's own numbers. No engine is involved.
 
-- **When it speaks.** A hello that mentions `!quiet`; a compliment when the opponent finds a move Allie
-  gave under 15% at their rating that moves the expected score 10 points their way; a graceful word when
-  their move costs the bot 15 points, or (once a game) when its expected score sinks 25 points below its
-  high and under 40%; an answer when someone writes; a post-game message. At most `remarks` unprompted remarks a game, `every` plies apart, and `gap` seconds between
-  messages. Messages that arrive while the model writes get one answer, to the last.
-- **Fair play.** Stockfish runs only after the game. During it the model gets the position and Allie's
-  numbers, but not the notes that would point the opponent somewhere: their last move when it helped the
-  bot, the bot's estimate when its expected score is above 55%, or the move Allie expected instead. It is
-  told never to suggest moves or point out threats, and a mid-game message that names a move not yet
-  played is dropped. `!quiet` from the opponent mutes the bot for that game and their rematches, including
-  a message already being written.
-- **Never in the way.** Each game's chat runs on its own thread (the game thread only notes Allie's view
-  and queues work); a call that takes over `timeout` (6 s) is dropped, a remark is dropped if the game
-  moved on two plies, and an error only skips a message. A game that ends without a final state (a
-  crash, shutdown) drops what is queued.
-  A bad key or model turns the model off (the hello and `!quiet` reply stay); a rate limit pauses it a
-  minute.
-- **Spend cap.** Each response's tokens are priced (Sonnet 5.5: $2 input, $2.50 cache write, $0.20
-  cache read, $10 output per million) into a ledger file (`ledger`) by UTC day and month. At `day_cap`
-  ($1) or `month_cap` ($15) the chat goes silent, logged once, until the window turns over. A spend limit
-  on the key in the Anthropic Console is the backstop.
+- **One conversation per game.** The persona and policy (cached for an hour) and the game's header come
+  first. Each model call appends a user turn with everything since the last call, then the model's
+  decision as JSON `{"speak": bool, "text": str}`. Earlier turns are never edited, so each call reads
+  the conversation from the prompt cache.
+  - **Moves:** each one with Allie's prediction for its mover at their rating (top moves with
+    probabilities, the move played marked), the think time typical there and the one taken, and the bot's
+    win/draw/loss after it.
+  - **Events:** draw offers and the bot's answer, takebacks, resignation, flag, abort, the opponent
+    leaving, a rematch.
+  - **Chat lines:** verbatim.
+  - **The position:** clocks, the opening (Lichess's names), phase, material, FEN, Allie's prediction for
+    the side to move.
+- **When it calls the model.** Every chat message does (the model may still stay silent), during the
+  game and for `linger` seconds after it. Other moments call it with a set probability:
+  - `p_moment` for a surprising move or a swing in the win/draw/loss, at least `every` plies after the
+    last call;
+  - `p_draw` once a draw offer is answered;
+  - `p_end` at the end.
+
+  Otherwise the update waits in the next turn.
+- **Casual or rated.** In casual games the bot gives its honest opinion from Allie's numbers when asked.
+  In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
+  message naming a move not yet played is dropped. After the game it reviews from Allie's numbers when
+  asked.
+- **`!quiet`.** It mutes the bot for that game and their rematches, including a message already being
+  written.
+- **Never in the way.** The chat reads its own copy of the game stream on a reader thread and keeps its
+  own model state, so it does not wait behind a move's think time.
+  - Replies are posted at once; unprompted messages wait `gap` seconds after the last one.
+  - A call over `timeout` is dropped, and an error only skips a message.
+  - A bad key or model turns the model off; a rate limit pauses it a minute.
+  - After the game, once the stream closes, it reads new chat lines from the game's chat page.
+- **Spend cap.** Each response's tokens are priced into a ledger file (`ledger`) by UTC day and month
+  (Sonnet 5.5, $ per million tokens: 2 input, 2.50 / 4 cache write for 5 min / 1 h, 0.20 cache read,
+  10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over. A spend
+  limit on the key in the Anthropic Console is the backstop.
 - **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`
-  (`chmod 600`) or `ANTHROPIC_API_KEY`. The bot logs each call's tokens (cached and not) and latency,
-  never the key.
-- **Dry run.** `analysis/lichess/chat_dryrun.py record` replays recorded games through the model as the
-  bot feeds it; `replay` prints the chat they would have had, with scripted opponent messages
-  (`--llm mock` needs no key).
+  (`chmod 600`) or `ANTHROPIC_API_KEY`. Each call is logged with its tokens (new, cached, written,
+  output), cost, time to the first token and latency; the key is never logged.
+- **Dry run.** `analysis/lichess/chat_dryrun.py` replays recorded games through a real chat, with scripted
+  messages, a draw offer and a resignation (`--llm mock` needs no key).
 
 ## Cost and accuracy
 

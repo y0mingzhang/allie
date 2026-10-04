@@ -1,20 +1,20 @@
 import json
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import chess
 import pytest
-import torch
 
-from allie.lichess import chat
+from allie.lichess import chat, llm
 from allie.lichess.bot import Bot
-from allie.lichess.chat import Chat, Chatter, clean
+from allie.lichess.chat import Chat, Chatter, clean, played, split
 from allie.lichess.client import Lichess
 from allie.lichess.config import Config
-from allie.lichess.engine import WDL, Engine, Play
+from allie.lichess.engine import Engine, Play
+from allie.lichess.llm import Reply
 from allie.lichess.mock import MockLichess
-from allie.lichess.tokens import MOVE_ID
 
 
 def wait(cond, timeout=60):
@@ -24,256 +24,203 @@ def wait(cond, timeout=60):
         time.sleep(0.02)
 
 
-class Recorder:
-    """A stand-in model: records each prompt, answers with a canned line."""
-
-    def __init__(self, reply="Nice one!", delay=0.0):
-        self.prompts, self.reply, self.delay = [], reply, delay
-
-    def __call__(self, system, prompt):
-        assert "SKIP" in system
-        self.prompts.append(prompt)
-        time.sleep(self.delay)
-        return self.reply
-
-
-def test_clean():
-    assert clean("SKIP") == clean("skip.") == clean("  ") == []
-    assert clean("see https://example.com") == clean("www.x.org is fun") == []
-    assert clean('"Good game!"') == ["Good game!"]
-    assert clean("**Well** played") == ["Well played"]
-    long = clean("word " * 60)[0]
-    assert len(long) <= 140 and long.endswith("…")
-    assert clean("one\n\ntwo\nthree", 2) == ["one", "two"]
-
-
-def test_played():
-    assert chat.played("Nice game!", [])
-    assert not chat.played("Maybe try Nf3 here", ["e2e4", "e7e5"])
-    assert chat.played("1. e4 e5 2. Nf3: a classic", ["e2e4", "e7e5", "g1f3"])
-    assert not chat.played("O-O was safer", ["e2e4"])
-    assert chat.played("Qxf7# was nice", "e2e4 e7e5 f1c4 b8c6 d1h5 g8f6 h5f7".split())
-
-
-class Gate(Recorder):
-    """A model that waits for open() before it answers."""
-
-    def __init__(self, reply="Sure!"):
-        super().__init__(reply)
-        self.gate = threading.Event()
-
-    def __call__(self, system, prompt):
-        self.prompts.append(prompt)
-        self.gate.wait(10)
-        return self.reply
-
-
-def test_quiet_and_close_stop_messages_in_flight():
-    f, llm = Fake(white=True, hello=""), Gate()
-    f.opponent = "inflight-opp"
-    c = Chatter(f, llm)
-    f.play(c, [], first=True)
-    f.say(c, "hi")
-    wait(lambda: llm.prompts)
-    f.say(c, "!quiet")
-    llm.gate.set()
-    wait(lambda: f.posts)
-    time.sleep(0.2)
-    assert f.posts == [("player", chat.QUIET)]
-    f2, llm2 = Fake(white=True, hello=""), Gate()
-    f2.opponent = "closed-opp"
-    c2 = Chatter(f2, llm2)
-    f2.play(c2, [], first=True)
-    f2.say(c2, "hi")
-    wait(lambda: llm2.prompts)
-    c2.close()  # the game thread ended without a final state
-    llm2.gate.set()
-    time.sleep(0.2)
-    assert f2.posts == [] and c2.cancelled
-
-
-def test_views_follow_the_game():
-    """A same-ply view is replaced; a changed history drops the views after it."""
-    f, llm = Fake(white=True, hello=""), Recorder()
-    c = Chatter(f, llm)
-    f.play(c, [], first=True)
-    f.play(c, ["e2e4"], wdl=(0.5, 0.0, 0.5))
-    f.play(c, ["e2e4"], wdl=(0.2, 0.0, 0.8))  # revised features at the same ply
-    assert c.views[1][1] == pytest.approx([0.8, 0.0, 0.2])
-    f.play(c, ["e2e4", "e7e5"])
-    f.play(c, ["d2d4", "d7d5"])  # a different game state on reconnect
-    assert set(c.views) == {0, 2} and c.views[2] is not None
-
-
-def logits(probs, wdl):
-    """A model output with these move probabilities and this (side to move's) win/draw/loss."""
-    z = torch.full((2432,), -50.0)
-    for u, p in probs.items():
-        z[MOVE_ID[u]] = float(torch.tensor(p).log())
-    z[WDL] = torch.tensor(wdl).log()
-    return z
-
-
-class Fake:
-    """A Match and Game in the shape the chat reads, driven by hand."""
-
-    def __init__(self, white=False, **cfg):
-        self.posts = []
-        client = SimpleNamespace(
-            chat=lambda gid, text, room: self.posts.append((room, text))
-        )
-        config = SimpleNamespace(chat=Chat(enabled=True, gap=0, **cfg))
-        self.bot = SimpleNamespace(config=config, client=client, me="allie")
-        self.gid, self.white, self.opponent, self.over = "g1", white, "opp", False
-        self.game = SimpleNamespace(moves=[], board=chess.Board(), logits=None, used=[], tokens=[],
-                                    elo=(1500, 1500))  # fmt: skip
-        self.full = dict(type="gameFull", white=dict(name="Opp", rating=1480),
-                         black=dict(name="allie", rating=1500), speed="blitz", rated=True,
-                         clock=dict(initial=180000, increment=2000))  # fmt: skip
-
-    def play(self, c, moves, probs=None, wdl=(0.4, 0.2, 0.4), status="started", winner=None,
-             first=False):  # fmt: skip
-        """The game reaches `moves`; the model's view there: probs and wdl, for the side to
-        move (probs: uniform over the legal moves by default)."""
-        g = self.game
-        g.moves, g.board = list(moves), chess.Board()
-        for u in moves:
-            g.board.push_uci(u)
-        if probs is None:
-            probs = {m.uci(): 1.0 for m in g.board.legal_moves}
-        g.logits = logits({u: p / sum(probs.values()) for u, p in probs.items()}, wdl)
-        state = dict(type="gameState", moves=" ".join(moves), wtime=170000, btime=171000,
-                     status=status, winner=winner)  # fmt: skip
-        c.seen(self.full | dict(state=state) if first else state)
-
-    def say(self, c, text, who=None, room="player"):
-        who = (
-            who or self.opponent.capitalize()
-        )  # a username; the opponent's id in lower case
-        c.heard(dict(type="chatLine", username=who, room=room, text=text))
-
-
-def test_compliment_and_privacy():
-    """Black bot. White's rare move that Allie rates strong gets a compliment; a rare blunder
-    gets nothing, and an answer during the game leaves it and our good prospects out."""
-    f, llm = Fake(every=0), Recorder()
-    c = Chatter(f, llm)
-    f.play(c, [], {"e2e4": 0.89, "f2f3": 0.01, "d2d4": 0.1}, first=True)  # white's view
-    wait(lambda: f.posts)
-    assert f.posts[0] == ("player", chat.HELLO)
-    f.play(c, ["f2f3"], wdl=(0.2, 0.2, 0.6))  # our view: f3 was strong (0.5 -> 0.3)
-    f.play(c, ["f2f3", "e7e5"], {"g1h3": 0.97, "g2g4": 0.03})
-    wait(lambda: len(f.posts) == 2)
-    assert "rare, strong find" in llm.prompts[0]
-    assert (
-        "1. f3: Allie gave it 1% for a 1480 player (not its top prediction)"
-        in llm.prompts[0]
-    )
-    f.play(c, ["f2f3", "e7e5", "g2g4"], wdl=(0.8, 0.1, 0.1))  # a blunder: 0.5 -> 0.85
-    f.say(c, "what's the best move here?")
-    wait(lambda: len(f.posts) == 3)
-    p = llm.prompts[-1]
-    assert "  Opp: what's the best move here?" in p and "Answer your opponent's" in p
-    assert "Their last move" not in p and "Allie's estimate" not in p
-    f.play(c, ["f2f3", "e7e5", "g2g4", "d8h4"], status="mate", winner="black")
-    wait(lambda: len(f.posts) == 4)
-    p = llm.prompts[-1]
-    assert (
-        "you won by checkmate" in p and "Their last move 2. g4: Allie gave it 3%" in p
-    )
-    assert (
-        "Your last move 2...Qh4#" in p and "Their most surprising move: 1. f3 (1%)" in p
-    )
-    assert len(llm.prompts) == 3  # no remark on the blunder
-
-
-def test_hurt_and_pressure():
-    """White bot. Their expected but costly move: a graceful word; the game sinking from its
-    high: once a game."""
-    f, llm = Fake(white=True, every=0, hello=""), Recorder()
-    f.opponent = "hurt-opp"
-    c = Chatter(f, llm)
-    moves = ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "d2d3", "f8c5"]
-    ours = [0.5, 0.5, 0.3, 0.3, 0.2, 0.2, 0.15, 0.15, 0.1]  # our expected score by ply
-    for k, e in enumerate(ours):
-        mine = (e, 0.0, 1 - e)
-        probs = {moves[k]: 0.9, "a7a6": 0.1} if k % 2 else None  # their moves: expected
-        f.play(c, moves[:k], probs, mine if k % 2 == 0 else mine[::-1], first=k == 0)
-    time.sleep(0.3)
-    tasks = [p.splitlines()[-1] for p in llm.prompts]
-    assert len(tasks) == 2
-    assert "hurt you" in tasks[0] and "1...e5: Allie gave it 90%" in llm.prompts[0]
-    assert "pressing you" in tasks[1]
-
-
-def test_quiet_and_limits():
-    f, llm = Fake(white=True, replies=2), Recorder("Thanks, you too!")
-    f.opponent = "quiet-opp"
-    c = Chatter(f, llm)
-    f.play(c, [], first=True)
-    f.say(c, "hi")
-    f.say(c, "hi", who="allie")  # our own echo
-    f.say(c, "Takeback sent", who="lichess")
-    f.say(c, "nice bot", who="someone", room="spectator")  # spectators: not in rooms
-    wait(lambda: len(f.posts) == 2)
-    assert f.posts == [("player", chat.HELLO), ("player", "Thanks, you too!")]
-    assert len(llm.prompts) == 1
-    f.say(c, "!quiet please")
-    wait(lambda: len(f.posts) == 3)
-    assert f.posts[-1] == ("player", chat.QUIET)
-    f.say(c, "hello?")
-    f.play(c, ["e2e4", "e7e5"], status="mate")
-    time.sleep(0.3)
-    assert len(f.posts) == 3 and len(llm.prompts) == 1
-    c2 = Chatter(f, llm)  # a rematch: still quiet, no hello
-    f.play(c2, [], first=True)
-    time.sleep(0.2)
-    assert len(f.posts) == 3
-
-
-def test_burst_and_budget():
-    """Messages that arrive while the model writes get one answer, to the last; replies stop
-    at the budget."""
-    f, llm = Fake(white=True, replies=3, hello=""), Recorder(delay=0.3)
-    f.opponent = "burst-opp"
-    c = Chatter(f, llm)
-    f.play(c, [], first=True)
-    f.say(c, "a")
-    wait(lambda: llm.prompts)
-    for t in ("b", "c", "d", "e"):
-        f.say(c, t)
-    wait(lambda: len(f.posts) == 2)
-    time.sleep(0.5)
-    assert len(llm.prompts) == 2 and "  Burst-opp: c\n" in llm.prompts[1]
-
-
-def test_slow_model_never_delays_the_game():
-    f, llm = Fake(white=True, every=0, hello=""), Recorder(delay=2)
-    f.opponent = "slow-opp"
-    c = Chatter(f, llm)
-    f.play(c, [], first=True)
-    start = time.monotonic()
-    for _ in range(5):
-        f.say(c, "hey")
-    assert time.monotonic() - start < 0.5
-
-
-@pytest.fixture
+@pytest.fixture(scope="module")
 def engine(tiny):
     e = Engine(tiny)
     yield e
     e.close()
 
 
-def test_chat_through_the_protocol(engine, monkeypatch):
-    """The bot on the mock server: the hello, an answer to the opponent and the post-game
-    message (remarks off: the tiny model's are random), and the moves stay legal."""
-    llm = Recorder("Good luck to you too!")
-    monkeypatch.setattr(chat, "model", lambda *a: llm)
-    mock = MockLichess({"tok": "allie"}, house_delay=0.1, max_plies=24)
-    config = Config(
-        play=Play(think_time=False), chat=Chat(enabled=True, gap=0, remarks=0)
+class Model:
+    """A stand-in model: records each call, says `text` (or nothing), optionally after a
+    gate is opened."""
+
+    def __init__(self, text="Fair enough.", gated=False):
+        self.calls, self.text, self.gate = [], text, threading.Event()
+        if not gated:
+            self.gate.set()
+
+    def __call__(self, system, messages):
+        self.calls.append((system, messages))
+        self.gate.wait(10)
+        out = json.dumps({"speak": bool(self.text), "text": self.text})
+        return Reply(
+            [{"type": "text", "text": out}], bool(self.text), self.text, 0.1, 0.2, 0.001
+        )
+
+    def turn(self, i=-1):
+        return self.calls[i][1][-1]["content"]
+
+
+class Game:
+    """A match as the chat sees it, with a client that records posts and serves the chat."""
+
+    def __init__(self, engine, opp="opp", white=False, rated=False, **cfg):
+        self.posts, self.lines = [], []
+        client = SimpleNamespace(
+            chat=lambda gid, text, room: self.posts.append((room, text)),
+            chat_lines=lambda gid: self.lines,
+        )
+        cfg = Chat(enabled=True, gap=0, poll=0.05, **cfg)
+        config = SimpleNamespace(chat=cfg, play=Play())
+        bot = SimpleNamespace(me="allie", config=config, client=client, engine=engine)
+        self.match = SimpleNamespace(bot=bot, gid="g1", over=False)
+        self.opp, self.white, self.rated = opp, white, rated
+
+    def chatter(self, model, seed=0):
+        self.c = Chatter(self.match, model, seed)
+        return self.c
+
+    def feed(self, *events):
+        for e in events:
+            self.c.put(e)
+        self.c.q.join()
+
+    def full(self, moves=""):
+        player = lambda u: {"id": u, "name": u.capitalize(), "rating": 1500}
+        w, b = ("allie", self.opp) if self.white else (self.opp, "allie")
+        return {"type": "gameFull", "id": "g1", "variant": {"key": "standard"},
+                "speed": "blitz", "rated": self.rated, "white": player(w),
+                "black": player(b), "clock": {"initial": 180000, "increment": 2000},
+                "initialFen": "startpos", "state": state(moves)}  # fmt: skip
+
+    def say(self, text, who=None, room="player"):
+        who = who or self.opp.capitalize()
+        return {"type": "chatLine", "room": room, "username": who, "text": text}
+
+
+def state(moves, status="started", **kw):
+    clocks = {"wtime": 170000, "btime": 171000, "winc": 2000, "binc": 2000}
+    return {"type": "gameState", "moves": moves, "status": status} | clocks | kw
+
+
+def test_clean_and_played():
+    assert clean('"Good game!"') == "Good game!" and clean("see https://x.org") == ""
+    long = "First sentence here, quite long. " * 3 + "x" * 50
+    a, b = chat.parts(long)
+    assert a.endswith("long.") and len(a) <= 140 and len(b) <= 140
+    assert chat.parts("short") == ["short"] and chat.parts("") == []
+    b = chess.Board()
+    for u in ("e2e4", "e7e5", "g1f3"):
+        b.push_uci(u)
+    assert played("Nf3, the classic", b) and played("nice game", b)
+    assert not played("try Nc6 here", b)
+
+
+def test_conversation(engine):
+    """The hello, an answer per message with Allie's annotations and the position, an
+    append-only conversation, and the system prompt cached for an hour."""
+    m = Model("Hi! Enjoy the game.")
+    g = Game(engine, p_moment=0)
+    c = g.chatter(m)
+    g.feed(g.full())
+    assert g.posts == [("player", chat.HELLO)]
+    g.feed(state("e2e4"), state("e2e4 e7e5"), g.say("hi gl"))
+    assert len(m.calls) == 1 and g.posts[-1] == ("player", "Hi! Enjoy the game.")
+    system, messages = m.calls[0]
+    assert system[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert "CASUAL" in system[1]["text"] and "Opp (1500)" in system[1]["text"]
+    turn = m.turn()
+    assert "1. e4 them" in turn and "| Allie: " in turn and "| you " in turn
+    assert "1... e5 you" in turn and 'Chat (player) Opp: "hi gl"' in turn
+    assert "Now (ply 2): them to move." in turn and "Opening: King's Pawn Game" in turn
+    assert "FEN: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2" in turn
+    assert "the fixed greeting" in turn
+    g.feed(state("e2e4 e7e5 g1f3"), g.say("wdyt about my next move?"))
+    second = m.calls[1][1]
+    assert second[0] == messages[0] and second[1]["role"] == "assistant"
+    assert "2. Nf3 them" in m.turn() and "1. e4" not in m.turn()  # only what is new
+    assert len(c.timings) == 2 and c.timings[0]["text"] == "Hi! Enjoy the game."
+
+
+def test_moments_draw_resign(engine):
+    """Unprompted calls at moments by probability; a declined draw offer; the end, with
+    Allie's review; then answers after the game, by fetching the chat once its stream ends."""
+    m = Model("")
+    g = Game(engine, p_moment=0, p_draw=1, p_end=1, every=0, linger=5)
+    g.chatter(m)
+    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()
+    g.feed(g.full(), *[state(" ".join(moves[: k + 1])) for k in range(len(moves))])
+    assert m.calls == []  # p_moment 0: the updates wait
+    them = "wdraw"
+    g.feed(state(" ".join(moves), **{them: True}), state(" ".join(moves)))
+    assert len(m.calls) == 1
+    turn = m.turn()
+    assert (
+        "Event: they offer a draw." in turn and "you declined their draw offer" in turn
     )
+    assert "1. e4 them" in turn  # the waiting updates
+    g.feed(state(" ".join(moves + ["d2d3"]), status="resign", winner="black"))
+    assert len(m.calls) == 2
+    assert "you won by resignation, they resigned after 7 plies" in m.turn()
+    assert "Review by Allie" in m.turn()
+    m.text = "Sure: 4. d3 was the quiet turn."
+    g.lines = [{"user": "Opp", "text": "how did I play?"}]
+    g.feed(chat.END)
+    wait(lambda: len(m.calls) == 3)
+    wait(lambda: g.posts[-1] == ("player", "Sure: 4. d3 was the quiet turn."))
+    assert 'Chat (player) Opp: "how did I play?"' in m.turn()
+    time.sleep(0.3)
+    assert len(m.calls) == 3  # each line once
+
+
+def test_quiet_rated_and_close(engine):
+    m = Model("Maybe Nc6 next?")
+    g = Game(engine, opp="quiet", rated=True)
+    c = g.chatter(m)
+    g.feed(g.full(), state("e2e4"), g.say("blunder?"))
+    assert len(m.calls) == 1 and "RATED" in m.calls[0][0][1]["text"]
+    assert g.posts == [("player", chat.HELLO)]  # an unplayed move, rated: dropped
+    m.text, m.gate = "Not telling!", threading.Event()
+    g.c.put(g.say("and now?"))
+    wait(lambda: len(m.calls) == 2)
+    g.c.put(g.say("!quiet"))
+    m.gate.set()
+    g.c.q.join()
+    assert g.posts[-1] == ("player", chat.QUIET) and len(g.posts) == 2
+    g.feed(state("e2e4 e7e5"), g.say("hello?"))
+    assert len(m.calls) == 2
+    g2 = Game(engine, opp="quiet")
+    g2.chatter(m)
+    g2.feed(g2.full())
+    assert g2.posts == []  # a rematch, still quiet
+    g3 = Game(engine, opp="crash")
+    c3 = g3.chatter(Model("x"))
+    g3.feed(g3.full())
+    c3.close()  # the game thread ended without the game ending
+    g3.c.q.join()
+    assert c3.done and c3.cancelled
+    del c
+
+
+def test_split():
+    """The chat gets each event at once even while the game thread is busy; the game thread
+    gets them all in order, then the stream's error."""
+    got = []
+    sink = SimpleNamespace(gid="g", done=False, put=got.append)
+
+    def stream():
+        yield {"type": "a"}
+        yield None
+        yield {"type": "b"}
+        raise OSError("closed")
+
+    events = split(stream(), sink)
+    assert next(events) == {"type": "a"}
+    wait(lambda: len(got) == 3)  # a, b and the end, while the game thread waits
+    assert got == [{"type": "a"}, {"type": "b"}, chat.END]
+    assert next(events) is None and next(events) == {"type": "b"}
+    with pytest.raises(OSError):
+        next(events)
+
+
+def test_through_the_bot(engine, monkeypatch):
+    """The bot on the mock server: the hello, an answer, the game's moves unchanged."""
+    m = Model("Thanks, you too!")
+    monkeypatch.setattr(chat, "model", lambda cfg: m)
+    mock = MockLichess({"tok": "allie"}, house_delay=0.1, max_plies=16)
+    cfg = Chat(enabled=True, gap=0, p_moment=0, p_end=0, linger=1, poll=0.1)
+    config = Config(play=Play(think_time=False), chat=cfg)
     bot = Bot(config, Lichess("tok", mock.url, wait=0.1), engine)
     threading.Thread(target=bot.run, daemon=True).start()
     try:
@@ -282,15 +229,12 @@ def test_chat_through_the_protocol(engine, monkeypatch):
         wait(lambda: gid in mock.games and mock.games[gid].board.move_stack)
         g = mock.games[gid]
         g.say("x", "hi, have fun")
-        wait(lambda: g.status != "started")
-        wait(lambda: llm.prompts and "game is over" in llm.prompts[-1])
-        wait(lambda: sum(e["username"] == "allie" for e in g.chat) == 3)
+        wait(lambda: sum(e["username"] == "allie" for e in g.chat) >= 2)
         ours = [e["text"] for e in g.chat if e["username"] == "allie"]
-        assert ours[0] == chat.HELLO and ours[1:] == ["Good luck to you too!"] * 2
-        assert any(
-            "Answer your opponent's" in p and "x: hi, have fun" in p
-            for p in llm.prompts
-        )
+        assert ours[:2] == [chat.HELLO, "Thanks, you too!"]
+        wait(lambda: g.status != "started")
+        g.say("x", "gg")  # after the game: fetched
+        wait(lambda: sum(e["username"] == "allie" for e in g.chat) >= 3)
         assert not mock.rejected
     finally:
         bot.stop()
@@ -298,50 +242,30 @@ def test_chat_through_the_protocol(engine, monkeypatch):
         bot.join()
 
 
-def test_config_section(tmp_path):
-    from allie.lichess.config import load
-
-    p = tmp_path / "bot.toml"
-    p.write_text('[chat]\nenabled = true\nrooms = ["player", "spectator"]\nevery = 6\n')
-    c = load(p)
-    assert c.chat.enabled and "spectator" in c.chat.rooms and c.chat.every == 6
-    assert not load(p, ["chat.enabled=false"]).chat.enabled
-    p.write_text("[chat]\nbogus = 1\n")
-    with pytest.raises(ValueError):
-        load(p)
-
-
 def test_ledger(tmp_path, caplog):
-    """Caps per UTC day and month; silent once reached, logged once, until the window turns;
-    the spend survives a restart."""
-    t = [chat.datetime(2026, 10, 4, 23, tzinfo=chat.UTC)]
+    t = [llm.datetime(2026, 10, 4, 23, tzinfo=llm.UTC)]
     path = tmp_path / "spend.json"
-    ledger = lambda: chat.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
+    ledger = lambda: llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
     a = ledger()
-    assert a.allows()
-    assert a.add(0.6) == [0.6, 0.6] and a.allows()
+    assert a.allows() and a.add(0.6) == [0.6, 0.6] and a.allows()
     a.add(0.5)
     assert not a.allows() and not a.allows()
     assert sum("2026-10-04" in r.message for r in caplog.records) == 1
     b = ledger()  # a restart
     assert not b.allows()
-    t[0] = chat.datetime(2026, 10, 5, 1, tzinfo=chat.UTC)  # a new day, the same month
-    assert b.allows()
-    assert b.add(0.4) == pytest.approx([0.4, 1.5]) and not b.allows()  # the month's cap
-    t[0] = chat.datetime(2026, 11, 1, tzinfo=chat.UTC)
+    t[0] = llm.datetime(2026, 10, 5, 1, tzinfo=llm.UTC)
+    assert b.allows() and b.add(0.4) == pytest.approx([0.4, 1.5]) and not b.allows()
+    t[0] = llm.datetime(2026, 11, 1, tzinfo=llm.UTC)
     assert b.allows()
     path.write_text("{not json")
-    assert ledger().allows()  # a corrupt ledger starts over
+    assert ledger().allows()
 
 
 class FakeAPI:
-    """A local Messages API: records each request, answers from a script of
-    ("text", stop_reason) or (HTTP status,) or ("sleep", seconds)."""
+    """A local Messages API that streams: answers from a script of decisions (dicts), HTTP
+    error codes, or ("sleep", seconds)."""
 
     def __init__(self, script):
-        import json
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
         self.script, self.requests = list(script), []
         api = self
 
@@ -355,73 +279,100 @@ class FakeAPI:
                     ({k.lower(): v for k, v in self.headers.items()}, body)
                 )
                 step = api.script.pop(0)
-                if step[0] == "sleep":
+                if isinstance(step, tuple):
                     time.sleep(step[1])
-                    step = ("late", "end_turn")
-                if isinstance(step[0], int):
-                    out, code = (
-                        {"type": "error", "error": {"type": "x", "message": "no"}},
-                        step[0],
+                    step = {"speak": False, "text": ""}
+                if isinstance(step, int):
+                    data = json.dumps(
+                        {"type": "error", "error": {"type": "x", "message": "no"}}
                     )
-                else:
-                    usage = dict(input_tokens=300, output_tokens=12, cache_read_input_tokens=700,
-                                 cache_creation_input_tokens=0)  # fmt: skip
-                    out, code = dict(id="msg_1", type="message", role="assistant",
-                                     model=body["model"], content=[dict(type="text", text=step[0])],
-                                     stop_reason=step[1], stop_sequence=None, usage=usage), 200  # fmt: skip
-                data = json.dumps(out).encode()
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
+                    self.send_response(step)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    return self.wfile.write(data.encode())
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
-                self.wfile.write(data)
+                usage = {"input_tokens": 300, "output_tokens": 1, "cache_read_input_tokens": 700,
+                         "cache_creation_input_tokens": 100,
+                         "cache_creation": {"ephemeral_5m_input_tokens": 100,
+                                            "ephemeral_1h_input_tokens": 0}}  # fmt: skip
+                message = {"id": "msg_1", "type": "message", "role": "assistant",
+                           "model": body["model"], "content": [], "stop_reason": None,
+                           "stop_sequence": None, "usage": usage}  # fmt: skip
+                text = json.dumps(step)
+                for e in (
+                    {"type": "message_start", "message": message},
+                    {"type": "content_block_start", "index": 0,
+                     "content_block": {"type": "text", "text": ""}},
+                    {"type": "content_block_delta", "index": 0,
+                     "delta": {"type": "text_delta", "text": text}},
+                    {"type": "content_block_stop", "index": 0},
+                    {"type": "message_delta", "delta": {"stop_reason": "end_turn",
+                     "stop_sequence": None}, "usage": {"output_tokens": 12}},
+                    {"type": "message_stop"},
+                ):  # fmt: skip
+                    self.wfile.write(
+                        f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode()
+                    )
+                    self.wfile.flush()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
 
-def test_claude_requests(monkeypatch, tmp_path):
-    """The SDK path against a local API: the request's shape, the key file, refusals, timeouts,
-    and a bad key turning the model off."""
+def test_claude(monkeypatch, tmp_path):
+    """The SDK path on a local streaming API: the request (structured output, effort,
+    thinking, fallback, caching), the key file, cost into the ledger, timeouts, a bad key."""
     pytest.importorskip("anthropic")
-    api = FakeAPI([("Nice move!", "end_turn"), ("x", "refusal"), ("sleep", 1.5), (401,),
-                   ("never", "end_turn")])  # fmt: skip
+    say = {"speak": True, "text": "Nice move!"}
+    api = FakeAPI([say, ("sleep", 1.5), 401, say])
     monkeypatch.setenv("ANTHROPIC_BASE_URL", api.url)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    path = tmp_path / "key"
-    path.write_text("sk-test-123\n")
-    path.chmod(0o600)
-    ledger = tmp_path / "spend" / "ledger.json"
-    cfg = Chat(enabled=True, timeout=1.0, key_file=str(path), ledger=str(ledger))
-    m = chat.make(cfg)
-    assert m("system text", "facts") == "Nice move!"
-    headers, body = api.requests[0]
-    assert headers["x-api-key"] == "sk-test-123"
-    assert "server-side-fallback-2026-07-01" in headers["anthropic-beta"]
-    assert body["model"] == "claude-sonnet-5-5" and body["max_tokens"] == 200
-    assert body["thinking"] == {"type": "between_tools"}
-    assert body["output_config"] == {"effort": "low"} and body["fallbacks"] == "default"
-    assert body["system"] == [
-        dict(type="text", text="system text", cache_control=dict(type="ephemeral"))
+    key, ledger = tmp_path / "key", tmp_path / "spend.json"
+    key.write_text("sk-test-123\n")
+    key.chmod(0o600)
+    cfg = Chat(enabled=True, timeout=1.0, key_file=str(key), ledger=str(ledger))
+    m = llm.make(cfg)
+    system = [
+        {"type": "text", "text": "persona", "cache_control": {"type": "ephemeral"}}
     ]
-    assert body["messages"] == [dict(role="user", content="facts")]
-    assert m("s", "p") == ""  # refusal
+    r = m(system, [{"role": "user", "content": "update"}])
+    assert r.speak and r.text == "Nice move!" and r.first <= r.seconds
+    headers, body = api.requests[0]
+    assert headers["x-api-key"] == "sk-test-123" and body["stream"] is True
+    assert "server-side-fallback-2026-07-01" in headers["anthropic-beta"]
+    assert body["model"] == "claude-sonnet-5-5" and body["fallbacks"] == "default"
+    assert body["thinking"] == {"type": "between_tools"}
+    assert body["output_config"]["effort"] == "low"
+    assert body["output_config"]["format"]["schema"] == llm.DECISION
+    assert body["cache_control"] == {"type": "ephemeral"} and body["system"] == system
+    usd = (300 * 2 + 100 * 2.5 + 700 * 0.2 + 12 * 10) / 1e6
+    assert r.usd == pytest.approx(usd)
+    day = llm.datetime.now(llm.UTC).strftime("%Y-%m-%d")
+    assert json.loads(ledger.read_text())[day] == pytest.approx(usd)
     start = time.monotonic()
-    assert m("s", "p") == ""  # timeout
+    assert m(system, [{"role": "user", "content": "u"}]) is None  # timeout
     assert time.monotonic() - start < 1.4
-    assert m("s", "p") == ""  # 401: off
-    assert m("s", "p") == "" and len(api.requests) == 4
-    assert m.usage["calls"] == 2 and m.usage["cached"] == 1400
-    usd = (300 * 2 + 700 * 0.2 + 12 * 10) / 1e6  # each answered call, refusals too
-    assert m.usage["usd"] == pytest.approx(2 * usd)
-    day = chat.datetime.now(chat.UTC).strftime("%Y-%m-%d")
-    assert json.loads(ledger.read_text())[day] == pytest.approx(2 * usd)
-    api.script = [("over the cap", "end_turn")] * 2
-    capped = chat.make(
-        Chat(enabled=True, key_file=str(path), ledger=str(ledger), day_cap=3 * usd)
+    assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
+    assert (
+        m(system, [{"role": "user", "content": "u"}]) is None and len(api.requests) == 3
     )
-    assert capped("s", "p") == "over the cap"  # $0.0017 of $0.0026: one more call
-    assert capped("s", "p") == "" and len(api.script) == 1
-    path.unlink()
-    assert chat.make(cfg)("s", "p") == ""  # no key: fixed lines only
+    key.unlink()
+    assert llm.make(cfg)(system, []) is None  # no key
+
+
+def test_config(tmp_path):
+    from allie.lichess.config import load
+
+    p = tmp_path / "bot.toml"
+    p.write_text(
+        '[chat]\nenabled = true\nrooms = ["player", "spectator"]\np_moment = 0.2\n'
+    )
+    c = load(p)
+    assert c.chat.enabled and "spectator" in c.chat.rooms and c.chat.p_moment == 0.2
+    p.write_text("[chat]\nstockfish = 'x'\n")
+    with pytest.raises(ValueError):
+        load(p)
