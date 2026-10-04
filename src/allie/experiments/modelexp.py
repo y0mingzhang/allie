@@ -324,8 +324,8 @@ def tables(w, runs):
             c, t = chessmix.cool(k), chessmix.recent(k)
             if c:
                 parts += [(c[1], None), (c[2], c[0])]
-            else:  # a recent-only tail trains on its inner policy's table throughout
-                parts += [(t[2] if t else k, None)]
+            else:  # a recent tail trains on its inner policy's table throughout
+                parts += [(t[-1] if t else k, None)]
         for k, start in parts:
             if not (k or "").startswith("table:"):
                 continue

@@ -9,6 +9,7 @@ keeps at most 1025 tokens as in the original rows): the overflowing game is trun
 """
 
 import copy
+import ctypes
 import hashlib
 import itertools
 import json
@@ -17,6 +18,7 @@ import multiprocessing as mp
 import os
 import queue
 import re
+import signal
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -337,19 +339,6 @@ def cooldown(policy, start, before=control):
     return lambda g, p: before(g, p) if p < start else policy(g, p)
 
 
-def tail_recent(policy, start, since):
-    """policy; from training progress start on, its Lichess games from months before `since` (YYYY-MM) weigh 0.
-    External sources keep their weights, and so do the bucket caps (Grid games carry no month)."""
-
-    def fn(g, p):
-        w, mw, mb = policy(g, p)
-        if p >= start and g.src == 0 and getattr(g, "month", since) < since:
-            w = np.zeros(g.n)
-        return w, mw, mb
-
-    return fn
-
-
 POLICIES = dict(
     control=control,
     natural=lambda g, p: (np.ones(g.n), True, True),
@@ -377,7 +366,7 @@ def table(name):
 
 
 COOL = re.compile(r"cool(\d+)(?:\(([^()]+)\))?:(.+)")
-RECENT = re.compile(r"recent(\d+)\((\d{4}-\d{2})\):(.+)")
+RECENT = re.compile(r"recent(\d+)\((\d{4}-\d{2})(?:,p=([0-9.]+))?\):(.+)")
 
 
 def cool(name):
@@ -388,31 +377,66 @@ def cool(name):
         return None
     start, before, after = int(m[1]) / 100, m[2], m[3]
     assert 0 < start < 1 and not any(
-        (x or "").startswith("cool") for x in (before, after)
+        (x or "").startswith(("cool", "recent")) for x in (before, after)
     ), name
     return start, before, after
 
 
 def recent(name):
-    """recentNN(YYYY-MM):POLICY as (NN / 100, YYYY-MM, POLICY); None if not a recent-tail name."""
+    """recentNN(YYYY-MM[,p=P]):POLICY as (NN / 100, YYYY-MM, P, POLICY), P = 1 without p; None if not a recent-tail
+    name. The tail keeps POLICY's weights and bucket caps throughout, so each bucket's (each Lichess format x Elo
+    cell's, each external store's) probability per game draw is POLICY's; its accepted games and packed tokens follow
+    only as far as its recent and older games agree in acceptance (val_leak, per-game weights of non-table policies)
+    and length. From NN% of training on, a Lichess bucket's draws come from its months from YYYY-MM on with probability
+    P and from its older months otherwise (P = 1: recent months only), each group's months at their old relative
+    weights; buckets lacking either group draw as before. A bucket of R passes whose recent games are a fraction f of
+    it gives them R (1 - T + T P / f) expected passes over a tail of length T: the table's cap bounds R, not this
+    (analysis/recent_share.py)."""
     m = RECENT.fullmatch(name)
     if not m:
         assert not name.startswith("recent"), name
         return None
-    start = int(m[1]) / 100
-    assert 0 < start < 1 and not m[3].startswith(("cool", "recent")), name
-    return start, m[2], m[3]
+    start, p = int(m[1]) / 100, float(m[3] or 1)
+    assert 0 < start < 1 and 0 < p <= 1, name
+    assert not m[4].startswith(("cool", "recent")), name
+    return start, m[2], p, m[4]
+
+
+def tail(policy):
+    """A sampler policy's recent tail (start, since, p), None without one: the recentNN prefix of its first '+' part
+    (refused on the others)."""
+    first, *rest = policy.split("+")
+    assert not any(k.startswith("recent") for k in rest), policy
+    r = recent(first)
+    return r and r[:3]
+
+
+def until(name, frac):
+    """name as it samples before training progress frac: its phase switches at or after frac removed."""
+    out = []
+    for k in name.split("+"):
+        if (c := cool(k)) and c[0] >= frac:
+            k = c[1] or "control"
+        elif (r := recent(k)) and r[0] >= frac:
+            k = r[-1]
+        out.append(k)
+    return "+".join(out)
+
+
+def same_until(a, b, frac):
+    """Whether policies a and b draw the same games and leave the sampler in the same state before training progress
+    frac (rows seen / total rows): a run may switch from a to b at a resume there."""
+    return until(a, frac) == until(b, frac)
 
 
 def resolve(name):
     """A policy name: POLICIES key, table:NAME, coolNN[(BEFORE)]:AFTER (BEFORE, control by default, until NN% of
-    training, then AFTER) or recentNN(YYYY-MM):POLICY (POLICY; after NN%, only its Lichess games from YYYY-MM on)."""
+    training, then AFTER) or recentNN(YYYY-MM[,p=P]):POLICY (POLICY's weights; the tail is the sampler's)."""
     if c := cool(name):
         start, before, after = c
         return cooldown(resolve(after), start, resolve(before) if before else control)
-    if r := recent(name):  # POLICY, then only its games from YYYY-MM on after NN%
-        start, since, inner = r
-        return tail_recent(resolve(inner), start, since)
+    if r := recent(name):
+        return resolve(r[-1])
     return (
         table(name.removeprefix("table:"))
         if name.startswith("table:")
@@ -481,6 +505,11 @@ def read(path, cols):
         return pq.ParquetFile(f).read(columns=cols)
 
 
+def month(path):
+    """The month directory a shard lives in: YYYY-MM, or 20xx-NAME in an external store."""
+    return Path(path).parents[2].name
+
+
 class Shard:
     """The resident shard of one bucket plus its policy outputs for the current phase."""
 
@@ -493,7 +522,7 @@ class Shard:
         )
         self.g.code = int(Path(path).parent.name[1:])
         self.g.src = self.g.code // 100000  # 0 lichess, else ext source
-        self.g.month = Path(path).parents[2].name
+        self.g.month = month(path)
 
     def policy(self, fn, ph):
         if self.phase != ph:
@@ -535,6 +564,7 @@ class Sampler:
             max(1, total_rows),
             chunk,
         )
+        self.tail = tail(policy)
         months = (
             sorted(months)
             if months
@@ -590,6 +620,15 @@ class Sampler:
                 self.units.setdefault(b["code"], []).append((str(Path(m) / s), rows))
                 left -= rows
         self.codes = sorted(self.units)
+        self.split = {}  # Lichess bucket -> (recent shards, older shards) its tail draws come from
+        for c, shards in self.units.items() if self.tail else ():
+            since = self.tail[1]
+            parts = (
+                [u for u in shards if month(u[0]) >= since],
+                [u for u in shards if month(u[0]) < since],
+            )
+            if c // 100000 == 0 and all(parts):
+                self.split[c] = parts
         self.games = np.array([games[c] for c in self.codes], float)
         self.paths = [p for c in self.codes for p, _ in self.units[c]]
         self.ends = [int(self.games.sum())]
@@ -607,12 +646,21 @@ class Sampler:
             self.cdf, self.weights_phase = np.cumsum(total) / total.sum(), ph
         return ph
 
-    def _take(self, k, count, rng, cursor):
-        """The next `count` games of bucket k as (path, rows, index array) pieces."""
-        code, pieces = self.codes[k], []
-        shards = self.units[code]
+    def _pools(self, k, count, rng):
+        """(cursor key, shards, draws) of the pools bucket k's next `count` draws come from: its shards, or in the
+        tail its recent and its older months' (a binomial split of the draws at the tail's recent fraction)."""
+        code = self.codes[k]
+        if self.tail and self.weights_phase >= self.tail[0] and code in self.split:
+            recent, old = self.split[code]
+            n = int(rng.binomial(count, self.tail[2]))
+            return [((code, "recent"), recent, n), ((code, "old"), old, count - n)]
+        return [(code, self.units[code], count)]
+
+    def _take(self, key, shards, count, rng, cursor):
+        """The next `count` games of `shards` under cursor `key` as (path, rows, index array) pieces."""
+        pieces = []
         while count:
-            cur = cursor.setdefault(code, [int(rng.integers(2**63)), 0, 0])
+            cur = cursor.setdefault(key, [int(rng.integers(2**63)), 0, 0])
             path, rows = shards[
                 np.random.default_rng(cur[0]).permutation(len(shards))[cur[1]]
             ]
@@ -631,7 +679,10 @@ class Sampler:
         before the next bucket's take, which fixes the order of rng draws."""
         drawn = np.searchsorted(self.cdf, rng.random(self.chunk), side="right")
         for k, count in zip(*np.unique(drawn, return_counts=True)):
-            yield int(k), self._take(int(k), int(count), rng, cursor)
+            pieces = []
+            for key, shards, n in self._pools(int(k), int(count), rng):
+                pieces += self._take(key, shards, n, rng, cursor)
+            yield int(k), pieces
 
     def _paths(self):
         """Non-resident shards the next chunk opens, found by replaying its draws on copies of the
@@ -736,7 +787,7 @@ class Sampler:
         )
 
     def load_state_dict(self, state):
-        if state["policy"] != self.policy:
+        if not same_until(state["policy"], self.policy, state["seen"] / self.total_rows):
             raise ValueError("Checkpoint mixing policy differs")
         if state.get("row", ROW) != self.row:
             raise ValueError("Checkpoint row length differs")
@@ -752,10 +803,18 @@ class Sampler:
         self.pool = list(zip(*chans)) if state["pool_lens"] else []
 
 
-def _produce(init, state, args, keep, q, req, ans):
+def _produce(init, state, args, keep, q, req, ans, parent):
     """Child process: rebuild the sampler at `state`, stream numbered batches, and answer
-    state requests for any recently produced batch number."""
+    state requests for any recently produced batch number. Dies with its parent: a rank killed by a
+    signal (OOM, torchrun) cannot clean up, and an orphaned worker would keep its sampler state
+    (gigabytes) inside the job's memory cgroup."""
     try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+        if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+            raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) failed")
+        if os.getppid() != parent:  # the parent died before the prctl took effect
+            os._exit(0)
         s = Sampler(**init)
         s.load_state_dict(state)
         snaps, lock = {}, threading.Lock()
@@ -769,6 +828,8 @@ def _produce(init, state, args, keep, q, req, ans):
 
         threading.Thread(target=serve, daemon=True).start()
         for seq in itertools.count(1):
+            if os.getppid() != parent:
+                os._exit(0)
             rows = s.batch(*args)
             with lock:
                 snaps[seq] = s.snapshot()
@@ -804,6 +865,7 @@ class Prefetch:
                     self.q,
                     self.req,
                     self.ans,
+                    os.getpid(),
                 ),
                 daemon=True,
             )
