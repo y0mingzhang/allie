@@ -724,6 +724,154 @@ def binned(values):
     return np.array([np.average(values[k], weights=w[k]) for k in keep if k.any()])
 
 
+def protocol_scores():
+    """Each model's benchmark scores per position, in games.npz's sampled order: (legal-move CE, top-1)."""
+    with np.load(DATA / "maia3-bench/games.npz") as z:
+        keep = z["keep"]
+
+    def read(path):
+        with np.load(path) as z:
+            ce, top1 = (
+                (z["ce_legal"], z["top1"]) if "ce_legal" in z else (z["ce"], z["top1"])
+            )
+        return (ce, top1) if len(ce) == len(keep) else (ce[keep], top1[keep])
+
+    paths = {NAME[m]: DATA / f"maia3-bench/scores/{m}.npz" for m in MAIA}
+    paths["Original Allie"] = ORIGINAL / "bench/allie1-medium.npz"
+    paths["Allie 2.0"] = DATA / "maia3-bench/bigrun-v2/step-00143051/scores.npz"
+    return {k: read(p) for k, p in paths.items() if Path(p).exists()}
+
+
+def dots(ax, rows, key, scale, color_of):
+    """One row per model: its paired difference from Maia-3 79M and the 95% interval, top to bottom."""
+    for i, (name, r) in enumerate(rows):
+        d = r[key]
+        y = len(rows) - 1 - i
+        c = color_of(name)
+        ax.plot(
+            [d["lo"] * scale, d["hi"] * scale],
+            [y, y],
+            color=c,
+            lw=2.4,
+            alpha=0.35,
+            zorder=3,
+        )
+        dot(ax, d["mean"] * scale, y, c, ms=9 if name == "Allie 2.0" else 8)
+    ax.axvline(0, color=MAIA["maia3-79m"], lw=1.4, zorder=2)
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([n for n, _ in rows][::-1])
+    ax.set_ylim(-0.6, len(rows) - 0.4)
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True)
+
+
+def color_of(name):
+    return (
+        BLUE
+        if name == "Allie 2.0"
+        else {**{NAME[m]: c for m, c in MAIA.items()}, "Original Allie": INK2}[name]
+    )
+
+
+def protocol():
+    """On Maia-3's evaluation rule: each model's loss and top-1 accuracy minus Maia-3 79M's, paired on the same
+    positions, with 95% game-bootstrap intervals (allie.eval.maia3.aggregate.compare)."""
+    sys.path[:0] = [str(ROOT / "src")]
+    from allie.eval.maia3 import aggregate
+
+    res = aggregate.compare(protocol_scores())["maia_protocol"]
+    order = ["Maia-3 5M", "Maia-3 23M", "Original Allie", "Allie 2.0"]
+    rows = [(n, res[n]) for n in order if n in res]
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.3), sharey=True)
+    fig.subplots_adjust(left=0.22, right=0.97, top=0.86, bottom=0.2, wspace=0.28)
+    dots(axes[0], rows, "d_ce", 1, color_of)
+    dots(axes[1], rows, "d_top1", 1, color_of)
+    axes[0].set_title("Loss (nats)", fontsize=TEXT, color=INK2)
+    axes[1].set_title("Top choice correct (points)", fontsize=TEXT, color=INK2)
+    for ax, fmt in ((axes[0], "{:+.2f}"), (axes[1], "{:+.0f}")):
+        ax.xaxis.set_major_locator(MaxNLocator(4))
+        ax.xaxis.set_major_formatter(
+            FuncFormatter(
+                lambda v, _, f=fmt: f.format(v).translate(MINUS) if v else "0"
+            )
+        )
+    for ax, dx, ha in ((axes[0], 4, "left"), (axes[1], -4, "right")):
+        ax.annotate("Maia-3 79M", (0, 1.0), xycoords=("data", "axes fraction"), xytext=(dx, -2),
+                    textcoords="offset points", ha=ha, va="top", fontsize=12, color=MUTED)  # fmt: skip
+    axes[0].set_xlim(-0.03, 0.09)
+    axes[1].set_xlim(-2.6, 1.0)
+    fig.text(
+        0.595,
+        0.04,
+        "Difference from Maia-3 79M",
+        ha="center",
+        fontsize=TEXT,
+        color=INK2,
+    )
+    save(fig, "protocol")
+    print(f"  {res['positions']} positions")
+    for n, r in rows + [("Maia-3 79M", res["Maia-3 79M"])]:
+        extra = ""
+        if "d_ce" in r:
+            a, b = r["d_ce"], r["d_top1"]
+            extra = f"  dCE {a['mean']:+.4f} [{a['lo']:+.4f}, {a['hi']:+.4f}]  dtop1 {b['mean']:+.2f} [{b['lo']:+.2f}, {b['hi']:+.2f}]"
+        print(f"  {n:16s} CE {r['ce']:.4f} top-1 {r['top1']:.2f}{extra}")
+
+
+CLOCKS = ["<10 s", "10-30 s", "30-60 s", "1-2 min", "2+ min"]
+
+
+def versatility():
+    """Allie 2.0's loss minus Maia-3 79M's by time control (bullet, rapid and classical from the formats sample,
+    5,000 positions per rating band; blitz from the benchmark) and, in blitz, by time left on the mover's clock;
+    paired 95% game-bootstrap intervals (allie.eval.maia3.report's aggregate-bigrun.json)."""
+    sl = jload(X / "maia3-bench/aggregate-bigrun.json")["slices"]
+    groups = (
+        (
+            "Time control",
+            [(f, sl["format"][f]) for f in ("bullet", "blitz", "rapid", "classical")],
+        ),
+        (
+            "Blitz, by time left",
+            [(t, sl["clock"][k]) for t, k in zip(CLOCKS, sl["clock"])],
+        ),
+    )
+    fig, axes = plt.subplots(
+        1, 2, figsize=(7.2, 3.6), sharey=True, gridspec_kw={"width_ratios": [4, 5]}
+    )
+    fig.subplots_adjust(left=0.13, right=0.98, top=0.86, bottom=0.17, wspace=0.08)
+    for ax, (title, items) in zip(axes, groups):
+        ax.axhline(0, color=MAIA["maia3-79m"], lw=1.4, zorder=2)
+        for i, (name, d) in enumerate(items):
+            e = d["d_ce_maia3-79m"]
+            ax.plot(
+                [i, i], [e["lo"], e["hi"]], color=BLUE, lw=2.4, alpha=0.35, zorder=3
+            )
+            dot(ax, i, e["mean"], BLUE)
+        ax.set_xticks(range(len(items)))
+        ax.set_xticklabels([n for n, _ in items], fontsize=12)
+        ax.set_xlim(-0.5, len(items) - 0.5)
+        ax.set_title(title, fontsize=TEXT, color=INK2)
+    label(axes[0], "Maia-3 79M", (-0.45, 0), 0, 7, va="bottom", color=MUTED, size=12)
+    axes[0].set_ylim(-0.27, 0.04)
+    axes[0].yaxis.set_major_locator(FixedLocator([-0.25, -0.2, -0.15, -0.1, -0.05, 0]))
+    axes[0].yaxis.set_major_formatter(
+        FuncFormatter(lambda v, _: f"{v:+.2f}".translate(MINUS) if v else "0")
+    )
+    axes[0].set_ylabel("Loss minus Maia-3 79M's")
+    save(fig, "versatility")
+    for title, items in groups:
+        for name, d in items:
+            e, a = (
+                d["d_ce_maia3-79m"],
+                d.get("d_top1_maia3-79m") or d.get("d_acc_maia3-79m"),
+            )
+            print(
+                f"  {title[:12]:12s} {name:10s} n {d['n']:6d}  dCE {e['mean']:+.4f} [{e['lo']:+.4f}, {e['hi']:+.4f}]"
+                f"  dtop1 {100 * a['mean']:+.2f} [{100 * a['lo']:+.2f}, {100 * a['hi']:+.2f}]"
+            )
+
+
 FIGS = {
     "training": training,
     "isoflop": isoflop,
@@ -733,6 +881,8 @@ FIGS = {
     "model": model,
     "pareto": pareto,
     "rating": rating,
+    "protocol": protocol,
+    "versatility": versatility,
 }
 
 if __name__ == "__main__":
