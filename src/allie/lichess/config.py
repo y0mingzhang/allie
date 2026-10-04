@@ -3,6 +3,7 @@
 import tomllib
 from dataclasses import dataclass, field, fields
 
+from .chat import Chat
 from .engine import Play
 
 
@@ -33,6 +34,7 @@ class Config:
     greeting: str = ""
     challenge: Challenge = field(default_factory=Challenge)
     play: Play = field(default_factory=Play)
+    chat: Chat = field(default_factory=Chat)
 
 
 def build(cls, d):
@@ -40,7 +42,7 @@ def build(cls, d):
     unknown = set(d) - set(names)
     if unknown:
         raise ValueError(f"unknown {cls.__name__} keys: {sorted(unknown)}")
-    sub = {"challenge": Challenge, "play": Play}
+    sub = {"challenge": Challenge, "play": Play, "chat": Chat}
     return cls(**{k: build(sub[k], v) if k in sub else v for k, v in d.items()})
 
 

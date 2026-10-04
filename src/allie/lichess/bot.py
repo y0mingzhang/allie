@@ -6,6 +6,7 @@ import threading
 import time
 import urllib.error
 
+from .chat import Chatter
 from .engine import Decision, Game
 
 log = logging.getLogger(__name__)
@@ -170,6 +171,7 @@ class Match:
         self.moved = self.answered = -1
         self.claim = None
         self.stats = []
+        self.chat = Chatter(self) if bot.config.chat.enabled else None
 
     def on_event(self, event):
         match event["type"]:
@@ -179,6 +181,10 @@ class Match:
                 self.on_state(event)
             case "opponentGone":
                 self.on_gone(event)
+            case "chatLine" if self.chat:
+                self.chat.heard(event)
+        if self.chat and event["type"] in ("gameFull", "gameState"):
+            self.chat.seen(event)
 
     def on_full(self, event):
         play = self.bot.config.play

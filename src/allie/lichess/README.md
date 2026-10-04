@@ -73,6 +73,33 @@ trust_remote_code=True)`, see the model card).
   or bots, and games per opponent. Only standard chess from the starting position is accepted. Beyond
   `max_games`, challenges are declined with "later".
 
+## Chat
+
+With `[chat] enabled = true` (default off), the bot talks in the game chat in natural language. Claude
+(`claude-sonnet-5-5`, effort low, thinking off) writes each message from facts the bot computes: the moves
+and position, how likely Allie found each move at the mover's rating, Allie's win / draw / loss estimate
+and how it moved, think times from the clocks, and after the game Stockfish's verdict on each side's
+costliest move.
+
+- **When it speaks.** A hello that mentions `!quiet`; a compliment when the opponent plays a move Allie
+  found rare (under 8% at their rating) and strong (their expected score up 12 points); a gracious word
+  when the bot's prospects fall 25 points from their high; an answer when someone writes; a post-game
+  message. At most `remarks` unprompted remarks a game, `every` plies apart, and `gap` seconds between
+  messages. Messages that arrive while the model writes get one answer, to the last.
+- **Fair play.** During the game the model never sees Stockfish, the opponent's mistakes (a move that
+  helped the bot) or the bot's estimate when it is above 55%, and is told never to suggest moves or point
+  out threats. `!quiet` from the opponent mutes the bot for that game and their rematches.
+- **Never in the way.** Each game's chat runs on its own thread; a call that takes over `timeout` (3 s)
+  is dropped, a remark is dropped if the game moved on two plies, and an error only skips a message.
+  A bad key or model turns the model off (the hello and `!quiet` reply stay); a rate limit pauses it a
+  minute.
+- **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`
+  (`chmod 600`) or `ANTHROPIC_API_KEY`. The bot logs each call's tokens (cached and not) and latency,
+  never the key.
+- **Dry run.** `analysis/lichess/chat_dryrun.py record` replays recorded games through the model as the
+  bot feeds it; `replay` prints the chat they would have had, with scripted opponent messages
+  (`--llm mock` needs no key).
+
 ## Cost and accuracy
 
 **Speed and memory.** One cached step, the time a move takes once the opponent's move arrives (median of 35

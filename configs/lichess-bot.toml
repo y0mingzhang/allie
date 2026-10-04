@@ -34,3 +34,17 @@ resign_loss = 0.97            # resign once P(loss) >= this for resign_moves own
 resign_moves = 3
 draw_accept = 0.4             # accept a draw offer when P(win) + P(draw) / 2 <= this
 draw_offer = 0.9              # offer a draw from ply 60 when P(draw) >= this (above 1: never)
+
+[chat]                        # natural-language chat written by Claude from Allie's numbers (README)
+enabled = false               # needs `uv sync --extra chat` and an Anthropic API key
+rooms = ["player"]            # remarks go here; add "spectator" to answer spectators too
+model = "claude-sonnet-5-5"
+effort = "low"                # output_config.effort; thinking "between_tools" = off, for latency
+max_tokens = 200
+timeout = 3.0                 # seconds; a late message is dropped, a move never waits
+key_file = "~/.config/allie/anthropic_key"  # chmod 600; ANTHROPIC_API_KEY wins if set
+every = 10                    # plies between two unprompted remarks, at least
+remarks = 4                   # unprompted remarks per game (besides hello and post-game)
+replies = 8                   # answers to chat messages per game
+gap = 4.0                     # seconds between two messages, at least
+stockfish = ""                # a Stockfish binary for the post-game message (never used mid-game)

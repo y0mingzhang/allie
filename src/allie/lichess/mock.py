@@ -42,7 +42,7 @@ class MockGame:
         self.version = 0
         self.history = []  # each move's mover's clock after it, ms
         self.changed = threading.Condition()
-        self.chat = []
+        self.chat = []  # chatLine events, as the game stream sends them
 
     def color(self, user):
         return (
@@ -83,6 +83,10 @@ class MockGame:
         with self.changed:
             self.version += 1
             self.changed.notify_all()
+
+    def say(self, user, text, room="player"):
+        self.chat.append(dict(type="chatLine", room=room, username=user, text=text))
+        self.publish()
 
     def end(self, status, winner=None):
         self.status, self.winner = status, winner
@@ -318,20 +322,25 @@ class Handler(BaseHTTPRequestHandler):
         self.mock.drop_after = None
         try:
             with g.changed:
-                seen = g.version
-            self.line(g.full())
+                seen, said, full = g.version, len(g.chat), g.full()
+            self.line(full)
+            last = full["state"]
             while g.status == "started" and not self.mock.closing.is_set():
                 with g.changed:
                     if g.version == seen:
                         g.changed.wait(1)
                     changed, seen = g.version != seen, g.version
-                if changed:
-                    self.line(g.state())
-                    sent += 1
+                if not changed:
+                    self.line()
+                    continue
+                for e in g.chat[said:]:
+                    self.line(e)
+                said = len(g.chat)
+                if (s := g.state()) != last:
+                    self.line(s)
+                    last, sent = s, sent + 1
                     if drop is not None and sent >= drop:
                         return
-                else:
-                    self.line()
             self.line(g.state())
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -361,7 +370,8 @@ class Handler(BaseHTTPRequestHandler):
                     g.publish()
             case ["chat"]:
                 n = int(self.headers.get("Content-Length") or 0)
-                g.chat.append(urllib.parse.parse_qs(self.rfile.read(n).decode()))
+                form = urllib.parse.parse_qs(self.rfile.read(n).decode())
+                g.say(user, form["text"][0], form.get("room", ["player"])[0])
             case ["claim-victory"]:
                 pass
             case _:
