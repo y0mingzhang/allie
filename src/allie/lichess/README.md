@@ -62,13 +62,23 @@ trust_remote_code=True)`, see the model card).
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
 | `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
 
-- **Think time.** With `play.think_time`, the bot waits for a think time drawn from the model's own think-time
-  prediction, which depends on the position, the clock and the ratings. It never waits longer than
-  `play.max_think` of its remaining clock. Compute time counts toward the wait.
-- **Resigning.** The bot resigns when the model gives it at least `play.resign_loss` probability of losing for
-  `play.resign_moves` of its own moves in a row, from ply 20.
-- **Draws.** It accepts a draw offer when its expected score, P(win) + P(draw)/2, is at most `play.draw_accept`.
-  From ply 60, it offers a draw when P(draw) is at least `play.draw_offer`.
+- **Think time.** The bot waits for a think time drawn from the model's think-time head: a full
+  distribution over 63 bins, from 0 s to over an hour, conditioned on the position, both clocks and both
+  ratings. A draw, not the average, so it plays fast moves fast and sometimes thinks long, as people do.
+  A guard keeps every wait under a share of the clock left (plus the increment), fitted so that human moves
+  almost never exceed it. Compute time counts toward the wait. Each side's first move takes 0.5-2 s.
+- **Resigning.** Each turn, the bot resigns with the probability that a human of its rating resigns in that
+  situation: a hazard fitted on held-out human games, from the model's win / draw / loss estimate, the ply,
+  the rating, the time control and the clock. It never resigns while the model gives it a real chance (the
+  1st percentile of P(loss) at human resignations). `play.resign = false` turns it off.
+- **Draws.** It offers draws as often as humans end games by agreement in that situation, and accepts an offer
+  unless it is clearly better (expected score above where 95% of human agreements happen).
+  `play.draws = false` turns both off.
+- **Calibration.** `analysis/lichess/human.py` scores the main evaluation's July 2026 games, fits
+  `behaviour.json` on half of them and compares on the other half, then plays the bot against itself in the
+  same ratings and time controls to compare its games with the humans'. See "Human-likeness" below.
+- **Modes.** `play.mode` names a function in `engine.MODES`. It chooses the move from `game.position()` and
+  passes it to `game.behave()`, which adds the think time, resignation and draw offer.
 - **Challenges.** `[challenge]` sets the accepted speeds, base times, increments, rated or casual games, humans
   or bots, and games per opponent. Only standard chess from the starting position is accepted. Beyond
   `max_games`, challenges are declined with "later".

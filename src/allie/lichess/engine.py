@@ -1,6 +1,5 @@
 """Move choice for live games: one resident model, one inference thread batching all games."""
 
-import math
 import queue
 import threading
 from concurrent.futures import Future
@@ -10,26 +9,23 @@ import chess
 import numpy as np
 import torch
 
+from . import behaviour
+from .behaviour import FORMATS
 from .model import Cache, step
 from .tokens import CONTEXT, HEADER, MOVE_ID, START, advance, features, fill, header
 
 TIME, WDL = slice(2350, 2413), slice(2413, 2416)
-# allie.search's format of each Lichess speed: bullet, blitz, rapid, classical
-FORMATS = dict(ultraBullet=0, bullet=0, blitz=1, rapid=2, classical=3, correspondence=3)
 
 
 @dataclass
 class Play:
-    mode: str = "human"  # human: sample the policy; strongest: argmax (or search)
+    mode: str = "human"  # a key of MODES: human samples the policy; strongest: argmax (or search)
     rating: int | str = 1500  # the bot's header Elo, or "opponent" to mirror it
     temperature: float = 1.0  # human mode
     search: int = 0  # strongest mode: coverage-search simulations (0 = policy argmax)
-    think_time: bool = True  # wait the model's predicted human think time
-    max_think: float = 0.1  # ... at most this fraction of the clock left
-    resign_loss: float = 0.97  # resign after resign_moves own moves at P(loss) >= this
-    resign_moves: int = 3
-    draw_accept: float = 0.4  # accept a draw offer when W + D/2 <= this
-    draw_offer: float = 0.9  # offer a draw from ply 60 when P(draw) >= this (1 = never)
+    think_time: bool = True  # wait a think time drawn from the model's think-time head
+    resign: bool = True  # resign as often and as late as humans of the bot's rating do
+    draws: bool = True  # offer and accept draws as humans do (otherwise: never)
 
 
 class Engine:
@@ -114,7 +110,6 @@ class Game:
         self.cache = Cache(engine.model)
         self.logits, self.used = None, []  # the logits at the cache's end; its (token, features)
         self.rng = np.random.default_rng(seed)
-        self.losing = 0
 
     def update(self, moves, wtime=None, btime=None):
         """The server's move list and clocks (seconds) after its last move."""
@@ -178,58 +173,77 @@ class Game:
 
     def decide(self, play, search=None, clock=None):
         """The bot's move at the current position. clock: its time left in seconds."""
-        legal = [m.uci() for m in self.board.legal_moves]
         try:
-            z = self.sync().double()
+            return MODES[play.mode](self, play, search, clock)
         except OverflowError:  # past 1,014 plies: a random legal move
+            legal = [m.uci() for m in self.board.legal_moves]
             return Decision(str(self.rng.choice(legal)), 0.0, (0, 1, 0), 1 / len(legal))
-        ids = torch.tensor([MOVE_ID[m] for m in legal])
-        p = torch.softmax(z[ids], 0).numpy()
-        if play.mode == "strongest" and search is not None and play.search:
-            moves, q = search(self, play.search)
-            p = np.zeros(len(legal))
-            p[[legal.index(m) for m in moves]] = q
-        if play.mode == "strongest" or play.temperature <= 0:
-            i = int(p.argmax())
-        else:
-            t = np.log(np.maximum(p, 1e-300))
-            with np.errstate(over="ignore"):
-                t = np.exp((t - t.max()) / play.temperature)
-            i = int(self.rng.choice(len(p), p=t / t.sum()))
-        wdl = tuple(torch.softmax(z[WDL], 0).tolist())
+
+    def position(self):
+        """The legal moves (UCI), their probabilities, the side to move's win / draw / loss
+        probabilities and its think-time distribution (63 bins)."""
+        z = self.sync().double()
+        legal = [m.uci() for m in self.board.legal_moves]
+        p = torch.softmax(z[[MOVE_ID[m] for m in legal]], 0).numpy()
+        return legal, p, tuple(torch.softmax(z[WDL], 0).tolist()), torch.softmax(z[TIME], 0).numpy()
+
+    def behave(self, play, clock, move, probability, wdl, time):
+        """A Decision for this move: think time, resignation and draw offer as humans of the
+        bot's rating behave (behaviour.py)."""
         ply = len(self.moves)
-        self.losing = self.losing + 1 if wdl[2] >= play.resign_loss else 0
+        x = (wdl, ply, self.elo[ply % 2], FORMATS.get(self.speed, 1), clock, self.base)
         return Decision(
-            move=legal[i],
-            think=self.think(z, play, clock) if play.think_time else 0.0,
+            move=move,
+            think=behaviour.think(time, self.rng, clock, self.inc, ply) if play.think_time else 0.0,
             wdl=wdl,
-            probability=float(p[i]),
-            resign=self.losing >= play.resign_moves and ply >= 20,
-            offer_draw=ply >= 60 and wdl[1] >= play.draw_offer,
+            probability=float(probability),
+            resign=play.resign and ply >= 2 and behaviour.resign(*x, self.rng),
+            offer_draw=play.draws and behaviour.offer_draw(*x, self.rng),
         )
 
-    def think(self, z, play, clock):
-        """A think time drawn from the model's head (trained from each side's second move)."""
-        if len(self.moves) < 2:
-            return float(self.rng.uniform(0.5, 2))
-        p = torch.softmax(z[TIME], 0).numpy()
-        b = self.rng.choice(len(p), p=p / p.sum())
-        u = self.rng.uniform(-0.5, 0.5)
-        s = max(b + u, 0.0) if b < 16 else 16 * math.exp((b - 16 + u) / 7.06)
-        return min(s, play.max_think * clock) if clock is not None else s
-
     def accept_draw(self, play, white):
-        """For the bot playing white (or not): is its expected score at most draw_accept?"""
+        """For the bot playing white (or not): accept a draw offer, as a human would?"""
+        if not play.draws:
+            return False
         try:
             w, d, loss = torch.softmax(self.sync().double()[WDL], 0).tolist()
         except OverflowError:
             return True
         if (len(self.moves) % 2 == 0) != white:  # the head speaks for the side to move
-            w = loss
-        return w + d / 2 <= play.draw_accept
+            w, loss = loss, w
+        return behaviour.accept_draw((w, d, loss))
 
     def cell(self, elo):
         """allie.search's cell: format x mover Elo band."""
         band = 0 if elo < 1400 else 1 if elo < 2000 else 2 if elo < 2400 else 3
         return 4 * FORMATS.get(self.speed, 1) + band
+
+
+def human(game, play, search, clock):
+    """A move sampled from the policy at play.temperature."""
+    legal, p, wdl, time = game.position()
+    if play.temperature <= 0:
+        i = int(p.argmax())
+    else:
+        t = np.log(np.maximum(p, 1e-300))
+        with np.errstate(over="ignore"):
+            t = np.exp((t - t.max()) / play.temperature)
+        i = int(game.rng.choice(len(p), p=t / t.sum()))
+    return game.behave(play, clock, legal[i], p[i], wdl, time)
+
+
+def strongest(game, play, search, clock):
+    """The most likely move, or the searched distribution's (play.search simulations)."""
+    legal, p, wdl, time = game.position()
+    if search is not None and play.search:
+        moves, q = search(game, play.search)
+        p = np.zeros(len(legal))
+        p[[legal.index(m) for m in moves]] = q
+    i = int(p.argmax())
+    return game.behave(play, clock, legal[i], p[i], wdl, time)
+
+
+# play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and
+# usually leaves timing, resignation and draws to game.behave.
+MODES = dict(human=human, strongest=strongest)
 

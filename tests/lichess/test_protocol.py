@@ -29,7 +29,8 @@ def engine(tiny):
 
 def start(engine, mock=None, **play):
     mock = mock or MockLichess({"tok": "allie"})
-    config = Config(max_games=4, play=Play(think_time=False, **play))
+    play = dict(think_time=False, resign=False, draws=False) | play
+    config = Config(max_games=4, play=Play(**play))
     bot = Bot(config, Lichess("tok", mock.url, wait=0.1), engine)
     run = threading.Thread(target=bot.run, daemon=True)
     run.start()
@@ -113,23 +114,24 @@ def test_clock_features(engine):
     assert len(known) >= 0.8 * len(game.clocks) and all(c == h for c, h in known)
 
 
-def test_draw_offer_and_resign(engine):
+def test_draw_offer_and_resign(engine, monkeypatch):
+    from allie.lichess import behaviour
+
+    monkeypatch.setattr(behaviour, "accept_draw", lambda wdl: True)
     mock = MockLichess({"tok": "allie"})
     mock.house_offers = {6}
-    mock, _ = start(engine, mock, draw_accept=1.0)
+    mock, _ = start(engine, mock, draws=True)
     mock.challenge("random", "allie", 60, 1, color="white")
     wait(lambda: finished(mock))
     g = next(iter(mock.games.values()))
     assert g.status == "draw"
-    mock2, _ = start(engine, resign_loss=0.0, resign_moves=1)
+    monkeypatch.setattr(behaviour, "resign", lambda *args: True)
+    mock2, _ = start(engine, resign=True)
     mock2.challenge("random", "allie", 60, 1, color="white")
     wait(lambda: finished(mock2))
     g2 = next(iter(mock2.games.values()))
-    assert (
-        g2.status == "resign"
-        and g2.winner == "white"  # the challenger, who chose white
-        and len(g2.board.move_stack) >= 20
-    )
+    # the bot (black) resigns at its first turn after each side has moved
+    assert g2.status == "resign" and g2.winner == "white" and len(g2.board.move_stack) == 3
 
 
 def test_rejects_bad_token():

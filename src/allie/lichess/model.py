@@ -296,13 +296,16 @@ class Cache:
 
 
 @torch.inference_mode()
-def step(model, items):
+def step(model, items, every=False):
     """Append tokens to caches in one batched forward. items: (cache, ids, feats, boards) with
     ids [m] int64, feats [m, 3] and boards [m, 68] uint8 tensors on the model's device. Returns
-    the logits [len(items), 2432] FP32 at each item's last new token."""
-    if model.fast is not None:
+    the logits [len(items), 2432] FP32 at each item's last new token (every: at every new
+    token, [sum of m, 2432]; the PyTorch backend only)."""
+    if every:
+        assert model.fast is None and model.graphs is None, "every needs backend='torch'"
+    elif model.fast is not None:
         return model.fast.step(items)
-    if model.graphs is not None and (z := model.graphs.step(items)) is not None:
+    elif model.graphs is not None and (z := model.graphs.step(items)) is not None:
         return z
     spans, lo = [], 0
     for cache, ids, *_ in items:
@@ -342,7 +345,7 @@ def step(model, items):
         return y
 
     cat = lambda j: torch.cat([it[j] for it in items]).to(dev)
-    last = torch.tensor([b - 1 for _, _, b, _ in spans], device=dev)
+    last = None if every else torch.tensor([b - 1 for _, _, b, _ in spans], device=dev)
     logits = model.forward(cat(1), pos, cat(2), cat(3), previous, attend, last)
     for c, a, b, n0 in spans:
         c.n = n0 + b - a

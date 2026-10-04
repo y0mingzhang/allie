@@ -24,16 +24,13 @@ bots = false
 per_user = 1                  # concurrent games with one opponent
 
 [play]
-mode = "human"                # human: sample the policy; strongest: argmax (or search)
+mode = "human"                # human: sample the policy; strongest: argmax (or search); see engine.MODES
 rating = "opponent"           # the bot's Elo in the game header: a number, or "opponent" to mirror it
 temperature = 1.0             # human mode; 1 is the model's own distribution
 search = 0                    # strongest mode: 0 or 5 / 8 / 25 / 128 coverage-search simulations
-think_time = true             # wait the model's predicted human think time before moving
-max_think = 0.1               # ... capped at this fraction of the clock left
-resign_loss = 0.97            # resign once P(loss) >= this for resign_moves own moves (from ply 20)
-resign_moves = 3
-draw_accept = 0.4             # accept a draw offer when P(win) + P(draw) / 2 <= this
-draw_offer = 0.9              # offer a draw from ply 60 when P(draw) >= this (above 1: never)
+think_time = true             # wait a think time drawn from the model's think-time head, as a human would
+resign = true                 # resign as often and as late as humans of the bot's rating do (behaviour.json)
+draws = true                  # offer and accept draws as humans do; false: never
 
 [chat]                        # natural-language chat written by Claude from Allie's numbers (README)
 enabled = false               # needs `uv sync --extra chat` and an Anthropic API key

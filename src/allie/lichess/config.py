@@ -64,7 +64,9 @@ def load(path, overrides=()):
         t[key] = value
     c = build(Config, d)
     p = c.play
-    assert p.mode in ("human", "strongest"), p.mode
+    from .engine import MODES
+
+    assert p.mode in MODES, f"play.mode: one of {sorted(MODES)}"
     assert p.rating == "opponent" or isinstance(p.rating, int), p.rating
     assert p.search in (0, 5, 8, 25, 128), "search: 0 or 5 / 8 / 25 / 128 simulations"
     return c
