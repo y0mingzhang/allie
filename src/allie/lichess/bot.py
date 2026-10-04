@@ -158,6 +158,7 @@ class Bot:
                         if event:
                             match.on_event(event)
                             backoff = 1
+                        match.tick()
                         if match.over or self.stopped.is_set():
                             break
                     else:
@@ -196,7 +197,7 @@ class Match:
         self.bot, self.gid = bot, gid
         self.game, self.white, self.over, self.opponent = None, None, False, None
         self.moved = self.answered = self.conceded = -1
-        self.claim = None
+        self.claim, self.waiting = None, None  # waiting: since when the opponent owes a first move
         self.stats = []
         self.chat = Chatter(self) if bot.config.chat.enabled else None
 
@@ -245,6 +246,8 @@ class Match:
             self.over = True
             return
         moves = s["moves"].split()
+        first = len(moves) < 2 and (len(moves) % 2 == 0) != self.white
+        self.waiting = (self.waiting or time.monotonic()) if first else None
         game, play = self.game, self.bot.config.play
         game.update(moves, s["wtime"] / 1000, s["btime"] / 1000)
         if s.get("bdraw" if self.white else "wdraw") and self.answered != len(moves):
@@ -278,6 +281,15 @@ class Match:
             self.bot.stopped.wait(d.think - spent)
         if self.call(self.bot.client.move, self.gid, d.move, d.offer_draw) is not None:
             self.moved = len(moves)
+
+    def tick(self):
+        """Abort a game whose opponent has not made a first move in config.abort seconds:
+        Lichess can leave it open for an hour, holding a slot and blocking a drain."""
+        wait = self.bot.config.abort
+        if self.waiting and wait and time.monotonic() - self.waiting > wait:
+            log.info("game %s: no first move from the opponent in %g s; aborting", self.gid, wait)
+            self.waiting = time.monotonic()  # if the abort fails, retry a period later
+            self.call(self.bot.client.abort, self.gid)
 
     def on_gone(self, event):
         if self.claim:

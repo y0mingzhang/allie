@@ -230,7 +230,7 @@ class MockLichess:
             if g.status == "started" and g.color(user) == (
                 "white" if white else "black"
             ):
-                time.sleep(self.house_delay)
+                self.closing.wait(self.house_delay)
                 offer = len(g.board.move_stack) in self.house_offers
                 g.move(user, self.house(g.board.copy()), offer)
 
@@ -374,6 +374,8 @@ class Handler(BaseHTTPRequestHandler):
             case ["resign"]:
                 g.end("resign", "black" if color == "white" else "white")
             case ["abort"]:
+                if len(g.board.move_stack) >= 2:  # as Lichess: only before both sides moved
+                    return self.reply(400, {"error": "game cannot be aborted"})
                 g.end("aborted")
             case ["draw", answer]:
                 other = "black" if color == "white" else "white"

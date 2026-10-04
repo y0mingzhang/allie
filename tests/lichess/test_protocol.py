@@ -27,10 +27,10 @@ def engine(tiny):
     e.close()
 
 
-def start(engine, mock=None, max_games=4, **play):
+def start(engine, mock=None, max_games=4, abort=30, **play):
     mock = mock or MockLichess({"tok": "allie"})
     play = dict(think_time=False, resign=False, draws=False) | play
-    config = Config(max_games=max_games, play=Play(**play))
+    config = Config(max_games=max_games, abort=abort, play=Play(**play))
     bot = Bot(config, Lichess("tok", mock.url, wait=0.1, silence=3), engine)  # mock keepalives: 1 s
     run = threading.Thread(target=bot.run, daemon=True)
     run.start()
@@ -307,3 +307,17 @@ def test_plays_through_a_full_disk(engine, tmp_path, monkeypatch):
     text = path.read_text()
     assert "lines could not be written here" in text and text.rstrip().endswith("disk back")
     assert " over: " in local.read_text()  # the games' ends, logged locally meanwhile
+
+
+@pytest.mark.parametrize("color", ["white", "black"])
+def test_aborts_a_game_the_opponent_never_starts(engine, color):
+    """The opponent never makes a first move (live game fG7tNbjC sat an hour after 1. e4, and
+    held the drain): the bot aborts after config.abort seconds and the drain completes."""
+    mock = MockLichess({"tok": "allie"}, house_delay=600)
+    mock, bot = start(engine, mock, abort=2)
+    mock.challenge("idle", "allie", 60, 1, color=color)  # the challenger's color
+    wait(lambda: len(bot.games) == 1)
+    bot.drain()
+    wait(lambda: bot.stopped.is_set(), timeout=30)
+    g = next(iter(mock.games.values()))
+    assert g.status == "aborted" and len(g.board.move_stack) == (color == "black")

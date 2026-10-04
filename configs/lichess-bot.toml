@@ -10,6 +10,7 @@ active_experts = 0            # routed experts per token, 0 = all 16; 8 is faste
 url = "https://lichess.org"
 max_games = 4                 # concurrent games; the rest are declined with "later"
 greeting = ""                 # sent to the opponent's chat at the start of each game
+abort = 30                    # seconds without the opponent's first move before the bot aborts the game
 
 [challenge]
 rated = true

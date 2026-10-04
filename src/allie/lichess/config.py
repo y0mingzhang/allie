@@ -33,6 +33,7 @@ class Config:
     url: str = "https://lichess.org"
     max_games: int = 4
     greeting: str = ""
+    abort: float = 30  # seconds without the opponent's first move before the bot aborts (0: never)
     challenge: Challenge = field(default_factory=Challenge)
     play: Play = field(default_factory=Play)
     chat: Chat = field(default_factory=Chat)

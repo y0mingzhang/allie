@@ -88,7 +88,8 @@ trust_remote_code=True)`, see the model card).
   passes it to `game.behave()`, which adds the think time, resignation and draw offer.
 - **Challenges.** `[challenge]` sets the accepted speeds, base times, increments, rated or casual games, humans
   or bots, and games per opponent. Only standard chess from the starting position is accepted. Beyond
-  `max_games`, challenges are declined with "later".
+  `max_games`, challenges are declined with "later". A game whose opponent has not made a first move within
+  `abort` seconds (30) is aborted: Lichess can leave one open for an hour, holding a slot and a drain.
 
 ## Human-likeness
 
