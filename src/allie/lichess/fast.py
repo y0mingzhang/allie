@@ -1355,7 +1355,7 @@ class Fast:
             and w["board.output"].shape[0] == 544
         )
         self.lib, self.model = library(), model
-        self.threads = threads or threads_default()
+        self.threads = min(threads or threads_default(), len(cpus()))  # spinning: never oversubscribe
         int8 = bool(model.scales)
         ve = [None] * n
         for j in range(model.ve):
@@ -1415,14 +1415,13 @@ class Fast:
             self.lib.allie_place(arr(ctypes.c_void_p, [t.data_ptr() for t in ts]),
                                  arr(ctypes.c_int64, [t.numel() * t.element_size() for t in ts]),
                                  len(ts), arr(ctypes.c_int32, nodes), len(nodes))  # fmt: skip
-        self.handle = self.lib.allie_new(
-            arr(ctypes.c_int64, cfg), arr(ctypes.c_double, [model.scale, model.floor]),
-            arr(ctypes.c_void_p, ptrs), arr(ctypes.c_void_p, lay),
-            arr(ctypes.c_int32, self.cpus) if self.cpus else None, spin,
-        )  # fmt: skip
+        self.args = (arr(ctypes.c_int64, cfg), arr(ctypes.c_double, [model.scale, model.floor]),
+                     arr(ctypes.c_void_p, ptrs), arr(ctypes.c_void_p, lay),
+                     arr(ctypes.c_int32, self.cpus) if self.cpus else None, spin)  # fmt: skip
+        self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
 
     def __del__(self):
-        if getattr(self, "handle", None):
+        if getattr(self, "handle", None) and os.getpid() == self.pid:  # a fork's copy: leaked
             self.lib.allie_free(self.handle)
             self.handle = None
 
@@ -1433,6 +1432,8 @@ class Fast:
         return dict(zip(PHASES, out))
 
     def step(self, items):
+        if os.getpid() != self.pid:  # a forked child has none of the pool's threads: new ones
+            self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
         self.lib.allie_wake(self.handle)  # workers wake while the inputs are gathered
         meta, caches, lo = [], [], 0
         for cache, ids, *_ in items:

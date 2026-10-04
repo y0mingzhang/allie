@@ -135,3 +135,24 @@ def test_fast_rejects_bad_inputs(tiny_path):
     b[:, 65] = 16
     with pytest.raises(ValueError, match="board"):
         step(m, [(Cache(m), ids, feats, b)])
+
+
+FORKED = {}
+
+
+def _forked_step():
+    m, x = FORKED["model"], FORKED["x"]
+    return step(m, [(Cache(m), *x)])[0]
+
+
+def test_fast_after_fork(tiny_path):
+    """A forked child has none of the parent's pool threads: its first step makes its own."""
+    import multiprocessing
+
+    m = Model(tiny_path, dtype=torch.bfloat16, threads=2)
+    x = inputs(random_game(3, 10))
+    want = step(m, [(Cache(m), *x)])[0]
+    FORKED.update(model=m, x=x)
+    with multiprocessing.get_context("fork").Pool(1) as pool:
+        got = pool.apply_async(_forked_step).get(timeout=120)
+    torch.testing.assert_close(got, want, atol=0, rtol=0)
