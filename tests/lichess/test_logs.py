@@ -84,7 +84,7 @@ def test_bad_records_do_not_stop_the_log(tmp_path, restore):
 
 
 def test_chat_reader_stops_when_abandoned():
-    from allie.lichess.chat import END, split
+    from allie.lichess.chat import split
 
     fed, abandon, gate = [], threading.Event(), threading.Event()
 
@@ -104,8 +104,5 @@ def test_chat_reader_stops_when_abandoned():
     assert next(stream)["n"] == 1
     abandon.set()  # the game thread resumes on a new stream
     gate.set()
-    for _ in range(500):
-        if fed and fed[-1] is END:
-            break
-        threading.Event().wait(0.01)
-    assert fed[-1] is END and [e["n"] for e in fed if e is not END] == [1]
+    threading.Event().wait(0.5)  # the reader has seen events 2 and 3 by now, and stopped
+    assert [e["n"] for e in fed] == [1]  # nothing after the abandon, not even the end

@@ -1,5 +1,6 @@
 """The bot: accept challenges by the config's rules, play every game in its own thread."""
 
+import http.client
 import json
 import logging
 import random
@@ -72,7 +73,8 @@ class Bot:
                                 self.stop()
                     if self.stopped.is_set():
                         break
-            except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
+            except (OSError, urllib.error.URLError, json.JSONDecodeError,
+                    http.client.HTTPException) as e:  # fmt: skip
                 log.warning("event stream: %s; reconnecting in %d s", e, backoff)
                 self.stopped.wait(backoff)
                 backoff = min(2 * backoff, 60)
@@ -161,7 +163,9 @@ class Bot:
                     else:
                         if not match.over and not self.stopped.is_set():
                             raise ConnectionError("game stream closed")
-                except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
+                except (OSError, urllib.error.URLError, json.JSONDecodeError,
+                        http.client.HTTPException) as e:  # fmt: skip
+                    abandon.set()  # a failed move POST, too: the stream may still be up
                     log.warning("game %s stream: %s; retry in %d s", gid, e, backoff)
                     self.stopped.wait(backoff)
                     backoff = min(2 * backoff, 30)

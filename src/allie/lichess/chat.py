@@ -198,7 +198,8 @@ def split(events, chat, abandon=None):
             q.put(e)
         finally:
             q.put(END)
-            chat.put(END)
+            if abandon is None or not abandon.is_set():  # an abandoned stream's end is not the game's
+                chat.put(END)
             if close := getattr(events, "close", None):
                 close()
 
