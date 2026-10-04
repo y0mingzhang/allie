@@ -102,10 +102,11 @@ def load(f, metrics):
         n, fam = r["n_nonembed"], r.get("recipe", "dense")
     elif dims:
         e, k, routed, shared = dims[:4]
+        dense = a.resolve(r["arch"]).get("moe_dense_first", 1)
         n = (
             4 * L * d * d
-            + 3 * d * H
-            + (L - 1) * (3 * d * (shared + k * routed) + d * e)
+            + dense * 3 * d * H
+            + (L - dense) * (3 * d * (shared + k * routed) + d * e)
         )
         fam = f"E{e}k{k}sh{round(100 * shared / H)}"
         fam += "q" * (r["arch"].get("moe_update") == "quantile")

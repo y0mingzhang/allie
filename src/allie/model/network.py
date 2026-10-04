@@ -197,8 +197,11 @@ def configure(cfg, device):
 
 def moe_layers(cfg):
     """Per block: its MoE constructor arguments (model_arch.moe_dims), None for a dense MLP."""
-    dims = model_arch.moe_dims(cfg.width, cfg.arch)
-    return [None] * cfg.layers if not dims else [None] + [dims] * (cfg.layers - 1)
+    dense = model_arch.resolve(cfg.arch)["moe_dense_first"]
+    assert dense <= cfg.layers, "moe_dense_first exceeds the layers"
+    if not model_arch.moe_dims(cfg.width, cfg.arch):
+        return [None] * cfg.layers
+    return [None] * dense + [model_arch.moe_dims(cfg.width, cfg.arch, j) for j in range(cfg.layers - dense)]
 
 
 def create_model(cfg, device="cuda"):

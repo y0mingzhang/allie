@@ -185,7 +185,7 @@ def qb_book(
 class MoE(nn.Module):
     def __init__(
         self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1, seq=0.0,
-        center=0.0, gate_floor=0.0,
+        center=0.0, gate_floor=0.0, log_gates=False,
     ):  # fmt: skip
         super().__init__()
         assert topk < experts
@@ -237,6 +237,8 @@ class MoE(nn.Module):
         # sum to k**0.5 * sum / floor: its routed output is suppressed, the router's degeneration is not repaired
         assert 0 <= gate_floor < float("inf")
         self.gate_floor = gate_floor
+        # log_gates: the same gates (and balance-loss affinities) as softmaxes of log-sigmoid scores, which never divide
+        self.log_gates = log_gates
         if center:
             self.register_buffer("mu", torch.zeros(dim))
             self.register_buffer("mu_steps", torch.zeros(()))
@@ -254,8 +256,11 @@ class MoE(nn.Module):
             idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
         else:  # torch.topk here, the stats top-k below
             idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
-        w = s.gather(1, idx)
-        w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
+        if self.log_gates:
+            w = k**0.5 * torch.softmax(F.logsigmoid(z.gather(1, idx)), -1)
+        else:
+            w = s.gather(1, idx)
+            w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
         flat = idx.flatten()
         order = flat.argsort(stable=True)
         count = counts(flat[order], e)
@@ -294,7 +299,11 @@ class MoE(nn.Module):
             # additive over rows, hence independent of how rows are split into micro-batches
             assert t % 1024 == 0
             sel = torch.zeros_like(s).scatter_(1, idx, 1.0).view(-1, 1024, e).mean(1)
-            prob = s / self.floored(s.sum(-1, keepdim=True))
+            prob = (
+                torch.softmax(F.logsigmoid(z), -1)
+                if self.log_gates
+                else s / self.floored(s.sum(-1, keepdim=True))
+            )
             prob = prob.view(-1, 1024, e).mean(1)
             loss = (
                 self.seq
