@@ -161,11 +161,19 @@ equal within noise. 95% intervals are bootstrapped over games.
 
 | Setting | CE minus the trained model's (nats) | Top-1 (trained model: 58.92%) |
 |---|---:|---:|
-| CPU, BF16, one game | −0.0003 [−0.0013, +0.0006] | 58.92% |
-| CPU, int8, one game | +0.0013 [−0.0008, +0.0035] | 58.66% |
-| GPU, BF16, one game | −0.0006 [−0.0015, +0.0003] | 58.82% |
-| GPU, BF16, 16 games in one step | −0.0005 [−0.0015, +0.0003] | 58.94% |
-| GPU, BF16, whole games in one step | −0.0006 [−0.0015, +0.0002] | 58.90% |
+| CPU, int8, one game (the default) | +0.0017 [−0.0005, +0.0038] | 58.74% |
+| CPU, BF16, one game | −0.0005 [−0.0014, +0.0004] | 58.74% |
+| GPU, BF16, one game (CUDA graphs, the default) | −0.0003 [−0.0012, +0.0006] | 58.84% |
+| PyTorch reference, CPU, int8, one game | +0.0013 [−0.0008, +0.0035] | 58.66% |
+| PyTorch reference, CPU, BF16, one game | −0.0003 [−0.0013, +0.0006] | 58.92% |
+| PyTorch reference, GPU, BF16, one game | −0.0006 [−0.0015, +0.0003] | 58.82% |
+| PyTorch reference, GPU, BF16, 16 games in one step | −0.0005 [−0.0015, +0.0003] | 58.94% |
+| PyTorch reference, GPU, BF16, whole games in one step | −0.0006 [−0.0015, +0.0002] | 58.90% |
+
+- **Fast against the reference**, on the same positions: CPU int8 +0.0003 [−0.0003, +0.0008] nats; the
+  probability of a move differs by 0.004 on average and at most 0.04, and the top move agrees on 99.4% of
+  positions (CPU BF16: 99.4%, GPU: 99.6%). The C++ kernels round to BF16 where the reference does; the sums
+  run in a different order.
 
 - **int8 against BF16**, on the same positions: +0.0016 ± 0.0011 nats (standard error); the top move agrees on
   97.5% of positions. This is within the 0.002 we allowed for the CPU default; `int8 = false` keeps BF16.
