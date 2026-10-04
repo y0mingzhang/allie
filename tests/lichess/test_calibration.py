@@ -14,8 +14,17 @@ def test_rule():
     quick[2], long_think[-1] = 1, 1  # 2.5 s; over an hour
     assert calibration.budget(800, quick) < calibration.budget(2600, quick) <= calibration.HW * 2.5
     assert calibration.budget(2600, long_think) == calibration.CAP
-    assert calibration.budget(2600, long_think, clock=5) == pytest.approx(calibration.HW * 5 / 10)
     assert calibration.budget(2600, long_think, speed="bullet") == 0
+
+
+def test_the_clock_caps_the_rung_searched():
+    """The hard limit applies to the rung actually searched, after the random rounding: a tenth of
+    the clock above the reserve (review: a 0.2 s clock could round up to a search)."""
+    rng = np.random.default_rng(0)
+    for clock, most in ((0.2, 0), (1.0, 0), (10.0, 32), (None, calibration.CAP)):
+        cap = calibration.ceiling(clock, reserve=1.0)
+        draws = {calibration.pick(n, rng, cap) for n in (0, 5, 40, 200, 256) for _ in range(500)}
+        assert max(draws) <= most and max(draws) * 1.0 / calibration.HW <= (clock or 1e9) / 10 + 1e-9
 
 
 def test_pick_rounds_onto_the_ladder_in_expectation():

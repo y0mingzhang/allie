@@ -4,6 +4,7 @@ import queue
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass
+from time import monotonic
 
 import chess
 import numpy as np
@@ -288,11 +289,14 @@ def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
     sampled from the policy, or from coverage search's distribution with a budget that grows with
     the predicted human think time and the rating."""
+    start = monotonic()
     legal, p, wdl, time = game.position()
     rating = game.elo[len(game.moves) % 2]
     n = 0  # search costs what calibration.HW assumes only on the fast CPU backend
     if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
-        n = calibration.pick(calibration.budget(rating, time, clock, game.speed), game.rng)
+        left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
+        most = calibration.ceiling(left, behaviour.PARAMETERS["guard"]["reserve"])
+        n = calibration.pick(calibration.budget(rating, time, game.speed), game.rng, most)
     s = p
     if n:
         moves, q = search(game, n)

@@ -3,16 +3,17 @@ the quality an R-rated human makes at the same time control, without giving up t
 diversity. The move is sampled at temperature 1 from the policy, or from allie.search coverage's
 calibrated human-move distribution after
 
-    N = min(CAP, K t^ALPHA exp(GAMMA (R - 1700) / 1000), HW t, HW clock / 10)
+    N = min(CAP, K t^ALPHA exp(GAMMA (R - 1700) / 1000), HW t)
 
 simulations, t being the predicted human think time (s) for the position. The time control enters
 through t: humans think longer in slower games and on harder moves, and the search follows. N goes
-onto LADDER by random rounding in log2(1 + N), as the fit interpolated. No search in bullet: there it
-raises the human-move cross-entropy above the policy's.
+onto LADDER by random rounding in log2(1 + N), as the fit interpolated, and the rung it lands on
+never exceeds a tenth of the clock left above the reserve. No search in bullet: there it raises the
+human-move cross-entropy above the policy's.
 
 HW is what a 6-CPU bot playing two games searches per second on the fast backend (about 17 ms a
-simulation), so the search costs at most about three quarters of the think time the bot waits
-anyway, and never a tenth of its clock.
+simulation), so the search costs about three quarters of the think time the bot waits anyway at
+most.
 
 Fitted on 220,000 positions of the golden evaluation's July 2026 human games (up to 5,000 per time
 control and 200-point rating band from 800 to 2600): the model sees what the human saw, Stockfish
@@ -31,18 +32,26 @@ _BINS = np.arange(63)
 SECONDS = np.where(_BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06))  # think-time head bins
 
 
-def budget(rating, time, clock=None, speed="blitz"):
+def budget(rating, time, speed="blitz"):
     """Coverage simulations (continuous) for a player of `rating`; time: the think-time head's
-    63-bin distribution for the position; clock: the bot's seconds left (None: unknown)."""
+    63-bin distribution for the position."""
     if speed in NO_SEARCH:
         return 0.0
     t = float(np.asarray(time, float) @ SECONDS / np.sum(time))
-    n = min(CAP, K * t**ALPHA * np.exp(GAMMA * (rating - 1700) / 1000), HW * t)
-    return float(n if clock is None else min(n, HW * clock / 10))
+    return float(min(CAP, K * t**ALPHA * np.exp(GAMMA * (rating - 1700) / 1000), HW * t))
 
 
-def pick(n, rng):
-    """n onto LADDER: one of its two neighbours, at random, linearly in log2(1 + n)."""
+def ceiling(clock, reserve=1.0):
+    """The most simulations the clock allows: a tenth of the seconds left above the reserve, at HW
+    simulations a second (None: no clock)."""
+    return np.inf if clock is None else HW * max(clock - reserve, 0.0) / 10
+
+
+def pick(n, rng, most=np.inf):
+    """n onto LADDER: one of its two neighbours, at random, linearly in log2(1 + n) (as the fit
+    interpolated; this keeps the mean of log2(1 + N), not of N), then the largest rung within
+    `most`, the hard limit."""
     i = float(np.interp(np.log2(1 + n), _U, np.arange(len(_U))))
     lo = int(i)
-    return LADDER[lo + 1] if lo + 1 < len(LADDER) and rng.random() < i - lo else LADDER[lo]
+    rung = LADDER[lo + 1] if lo + 1 < len(LADDER) and rng.random() < i - lo else LADDER[lo]
+    return max(b for b in LADDER if b <= max(min(rung, most), 0))
