@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .api import REPO
 
-GITHUB = "https://github.com/y0mingzhang/allie"  # placeholder until the public repo is settled
+GITHUB = "https://github.com/y0mingzhang/allie"
 HERE = Path(__file__).parent
 CODE = ("api.py", "model.py", "tokens.py")
 WRAPPER = ("configuration_allie.py", "modeling_allie.py", "README.md")

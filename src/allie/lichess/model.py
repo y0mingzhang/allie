@@ -75,6 +75,10 @@ class Model:
                 self.w[k], self.scales[k] = quantize(v)
             else:
                 self.w[k] = v.to(self.device, torch.float32 if kind in FP32 else dtype)
+        for i in range(self.layers):  # the output gate and value-embedding gate read the same
+            gates = [self.w.pop(f"{i}.attn_gate"), self.w.pop(f"{i}.ve_gate", None)]
+            self.w[f"{i}.gates"] = torch.cat([g for g in gates if g is not None])
+        self.moe_mode = None  # None: by device and tokens; or token / group / gather / dense
         s = self.w["scalars"]
         n = self.layers
         self.lam, self.x0l = s[:n].tolist(), self.w["x0_lambdas"].view(-1, 2).tolist()
@@ -121,17 +125,35 @@ class Model:
         return self.linear(swiglu(self.linear(x, up, e)), down, e)
 
     def mlp(self, i, h):
-        w = self.w
-        if f"{i}.fc" in w:
+        if f"{i}.fc" in self.w:
             return self.ffn(h, f"{i}.fc", f"{i}.proj")
+        w, k = self.w, self.topk
         s = torch.sigmoid(F.linear(h.float() - w[f"{i}.mu"], w[f"{i}.router"]))
-        idx = torch.topk(s + w[f"{i}.moe_bias"], self.topk, dim=-1).indices
+        idx = torch.topk(s + w[f"{i}.moe_bias"], k, dim=-1).indices
         gate = s.gather(1, idx)
-        gate = gate * (
-            self.topk**0.5 / gate.sum(-1, keepdim=True).clamp_min(self.floor)
+        gate = gate * (k**0.5 / gate.sum(-1, keepdim=True).clamp_min(self.floor))
+        gate = gate[:, : self.keep].to(h.dtype).float()  # BF16 gates, FP32 sums (trainer)
+        idx = idx[:, : self.keep]
+        mode = self.moe_mode or (
+            ("gather" if len(h) <= 4 else "dense" if len(h) <= 64 else "group")
+            if h.is_cuda
+            else ("token" if len(h) <= 2 else "group")
         )
-        gate = gate.to(h.dtype).float()  # the trainer combines BF16 gates in FP32
-        idx, gate = idx[:, : self.keep].flatten(), gate[:, : self.keep].flatten()
+        out = getattr(self, mode)(i, h, idx, gate)
+        return out.to(h.dtype) + self.ffn(h, f"{i}.shared_up", f"{i}.shared_down")
+
+    def token(self, i, h, idx, gate):
+        """Each token's experts one by one: the fewest operations for one or two tokens."""
+        out = torch.zeros(h.shape, dtype=torch.float32, device=h.device)
+        for t, (es, gs) in enumerate(zip(idx.tolist(), gate.tolist())):
+            x, acc = h[t : t + 1], out[t]
+            for e, g in zip(es, gs):
+                acc.add_(self.ffn(x, f"{i}.up", f"{i}.down", e)[0], alpha=g)
+        return out
+
+    def group(self, i, h, idx, gate):
+        """Tokens grouped by expert: one matrix product per routed expert."""
+        idx, gate = idx.flatten(), gate.flatten()
         order = idx.argsort(stable=True)
         experts, counts = torch.unique_consecutive(idx[order], return_counts=True)
         rows, gate = order // self.keep, gate[order]
@@ -142,8 +164,25 @@ class Model:
             y = self.ffn(h[r], f"{i}.up", f"{i}.down", e)
             out.index_add_(0, r, y.float() * gate[lo : lo + n, None])
             lo += n
-        shared = self.ffn(h, f"{i}.shared_up", f"{i}.shared_down")
-        return out.to(h.dtype) + shared
+        return out
+
+    def gather(self, i, h, idx, gate):
+        """The selected experts' weights gathered into one batched product: no host syncs
+        (GPU, few tokens)."""
+        e = idx.flatten()
+        x = h.repeat_interleave(self.keep, 0)[:, :, None]
+        y = swiglu(torch.bmm(self.w[f"{i}.up"][e], x)[..., 0])
+        y = torch.bmm(self.w[f"{i}.down"][e], y[..., None])[..., 0]
+        return (y.float().view(len(h), self.keep, -1) * gate[..., None]).sum(1)
+
+    def dense(self, i, h, idx, gate):
+        """Every token through every expert, then the gated sum: reads each expert once and
+        needs no host syncs (GPU, a batch of games)."""
+        up, down = self.w[f"{i}.up"], self.w[f"{i}.down"]
+        x = h[None].expand(len(up), -1, -1)
+        y = torch.bmm(swiglu(torch.bmm(x, up.transpose(1, 2))), down.transpose(1, 2))
+        combine = torch.zeros(len(h), len(up), device=h.device).scatter_(1, idx, gate)
+        return torch.einsum("te,etd->td", combine, y.float())
 
     @torch.inference_mode()
     def forward(self, ids, pos, feats, boards, previous, attend, last=None):
@@ -180,17 +219,12 @@ class Model:
             else:
                 x = self.lam[i] * x + self.x0l[i][0] * x0 + self.x0l[i][1] * x02
             h = norm(x)
-            q, k, v = (
-                self.linear(h, f"{i}.qkv").view(-1, 3 * heads, hd).chunk(3, dim=-2)
-            )
-            q, k = rotary(norm(q)), rotary(norm(k))
+            qkv = self.linear(h, f"{i}.qkv").view(-1, 3 * heads, hd)
+            qk, v = rotary(norm(qkv[:, : 2 * heads])), qkv[:, 2 * heads :]
+            g = torch.sigmoid(F.linear(h[:, :16], w[f"{i}.gates"]))  # output, value
             if ve[i] is not None:
-                g = 2 * torch.sigmoid(F.linear(h[:, :16], w[f"{i}.ve_gate"]))
-                v = v + g[..., None] * ve[i].view_as(v)
-            y = (
-                attend(i, q, k, v)
-                * torch.sigmoid(F.linear(h[:, :16], w[f"{i}.attn_gate"]))[..., None]
-            )
+                v = v + 2 * g[:, heads:, None] * ve[i].view_as(v)
+            y = attend(i, qk[:, :heads], qk[:, heads:], v) * g[:, :heads, None]
             x = x + self.linear(y.reshape(-1, self.width), f"{i}.o")
             x = x + self.mlp(i, norm(x))
             if i in skip_in:
