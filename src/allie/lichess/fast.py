@@ -1069,11 +1069,23 @@ int allie_threads(void* h) { return ((Engine*)h)->pool->n; }
 
 void allie_wake(void* h) { ((Engine*)h)->pool->wake(); }
 
-// meta: per sequence n0 len cap off; caches: per sequence k v e; out: S x V
-void allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, const uint8_t* boards,
-                const int64_t* meta, void* const* caches, float* out) {
+// meta: per sequence n0 len cap off; caches: per sequence k v e; out: S x V. Returns 0, or 1 for a
+// token outside the vocabulary, 2 for a board state outside its ranges, 3 for spans that do not fit
+int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, const uint8_t* boards,
+               const int64_t* meta, void* const* caches, float* out) {
   Engine& m = *(Engine*)h;
   int D = m.D, nt = m.pool->n;
+  for (int k = 0; k < T; k++) {
+    const uint8_t* b = boards + 68 * k;
+    if (ids[k] < 0 || ids[k] >= m.V) return 1;
+    if (*std::max_element(b, b + 64) > 12 || b[64] > 1 || b[65] > 15 || b[66] > 8) return 2;
+  }
+  for (int s = 0, off = 0; s < S; s++) {
+    const int64_t* q = meta + 4 * s;
+    if (q[1] < 1 || q[0] < 0 || q[0] + q[1] > std::min<int64_t>(q[2], m.ctx) || q[3] != off) return 3;
+    off += q[1];
+    if (s == S - 1 && off != T) return 3;
+  }
   m.T = T, m.S = S, m.ids = ids, m.feats = feats, m.boards = boards, m.out = out;
   m.seq.resize(S);
   m.tseq.resize(T);
@@ -1134,6 +1146,7 @@ void allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, c
   m.phase.assign(nt, Engine::Count{0});
   m.ctr[0].store(0), m.ctr[1].store(0);
   m.pool->run(trampoline, &m);
+  return 0;
 }
 
 // seconds spent in each phase since the last call (out: NPHASE doubles); on: keep profiling
@@ -1271,7 +1284,7 @@ def library():
     lib.allie_free.argtypes = [P]
     lib.allie_threads.restype, lib.allie_threads.argtypes = I, [P]
     lib.allie_wake.argtypes = [P]
-    lib.allie_step.argtypes = [P, I, I, P, P, P, P, P, P]
+    lib.allie_step.restype, lib.allie_step.argtypes = I, [P, I, I, P, P, P, P, P, P]
     lib.allie_bandwidth.restype = D
     lib.allie_bandwidth.argtypes = [I, ctypes.c_int64, I, P]
     lib.allie_place.restype, lib.allie_place.argtypes = I, [P, P, I, P, I]
@@ -1434,11 +1447,14 @@ class Fast:
             cat(3, torch.uint8),
         )
         out = torch.empty(len(items), self.model.config["vocab"])
-        self.lib.allie_step(
+        err = self.lib.allie_step(
             self.handle, lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
             (ctypes.c_int64 * len(meta))(*meta), (ctypes.c_void_p * len(caches))(*caches),
             out.data_ptr(),
         )  # fmt: skip
+        if err:
+            raise ValueError(("token outside the vocabulary", "board state out of range",
+                              "tokens past the cache or the context")[err - 1])  # fmt: skip
         for cache, ids, *_ in items:
             cache.n += len(ids)
         return out

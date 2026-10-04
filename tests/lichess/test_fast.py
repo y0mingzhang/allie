@@ -123,3 +123,15 @@ def test_graphs_match_eager(tiny_path, dtype):
     assert len(m.graphs.graphs) >= 2  # replays happened: batches of three, then one game
     one = play(m, games[:1], lengths[:1], 5)
     torch.testing.assert_close(one, play(ref, games[:1], lengths[:1], 5), **tol)
+
+
+def test_fast_rejects_bad_inputs(tiny_path):
+    m = Model(tiny_path, dtype=torch.bfloat16, threads=2)
+    ids, feats, boards = inputs(random_game(4, 6))
+    for bad in (ids.clone().fill_(2432), ids.clone().fill_(-1)):
+        with pytest.raises(ValueError, match="vocabulary"):
+            step(m, [(Cache(m), bad, feats, boards)])
+    b = boards.clone()
+    b[:, 65] = 16
+    with pytest.raises(ValueError, match="board"):
+        step(m, [(Cache(m), ids, feats, b)])
