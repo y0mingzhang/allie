@@ -60,7 +60,10 @@ KINDS = {  # the remarks, what the model is asked for, and their slot in a quiet
     "compliment": ("their good move: a brief, genuine compliment", "middle"),
     "endgame": ("the endgame starting: a short remark on it", None),
     "scramble": ("your clock running low: a short remark on your time trouble", None),
-    "finish": ("the end of the game: a short, gracious closing line", "finish"),
+    "finish": (
+        "the end of the game: a short, gracious closing line, nothing about their mistakes",
+        "finish",
+    ),
     "draw": (
         "their draw offer, which you declined: a short, friendly word on it",
         "draw",

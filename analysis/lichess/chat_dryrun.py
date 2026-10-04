@@ -87,9 +87,24 @@ def replay(c, posts, path, rated, plies, script):
                 script[k + 1] = "draw"
             case str() as text:
                 say(k, text)
-    winner = "white" if white else "black"
-    posts.append((len(moves), opp, "(resigns)"))
-    feed(state(len(moves), status="resign", winner=winner), chat.END)
+    # the game's real end when the replay reaches it, else the side worse off resigns
+    board = chess.Board()
+    for u in moves:
+        board.push_uci(u)
+    full_game = len(moves) == len(read(path, 10_000)[1])
+    winner = {"1-0": "white", "0-1": "black"}.get(h["Result"]) if full_game else None
+    if winner is None and not full_game:
+        e = chat.score(c.views[max(c.views)].wdl) if c.views else 0.5  # ours
+        winner = (
+            ("white" if white else "black")
+            if e >= 0.5
+            else ("black" if white else "white")
+        )
+    status = "mate" if board.is_checkmate() else "outoftime" if "Time" in h.get(
+        "Termination", "") else "draw" if winner is None else "resign"  # fmt: skip
+    loser = "Allie" if winner and (winner == "white") != white else opp
+    posts.append((len(moves), loser, f"({status})"))
+    feed(state(len(moves), status=status, winner=winner), chat.END)
     for text in after:
         say(len(moves) + 1, text)
     c.done = True
@@ -155,7 +170,7 @@ def main():
             b.push(m)
         us = "white" if h["White"] == BOT else "black"
         print(f"\n=== {kind} {h['TimeControl']}: {h['White']} - {h['Black']}, Allie is {us}; "
-              f"{len(moves)} plies, then {opp} resigns ===")  # fmt: skip
+              f"{len(moves)} plies ===")  # fmt: skip
         k = 0
         for ply, who, text in posts:
             k = k if ply is None else ply
