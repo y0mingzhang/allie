@@ -179,9 +179,21 @@ The [bot's guide](src/allie/lichess/README.md) covers bot accounts, settings and
 
 ## Download and run the model
 
-The weights will be on Hugging Face as [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0). The download is 11 GB, in the format `allie-bot` reads.
+The weights are on Hugging Face as [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0), an 11 GB download. It runs with `transformers` alone, on a CPU or a GPU:
 
-TODO: download and inference instructions, once the repository is published.
+```sh
+pip install transformers torch python-chess
+```
+
+```python
+from transformers import AutoModel
+
+model = AutoModel.from_pretrained("yimingzhang/allie-2.0", trust_remote_code=True)
+model.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="180+2")
+model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player would play it
+```
+
+`predict` gives every legal move's probability; `analyze` adds the win, draw and loss chances and the expected think time. On a CPU the weights load in int8 (8 GB, about 30 ms a move); on a GPU, in BF16 (about 18 ms). This package has the same code, a command line (`allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2`) and the Lichess bot. See [src/allie/lichess/README.md](src/allie/lichess/README.md).
 
 ---
 

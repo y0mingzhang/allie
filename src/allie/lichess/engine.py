@@ -192,8 +192,9 @@ class Game:
         if play.mode == "strongest" or play.temperature <= 0:
             i = int(p.argmax())
         else:
-            t = np.log(np.maximum(p, 1e-300)) / play.temperature
-            t = np.exp(t - t.max())
+            t = np.log(np.maximum(p, 1e-300))
+            with np.errstate(over="ignore"):
+                t = np.exp((t - t.max()) / play.temperature)
             i = int(self.rng.choice(len(p), p=t / t.sum()))
         wdl = tuple(torch.softmax(z[WDL], 0).tolist())
         ply = len(self.moves)
