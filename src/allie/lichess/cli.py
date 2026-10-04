@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import logging
 import os
 import signal
 import sys
@@ -52,6 +51,8 @@ def main():
     e.add_argument("out")
     run = sub.add_parser("play", help="play on Lichess (token: LICHESS_TOKEN)")
     run.add_argument("--drain-file", help="once this file exists, finish the games and exit")
+    run.add_argument("--log", help="append the log here (reopened after a failed write; while "
+                     "it fails, lines go to a node-local file); default stderr")  # fmt: skip
     run.epilog = "SIGUSR1 also drains: no new games, exit once the current ones end."
     s = sub.add_parser("selfplay", help="offline games on a local mock Lichess")
     s.add_argument("--games", type=int, default=2)
@@ -68,9 +69,16 @@ def main():
     for x in (s, b):
         x.add_argument("--out", help="write the result here (JSON)")
     a = p.parse_args()
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr
-    )
+    from .logs import setup
+
+    listener = setup(getattr(a, "log", None))
+    try:
+        run_command(a)
+    finally:
+        listener.stop()
+
+
+def run_command(a):
     if a.command == "export":
         from .export import main as export
 

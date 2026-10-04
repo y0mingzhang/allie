@@ -11,9 +11,11 @@ log = logging.getLogger(__name__)
 
 
 class Lichess:
-    def __init__(self, token, url="https://lichess.org", timeout=20, retries=5, wait=60):
+    def __init__(self, token, url="https://lichess.org", timeout=20, retries=5, wait=60,
+                 silence=30):  # fmt: skip
         self.url, self.timeout, self.retries = url.rstrip("/"), timeout, retries
         self.wait = wait  # after HTTP 429, as Lichess asks
+        self.silence = silence  # seconds without a byte (keepalives included) before a stream is dropped
         self.headers = {"Authorization": f"Bearer {token}", "User-Agent": "allie-bot"}
 
     def _open(self, method, path, data=None, timeout=None):
@@ -44,10 +46,11 @@ class Lichess:
             time.sleep(wait)
         raise ConnectionError(f"{method} {path} failed {n} times")
 
-    def stream(self, path, timeout=30):
+    def stream(self, path):
         """Events of an ndjson stream, None for each keepalive newline; ends when the server
-        closes it. Lichess sends keepalives every few seconds, so a silent socket times out."""
-        with self._open("GET", path, timeout=timeout) as r:
+        closes it. Lichess sends keepalives every few seconds, so a socket silent for
+        self.silence seconds raises TimeoutError and the caller reconnects."""
+        with self._open("GET", path, timeout=self.silence) as r:
             for line in r:
                 yield json.loads(line) if line.strip() else None
 

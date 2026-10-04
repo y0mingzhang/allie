@@ -26,7 +26,7 @@ class Play:
     think_time: bool = True  # wait a think time drawn from the model's think-time head
     resign: bool = True  # resign as often and as late as humans of the bot's rating do
     draws: bool = True  # offer and accept draws as humans do (otherwise: never)
-    lag: float = 0.1  # seconds the network and Lichess add to each move, taken off the think time
+    lag: float = 0.3  # seconds Lichess charges beyond the bot's own think time (measured live)
 
 
 class Engine:

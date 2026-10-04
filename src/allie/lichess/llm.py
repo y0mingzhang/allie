@@ -7,7 +7,7 @@ import math
 import os
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 log = logging.getLogger(__name__)
@@ -94,8 +94,12 @@ def cost(model, u):
 class Ledger:
     """Spend in USD by UTC day and month ("2026-10-04", "2026-10"), in a JSON file shared by
     processes (read before each check, locked to add). allows() is False from the call that
-    reaches a cap until the window ends, and for good once the file can't be read or written
-    (a missing file is a new ledger)."""
+    reaches a cap until the window ends; for good once the file holds something else than a
+    ledger; and for RETRY seconds after the file can't be read or written (a filesystem
+    outage), when charges not yet recorded are kept and written with the next one. A missing
+    file is a new ledger."""
+
+    RETRY = 300
 
     def __init__(self, path, day_cap, month_cap, now=lambda: datetime.now(UTC)):
         self.path, self.caps, self.now = (
@@ -104,6 +108,7 @@ class Ledger:
             now,
         )
         self.lock, self.warned, self.broken = threading.Lock(), set(), False
+        self.retry, self.unrecorded = None, 0.0  # when to try the file again; USD owed to it
 
     def read(self):
         try:
@@ -111,22 +116,31 @@ class Ledger:
                 spent = json.load(f)
         except FileNotFoundError:
             return {}
-        except (OSError, ValueError) as e:
+        except OSError as e:
+            return self.fail(e, transient=True)
+        except ValueError as e:
             return self.fail(e)
         return spent if isinstance(spent, dict) else self.fail("not a JSON object")
 
-    def fail(self, e):
-        if not self.broken:
-            log.error(
-                "chat: ledger %s: %s; no paid calls until this is fixed", self.path, e
-            )
-        self.broken = True
+    def fail(self, e, transient=False):
+        if not self.broken and self.retry is None:
+            until = "it can be written again" if transient else "this is fixed"
+            log.error("chat: ledger %s: %s; no paid calls until %s", self.path, e, until)
+        if transient:
+            self.retry = self.now() + timedelta(seconds=self.RETRY)
+        else:
+            self.broken = True
 
     def windows(self):
         t = self.now()
         return t.strftime("%Y-%m-%d"), t.strftime("%Y-%m")
 
     def allows(self):
+        if self.broken:
+            return False
+        if self.retry is not None:
+            if self.now() < self.retry or math.isinf(self.add(0.0)[0]):
+                return False
         spent = self.read()
         if spent is None or self.broken:
             return False
@@ -142,6 +156,9 @@ class Ledger:
     def add(self, usd):
         """Charge usd; the window totals (infinite if the charge can't be recorded)."""
         with self.lock:
+            self.unrecorded += usd
+            if self.broken:
+                return [math.inf] * 2
             try:
                 os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
                 with open(self.path + ".lock", "a") as lock:
@@ -149,13 +166,17 @@ class Ledger:
                     if (spent := self.read()) is None:
                         return [math.inf] * 2
                     for w in self.windows():
-                        spent[w] = spent.get(w, 0.0) + usd
+                        spent[w] = spent.get(w, 0.0) + self.unrecorded
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(spent, f, indent=0, sort_keys=True)
                     os.replace(self.path + ".tmp", self.path)
             except OSError as e:
-                self.fail(e)
+                self.fail(e, transient=True)
                 return [math.inf] * 2
+            if self.retry is not None:
+                log.info("chat: ledger %s written again ($%.4f caught up)", self.path, self.unrecorded)
+                self.retry = None
+            self.unrecorded = 0.0
             return [spent[w] for w in self.windows()]
 
 

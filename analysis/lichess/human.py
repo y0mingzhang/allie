@@ -390,9 +390,12 @@ def fit(a):
     t = sample_time(P["time"][played], rng)
     s, c = P["spent"][played].astype(float), P["clock"][played].astype(float)
     inc, half = P["inc"][played], P["half"][played]
-    ratio = (s - inc) / np.maximum(c - 1, 1)
+    # the reserve covers live lag: Lichess charged the bot 0.33 s more than its own think time
+    # per move on average, 2.2 s at the 99th percentile (634 moves, 2026-10-04)
+    reserve = 2.0
+    ratio = (s - inc) / np.maximum(c - reserve, 1)
     share = float(np.clip(np.percentile(ratio[half == fit_half], 99.9), 0.1, 0.5))
-    guard = dict(reserve=1.0, share=round(share, 3))
+    guard = dict(reserve=reserve, share=round(share, 3))
     hard = np.maximum(0, c - guard["reserve"])
     capped = np.minimum(np.minimum(t, hard * guard["share"] + inc), hard)
     old = np.minimum(t, 0.1 * c)  # before: a draw capped at 10% of the clock left
@@ -562,7 +565,7 @@ def main():
     m.add_argument("--per-cell", type=int, default=25)
     m.add_argument("--concurrent", type=int, default=4)
     m.add_argument("--compute", type=float, default=0.05, help="seconds of compute per move")
-    m.add_argument("--lag", type=float, default=0.1, help="seconds of network and server lag per move")
+    m.add_argument("--lag", type=float, default=0.3, help="seconds of network and server lag per move")
     m.add_argument("--seed", type=int, default=0)
     c = sub.add_parser("compare")
     c.add_argument("--data", required=True)

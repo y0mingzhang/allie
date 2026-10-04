@@ -37,6 +37,9 @@ def screen(c, rules, busy):
     return None
 
 
+ERRORS = 5  # unexpected errors in one game before the bot resigns it
+
+
 class Bot:
     def __init__(self, config, client, engine, search=None):
         self.config, self.client, self.engine, self.search = (
@@ -70,6 +73,10 @@ class Bot:
                         break
             except (OSError, urllib.error.URLError, ValueError) as e:
                 log.warning("event stream: %s; reconnecting in %d s", e, backoff)
+                self.stopped.wait(backoff)
+                backoff = min(2 * backoff, 60)
+            except Exception:  # a bug or a local failure: logged, and the bot goes on
+                log.exception("event stream: unexpected error; reconnecting in %d s", backoff)
                 self.stopped.wait(backoff)
                 backoff = min(2 * backoff, 60)
 
@@ -135,7 +142,10 @@ class Bot:
                 t.start()
 
     def play(self, match):
-        gid, backoff = match.gid, 1
+        """Serve one game's stream until it ends. Network errors reconnect; any other error
+        is logged and the game resumes from a fresh stream, until ERRORS of them (a persistent
+        bug), when the bot resigns rather than leave the game to time out."""
+        gid, backoff, errors = match.gid, 1, 0
         try:
             while not match.over and not self.stopped.is_set():
                 try:
@@ -153,9 +163,18 @@ class Bot:
                     log.warning("game %s stream: %s; retry in %d s", gid, e, backoff)
                     self.stopped.wait(backoff)
                     backoff = min(2 * backoff, 30)
-        except Exception:
-            log.exception("game %s failed", gid)
-            raise
+                except Exception:
+                    errors += 1
+                    log.exception("game %s: error %d of %d; resuming", gid, errors, ERRORS)
+                    if errors >= ERRORS:
+                        log.error("game %s: giving up; resigning", gid)
+                        try:
+                            match.call(self.client.resign, gid)
+                        except Exception:  # noqa: BLE001 - the game ends on time anyway
+                            log.exception("game %s: resign failed", gid)
+                        break
+                    self.stopped.wait(backoff)
+                    backoff = min(2 * backoff, 30)
         finally:
             with self.lock:
                 self.games.pop(gid, None)

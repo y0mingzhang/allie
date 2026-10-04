@@ -138,6 +138,10 @@ class MockLichess:
     def __init__(self, tokens, house=None, house_delay=0.05, max_plies=400):
         self.tokens = dict(tokens)  # token -> user id
         self.house_offers = set()  # plies at which house players offer a draw with their move
+        self.house_accepts = False  # house players accept the opponent's draw offers
+        # streams ("event" or "game") whose next connection goes silent (no keepalives) for
+        # this many seconds after its first line, as a stalled connection does
+        self.stall = {}
         self.house = house or (
             lambda board: random.choice(list(board.legal_moves)).uci()
         )
@@ -219,6 +223,10 @@ class MockLichess:
                     g.changed.wait(1)
                 seen = g.version
             white = g.board.turn == chess.WHITE
+            other = "black" if g.color(user) == "white" else "white"
+            if g.status == "started" and self.house_accepts and g.draw[other]:
+                g.end("draw")
+                continue
             if g.status == "started" and g.color(user) == (
                 "white" if white else "black"
             ):
@@ -304,6 +312,8 @@ class Handler(BaseHTTPRequestHandler):
             for g in list(self.mock.games.values()):  # as Lichess: ongoing games on connect
                 if g.status == "started" and g.color(user):
                     self.line(dict(type="gameStart", game=dict(gameId=g.id, id=g.id)))
+            self.line()
+            self.silent("event")
             while not self.mock.closing.is_set():
                 try:
                     self.line(q.get(timeout=1))
@@ -311,6 +321,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.line()
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def silent(self, kind):
+        """Hold the connection open without a byte, if a stall was set for this stream kind."""
+        if seconds := self.mock.stall.pop(kind, None):
+            self.mock.closing.wait(seconds)
+            raise BrokenPipeError  # the client has given up on this connection by now
 
     def stream_game(self, user, g):
         if g is None:
@@ -322,6 +338,7 @@ class Handler(BaseHTTPRequestHandler):
             with g.changed:
                 seen, said, full = g.version, len(g.chat), g.full()
             self.line(full)
+            self.silent("game")
             last = full["state"]
             while g.status == "started" and not self.mock.closing.is_set():
                 with g.changed:

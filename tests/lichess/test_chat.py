@@ -467,7 +467,13 @@ class FakeAPI:
                     self.wfile.flush()
                     time.sleep(stall)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Quiet(ThreadingHTTPServer):
+            daemon_threads = True
+
+            def handle_error(self, request, client_address):
+                pass  # a client that gave up (a timeout test): printing it at exit can abort
+
+        self.server = Quiet(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
@@ -540,3 +546,29 @@ def test_config(tmp_path):
     p.write_text("[chat]\nstockfish = 'x'\n")
     with pytest.raises(ValueError):
         load(p)
+
+
+def test_ledger_survives_an_outage(tmp_path, caplog, monkeypatch):
+    """A filesystem outage silences paid calls for RETRY seconds, keeps the charges it could
+    not record, and writes them once the file works again."""
+    t = [llm.datetime(2026, 10, 4, 12, tzinfo=llm.UTC)]
+    path = tmp_path / "spend.json"
+    a = llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
+    assert a.add(0.1) == pytest.approx([0.1, 0.1])
+    real = open
+
+    def broken(file, *args, **kwargs):
+        if str(file).startswith(str(path)):
+            raise OSError(122, "Disk quota exceeded")
+        return real(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", broken)
+    assert a.add(0.2) == [float("inf")] * 2 and not a.allows()
+    t[0] += llm.timedelta(seconds=a.RETRY + 1)
+    assert not a.allows()  # still failing: another wait
+    monkeypatch.setattr("builtins.open", real)
+    assert not a.allows()  # inside the new wait
+    t[0] += llm.timedelta(seconds=a.RETRY + 1)
+    assert a.allows()
+    assert json.loads(path.read_text())["2026-10-04"] == pytest.approx(0.3)
+    assert sum("no paid calls" in r.message for r in caplog.records) == 1

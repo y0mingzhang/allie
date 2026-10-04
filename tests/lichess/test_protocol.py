@@ -27,11 +27,11 @@ def engine(tiny):
     e.close()
 
 
-def start(engine, mock=None, **play):
+def start(engine, mock=None, max_games=4, **play):
     mock = mock or MockLichess({"tok": "allie"})
     play = dict(think_time=False, resign=False, draws=False) | play
-    config = Config(max_games=4, play=Play(**play))
-    bot = Bot(config, Lichess("tok", mock.url, wait=0.1), engine)
+    config = Config(max_games=max_games, play=Play(**play))
+    bot = Bot(config, Lichess("tok", mock.url, wait=0.1, silence=3), engine)  # mock keepalives: 1 s
     run = threading.Thread(target=bot.run, daemon=True)
     run.start()
     STARTED.append((bot, mock, run))
@@ -187,3 +187,115 @@ def test_restart_resumes_games(engine):
     _, second = start(engine, mock)
     wait(lambda: g.id in second.finished)
     assert not mock.rejected and g.status != "outoftime" and len(g.board.move_stack) > 12
+
+
+def test_agreed_draw_frees_the_slot(engine, monkeypatch):
+    """The bot offers a draw with its move, the opponent accepts: the game ends, its thread
+    exits and the next challenge is accepted and played (live game y9S42Hkn ended this way)."""
+    from allie.lichess import behaviour
+
+    monkeypatch.setattr(behaviour, "offer_draw", lambda wdl, ply, *args: ply >= 6)
+    mock = MockLichess({"tok": "allie"})
+    mock.house_accepts = True
+    mock, bot = start(engine, mock, max_games=1, draws=True)
+    mock.challenge("random", "allie", 60, 1, color="white")
+    wait(lambda: finished(mock))
+    g = next(iter(mock.games.values()))
+    assert g.status == "draw" and 6 <= len(g.board.move_stack) <= 8
+    wait(lambda: g.id in bot.finished and not bot.games)
+    mock.challenge("someone", "allie", 60, 1, color="white")
+    wait(lambda: finished(mock, 2))
+    assert not mock.declined and len(mock.games) == 2
+
+
+@pytest.mark.parametrize("kind", ["event", "game"])
+def test_stalled_stream_reconnects(engine, kind):
+    """A stream that goes silent (no keepalives) is dropped after Lichess.silence seconds and
+    reopened; challenges and moves then flow again."""
+    mock = MockLichess({"tok": "allie"})
+    mock.stall[kind] = 30
+    mock, bot = start(engine, mock)
+    mock.challenge("random", "allie", 60, 1, color="black")
+    wait(lambda: finished(mock), timeout=30)
+    paths = [c[2] for c in mock.calls]
+    stream = "/api/stream/event" if kind == "event" else "/api/bot/game/stream/"
+    assert sum(stream in p for p in paths) >= 2 and not mock.rejected
+    assert next(iter(mock.games.values())).status != "outoftime"
+
+
+def test_game_survives_unexpected_errors(engine, monkeypatch, caplog):
+    """An unexpected error in the game thread is logged and the game resumes from a fresh
+    stream; a persistent one resigns the game rather than leaving it to time out."""
+    from allie.lichess import bot as botmod
+
+    real, failures = botmod.Match.on_state, [1]
+
+    def flaky(self, s):
+        if failures[0] and len(s["moves"].split()) >= 4:
+            failures[0] -= 1
+            raise RuntimeError("injected")
+        return real(self, s)
+
+    monkeypatch.setattr(botmod.Match, "on_state", flaky)
+    monkeypatch.setattr(botmod, "ERRORS", 3)
+    mock, bot = start(engine)
+    mock.challenge("random", "allie", 60, 1, color="black")
+    wait(lambda: finished(mock))
+    g = next(iter(mock.games.values()))
+    assert g.status in ("mate", "draw", "stalemate") and len(g.board.move_stack) > 10
+    failures[0] = 10**9  # from now on every state fails: the bot resigns its game
+    mock.challenge("random", "allie", 60, 1, color="black")
+    wait(lambda: finished(mock, 2))
+    g2 = list(mock.games.values())[1]
+    assert g2.status == "resign" and g2.winner == "black"  # the challenger; the bot was white
+    assert sum("error 1 of 3" in r.message for r in caplog.records) == 2
+    assert any("giving up" in r.message for r in caplog.records)
+
+
+def test_plays_through_a_full_disk(engine, tmp_path, monkeypatch):
+    """The shared filesystem fills up mid-game (live 2026-10-04: EDQUOT from 08:17 to 12:41
+    ET): every write there fails, the bot plays on, the log lines go to the node-local file,
+    and the log notes the gap once the disk takes writes again."""
+    import builtins
+    import errno
+    import logging
+    import sys
+
+    from allie.lichess import logs
+
+    shared, local = tmp_path / "shared", tmp_path / "local.log"
+    shared.mkdir()
+    path = shared / "bot.log"
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    listener = logs.setup(str(path))
+    listener.handlers[0].fallback = str(local)
+    real, full = builtins.open, [False]
+
+    def quota(file, mode="r", *args, **kwargs):
+        if full[0] and str(file).startswith(str(shared)) and any(c in mode for c in "wa+"):
+            raise OSError(errno.EDQUOT, "Disk quota exceeded")
+        return real(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", quota)
+    try:
+        mock, bot = start(engine)
+        mock.challenge("random", "allie", 60, 1, color="black")
+        mock.challenge("other", "allie", 60, 1, color="white")
+        wait(lambda: len(mock.games) == 2)
+        listener.handlers[0].close_stream()  # the open handle fails too
+        full[0] = True
+        wait(lambda: finished(mock, 2))
+        assert not mock.rejected and all(g.status != "outoftime" for g in mock.games.values())
+        wait(lambda: len(bot.finished) == 2)
+        full[0] = False
+        logging.getLogger("allie").info("disk back")
+    finally:
+        listener.stop()
+        root.handlers[:] = handlers
+        root.setLevel(level)
+    text = path.read_text()
+    assert "lines could not be written here" in text and text.rstrip().endswith("disk back")
+    assert " over: " in local.read_text()  # the games' ends, logged locally meanwhile
