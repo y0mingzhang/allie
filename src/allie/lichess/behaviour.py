@@ -4,7 +4,8 @@ analysis/lichess/human.py fits behaviour.json on half of the main evaluation's J
 (every clock known) and checks it on the other half:
 - resignation: a per-position hazard for each player, on its turn (instead of moving) or right
   after its own move, logistic in the model's win / draw / loss probabilities for that player,
-  the ply, its rating, the format and its clock; never below a P(loss) floor;
+  the ply, its rating, the format and its clock; never below the P(loss) under which humans
+  almost never resign (the 5th percentile of their resignations);
 - draws: a hazard of the same form for ending a game by agreement on one's turn (the data show
   agreements, not offers, so this is a heuristic policy), and the expected score up to which
   humans agree;
@@ -54,6 +55,16 @@ def features(wdl, ply, elo, fmt, clock, base, on_turn=True):
     return x + [float(fmt == f) for f in (0, 2, 3)] + [float(on_turn)]
 
 
+def resign_features(wdl, ply, elo, fmt, clock, base, on_turn, knots):
+    """features() plus a piecewise-linear P(loss) (hinges in logit P(loss) at the knots, on
+    and off turn): human resignation rises steeply between P(loss) 0.85 and 0.99 and falls
+    again when mate is imminent, which a single logit cannot follow."""
+    x = features(wdl, ply, elo, fmt, clock, base, on_turn)
+    z = logit(wdl[2])
+    hinge = [max(0.0, z - logit(k)) for k in knots]
+    return x + hinge + [float(on_turn) * v for v in hinge]
+
+
 def hazard(name, x):
     z = float(np.dot(PARAMETERS[name]["coef"], x))
     return 1 / (1 + math.exp(-min(max(z, -50), 50)))
@@ -84,7 +95,8 @@ def resign(wdl, ply, elo, fmt, clock, base, rng, on_turn=True):
     right after one's own move, with wdl that player's view of the new position."""
     if ply < 2 or wdl[2] < PARAMETERS["resign"]["floor"]:
         return False
-    x = features(wdl, ply, elo, fmt, clock, base, on_turn)
+    r = PARAMETERS["resign"]
+    x = resign_features(wdl, ply, elo, fmt, clock, base, on_turn, r["knots"])
     return rng.random() < hazard("resign", x)
 
 
@@ -96,6 +108,7 @@ def offer_draw(wdl, ply, elo, fmt, clock, base, rng):
 
 
 def accept_draw(wdl):
-    """Accept an offer unless clearly better: humans agree at expected scores up to this."""
+    """Accept an offer unless clearly better (three quarters of human agreements happen at or
+    below this expected score for the better side)."""
     w, d, _ = wdl
     return w + d / 2 <= PARAMETERS["draw"]["accept"]

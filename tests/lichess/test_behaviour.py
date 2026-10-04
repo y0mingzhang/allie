@@ -46,11 +46,12 @@ def test_resign_only_when_lost():
     assert even[2] < floor <= lost[2]
     hits = sum(behaviour.resign(lost, 60, 1500, 1, 100, 180, rng) for _ in range(1000))
     assert hits > 0
-    x = behaviour.features(lost, 60, 1500, 1, 100, 180)
+    knots = behaviour.PARAMETERS["resign"]["knots"]
+    x = behaviour.resign_features(lost, 60, 1500, 1, 100, 180, True, knots)
     assert abs(hits / 1000 - behaviour.hazard("resign", x)) < 0.05
     assert not any(behaviour.resign(lost, 1, 1500, 1, 100, 180, rng) for _ in range(100))
     off = sum(behaviour.resign(lost, 60, 1500, 1, 100, 180, rng, on_turn=False) for _ in range(1000))
-    xo = behaviour.features(lost, 60, 1500, 1, 100, 180, on_turn=False)
+    xo = behaviour.resign_features(lost, 60, 1500, 1, 100, 180, False, knots)
     assert abs(off / 1000 - behaviour.hazard("resign", xo)) < 0.05
 
 

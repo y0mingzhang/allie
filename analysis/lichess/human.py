@@ -312,13 +312,20 @@ def risk_set(P):
     return {key: np.concatenate([r[key] for r in rows]) for key in rows[0]}
 
 
-def design(R):
-    """behaviour.features for every row, vectorized (checked against it in fit)."""
+KNOTS = (0.5, 0.7, 0.85, 0.95, 0.99, 0.999)
+
+
+def design(R, knots=None):
+    """behaviour.features (knots: behaviour.resign_features) for every row, vectorized
+    (checked against them in fit)."""
     w, d, loss = R["wdl"].T
     left = np.clip(R["clock"] / R["base"], 0, 1.5)
     f = R["fmt"]
     cols = [np.ones(len(w)), lg(loss), lg(w), lg(d), np.minimum(R["k"], 200) / 100,
             (R["elo"] - 1500) / 500, left, f == 0, f == 2, f == 3, R["on"]]  # fmt: skip
+    if knots is not None:
+        hinge = [np.maximum(0, lg(loss) - lg(np.float64(k))) for k in knots]
+        cols += hinge + [R["on"] * v for v in hinge]
     return np.stack([c.astype(np.float64) for c in cols], 1)
 
 
@@ -402,14 +409,16 @@ def fit(a):
 
     # resignation: a discrete-time hazard on both players' opportunities
     R = risk_set(P)
-    X = design(R)
+    X = design(R, KNOTS)
     for r in rng.choice(len(X), 300, replace=False):  # the engine computes the same features
-        x = bh.features(tuple(R["wdl"][r]), int(R["k"][r]), int(R["elo"][r]), int(R["fmt"][r]),
-                        float(R["clock"][r]), float(R["base"][r]), bool(R["on"][r]))  # fmt: skip
+        x = bh.resign_features(tuple(R["wdl"][r]), int(R["k"][r]), int(R["elo"][r]), int(R["fmt"][r]),
+                               float(R["clock"][r]), float(R["base"][r]), bool(R["on"][r]), KNOTS)  # fmt: skip
         assert np.allclose(x, X[r], atol=1e-5), (x, X[r])
     y = R["y"].astype(float)
     tr = R["half"] == fit_half
-    floor = round(float(np.percentile(R["wdl"][(y == 1) & tr, 2], 1)), 3)
+    # humans almost never resign below this P(loss) (5th percentile of their resignations):
+    # below it, a resignation is mostly a game that could still be saved
+    floor = round(float(np.percentile(R["wdl"][(y == 1) & tr, 2], 5)), 3)
     coef = logistic(X[tr & (R["wdl"][:, 2] >= floor)], y[tr & (R["wdl"][:, 2] >= floor)])
     h = 1 / (1 + np.exp(-np.clip(X @ coef, -50, 50)))
     te = (R["half"] == check_half) & (R["wdl"][:, 2] >= floor)
@@ -437,8 +446,14 @@ def fit(a):
             resign_in_games_not_lost=round(float((ok & ~lost[players]).mean()), 4),
             loss_at_resign=q(R["wdl"][r, 2], (5, 25, 50)), ply_at_resign=q(R["k"][r], (25, 50, 75)),
         )  # fmt: skip
+    by_loss = []
+    for lo, hi in zip((floor, 0.5, 0.7, 0.85, 0.95, 0.99, 0.999), (0.5, 0.7, 0.85, 0.95, 0.99, 0.999, 1.01)):
+        for on in (1, 0):
+            m = te & (R["wdl"][:, 2] >= lo) & (R["wdl"][:, 2] < hi) & (R["on"] == on)
+            by_loss.append(dict(loss=[lo, hi], on_turn=on, n=int(m.sum()), observed=round(float(y[m].mean()), 4),
+                                predicted=round(float(h[m].mean()), 4)))  # fmt: skip
     report["resign"] = dict(floor=floor, coef=coef.round(4).tolist(), calibration=calibration,
-                            players=out)  # fmt: skip
+                            calibration_by_loss=by_loss, players=out)  # fmt: skip
 
     # draws: agreements happen on someone's turn; offer and accept rules are heuristics (the data
     # show agreements, not offers or declines)
@@ -454,7 +469,8 @@ def fit(a):
     agreed = yd == 1
     e = P["wdl"][:, 0] + P["wdl"][:, 1] / 2
     at = np.maximum(e, 1 - e)[agreed & (P["half"] == fit_half)]
-    accept = round(float(np.percentile(at, 95)), 3) if len(at) else 0.5
+    # three quarters of human agreements happen at or below this expected score for the better side
+    accept = round(float(np.percentile(at, 75)), 3) if len(at) else 0.5
     dt = dm & (P["half"] == check_half)
     report["draw"] = dict(accept=accept, expected_score_at_agreement=q(e[agreed & (P["half"] == check_half)], (5, 25, 50, 75, 95)),
                           agreements_predicted=round(float(hd[dt].sum())), agreements_observed=int(yd[dt].sum()))  # fmt: skip
@@ -468,7 +484,7 @@ def fit(a):
     manifest = json.loads((ev.OUT / "manifest.json").read_text())
     model = json.loads((Path(a.model) / "config.json").read_text()) if a.model else {}
     params = dict(
-        resign=dict(coef=coef.round(5).tolist(), floor=floor),
+        resign=dict(coef=coef.round(5).tolist(), floor=floor, knots=list(KNOTS)),
         draw=dict(coef=dcoef.round(5).tolist(), accept=accept, min_ply=min_ply),
         guard=guard,
         provenance=dict(
@@ -480,6 +496,42 @@ def fit(a):
     Path(a.params).write_text(json.dumps(params, indent=1) + "\n")
     Path(a.data, "report.json").write_text(json.dumps(report, indent=1) + "\n")
     print(json.dumps(report, indent=1))
+
+
+def compare(a):
+    """The simulated games (bot vs bot) against the held-out human games they copy."""
+    G = dict(np.load(Path(a.data) / "games.npz"))
+    sim = json.loads(Path(a.sim).read_text())
+    n, loser, kind = outcomes(G)
+    off = G["clock_offsets"]
+    out = {}
+    for f in range(4):
+        S = [x for x in sim if x["fmt"] == f]
+        if not S:
+            continue
+        idx = np.array([x["game"] for x in S])
+        human_spent = []
+        for i in idx:
+            c, inc, base = G["clocks"][off[i] : off[i + 1]], G["inc"][i], G["base"][i]
+            prev = np.r_[base, base, c[:-2]]
+            human_spent.append((prev - c + inc)[2:])
+        human_spent = np.concatenate(human_spent)
+        bot_spent = np.concatenate([np.array(x["spent"][2:]) for x in S])
+        hk = kind[idx]
+        bk = np.array([KINDS.index(x["kind"]) for x in S])
+        res = [x for x in S if x["kind"] == "resign"]
+        out[FORMATS[f]] = dict(
+            games=len(S),
+            endings=dict(human={KINDS[i]: round(float((hk == i).mean()), 3) for i in range(6)},
+                         bot={KINDS[i]: round(float((bk == i).mean()), 3) for i in range(6)}),
+            plies=dict(human=q(n[idx], (25, 50, 75)), bot=q([x["plies"] for x in S], (25, 50, 75))),
+            resign_after_own_move=round(float(np.mean([x["how"] == "after own move" for x in res])), 3) if res else None,
+            seconds_per_move=dict(human=q(human_spent, (10, 25, 50, 75, 90, 99)), bot=q(bot_spent, (10, 25, 50, 75, 90, 99))),
+            flagged_while_not_losing=sum(x["kind"] == "flag" and x["loss_at_end"] < 0.5 for x in S),
+        )  # fmt: skip
+    text = json.dumps(out, indent=1)
+    Path(a.sim).with_suffix(".compare.json").write_text(text + "\n")
+    print(text)
 
 
 def main():
@@ -505,13 +557,16 @@ def main():
     m.add_argument("--compute", type=float, default=0.05, help="seconds of compute per move")
     m.add_argument("--lag", type=float, default=0.1, help="seconds of network and server lag per move")
     m.add_argument("--seed", type=int, default=0)
+    c = sub.add_parser("compare")
+    c.add_argument("--data", required=True)
+    c.add_argument("--sim", required=True)
     f = sub.add_parser("fit")
     f.add_argument("--data", required=True)
     f.add_argument("--params", default=str(Path(__file__).parents[2] / "src/allie/lichess/behaviour.json"))
     f.add_argument("--model", help="the export the heads came from (provenance)")
     f.add_argument("--weights", default="int8 (cpu)", help="precision the heads ran in (provenance)")
     a = p.parse_args()
-    {"score": score, "fit": fit, "simulate": simulate}[a.command](a)
+    {"score": score, "fit": fit, "simulate": simulate, "compare": compare}[a.command](a)
 
 
 

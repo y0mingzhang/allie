@@ -191,7 +191,7 @@ class Game:
     def concede(self, play, clock, white):
         """After the bot's own move (the opponent to move): resign now, as a human would on
         seeing the new position? clock: the bot's time left."""
-        if not play.resign:
+        if not play.resign or len(self.moves) < 2:
             return False
         try:
             w, d, loss = torch.softmax(self.sync().double()[WDL], 0).tolist()
