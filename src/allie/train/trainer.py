@@ -378,6 +378,12 @@ def main():
         "down output, the gates' grad, a batched matmul per chunk, may round otherwise on GPU)",
     )
     p.add_argument(
+        "--optimizers-reversed",
+        action="store_true",
+        help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
+        "(bitwise: disjoint parameters)",
+    )
+    p.add_argument(
         "--arch", default="{}", help="architecture switches, JSON (model.arch.DEFAULTS)"
     )
     p.add_argument(
@@ -475,6 +481,7 @@ def main():
         if rank == 0:
             (out / "ft-init.json").write_text(json.dumps(init, indent=1) + "\n")
     manager = TrainingManager(model, cfg, schedule, a.wsd_decay_start, a.wsd_end_step)
+    manager.reverse = a.optimizers_reversed
     net = torch.compile(model, dynamic=False, fullgraph=a.ckpt != "eager")
     from allie.data.mix import (
         ROW,

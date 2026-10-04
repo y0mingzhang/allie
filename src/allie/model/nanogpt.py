@@ -1499,6 +1499,9 @@ class TrainingManager:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]
         self.adam_every = False  # True: the Adam optimizers step every step, not odd ones only
+        # NorMuon (expert shards first) before Adam: the backward's last reduces, Adam's embedding grads, finish
+        # under the NorMuon steps instead of stalling the first Adam step (disjoint parameters, the same updates)
+        self.reverse = False
 
     def get_forward_args(self):
         return ForwardScheduleConfig(
@@ -1520,7 +1523,7 @@ class TrainingManager:
         for group in (g for opt in muons for g in opt.param_groups):
             group["momentum"] = self.schedule.momentum(step)
 
-        for opt in self.optimizers:
+        for opt in self.optimizers[:: -1 if self.reverse else 1]:
             # Adam on odd steps only, unless adam_every
             if opt in muons or self.adam_every or step % 2 == 1:
                 for group in opt.param_groups:
