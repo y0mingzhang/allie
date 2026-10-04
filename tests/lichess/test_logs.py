@@ -116,7 +116,8 @@ def test_exit_with_a_stuck_writer(tmp_path, monkeypatch, capsys, restore, stuck)
     exits, local = [], tmp_path / "local.log"
     monkeypatch.setattr(logs, "setup", setup)
     monkeypatch.setattr(logs, "local", lambda name: str(local))
-    monkeypatch.setattr(logs.Listener, "stop", lambda self, timeout: stop(self, 0.5))
+    if stuck:
+        monkeypatch.setattr(logs.Listener, "stop", lambda self, timeout: stop(self, 0.5))
     monkeypatch.setattr(cli, "run_command", run)
     monkeypatch.setattr(cli.os, "_exit", exits.append)
     argv = ["allie-bot", "play", "--config", "x.toml", "--log", str(tmp_path / "bot.log")]

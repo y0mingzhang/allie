@@ -88,8 +88,10 @@ def main():
             note = "allie-bot: the log writer is stuck; exiting without it\n"
             if sys.exc_info()[1]:  # the error on its way out
                 note += traceback.format_exc()
-            listener.abandon(note)
-            os._exit(1)
+            try:
+                listener.abandon(note)
+            finally:
+                os._exit(1)
 
 
 def run_command(a):

@@ -175,7 +175,7 @@ class Bot:
                     abandon.set()
                     if match.moved != since:  # the game went on since the last error
                         errors, since = 0, match.moved
-                    errors += 1
+                    errors = min(errors + 1, ERRORS)  # the opponent's turn holds it at ERRORS
                     log.exception("game %s: error %d of %d; resuming", gid, errors, ERRORS)
                     if errors >= ERRORS and match.to_move():
                         log.error("game %s: giving up; resigning", gid)
@@ -185,7 +185,7 @@ class Bot:
                             log.exception("game %s: resign failed", gid)
                         break
                     self.stopped.wait(backoff)
-                    backoff = min(2 * backoff, 30)
+                    backoff = min(2 * backoff, 5)  # the bot's clock may be running
         finally:
             with self.lock:
                 self.games.pop(gid, None)
@@ -286,7 +286,7 @@ class Match:
         if d.think > spent:
             self.bot.stopped.wait(d.think - spent)
         if self.call(self.bot.client.move, self.gid, d.move, d.offer_draw) is None:
-            self.refused = time.monotonic()  # mostly the opponent resigned meanwhile: see tick()
+            self.refused = time.monotonic(), self.ply  # mostly the opponent resigned: see tick()
             return
         self.moved, self.refused = len(moves), None
 
@@ -298,7 +298,8 @@ class Match:
         """Abort a game whose opponent has not made a first move in config.abort seconds:
         Lichess can leave it open for an hour, holding a slot and blocking a drain. Resync a
         game that goes on after Lichess refused the bot's move: the board must disagree."""
-        if self.refused and time.monotonic() - self.refused > 3 and not self.over:
+        late = self.refused and time.monotonic() - self.refused[0] > 3
+        if late and self.refused[1] == self.ply and not self.over:  # no state since
             self.refused = None
             raise RuntimeError("move refused and the game goes on; resyncing")
         wait = self.bot.config.abort
