@@ -894,10 +894,8 @@ def main():
             or stop_code
         ):
             save(step, metrics, a.final_model_only and step == total_steps)
+            # the save's time stays out of tok/s; the loss sums keep their 25-step window
             window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
-            primary_sum.zero_()
-            count_sum.zero_()
-            aux_sum.zero_()
         if stop_code:
             stop_reason = (
                 "signal"
