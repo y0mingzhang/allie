@@ -27,12 +27,12 @@ Maia's protocol (56,599 positions):
 
 | Model | Loss (nats) | Top choice correct (%) | Loss vs Maia-3 79M | Top choice vs Maia-3 79M (points) |
 |---|---:|---:|---:|---:|
-| Maia-3 5M | 1.2933 | 57.04 | +0.0753 [+0.0715, +0.0791] | −2.02 [−2.26, −1.77] |
-| Maia-3 23M | 1.2405 | 58.56 | +0.0225 [+0.0204, +0.0247] | −0.50 [−0.70, −0.30] |
+| Maia-3 5M | 1.2933 | 57.04 | +0.0753 [+0.0715, +0.0791] | −2.02 [−2.27, −1.75] |
+| Maia-3 23M | 1.2405 | 58.56 | +0.0225 [+0.0203, +0.0248] | −0.50 [−0.72, −0.29] |
 | Maia-3 79M | 1.2180 | 59.06 | | |
-| Original Allie | 1.2883 | 57.09 | +0.0703 [+0.0661, +0.0747] | −1.97 [−2.25, −1.67] |
-| Allie 2.0 | 1.2048 | 59.37 | −0.0132 [−0.0165, −0.0097] | +0.31 [+0.07, +0.56] |
-| Before the second anneal | 1.2075 | 59.32 | −0.0105 [−0.0141, −0.0070] | +0.26 [+0.00, +0.52] |
+| Original Allie | 1.2883 | 57.09 | +0.0703 [+0.0659, +0.0746] | −1.97 [−2.23, −1.69] |
+| Allie 2.0 | 1.2048 | 59.37 | −0.0132 [−0.0166, −0.0100] | +0.31 [+0.06, +0.56] |
+| Before the second anneal | 1.2075 | 59.32 | −0.0105 [−0.0139, −0.0072] | +0.26 [+0.02, +0.52] |
 
 *Brackets are 95% intervals over games, with each model paired with Maia-3 79M on the same positions.*
 
@@ -49,17 +49,17 @@ All 80,000 positions:
 
 ### Where the differences come from
 
-Allie 2.0 before its second anneal, minus Maia-3 79M, on slices of the benchmark. The bullet, rapid and classical rows use 5,000 positions per rating band. The other rows are blitz.
+Allie 2.0 minus Maia-3 79M on slices of the benchmark. The bullet, rapid and classical rows use 5,000 positions per rating band. The other rows are blitz.
 
 | Slice | positions | CE difference | top-1 difference (points) |
 |---|---:|---:|---:|
-| bullet | 20,000 | −0.1412 [−0.1514, −0.1310] | +3.33 [+2.81, +3.83] |
-| rapid | 20,000 | −0.0163 [−0.0222, −0.0102] | +0.53 [+0.11, +0.94] |
-| classical | 20,000 | −0.0208 [−0.0278, −0.0144] | +0.45 [−0.00, +0.90] |
-| mover has under 10 s left | 2,852 | −0.2229 [−0.2627, −0.1823] | +3.47 [+1.88, +4.91] |
-| mover has 60-120 s left | 15,719 | +0.0107 [+0.0034, +0.0182] | −0.53 [−1.06, −0.02] |
-| plies 40-59 | 15,997 | +0.0071 [+0.0003, +0.0137] | −0.09 [−0.62, +0.42] |
-| Maia-3's protocol (below) | 56,599 | −0.0105 [−0.0141, −0.0070] | +0.26 [+0.00, +0.52] |
+| bullet | 20,000 | −0.1448 [−0.1552, −0.1343] | +3.36 [+2.84, +3.86] |
+| rapid | 20,000 | −0.0191 [−0.0252, −0.0131] | +0.74 [+0.29, +1.16] |
+| classical | 20,000 | −0.0227 [−0.0292, −0.0162] | +0.56 [+0.11, +1.01] |
+| mover has under 10 s left | 2,852 | −0.2240 [−0.2658, −0.1842] | +3.47 [+2.00, +5.10] |
+| mover has 60-120 s left | 15,719 | +0.0088 [+0.0014, +0.0160] | −0.55 [−1.04, −0.03] |
+| plies 40-59 | 15,997 | +0.0053 [−0.0017, +0.0120] | −0.17 [−0.69, +0.32] |
+| Maia-3's protocol (below) | 56,599 | −0.0132 [−0.0166, −0.0100] | +0.31 [+0.06, +0.56] |
 
 ### Maia-3's protocol
 
@@ -73,13 +73,13 @@ That keeps 56,599 of the 80,000 positions, in 6,089 games. An earlier version of
 
 ![Loss relative to Maia-3 79M by game rating, for Maia-3 5M and 23M, the original Allie and Allie 2.0](figures/rating.png)
 
-*Allie 2.0 before its second anneal. Every position scored, as in the README's compute plot.*
+*Every position scored, as in the README's compute plot.*
 
 The rating plot uses every scored blitz move of the main evaluation: 402,108 positions in 6,247 games. They are reweighted to the natural mix of players and grouped by game rating in 100-point bins.
 
-Before its second anneal, Allie 2.0's whole CE interval is below Maia-3 79M's in 19 of 23 bins. The exceptions are 600-700, 700-800, 1000-1100 and 2800-2900. Only the last, with 7 games, has a higher point estimate.
+Allie 2.0's whole CE interval is below Maia-3 79M's in 20 of 23 bins. The exceptions are 600-700, 700-800 and 2800-2900. Only the last, with 7 games, has a higher point estimate.
 
-Its accuracy is lower in two bins, both within noise: 800-900 by 0.12 points and 2800-2900 by 0.33 points. The bins at both ends hold few games.
+Its accuracy is lower in one bin, 2800-2900, by 0.33 points, within noise. It ties in 800-900. The bins at both ends hold few games.
 
 ### The original Allie
 
@@ -101,15 +101,17 @@ The search runs over the model's own predictions of the move, the outcome and th
 
 Each search budget's output is calibrated on separate July 2026 games, which do not overlap the benchmark.
 
-| Before the second anneal | GFLOPs per move | CE | CE gain | top-1 gain (points) |
+| Model | GFLOPs per move | CE | CE gain | top-1 gain (points) |
 |---|---:|---:|---:|---:|
-| raw policy | 1.40 | 1.2216 | | |
-| 5 simulations | 8.30 | 1.2189 | +0.0026 [+0.0014, +0.0039] | +0.15 [−0.08, +0.37] |
-| 128 simulations | 176 | 1.2161 | +0.0055 [+0.0038, +0.0070] | +0.18 [−0.04, +0.40] |
+| Allie 2.0, raw policy | 1.40 | 1.2194 | | |
+| Allie 2.0, 5 simulations | 8.30 | 1.2169 | +0.0025 [+0.0013, +0.0037] | +0.10 [−0.10, +0.31] |
+| Before the second anneal, raw policy | 1.40 | 1.2216 | | |
+| Before the second anneal, 5 simulations | 8.30 | 1.2189 | +0.0026 [+0.0014, +0.0039] | +0.15 [−0.08, +0.37] |
+| Before the second anneal, 128 simulations | 176 | 1.2161 | +0.0055 [+0.0038, +0.0070] | +0.18 [−0.04, +0.40] |
 
-On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395. The original Allie scores 1.3006.
+On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395. The original Allie scores 1.3006. 128 simulations ran only before the second anneal, so the README's plot leaves them out.
 
-The gain comes from strong players. With 128 simulations it is −0.0001 below 1400 and +0.0014 at 1400-2000. It is +0.0062 at 2000-2400 and +0.0143 at 2400+.
+The gain comes from strong players. Before the anneal, with 128 simulations, it is −0.0001 below 1400 and +0.0014 at 1400-2000. It is +0.0062 at 2000-2400 and +0.0143 at 2400+.
 
 Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 nats on the scaling sweep's best MoE models, and 0.0055 on the big run's final checkpoint.
 

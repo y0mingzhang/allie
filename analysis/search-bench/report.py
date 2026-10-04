@@ -31,12 +31,14 @@ MODEL = {
     "sw-moe-s42": ("sweep MoE 1e18", 18, 896),
     "bigrun132k": ("big run step 132K", 24, 1536),
     "bigrun": ("big run", 24, 1536),
+    "ann2": ("annealed big run", 24, 1536),
 }
 # Allie 2.0: 2 x active matmul parameters per move; its raw reference is eval.maia3.score_moe on the same checkpoint
-FLOPS |= {t: dict(flops_per_move=1389084288) for t in ("bigrun132k", "bigrun")}
+FLOPS |= {t: dict(flops_per_move=1389084288) for t in ("bigrun132k", "bigrun", "ann2")}
 RAW = {
     "bigrun132k": DATA / "bigrun-v2/step-00132096/scores.npz",
     "bigrun": DATA / "bigrun-v2/step-00143051/scores.npz",
+    "ann2": paths.DATA / "distill-v2/scores/ann-all-p05-t1907.npz",
 }
 KEYS = ("index", "ce", "top1", "nodes")
 
@@ -236,8 +238,9 @@ def plot(results):
         "sw-dense-s42": "#1baf7a",
         "bigrun132k": "#4a3aa7",
         "bigrun": "#4a3aa7",
+        "ann2": "#4a3aa7",
     }
-    big = results[0][0].startswith("bigrun")
+    big = MODEL[results[0][0]][1] == 24
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.2), facecolor=surface)
     n = min(r[2] for r in results)
     # every tag is a prefix of run.py's one fixed order, so equal n means identical positions

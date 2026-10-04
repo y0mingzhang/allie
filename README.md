@@ -98,7 +98,7 @@ Maia-3 trains only on Lichess blitz, so we compare on blitz. We use 80,000 blitz
 
 ![Loss against compute per move for Maia-3, the original Allie, and Allie 2.0 with and without search](docs/figures/pareto.png)
 
-*Orange: Allie 2.0 before its second anneal, alone and with 5 or 128 search simulations per move.*
+*Orange: Allie 2.0 alone and with 5 search simulations per move. More search is in [DETAILS](docs/DETAILS.md#search).*
 
 On all 80,000 positions, Allie 2.0's loss is 1.2030 against 1.2269 for Maia-3 79M. It uses 1.39 GFLOPs per move against 9.23.
 
@@ -113,11 +113,11 @@ On all 80,000 positions, Allie 2.0's loss is 1.2030 against 1.2269 for Maia-3 79
 
 ![Loss and top-1 accuracy minus Maia-3 79M's on Maia's protocol, with 95% intervals](docs/figures/protocol.png)
 
-*Allie 2.0 before its second anneal. Each bar compares a model with Maia-3 79M on the same positions.*
+*Each bar compares a model with Maia-3 79M on the same positions.*
 
-Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.0 before its second anneal roughly matches Maia-3 79M.
+Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.0 roughly matches Maia-3 79M.
 
-Its loss is 1.2075 against 1.2180. Its top choice is right 59.32% of the time against 59.06%, a gap of 0.26 points that is barely outside noise [0.00, 0.52]. The original Allie scores 1.2883 and 57.09%.
+Its loss is 1.2048 against 1.2180. Its top choice is right 59.37% of the time against 59.06%, a gap of 0.31 points [0.06, 0.56]. The original Allie scores 1.2883 and 57.09%.
 
 ### Beyond blitz
 
@@ -125,7 +125,7 @@ Allie plays beyond blitz: it supports every time control (bullet, blitz, rapid, 
 
 ![Allie 2.0's loss minus Maia-3 79M's by time control and, in blitz, by time left on the clock](docs/figures/versatility.png)
 
-*Allie 2.0 before its second anneal. Bullet, rapid and classical use a separate sample of 20,000 positions each.*
+*Bullet, rapid and classical use a separate sample of 20,000 positions each.*
 
 \*Maia-3 never trained on bullet, rapid or classical games.
 

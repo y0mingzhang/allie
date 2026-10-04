@@ -592,23 +592,19 @@ def gflops(name):
 
 def search_index(n):
     """Benchmark positions the search ran on (legal.npz order), as run.py drew them."""
-    files = sorted((SEARCH / "bigrun/legal").glob("[0-9]*.npz"))
+    files = sorted((SEARCH / "ann2/legal").glob("[0-9]*.npz"))
     return np.concatenate([np.load(f)["index"] for f in files])[:n]
 
 
 def pareto():
     """Legal-move CE against GFLOPs per move, on the 20,000 benchmark positions that search ran on."""
-    rep = jload(SEARCH / "report-bigrun.json")
+    rep = jload(SEARCH / "report-ann2.json")
     p = rep["points"]
     pts = [
         dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name)
         for m, name in MAIA.items()
     ]
-    for k, t in (
-        ("frozen/legal", "Allie 2.0 (raw)"),
-        ("devcal/5", "5 simulations"),
-        ("devcal/128", "128 simulations"),
-    ):
+    for k, t in (("frozen/legal", "Allie 2.0 (raw)"), ("devcal/5", "5 simulations")):
         pts.append(dict(fam="allie", g=p[k]["gflops"], v=p[k]["ce"], t=t))
     ce = previous("allie1-medium", "bench")
     if ce is not None:
@@ -620,8 +616,8 @@ def pareto():
                 t="Original Allie",
             )
         )
-    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.13, 320], nice=False), title="Compute per move (GFLOPs, log scale)",
-              axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20, 50, 100, 200], grid=False, format="~g"))  # fmt: skip
+    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.2, 25], nice=False), title="Compute per move (GFLOPs, log scale)",
+              axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20], grid=False, format="~g"))  # fmt: skip
     y = alt.Y("v:Q", scale=alt.Scale(domain=[1.20, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
               axis=alt.Axis(values=[1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
     b = values(pts)
@@ -662,7 +658,7 @@ def protocol_scores():
 
     paths = {name: DATA / f"maia3-bench/scores/{m}.npz" for m, name in MAIA.items()}
     paths["Original Allie"] = ORIGINAL / "bench/allie1-medium.npz"
-    paths["Allie 2.0"] = DATA / "maia3-bench/bigrun-v2/step-00143051/scores.npz"
+    paths["Allie 2.0"] = DATA / f"distill-v2/scores/{ANN}.npz"
     return {k: read(p) for k, p in paths.items() if Path(p).exists()}
 
 
@@ -717,8 +713,8 @@ def protocol():
 def versatility():
     """Allie 2.0's loss minus Maia-3 79M's by time control (bullet, rapid and classical from the formats sample,
     5,000 positions per rating band; blitz from the benchmark) and, in blitz, by time left on the mover's clock;
-    paired 95% game-bootstrap intervals (allie.eval.maia3.report's aggregate-bigrun.json)."""
-    sl = jload(X / "maia3-bench/aggregate-bigrun.json")["slices"]
+    paired 95% game-bootstrap intervals (allie.eval.maia3.report's aggregate-NAME.json)."""
+    sl = jload(X / f"maia3-bench/aggregate-{ANN}.json")["slices"]
     clocks = ["Under 10 s", "10–30 s", "30–60 s", "1–2 min", "Over 2 min"]
     groups = (
         ("By time control", ["bullet", "blitz", "rapid", "classical"], [sl["format"][f] for f in ("bullet", "blitz", "rapid", "classical")]),
@@ -744,13 +740,13 @@ def versatility():
 def rating():
     """Legal-move CE minus Maia-3 79M's per 100-point bin of game rating, on every scored blitz move."""
     rows = [
-        r for r in jload(X / "bigrun-progress/acc-by-game-rating-final.json") if r["n"]
+        r for r in jload(X / f"bigrun-progress/acc-by-game-rating-{ANN}.json") if r["n"]
     ]
     x_ = [float(np.mean([float(v) for v in r["bin"].split("-")])) for r in rows]
     ref = np.array([r["models"]["maia3-79m"]["ce"][0] for r in rows])
     pts = []
     for i, r in enumerate(rows):
-        d = r["models"]["bigrun-143051"]["d_ce_79m"]
+        d = r["models"][ANN]["d_ce_79m"]
         pts.append(dict(x=x_[i], s="Allie 2.0", d=d[0], lo=d[1], hi=d[2]))
         pts += [
             dict(x=x_[i], s=MAIA[m], d=r["models"][m]["ce"][0] - ref[i])
@@ -814,7 +810,7 @@ def rating():
         "Loss minus Maia-3 79M's by game rating, on all blitz positions of the main evaluation. Below zero is",
         "better. Band: Allie 2.0's 95% interval; the end bins hold few games."))  # fmt: skip
     save(chart, "rating")
-    d = np.array([r["models"]["bigrun-143051"]["d_ce_79m"] for r in rows])
+    d = np.array([r["models"][ANN]["d_ce_79m"] for r in rows])
     print(
         f"  {len(rows)} bins; CE above 79M in {[r['bin'] for r, v in zip(rows, d[:, 0]) if v > 0]}; interval below 0 in {(d[:, 2] < 0).sum()}"
     )

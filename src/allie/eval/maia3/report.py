@@ -3,12 +3,14 @@ the best 1e18 sweep MoE, on the benchmark's 80,000 blitz positions (eval.maia3.a
 bootstrap) and on the by-format companion sample (eval.maia3.formats: 5,000 per bullet / rapid / classical
 cell). Slices: Elo band, 200-Elo bin of the mover, blitz time control, game format, mover's clock, ply.
 
-usage: eval.maia3.report STEP   (reads bigrun-v2/step-STEP/scores.npz and formats/scores/bigrun-STEP.npz)
-Writes tables-bigrun.md and aggregate-bigrun.json.
+usage: eval.maia3.report STEP          (bigrun-v2/step-STEP/scores.npz, formats/scores/bigrun-STEP.npz)
+       eval.maia3.report NAME SCORES   (SCORES: NAME's benchmark scores.npz, beside its .json; formats/scores/NAME.npz)
+Writes tables-bigrun.md and aggregate-bigrun.json, or tables-NAME.md and aggregate-NAME.json.
 """
 
 import json
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -206,7 +208,12 @@ def sliced(
 
 
 def main():
-    step = int(sys.argv[1])
+    if len(sys.argv) > 2:
+        name, bench, out_name = sys.argv[1], Path(sys.argv[2]), sys.argv[1]
+    else:
+        step = int(sys.argv[1])
+        name, out_name = f"bigrun-{step}", "bigrun"
+        bench = DATA / "bigrun-v2" / f"step-{step:08d}" / "scores.npz"
     rng = np.random.default_rng(7)
     s, masks, cached = load()
     keep = np.load(DATA / "games.npz")["keep"]
@@ -214,15 +221,14 @@ def main():
         m: dict(ce=cached[m]["ce"].astype(float), top1=cached[m]["top1"].astype(float))
         for m in ORDER[:-1]
     }
-    sc["bigrun"] = scores(DATA / "bigrun-v2" / f"step-{step:08d}" / "scores.npz", keep)
+    sc["bigrun"] = scores(bench, keep)
     fl = json.loads((HERE / "flops.json").read_text())
     GFLOPS.update({m: fl[m]["flops_per_move"] / 1e9 for m in ORDER[:3]})
-    info = json.loads(
-        (DATA / "bigrun-v2" / f"step-{step:08d}" / "scores.json").read_text()
-    )
+    info = json.loads(bench.with_suffix(".json").read_text())
+    step = info["step"]
     out = dict(step=step, views={}, slices={}, model_sha256=info["model_sha256"])
     lines = [
-        f"Big run step {step:,} ({info['tokens'] / 1e9:.1f}B tokens), checkpoint sha256 {info['model_sha256'][:12]}.",
+        f"{name}: step {step:,} ({info['tokens'] / 1e9:.1f}B tokens), checkpoint sha256 {info['model_sha256'][:12]}.",
         "",
     ]
     overall(s, masks, sc, rng, out, lines)
@@ -280,7 +286,7 @@ def main():
         lines,
     )
 
-    f = FMT / "scores" / f"bigrun-{step}.npz"
+    f = FMT / "scores" / f"{name}.npz"
     if f.exists() and all((FMT / "scores" / f"{m}.npz").exists() for m in ORDER[:-1]):
         with np.load(FMT / "games.npz") as z:
             fs = z["sel"][z["keep"]]
@@ -344,8 +350,8 @@ def main():
             )
         lines.append("")
 
-    (HERE / "aggregate-bigrun.json").write_text(json.dumps(out, indent=1) + "\n")
-    (HERE / "tables-bigrun.md").write_text("\n".join(lines) + "\n")
+    (HERE / f"aggregate-{out_name}.json").write_text(json.dumps(out, indent=1) + "\n")
+    (HERE / f"tables-{out_name}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 

@@ -36,15 +36,17 @@ def pressure():
 
 def compare(scores, ref="Maia-3 79M", seed=7):
     """Per view: each model's CE and top-1 (%), and its paired differences from ref with 95% game-bootstrap
-    intervals, for scores {name: (legal-move CE, top-1) per benchmark position}."""
+    intervals, for scores {name: (legal-move CE, top-1) per benchmark position}. Every interval draws from its own
+    generator, so it does not depend on which other models are compared."""
     s, masks = views()
     scores = {k: (np.asarray(ce, float), np.asarray(t, float)) for k, (ce, t) in scores.items()}
     out = {}
     for view, m in masks.items():
-        rng, g, (ce0, t0) = np.random.default_rng(seed), s[m, 0], scores[ref]
+        g, (ce0, t0) = s[m, 0], scores[ref]
         out[view] = dict(positions=int(m.sum()))
         for name, (ce, t) in scores.items():
-            d = {} if name == ref else dict(d_ce=stats(g, ce[m] - ce0[m], rng), d_top1=stats(g, 100 * (t[m] - t0[m]), rng))
+            d = {} if name == ref else dict(d_ce=ce[m] - ce0[m], d_top1=100 * (t[m] - t0[m]))
+            d = {k: stats(g, x, np.random.default_rng(seed)) for k, x in d.items()}
             out[view][name] = dict(ce=float(ce[m].mean()), top1=float(100 * t[m].mean()), **d)
     return out
 
