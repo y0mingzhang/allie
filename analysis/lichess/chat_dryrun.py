@@ -7,7 +7,7 @@ and cost, and the spend.
 
 usage: python analysis/lichess/chat_dryrun.py --config bot.toml [--llm claude|mock]
            [--ledger PATH] [--seed N] [--prompts]
-           GAME.pgn:casual|rated:PLIES[:chatty|quiet|silent]...
+           GAME.pgn:casual|rated:PLIES[:chatty|identity|quiet|silent]...
 """
 
 import argparse
@@ -27,6 +27,12 @@ SCRIPTS = {
         [(0.0, "hi! gl"), (0.25, "wdyt about my next move?"), (0.45, "blunder?"),
          (0.6, "draw"), (0.8, "you play like a human lol")],
         ["gg, how did I play?", "what was the turning point?"],
+    ),
+    "identity": (
+        [(0.0, "hi gl"), (0.2, "are you an engine?"), (0.35, "was that the best move?"),
+         (0.5, "whos winning rn?"), (0.6, "draw"), (0.7, "can you play faster"),
+         (0.8, "idm")],
+        ["gg", "how did i play?"],
     ),
     "quiet": ([(0.6, "draw")], ["gg"]),  # never chats; gg after the game
     "silent": ([], []),

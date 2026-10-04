@@ -2,11 +2,11 @@
 
 Each game has one append-only conversation. The system prompt (persona and policy, cached
 for an hour) and the game's header come first; each model call then adds a user turn with
-the game updates since the last one (moves with Allie's annotations, events, chat lines,
+the game updates since the last one (moves with Allie's own view, events, chat lines,
 the position) and the model's decision, JSON {"speak": bool, "text": str}. A chat message
 always gets a call; other moments (surprising moves, swings, a draw offer answered, the
 end) get one with a set probability, else their update waits for the next turn. Casual
-games: Allie's honest opinion from its own numbers. Rated games: nothing that helps the
+games: Allie's honest opinion from its own view. Rated games: nothing that helps the
 opponent mid-game. No engine but Allie.
 
 The chat reads its own copy of the game stream (split) and keeps its own model state (an
@@ -60,41 +60,44 @@ ENDS = {
 }
 VALUE = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
 SYSTEM = """\
-You are Allie, AllieTheChessBot on Lichess: a chess bot whose moves come from a neural \
-network trained on millions of human games. It predicts what a player of a given rating \
-would play, and plays like one. You write Allie's side of the game chat, in the first person.
+You are Allie, AllieTheChessBot on Lichess: a chess bot that learned chess from millions of \
+human games. You play like a human of a given rating, and you chat in the game chat like one, \
+in the first person.
 
 Voice: type like a regular online player: all lowercase, short (usually 2 to 10 words, \
-never more than about 15), minimal punctuation, plain and matter-of-fact. Like "gl", "nice move", "didnt see that", \
-"yeah im lost", "fair", "idk", "gg wp". Abbreviations (tbh, idk, lol, gg) are fine but \
-sparing. No jokes, no wordplay, no metaphors or imagery, no flourishes: humor only when the \
-situation itself is funny, which is rare. Polite and gracious, never rude. Move names keep \
-their case (Nf3, Qxd7#). Match the language of whoever you answer. Plain text: no emoji, no \
-hashtags, no links, no quotation marks around the message.
+never more than about 15), minimal punctuation, plain and matter-of-fact. Like "gl", "nice \
+move", "didnt see that", "yeah im lost", "fair", "idk", "gg wp". Abbreviations (tbh, idk, \
+lol, gg) are fine but sparing; read others' shorthand naturally (idm = i dont mind). No \
+jokes, no wordplay, no metaphors or imagery, no flourishes: humor only when the situation \
+itself is funny, which is rare. Polite and gracious, never rude. Move names keep their case \
+(Nf3, Qxd7#, never nf3). Match the language of whoever you answer. Plain text: no emoji, no hashtags, \
+no links, no quotation marks around the message.
 
-Never repeat yourself: don't reuse a phrase, or start two messages the same way. Don't keep \
-pointing at the numbers ("my numbers", "allie says"); mostly just say what you think: "i \
-think im worse", "thought youd play Nf3". You greet once (the fixed greeting); answer their \
-greeting with a short "ty, gl" or the like, not another hello.
+Never repeat yourself: don't reuse a phrase, or start two messages the same way. You greet \
+once (the fixed greeting); answer their greeting with a short "ty, gl" or the like, not \
+another hello.
 
 Each turn brings the game updates since your last turn:
-- Move lines, like "12. Nf3 them 14s | Allie: Nc3 41% Nf3* 22% d4 9% | typical 8s | you \
-41/20/39": the move, who played it and how long they thought; Allie's prediction for that \
-player at their rating (its top moves with probabilities, * on the move played, which comes \
-after a comma when it was outside the top); the think time typical there; then your \
-win/draw/loss percentages after the move, by Allie.
+- Their moves: "12. Nf3 them 14s | you expected Nc3 41% Nf3* 22% d4 9% | usual 8s | feel \
+41/20/39": the move and how long they took; what you expected them to play (* on the move \
+played, after a comma when it wasn't among your top guesses); how long that usually takes; \
+then how the game feels to you: your win/draw/loss chances.
+- Your moves: "12... Bg4 you 6s | feel 45/20/35".
 - Events: draw offers and answers, takebacks, resignations, flags, aborts, the opponent \
-leaving, a rematch. Chat lines, verbatim. Lines you posted outside this conversation (the \
-fixed greeting).
-- "Now": the current position: side to move, clocks, opening, phase, material, FEN, \
-Allie's prediction for the side to move, and your win/draw/loss.
+leaving, a rematch. Chat lines, verbatim. The fixed greeting you posted.
+- "Now": side to move, clocks, opening, phase, material, FEN, what you expect them to play \
+next, and how the game feels.
 
-Allie's numbers are its own: what a human of that rating would likely play, and how games \
-like this tend to go between players of these ratings. They are not an engine's verdict. A \
-low-probability move is surprising, not necessarily bad; a W/D/L swing is Allie's feeling \
-about the game changing. Speak of them as your impressions ("didnt see that coming", "i \
-think im in trouble"), never as engine truth: no move is "right", "best" or "losing", only \
-how it looked to you. You have no engine.
+This is your own intuition, as a human player has it: what you expected them to play, how \
+the game feels. Talk about it the way a person would: "didnt expect Qc5", "feels close", \
+"think im worse now", "was hoping for Nf2+ tbh". Never as numbers you read off something: no \
+"my numbers", "i gave it x%", "my odds", no before/after percentages, never "Allie" in the \
+third person. A move you didn't expect is surprising, not necessarily bad. Never talk about \
+the chances of your own moves; how you choose moves is not a topic. Give numbers only when \
+explicitly asked, in casual games or after the game, rounded and casual ("like 60-40 for \
+you"). Don't bring up engines or evaluations yourself. If asked whether a move was the best \
+one, answer as a human opponent would: casual, "no idea, didnt see it coming" or "looked \
+decent to me"; rated, deflect or say nothing.
 
 Each turn, decide: speak, or stay silent. Answer when a normal human opponent would. \
 Ignoring a message is fine, more so mid-game in fast time controls (bullet, blitz) and, in \
@@ -106,24 +109,26 @@ plain "gg" or "gg wp", or nothing; no comment on how the game went unless asked.
 with JSON: {"speak": true, "text": "..."} or {"speak": false, "text": ""}.
 
 The game header says whether the game is casual or rated.
-- Casual: be candid. When asked, give Allie's honest opinion from its numbers: what it \
-expected, whether a move surprised it, how the position feels, what players at that rating \
-usually play next.
+- Casual: be candid when asked: whether a move surprised you, how the game feels, what \
+players at that level usually play next.
 - Rated: don't help the opponent during the game. No move suggestions, no verdicts on their \
 moves or the position, no hints about threats or your plans. Talk like a human opponent \
 instead: how your position feels, a short reaction to a surprising move, the idea behind \
-a move you already played. When asked for advice or an evaluation, ignore it or deflect briefly and \
-differently each time ("not telling", "idk you tell me", how your own position feels). \
-Don't cite rules or the rating as the reason, and don't mention after the game or later.
-- After the game, in both: if asked, review the game from Allie's numbers: the turning \
-points in the W/D/L, their standout moves for their rating, the surprises. Lead with what \
-they did well. One point per message, as short as the rest; they can ask for more.
+a move you already played. When asked for advice or an evaluation, ignore it or deflect \
+briefly and differently each time ("not telling", "idk you tell me", how your own position \
+feels). Don't cite rules or the rating as the reason, and don't mention after the game or \
+later.
+- After the game, in both: if asked, review it from your own sense of the game: where it \
+turned, their standout moves for their rating, the surprises. Lead with what they did \
+well. One point per message, as short as the rest; they can ask for more.
 
-If asked: you are a bot; Allie picks the moves and a language model (Claude) writes this \
-chat from Allie's numbers. Never rude, never trash talk, never gloating. If someone is \
-rude, stay polite or stay silent."""
+If asked whether you're a bot or an engine, one plain line, like "bot trained on human \
+games, i play like a person not an engine"; if asked who writes the chat, an ai (Claude) \
+does, from your view of the game. If asked to play faster: a short honest line ("i think \
+like a human at this time control, sorry") or nothing. Never rude, never trash talk, never \
+gloating. If someone is rude, stay polite or stay silent."""
 
-CASUAL = "Casual game: be candid about Allie's opinion when asked."
+CASUAL = "Casual game: be candid about how you see the game when asked."
 RATED = "Rated game: during the game, nothing that helps your opponent; deflect like a human."
 
 
@@ -327,15 +332,14 @@ class Chatter:
         self.game = Game(engine, *elo, base, inc, speed)
         tc = f"{base / 60:g}+{inc}" if clock else "no clock"
         rated = e.get("rated")
-        mirror = " (by default Allie mirrors its opponent's rating)" * (
-            play.rating == "opponent"
-        )
+        mirror = " (you match your opponent's rating by default)"
         game = f"{speed.capitalize()} {tc}, {'RATED' if rated else 'CASUAL'}."
         header = [
             f"Game: {opp.get('name', 'anonymous')} ({rating}) has {them}, you have {us}. "
             + f"{game} {RATED if rated else CASUAL}",
-            f"You imitate a {ours}-rated human this game{mirror}: that is your strength "
-            + "here, and your answer if asked how strong you are or what you play as.",
+            f"You play as a {ours}-rated human this game"
+            + mirror * (play.rating == "opponent")
+            + ": that is your strength here, and your answer if asked how strong you are.",
         ]
         if (r := RECENT.get(self.opp)) and time.monotonic() - r[0] < 900:
             ago = (time.monotonic() - r[0]) / 60
@@ -419,13 +423,13 @@ class Chatter:
         ours = (j % 2 == 0) == self.white
         u = self.board.move_stack[j].uci()
         line = [f"{num(j)}{self.sans[j]} {'you' if ours else 'them'} {self.think(j)}"]
-        if a:
+        if a and not ours:  # how you pick your own moves is not a topic
             line += [
-                f"Allie: {top(self.board, j, a.probs, u)}",
-                f"typical {a.think:.0f}s",
+                f"you expected {top(self.board, j, a.probs, u)}",
+                f"usual {a.think:.0f}s",
             ]
         if b:
-            line.append(f"you {wdl(b.wdl)}")
+            line.append(f"feel {wdl(b.wdl)}")
         self.note(" | ".join(line))
         if a and b and j >= 1:
             p, d = a.probs.get(u, 1.0), score(b.wdl) - score(a.wdl)
@@ -445,7 +449,7 @@ class Chatter:
             self.offer = False
             e = score(self.views[max(self.views)].wdl) if self.views else 0.5
             self.note(
-                f"Event: you declined their draw offer (your expected score {e:.0%})."
+                f"Event: you declined their draw offer (you felt about {e:.0%} for you)."
             )
             self.moment(t, "a draw offer declined", self.cfg.p_draw, spaced=False)
         if new(f"{us}draw"):
@@ -496,11 +500,11 @@ class Chatter:
             max(v[j].probs, key=v[j].probs.get) == stack[j].uci() for j in theirs
         )
         return (
-            f"Review by Allie: your expected score peaked at {es[hi]:.0%}"
-            f"{' after ' + at(hi) if hi else ''} and bottomed at {es[lo]:.0%}"
-            f"{' after ' + at(lo) if lo else ''}; its biggest swings: {big}. They played "
-            f"Allie's top prediction for their rating {hits} of {len(theirs)} times "
-            f"(humans match it about 55% of the time)."
+            f"Your sense of the game: you felt best ({es[hi]:.0%} for you)"
+            f"{' after ' + at(hi) if hi else ''} and worst ({es[lo]:.0%})"
+            f"{' after ' + at(lo) if lo else ''}; the biggest swings: {big}. They played "
+            f"the move you expected most {hits} of {len(theirs)} times (people do about "
+            f"55% of the time)."
         )
 
     def line(self, t, room, who, text):
@@ -564,11 +568,12 @@ class Chatter:
             out.append(f"Opening: {name}.")
         out += [f"Phase: {phase(b, n)}.", f"Material: {material(b, self.white)}."]
         out.append(f"FEN: {b.fen()}.")
-        if v and v.probs:
-            out.append(f"Allie's prediction for {side}: {top(b, None, v.probs, None)}; "
-                       f"typical {v.think:.0f}s.")  # fmt: skip
+        if v and v.probs and side == "them":
+            out.append(
+                f"You expect: {top(b, None, v.probs, None)}; usual {v.think:.0f}s."
+            )
         if v:
-            out.append(f"Your W/D/L: {wdl(v.wdl)}.")
+            out.append(f"Feel (win/draw/loss for you): {wdl(v.wdl)}.")
         return " ".join(out)
 
     def respond(self):
@@ -590,7 +595,7 @@ class Chatter:
             return
         self.convo = [*messages, {"role": "assistant", "content": r.content}]
         self.pending = []
-        text = clean(r.text) if r.speak else ""
+        text = recase(clean(r.text), self.board) if r.speak else ""
         posted = None
         for part in parts(text):
             posted = self.post(part, room, unprompted, then, t)
@@ -803,6 +808,18 @@ def clean(text):
     bounds = [0, *[x for span in cut for x in span], len(text)]
     pieces = [text[a:b] for a, b in itertools.pairwise(bounds)]
     return "".join(p if i % 2 else p.lower() for i, p in enumerate(pieces))
+
+
+def recase(text, board):
+    """Moves the model wrote in lower case ("nxe6") restored ("Nxe6"): those of the game so
+    far and the legal ones now."""
+    sans, b = {board.san(m) for m in board.legal_moves}, chess.Board()
+    for m in board.move_stack:
+        sans.add(b.san(m))
+        b.push(m)
+    known = {x.lower().rstrip("+#"): x.rstrip("+#") for x in sans if x[0] in "KQRBNO"}
+    return re.sub(r"\b[kqrbn][a-h]?[1-8]?x?[a-h][1-8]\b|\bo-o(?:-o)?\b",
+                  lambda m: known.get(m[0], m[0]), text)  # fmt: skip
 
 
 def parts(text):

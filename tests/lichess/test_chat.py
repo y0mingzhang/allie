@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -125,8 +126,11 @@ def test_conversation(engine):
     assert system[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert "CASUAL" in system[1]["text"] and "Opp (1500)" in system[1]["text"]
     turn = m.turn()
-    assert "1. e4 them" in turn and "| Allie: " in turn and "| you " in turn
-    assert "1... e5 you" in turn and 'Chat (player) Opp: "hi gl"' in turn
+    assert "1. e4 them" in turn and "| you expected " in turn and "| feel " in turn
+    assert (
+        re.search(r"1\.\.\. e5 you \d+s \| feel", turn) is not None
+        and 'Chat (player) Opp: "hi gl"' in turn
+    )
     assert "Now (ply 2): them to move." in turn and "Opening: King's Pawn Game" in turn
     assert "FEN: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2" in turn
     assert "the fixed greeting" in turn
@@ -159,7 +163,7 @@ def test_moments_draw_resign(engine):
     g.feed(state(" ".join(moves + ["d2d3"]), status="resign", winner="black"))
     assert len(m.calls) == 3
     assert "you won by resignation, they resigned after 7 plies" in m.turn()
-    assert "Review by Allie" in m.turn()
+    assert "Your sense of the game" in m.turn()
     m.text = "sure: 4. d3 was the quiet turn."
     g.lines = [{"user": "Opp", "text": "how did I play?"}]
     g.feed(chat.END)
@@ -218,7 +222,7 @@ def test_header_and_stale(engine, monkeypatch):
     full["white"]["rating"] = 759
     g.feed(full)
     header = c.system[1]["text"]
-    assert "You imitate a 759-rated human" in header and "1335" not in header
+    assert "You play as a 759-rated human" in header and "1335" not in header
     monkeypatch.setattr(chat, "STALE", 0.1)
     c.put(g.say("hi"))
     wait(lambda: m.calls)
