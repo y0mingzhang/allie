@@ -157,3 +157,37 @@ def test_fast_after_fork(tiny_path):
     with multiprocessing.get_context("fork").Pool(1) as pool:
         got = pool.apply_async(_forked_step).get(timeout=120)
     torch.testing.assert_close(got, want, atol=0, rtol=0)
+
+
+def test_fast_concurrent_steps(tiny_path):
+    """Steps from several threads on one model run one at a time (codex: they crashed)."""
+    m = Model(tiny_path, dtype=torch.bfloat16, threads=2)
+    games = [inputs(random_game(20 + s, 40)) for s in range(4)]
+    want = [step(m, [(Cache(m), *x)])[0] for x in games]
+    got = [None] * len(games)
+    go = threading.Barrier(len(games))
+
+    def run(j):
+        go.wait()
+        got[j] = step(m, [(Cache(m), *games[j])])[0]
+
+    threads = [threading.Thread(target=run, args=(j,)) for j in range(len(games))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for a, b in zip(got, want):
+        torch.testing.assert_close(a, b, atol=0, rtol=0)
+
+
+def test_fast_float32_out_and_threads(tiny_path):
+    with pytest.raises(ValueError):
+        Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=-1)
+    m = Model(tiny_path, dtype=torch.bfloat16, threads=2)
+    default = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    try:
+        z = step(m, [(Cache(m), *inputs(random_game(5, 8)))])
+    finally:
+        torch.set_default_dtype(default)
+    assert z.dtype == torch.float32 and 0 < z.min() and z.max() < 23

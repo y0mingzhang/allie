@@ -18,6 +18,7 @@ import hashlib
 import os
 import platform
 import subprocess
+import threading
 import weakref
 from pathlib import Path
 
@@ -1371,9 +1372,11 @@ class Fast:
             and w["board.output"].shape[0] == 544
         )
         self.lib, self.model = library(), model
-        self.threads = min(
-            threads or threads_default(), len(cpus())
-        )  # spinning: never oversubscribe
+        if threads is not None and threads < 1:
+            raise ValueError("threads must be at least 1")
+        # spinning threads must never outnumber the CPUs
+        self.threads = min(threads or threads_default(), len(cpus()))
+        self.lock = threading.Lock()
         int8 = bool(model.scales)
         ve = [None] * n
         for j in range(model.ve):
@@ -1452,9 +1455,11 @@ class Fast:
         return dict(zip(PHASES, out))
 
     def step(self, items):
-        if (
-            os.getpid() != self.pid
-        ):  # a forked child has none of the pool's threads: new ones
+        with self.lock:  # one step at a time: the engine's buffers and threads are shared
+            return self._step(items)
+
+    def _step(self, items):
+        if os.getpid() != self.pid:  # a forked child has none of the pool's threads
             self.handle, self.pid = self.lib.allie_new(*self.args), os.getpid()
         self.lib.allie_wake(self.handle)  # workers wake while the inputs are gathered
         meta, caches, lo = [], [], 0
@@ -1463,17 +1468,14 @@ class Fast:
             meta += [cache.n, len(ids), cache.capacity, lo]
             caches += [cache.k.data_ptr(), cache.v.data_ptr(), cache.e.data_ptr()]
             lo += len(ids)
-        cat = lambda j, dt: (
-            torch.cat([it[j] for it in items]).to("cpu", dt).contiguous()
-        )
-        ids, feats, boards = (
-            cat(1, torch.int64),
-            cat(2, torch.float32),
-            cat(3, torch.uint8),
-        )
+
+        def cat(j, dtype):
+            return torch.cat([it[j] for it in items]).to("cpu", dtype).contiguous()
+
+        ids, feats, boards = cat(1, torch.int64), cat(2, torch.float32), cat(3, torch.uint8)
         if ids.shape != (lo,) or feats.shape != (lo, 3) or boards.shape != (lo, 68):
             raise ValueError("items: ids [m], feats [m, 3] and boards [m, 68] each")
-        out = torch.empty(len(items), self.model.config["vocab"])
+        out = torch.empty(len(items), self.model.config["vocab"], dtype=torch.float32)
         err = self.lib.allie_step(
             self.handle, lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
             (ctypes.c_int64 * len(meta))(*meta), (ctypes.c_void_p * len(caches))(*caches),
@@ -1525,7 +1527,7 @@ class Graphs:
         self.e = torch.zeros(slots + 1, ctx, m.width, **kw)
         self.model, self.slots, self.ctx = m, slots, ctx
         self.free = list(range(slots))[::-1]
-        self.graphs, self.pool = {}, None
+        self.graphs, self.pool, self.lock = {}, None, threading.Lock()
 
     def attach(self, cache):
         """A new cache's storage: a free slot (False when none is left)."""
@@ -1579,6 +1581,10 @@ class Graphs:
 
     def step(self, items):
         """step()'s logits, or None when the step is not one new token per pooled game."""
+        with self.lock:  # the graphs' inputs are shared
+            return self._step(items)
+
+    def _step(self, items):
         n = len(items)
         if n > self.BATCHES[-1] or any(len(ids) != 1 or getattr(c, "slot", None) is None
                                        for c, ids, *_ in items):  # fmt: skip
