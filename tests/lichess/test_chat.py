@@ -111,7 +111,7 @@ def test_clean_and_played():
         assert not chat.gg(t)
     assert chat.gg("well played") and chat.gg("nice game ty") and chat.gg("g g")
     start = time.monotonic()
-    chat.gg("g" * 5000 + "x")
+    assert not chat.gg("g" * 5000)
     assert time.monotonic() - start < 0.05  # no backtracking
     b = chess.Board()
     for u in "e2e4 e7e5 g1f3 b8c6".split():

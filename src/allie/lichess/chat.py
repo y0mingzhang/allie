@@ -684,7 +684,9 @@ GG_PAIRS = {("good", "game"), ("nice", "game"), ("well", "played")}
 
 def gg(text):
     """Is it only a "good game" (gg, gg wp, good game, ty gg, ...)? A bounded token scan."""
-    words = re.sub(r"[^a-z ]", " ", text.lower()[:60]).split()
+    if len(text) > 60:
+        return False
+    words = re.sub(r"[^a-z ]", " ", text.lower()).split()
     i = 0
     while i < len(words):
         if tuple(words[i : i + 2]) in GG_PAIRS:
