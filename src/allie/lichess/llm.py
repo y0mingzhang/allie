@@ -197,9 +197,8 @@ class Claude:
             with self.client.beta.messages.stream(
                 system=system, messages=messages, **self.params
             ) as s:
-                deadline = threading.Timer(
-                    self.cfg.timeout, s.close
-                )  # a total deadline
+                left = max(self.cfg.timeout - (time.monotonic() - start), 0)
+                deadline = threading.Timer(left, s.close)  # the total deadline
                 deadline.start()
                 try:
                     for ev in s:
@@ -240,7 +239,7 @@ class Claude:
         log.info("chat model %s: %d new + %d cached + %d written, %d out, $%.4f (day $%.2f,"
                  " month $%.2f), first token %.2f s, %.2f s, %s", r.model, *n[1:], day,
                  month, first or t, t, r.stop_reason)  # fmt: skip
-        if r.stop_reason != "end_turn":
+        if r.stop_reason != "end_turn" or t > self.cfg.timeout:
             return None
         try:
             d = json.loads("".join(b.text for b in r.content if b.type == "text"))

@@ -326,6 +326,11 @@ class FakeAPI:
                 if isinstance(step, tuple) and step[0] == "sleep":
                     time.sleep(step[1])
                     step = {"speak": False, "text": ""}
+                elif (
+                    isinstance(step, tuple) and step[0] == "slow"
+                ):  # late headers, slow body
+                    time.sleep(step[1])
+                    stall, step = step[1] / 6, {"speak": True, "text": "Late reply"}
                 elif isinstance(step, tuple):  # ("stall", s): stall after message_start
                     stall, step = step[1], {"speak": False, "text": ""}
                 if isinstance(step, int):
@@ -375,7 +380,7 @@ def test_claude(monkeypatch, tmp_path):
     thinking, fallback, caching), the key file, cost into the ledger, timeouts, a bad key."""
     pytest.importorskip("anthropic")
     say = {"speak": True, "text": "Nice move!"}
-    api = FakeAPI([say, ("sleep", 1.5), ("stall", 3), 401, say])
+    api = FakeAPI([say, ("sleep", 1.5), ("stall", 3), ("slow", 0.7), 401, say])
     monkeypatch.setenv("ANTHROPIC_BASE_URL", api.url)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     key, ledger = tmp_path / "key", tmp_path / "spend.json"
@@ -412,9 +417,16 @@ def test_claude(monkeypatch, tmp_path):
         300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + 300) * 10
     ) / 1e6  # + all it could write
     assert json.loads(ledger.read_text())[day] == pytest.approx(usd + partial)
+    before = json.loads(ledger.read_text())[day]
+    start = time.monotonic()
+    assert (
+        m(system, [{"role": "user", "content": "u"}]) is None
+    )  # over the total deadline
+    assert time.monotonic() - start < 1.4
+    assert json.loads(ledger.read_text())[day] > before  # still charged
     assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
     assert m(system, [{"role": "user", "content": "u"}]) is None
-    assert len(api.requests) == 4
+    assert len(api.requests) == 5
     key.unlink()
     assert llm.make(cfg)(system, []) is None  # no key
 
