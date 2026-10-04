@@ -1378,6 +1378,7 @@ class Fast:
         arr = lambda ty, xs: (ty * len(xs))(*xs)
         order = cpu_order(self.threads) if pin else None
         self.cpus, nodes = order or (None, None)
+        place = place and os.environ.get("ALLIE_NUMA") != "0"
         if place and nodes and Path("/sys/devices/system/node/node1").exists():
             # weights on the NUMA node of the threads (bound), or spread over theirs (interleaved)
             ts = [t for t in self.tensors if t is not None]
