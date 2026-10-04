@@ -153,8 +153,9 @@ class Allie:
             raise ValueError("temperature must be a number >= 0")
         if temperature == 0:
             return next(iter(p))
-        logp = np.log(np.maximum(np.array(list(p.values())), 1e-300)) / temperature
-        w = np.exp(logp - logp.max())
+        logp = np.log(np.maximum(np.array(list(p.values())), 1e-300))
+        with np.errstate(over="ignore"):  # a tiny temperature sends all but the best to -inf
+            w = np.exp((logp - logp.max()) / temperature)
         rng = rng or np.random.default_rng()
         return list(p)[rng.choice(len(w), p=w / w.sum())]
 

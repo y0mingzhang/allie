@@ -151,3 +151,25 @@ def test_moe_paths_agree(tiny):
         tiny.moe_mode = mode
         torch.testing.assert_close(tiny.mlp(2, h), ref, atol=1e-5, rtol=1e-5)
     tiny.moe_mode = None
+
+
+def test_revised_clocks_refresh_the_cache(tiny):
+    """Clocks learnt later revise filled-in features: the cache must follow."""
+    engine = Engine(tiny)
+    moves = random_game(7, 20)
+
+    def fresh(g):
+        x = torch.tensor(g.tokens), torch.tensor(g.features(), dtype=torch.float32)
+        b = torch.tensor(np.frombuffer(b"".join(g.boards), np.uint8).reshape(-1, 68))
+        return step(tiny, [(Cache(tiny), x[0], x[1], b)])[0]
+
+    for events in (
+        [(moves, 120, 110), (moves[:15], 150, 140)],  # a takeback removes the anchors
+        [(moves[:4], None, None), (moves[:6], 170, 160)],  # clocks arrive late
+    ):
+        g = Game(engine, 1500, 1500, 180, 2)
+        for ms, w, b in events:
+            g.update(ms, w, b)
+            g.sync()
+        torch.testing.assert_close(g.sync(), fresh(g), atol=2e-5, rtol=0)
+    engine.close()

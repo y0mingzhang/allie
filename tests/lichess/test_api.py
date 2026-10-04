@@ -88,6 +88,7 @@ def test_play_temperatures(tiny):
     allie, game = Allie(tiny), "1. e4 e5"
     best = next(iter(allie.predict(game, 1500, 1500)))
     assert allie.play(game, temperature=1e-4) == best == allie.play(game, temperature=0)
+    assert allie.play(game, temperature=1e-320) == best
     with pytest.raises(ValueError):
         allie.play(game, temperature=float("nan"))
 

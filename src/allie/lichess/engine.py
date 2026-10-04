@@ -112,7 +112,7 @@ class Game:
         self.moves, self.clocks = [], []
         self.board = chess.Board()
         self.cache = Cache(engine.model)
-        self.logits = None
+        self.logits, self.used = None, []  # the logits at the cache's end; its (token, features)
         self.rng = np.random.default_rng(seed)
         self.losing = 0
 
@@ -148,21 +148,26 @@ class Game:
                 self.clocks[j] = int(t)
 
     def sync(self):
-        """Bring the cache up to the last known token; the logits there."""
-        if self.cache.n == len(self.tokens) and self.logits is not None:
-            return self.logits
+        """Bring the cache up to the last known token; the logits there. Clocks learnt later
+        can revise earlier positions' features (gaps are filled), so the cache is kept only
+        up to the first position whose token or features changed."""
         if len(self.tokens) > CONTEXT:
             raise OverflowError("game longer than the model's context")
-        n = min(self.cache.n, len(self.tokens) - 1)  # at least the last token, for its logits
+        now = list(zip(self.tokens, map(tuple, self.features())))
+        n, top = 0, min(self.cache.n, len(self.used))
+        while n < top and self.used[n] == now[n]:
+            n += 1
+        if n == len(now) and self.logits is not None:
+            return self.logits
+        n = min(n, len(now) - 1)  # at least the last token, for its logits
         self.cache.truncate(n)
         self.logits = self.engine.extend(
             self.cache,
             torch.tensor(self.tokens[n:]),
-            torch.tensor(self.features(n), dtype=torch.float32),
-            torch.tensor(
-                np.frombuffer(b"".join(self.boards[n:]), np.uint8).reshape(-1, 68)
-            ),
+            torch.tensor([f for _, f in now[n:]], dtype=torch.float32),
+            torch.tensor(np.frombuffer(b"".join(self.boards[n:]), np.uint8).reshape(-1, 68)),
         )
+        self.used = now
         return self.logits
 
     def features(self, lo=0):
