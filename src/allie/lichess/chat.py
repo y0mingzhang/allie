@@ -677,15 +677,22 @@ def opponent(e, me):
     return (p.get("id") or p.get("name") or "anonymous").lower()
 
 
-GGS = re.compile(
-    r"((g+ ?g+s?|ggwp|wp|well played|good game|nice game|ty|thx|thanks) ?)+"
-)
+GG_WORDS = {"gg", "ggs", "ggwp", "wp", "ty", "thx", "thanks", "g"}  # "g g" counts too
+GG_PAIRS = {("good", "game"), ("nice", "game"), ("well", "played")}
 
 
 def gg(text):
-    """Is it only a "good game" (gg, gg wp, good game, ty gg, ...)?"""
-    t = " ".join(re.sub(r"[^\w ]", " ", text.lower()).split())
-    return bool(GGS.fullmatch(t)) and not re.fullmatch(r"(ty|thx|thanks) ?", t)
+    """Is it only a "good game" (gg, gg wp, good game, ty gg, ...)? A bounded token scan."""
+    words = re.sub(r"[^a-z ]", " ", text.lower()[:60]).split()
+    i = 0
+    while i < len(words):
+        if tuple(words[i : i + 2]) in GG_PAIRS:
+            i += 2
+        elif words[i] in GG_WORDS or set(words[i]) == {"g"}:
+            i += 1
+        else:
+            return False
+    return words != ["g"] and any(w not in ("ty", "thx", "thanks") for w in words)
 
 
 def quiet(e):

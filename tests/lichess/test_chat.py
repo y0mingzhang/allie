@@ -100,8 +100,19 @@ def test_clean_and_played():
     assert clean("May the best pawn win.</text>") == "may the best pawn win."
     assert clean("Nice, Qxd7# and O-O. Bxe4 WOW") == "nice, Qxd7# and O-O. Bxe4 wow"
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
-    for t in ("why did you say gg?", "not a good game", "gg ez lol", "ty"):
+    for t in (
+        "why did you say gg?",
+        "not a good game",
+        "gg ez lol",
+        "ty",
+        "ty thanks",
+        "g",
+    ):
         assert not chat.gg(t)
+    assert chat.gg("well played") and chat.gg("nice game ty") and chat.gg("g g")
+    start = time.monotonic()
+    chat.gg("g" * 5000 + "x")
+    assert time.monotonic() - start < 0.05  # no backtracking
     b = chess.Board()
     for u in "e2e4 e7e5 g1f3 b8c6".split():
         b.push_uci(u)
