@@ -1,6 +1,6 @@
 # Allie
 
-> **Disclaimer:** I did not do any of this research. The experiments, code, analysis and this write-up were produced by AI agents (Claude Code and OpenAI Codex), with me setting goals and making calls. — Yiming
+> **Disclaimer:** I did not "do" any of this research. The experiments, code, analysis and this write-up were produced by AI agents (Claude Code and OpenAI Codex), with me mostly writing a bunch of prompts. — Yiming
 
 ## What Allie is
 
@@ -25,7 +25,7 @@ You can [play it on Lichess](#play-against-allie-on-lichess) or [download it](#d
 
 ![Diagram of one Allie 2.0 block: attention, then a router that sends each token to 16 of 256 experts plus a shared expert](docs/figures/model.png)
 
-*Most of Allie 2.0's blocks send each move to 16 of 256 small "experts", plus one shared expert.*
+*23 of Allie 2.0's 24 blocks route each move to 16 of 256 small "experts", plus one shared expert.*
 
 The model reads the game as a sequence of moves, with both ratings and the time control at the start. At each move it also sees the clocks and the board.
 
@@ -39,13 +39,13 @@ Before training Allie 2.0, we trained 45 smaller models of two kinds: standard "
 
 ![Loss against model size for dense and mixture-of-experts models at three compute budgets](docs/figures/isoflop.png)
 
-*Loss against model size at three compute budgets. Rings mark the best size.*
+*Dense in grey, mixture of experts in orange. Points are the sizes each curve is fit to.*
 
 The mixture of experts won at every budget. A dense model needs about 2.2 to 2.5 times the compute to match it.
 
 ![Compute a dense model needs to match the mixture of experts, at three budgets](docs/figures/moe-vs-dense.png)
 
-*How many times more compute a dense model needs to match the mixture of experts.*
+*From the fitted scaling laws of the two model families.*
 
 We then fit a scaling law in the style of [Chinchilla](https://arxiv.org/abs/2203.15556). It predicts the loss from the model's size and the number of training tokens.
 
@@ -53,7 +53,7 @@ The law forecast 1.2856 for Allie 2.0. Allie 2.0 scored 1.2533, below the law's 
 
 ![Loss against training compute: the sweep's best models, each law extrapolated, and Allie 2.0 below its forecast](docs/figures/frontier.png)
 
-*Best loss at each training budget. Dashed: the law's extrapolation. Allie 2.0 landed 0.032 below its forecast.*
+*Allie 2.0 used about 50 times the compute of the largest sweep budget.*
 
 Allie 2.0's recipe isn't the reason: at small scale it is slightly worse than the sweep's. More likely, the law underestimates how far loss keeps falling with compute.
 
@@ -84,7 +84,7 @@ Favoring strong players lowered the loss for players rated 2400 and above by 0.0
 
 ![Allie 2.0's loss on the main test set during training, and the scaling law's forecast](docs/figures/training.png)
 
-*Loss on the main test set during training, against the scaling law's forecast.*
+*Earlier checkpoints were not scored on the main test set.*
 
 - **Hardware.** One machine with 8 NVIDIA L40S GPUs, for 6.6 days.
 - **Length.** 75B tokens in 143,051 steps.
@@ -99,7 +99,7 @@ Maia-3 trains only on Lichess blitz, so we compare on blitz. We use 80,000 blitz
 
 ![Loss against compute per move for Maia-3, the original Allie, and Allie 2.0 with and without search](docs/figures/pareto.png)
 
-*Loss against compute per move. Blue: Allie 2.0 with 0, 5 or 128 steps of search.*
+*Orange: Allie 2.0 alone and with 5 or 128 search simulations per move.*
 
 On all 80,000 positions, Allie 2.0's loss is 1.2056 against 1.2269 for Maia-3 79M. It uses 1.39 GFLOPs per move against 9.23.
 
@@ -114,7 +114,7 @@ On all 80,000 positions, Allie 2.0's loss is 1.2056 against 1.2269 for Maia-3 79
 
 ![Loss and top-1 accuracy minus Maia-3 79M's on Maia's protocol, with 95% intervals](docs/figures/protocol.png)
 
-*Difference from Maia-3 79M on Maia's protocol, with 95% intervals.*
+*Each bar compares a model with Maia-3 79M on the same positions.*
 
 Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.0 roughly matches Maia-3 79M.
 
@@ -122,11 +122,13 @@ Its loss is 1.2075 against 1.2180. Its top choice is right 59.32% of the time ag
 
 ### Beyond blitz
 
-Allie 2.0 covers every time control and reads the clock. In bullet its loss is 0.141 lower than Maia-3 79M's, and in blitz with under 10 seconds left it is 0.223 lower.
+Allie plays beyond blitz: it supports every time control (bullet, blitz, rapid, classical)\*. It also reads the clock, which helps most when time runs short.
 
 ![Allie 2.0's loss minus Maia-3 79M's by time control and, in blitz, by time left on the clock](docs/figures/versatility.png)
 
-*Allie 2.0's loss minus Maia-3 79M's, by time control and by time left in blitz. Below zero is better.*
+*Bullet, rapid and classical use a separate sample of 20,000 positions each.*
+
+\*Maia-3 never trained on bullet, rapid or classical games.
 
 Tables with every number and interval are in [DETAILS](docs/DETAILS.md#blitz-benchmark).
 
@@ -151,7 +153,7 @@ Set `ALLIE_DATA` to the folder for the game data and test sets. Runs and scores 
 3. **Build the test set.** `python -m allie.eval.build`
 4. **Train.** `allie-train configs/allie-2.0.json --nproc 8` needs eight 48 GB GPUs for about a week. It stops every two days; the same command resumes it.
 5. **Evaluate.** `allie-eval --checkpoint results/pretrain/allie-2.0/last.pt` scores the main test set. The blitz comparison has its own scripts in `allie.eval.maia3`.
-6. **Figures.** `python docs/make_figures.py` redraws every figure here.
+6. **Figures.** `uv run --extra figures python docs/make_figures.py` redraws every figure here.
 
 Commands run inside the environment: prefix them with `uv run`, or activate `.venv`. Search has its own [guide](src/allie/search/README.md). More on the code is in [DETAILS](docs/DETAILS.md#reproducing).
 

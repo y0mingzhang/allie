@@ -1,6 +1,6 @@
 # Allie: details
 
-> Researched and written by AI agents (Claude Code and OpenAI Codex), with Yiming Zhang setting goals and making calls.
+> **Disclaimer:** Yiming did not "do" any of this research. The experiments, code, analysis and this write-up were produced by AI agents (Claude Code and OpenAI Codex), with him mostly writing a bunch of prompts.
 
 The numbers behind the [README](../README.md).
 
@@ -75,6 +75,10 @@ The original Allie's code (`trim_games`) defines the moves as plies. It keeps ea
 That keeps 56,599 of the 80,000 positions, in 6,089 games. An earlier version of this page used ply 20 and the mover's clock at each position instead, which kept 48,987.
 
 ### By rating
+
+![Loss relative to Maia-3 79M by game rating, for Maia-3 5M and 23M, the original Allie and Allie 2.0](figures/rating.png)
+
+*Every position scored, as in the README's compute plot.*
 
 The rating plot uses every scored blitz move of the main evaluation: 402,108 positions in 6,247 games. They are reweighted to the natural mix of players and grouped by game rating in 100-point bins.
 
@@ -193,7 +197,7 @@ We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embe
 
 ![Compute-optimal active parameters against training compute, with Allie 2.0's size against the law's extrapolated optimum](figures/optimal.png)
 
-*Compute-optimal model size: the sweep's best sizes and each law's optimum, dashed beyond the sweep.*
+*Points: the sweep's best sizes, with 90% intervals. Lines: each family's scaling law.*
 
 At Allie 2.0's compute, the law's MoE optimum is 1.8B active parameters on 28B tokens. That is 51 times the sweep's largest budget and 3.9 times the largest size it was fit on, so treat it as a direction, not a validated choice. Beyond the swept sizes, training FLOPs per parameter and token are held at the largest size's value.
 

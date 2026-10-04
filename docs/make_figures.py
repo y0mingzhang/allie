@@ -1,10 +1,11 @@
-"""Regenerate the README figures from the result files.
+"""Regenerate the README and DETAILS figures from the result files.
 
-usage: python docs/make_figures.py [name ...]
+usage: uv run --extra figures python docs/make_figures.py [name ...]
 
-Writes docs/figures/NAME.{png,svg} (all figures by default) and prints the numbers each figure shows, so the
-README can be checked against this output. The earlier Allie models' scores are read from ALLIE_ORIGINAL (a
-directory of their benchmark and rating-set scores); without them their marks are left out.
+Writes docs/figures/NAME.png (all figures by default) and prints the numbers each figure shows, so the text can
+be checked against this output. Charts are Vega-Lite (Altair, rendered by vl-convert), the model diagram is
+matplotlib; both use Inter from docs/fonts. The original Allie's scores are read from ALLIE_ORIGINAL (a directory
+of its benchmark and rating-set scores); without them its marks are left out.
 """
 
 import json
@@ -13,13 +14,13 @@ import os
 import sys
 from pathlib import Path
 
+import altair as alt
 import matplotlib.pyplot as plt
 import numpy as np
+import vl_convert as vlc
+from matplotlib import font_manager
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
-from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator, NullLocator
 from scipy.optimize import minimize_scalar
-
-plt.switch_backend("agg")
 
 ROOT = Path(__file__).resolve().parents[1]
 R = ROOT / "results"
@@ -29,67 +30,40 @@ ORIGINAL = Path(
     os.environ.get("ALLIE_ORIGINAL", "/home/yimingz3/allie-equiv/old-allie")
 )
 OUT = ROOT / "docs" / "figures"
+FONTS = ROOT / "docs" / "fonts"
 FINAL = R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"  # Allie 2.0
-BENCH = (
-    X / "distill-v2/report.json"
-)  # every scored model on the 80,000 benchmark positions
 SEARCH = DATA / "maia3-bench/search"
 SWEEP = X / "sweep-readout-c8s200f0v4-w4.json"
-PREVIOUS = {"allie1-medium": "Original Allie"}
-
-INK, INK2, MUTED = "#27272a", "#52525b", "#71717a"
-GRID, AXIS, SURFACE = "#e5e7eb", "#d4d4d8", "#ffffff"
-BLUE, WASH, CHOSEN = "#2563eb", "#f3f7fe", "#dbe6fb"
-MAIA = {"maia3-5m": "#b4b4bc", "maia3-23m": "#85858d", "maia3-79m": "#52525b"}
-NAME = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
-DENSE = "#85858d"
-SIZE = (7.2, 4.6)
 C_ALLIE = (
-    3.142088554411623e20
-)  # Allie 2.0's useful training FLOPs (bigrun-trajectory-v2)
-TEXT = 14
-MINUS = str.maketrans("-", "−")
-
-plt.rcParams.update(
-    {
-        "font.family": ["Nimbus Sans", "DejaVu Sans"],
-        "font.size": TEXT,
-        "text.color": INK,
-        "mathtext.fontset": "custom",
-        "mathtext.rm": "Nimbus Sans",
-        "mathtext.it": "Nimbus Sans:italic",
-        "axes.facecolor": SURFACE,
-        "figure.facecolor": SURFACE,
-        "savefig.facecolor": SURFACE,
-        "axes.edgecolor": AXIS,
-        "axes.linewidth": 0.8,
-        "axes.labelcolor": INK2,
-        "axes.labelsize": TEXT,
-        "axes.labelpad": 9,
-        "axes.grid": True,
-        "axes.grid.axis": "y",
-        "grid.color": GRID,
-        "grid.linewidth": 0.8,
-        "axes.axisbelow": True,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.spines.left": False,
-        "axes.spines.bottom": False,
-        "xtick.color": AXIS,
-        "ytick.color": AXIS,
-        "xtick.labelcolor": MUTED,
-        "ytick.labelcolor": MUTED,
-        "xtick.labelsize": 13,
-        "ytick.labelsize": 13,
-        "xtick.major.size": 0,
-        "xtick.major.pad": 7,
-        "ytick.major.size": 0,
-        "ytick.major.pad": 7,
-        "lines.solid_capstyle": "round",
-        "lines.solid_joinstyle": "round",
-        "svg.fonttype": "path",
-    }
+    3.142088554411623e20  # Allie 2.0's useful training FLOPs (bigrun-trajectory-v2)
 )
+MAIA = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
+
+INK, INK2, MUTED = "#1f2328", "#57534e", "#78716c"
+PAPER, GRID, NEUTRAL, NEUTRAL_DARK = "#f8f7f3", "#e7e4dc", "#c9c3b8", "#8a8378"
+ALLIE, ALLIE_PALE, ALLIE_WASH = "#e4572e", "#f3b49f", "#f9d5c8"
+MINUS = "−"
+WIDTH = (
+    634  # one-panel plot width; every figure renders about 730 px wide (1,460 at 2x)
+)
+
+
+@alt.theme.register("allie", enable=True)
+def theme():
+    return alt.theme.ThemeConfig(
+        config={
+            "font": "Inter",
+            "background": PAPER,
+            "padding": {"left": 20, "right": 24, "top": 20, "bottom": 16},
+            "view": {"stroke": None},
+            "title": {"anchor": "start", "fontSize": 18, "fontWeight": 700, "color": INK, "subtitleFontSize": 13,
+                      "subtitleColor": INK2, "subtitlePadding": 6, "offset": 18, "subtitleLineHeight": 18},
+            "axis": {"domain": False, "ticks": False, "gridColor": GRID, "labelColor": MUTED, "labelFontSize": 12.5,
+                     "titleColor": INK2, "titleFontSize": 12, "titleFontWeight": 500, "titlePadding": 10,
+                     "labelPadding": 6},
+            "text": {"font": "Inter", "fontSize": 13.5, "color": INK2},
+        }
+    )  # fmt: skip
 
 
 def jload(p):
@@ -100,66 +74,78 @@ def jsonl(p):
     return [json.loads(x) for x in Path(p).read_text().splitlines() if x.strip()]
 
 
-def figure(size=SIZE, **adjust):
-    fig, ax = plt.subplots(figsize=size)
-    fig.subplots_adjust(
-        **({"left": 0.12, "right": 0.96, "top": 0.95, "bottom": 0.17} | adjust)
-    )
-    return fig, ax
-
-
-def label(ax, text, xy, dx=0, dy=0, color=INK2, size=TEXT, **kw):
-    kw = {"ha": "left", "va": "center", "fontsize": size, "color": color} | kw
-    return ax.annotate(text, xy, xytext=(dx, dy), textcoords="offset points", **kw)
-
-
-def dot(ax, x, y, color, ms=9, hollow=False, z=5):
-    face, edge = (SURFACE, color) if hollow else (color, SURFACE)
-    ax.plot(x, y, "o", ms=ms, mfc=face, mec=edge, mew=2 if hollow else 1.2, zorder=z)
-
-
-def save(fig, name, dpi=200):
+def save(chart, name):
     OUT.mkdir(parents=True, exist_ok=True)
-    for ext in ("png", "svg"):
-        fig.savefig(OUT / f"{name}.{ext}", dpi=dpi)
-    plt.close(fig)
+    (OUT / f"{name}.png").write_bytes(vlc.vegalite_to_png(chart.to_json(), scale=2))
     print(f"wrote docs/figures/{name}.png")
 
 
-def logx(ax, ticks, fmt="{:g}".format):
-    ax.set_xscale("log")
-    ax.xaxis.set_major_locator(FixedLocator(ticks))
-    ax.xaxis.set_minor_locator(NullLocator())
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt(v)))
+def signed(v, nd):
+    return f"{v:+.{nd}f}".replace("-", MINUS)
 
 
 def power(v):
-    """6.29e17 -> 6.3×10¹⁷, 1e18 -> 10¹⁸ (mathtext)."""
-    e = math.floor(math.log10(v) + 1e-9)
-    m = float(f"{v / 10**e:.2g}")
-    return f"$10^{{{e}}}$" if m == 1 else rf"${m:g}\times10^{{{e}}}$"
+    """1e18 -> 10¹⁸."""
+    sup = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+    return "10" + str(round(math.log10(v))).translate(sup)
 
 
-def ends(ax, items, gap):
-    """Direct labels right of the plot for (text, y) series ending at y: stacked at least gap apart, with a short
-    leader to the series' own end when a label had to move."""
-    items = sorted(items, key=lambda t: t[1])
-    ys = [items[0][1]]
-    for _, y in items[1:]:
-        ys.append(max(y, ys[-1] + gap))
-    for (text, y0), y in zip(items, ys):
-        leader = {
-            "arrowstyle": "-",
-            "color": AXIS,
-            "lw": 0.8,
-            "shrinkA": 1,
-            "shrinkB": 0,
-        }
-        ax.annotate(
-            text, (1.0, y0), xytext=(1.03, y), xycoords=("axes fraction", "data"),
-            textcoords=("axes fraction", "data"), fontsize=TEXT, color=INK2, va="center", ha="left",
-            arrowprops=leader if abs(y - y0) > gap / 4 else None,
-        )  # fmt: skip
+def power_axis():
+    """Vega label expression writing powers of ten (16-22) as power() does."""
+    expr = "''"
+    for e in range(16, 23):
+        expr = f"abs(log(datum.value) / log(10) - {e}) < 0.01 ? '{power(10.0**e)}' : ({expr})"
+    return expr
+
+
+def signed_axis(nd):
+    return f"datum.value == 0 ? '0' : (datum.value > 0 ? '+' : '{MINUS}') + format(abs(datum.value), '.{nd}f')"
+
+
+def title(text, *sub):
+    return alt.TitleParams(text, subtitle=list(sub))
+
+
+def panel_title(text):
+    return alt.TitleParams(
+        text, anchor="start", fontSize=13, fontWeight=600, color=INK, offset=10
+    )
+
+
+def values(rows):
+    return alt.Chart(alt.Data(values=rows))
+
+
+def diverging(rows, order, dom, nd, ticks, name, highlight, label_axis=True, width=300):
+    """Horizontal bars of differences from a reference at zero, with whiskers (lo, hi) and signed labels."""
+    b = values(rows)
+    sx = alt.Scale(domain=dom, nice=False)
+    y = alt.Y("name:N", sort=order, title=None, axis=alt.Axis(labels=label_axis, labelFontSize=13, labelFontWeight=500,
+                                                               labelColor=INK, labelPadding=10))  # fmt: skip
+    bar = b.mark_bar(height=16, cornerRadiusEnd=2).encode(
+        y=y, color=alt.condition(highlight, alt.value(ALLIE), alt.value(NEUTRAL)),
+        x=alt.X("d:Q", scale=sx, title=None, axis=alt.Axis(values=ticks, grid=True, labelExpr=signed_axis(nd))))  # fmt: skip
+    whisk = b.mark_rule(color=INK, strokeWidth=1.3).encode(
+        y=y, x=alt.X("lo:Q", scale=sx), x2="hi:Q"
+    )
+    pos = (
+        b.transform_filter(alt.datum.d > 0)
+        .mark_text(align="left", dx=7)
+        .encode(y=y, x=alt.X("hi:Q", scale=sx), text="label:N")
+    )
+    neg = (
+        b.transform_filter(alt.datum.d <= 0)
+        .mark_text(align="right", dx=-7)
+        .encode(y=y, x=alt.X("lo:Q", scale=sx), text="label:N")
+    )
+    zero = (
+        values([{"v": 0}])
+        .mark_rule(color=INK, strokeWidth=1.4)
+        .encode(x=alt.X("v:Q", scale=sx))
+    )
+    return (bar + whisk + zero + pos + neg).properties(
+        width=width, height=34 * len(order), title=panel_title(name)
+    )
 
 
 def allie_n():
@@ -217,41 +203,61 @@ def optimum(fam, c):
     return float(o.fun), n, c / (kap(n) * n)
 
 
+def law_layers(x, y, key, lab):
+    """Each family's law at its compute-optimal size (solid over the sweep, dashed up to Allie 2.0's compute),
+    its isoflop minima, and a label per family at lab[fam] = (c, value)."""
+    cells = macro()["cells"]
+    layers = []
+    for fam, color, name in (
+        ("dense", NEUTRAL_DARK, "dense"),
+        ("s16", ALLIE, "mixture of experts"),
+    ):
+        last = cells[fam]["1e18"]["c"]
+        law_ = [
+            dict(c=float(c), v=optimum(fam, c)[key])
+            for c in np.geomspace(5e17, C_ALLIE, 60)
+        ]
+        mins = [
+            dict(c=cells[fam][b]["c"], v=cells[fam][b]["l" if key == 0 else "n_opt"])
+            for b in ("1e17", "3e17", "1e18")
+        ]
+        layers += [
+            values([r for r in law_ if r["c"] <= last]).mark_line(color=color, strokeWidth=2.5).encode(x=x, y=y),
+            values([r for r in law_ if r["c"] >= last]).mark_line(color=color, strokeWidth=2.5, strokeDash=[6, 4]).encode(x=x, y=y),
+            values(mins).mark_circle(color=color, size=70, opacity=1).encode(x=x, y=y),
+            values([dict(c=lab[fam][0], v=lab[fam][1], t=name)]).mark_text(align="left", color=color, fontWeight=600)
+            .encode(x=x, y=y, text="t:N"),
+        ]  # fmt: skip
+    return layers
+
+
 def training():
     """Allie 2.0's main-eval CE over training, and the scaling law's forecast for the finished run."""
     rows = sorted(
         jsonl(X / "maia3-bench/bigrun-trajectory-v2.jsonl"), key=lambda r: r["step"]
     )
-    t = np.array([r["tokens"] for r in rows]) / 1e9
-    main = np.array([r["golden_macro"] for r in rows])
+    curve = [dict(t=r["tokens"] / 1e9, v=r["golden_macro"]) for r in rows]
     act, _, D = allie_n()
     forecast = law("s16")(act, D)
-    fig, ax = figure()
-    ax.plot(t, main, color=BLUE, lw=2.6, zorder=4)
-    dot(ax, t[-1], main[-1], BLUE)
-    label(
-        ax,
-        f"Allie 2.0  {main[-1]:.4f}",
-        (t[-1], main[-1]),
-        -12,
-        -2,
-        color=INK,
-        ha="right",
-        va="top",
-    )
-    dot(ax, D / 1e9, forecast, MUTED, hollow=True)
-    text = f"forecast\n{forecast:.4f}"
-    label(
-        ax, text, (D / 1e9, forecast), 0, 12, ha="center", va="bottom", linespacing=1.15
-    )
-    ax.set_xlim(20, 79)
-    ax.set_ylim(1.24, 1.42)
-    ax.yaxis.set_major_locator(MaxNLocator(4))
-    ax.set_xlabel("Training tokens (billions)")
-    ax.set_ylabel("Main-evaluation CE (nats)")
-    save(fig, "training")
+    x = alt.X("t:Q", scale=alt.Scale(domain=[20, 80], nice=False), title="Training tokens (billions)",
+              axis=alt.Axis(values=[20, 30, 40, 50, 60, 70, 80], grid=False))  # fmt: skip
+    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.24, 1.42], nice=False, zero=False), title="Main-evaluation loss (nats)",
+              axis=alt.Axis(values=[1.25, 1.30, 1.35, 1.40], grid=True, format=".2f"))  # fmt: skip
+    end = [dict(curve[-1], t_=f"Allie 2.0  {curve[-1]['v']:.4f}")]
+    fc = [dict(t=D / 1e9, v=forecast, t_=f"Forecast  {forecast:.4f}")]
+    chart = alt.layer(
+        values(curve).mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y),
+        values(end).mark_circle(color=ALLIE, size=120, opacity=1).encode(x=x, y=y),
+        values(end).mark_text(align="right", dx=-12, dy=10, color=INK, fontWeight=600).encode(x=x, y=y, text="t_:N"),
+        values(fc).mark_point(color=NEUTRAL_DARK, size=120, strokeWidth=2, filled=False).encode(x=x, y=y),
+        values(fc).mark_text(dy=-18).encode(x=x, y=y, text="t_:N"),
+    ).properties(width=WIDTH, height=300, title=title(
+        "Allie 2.0's loss kept falling to the end of training",
+        "Main-evaluation loss on checkpoints from 22B tokens on, and the scaling law's forecast for the finished",
+        "run. Lower is better."))  # fmt: skip
+    save(chart, "training")
     print(
-        f"  N {act / 1e6:.1f}M, D {D / 1e9:.1f}B: forecast {forecast:.4f}; final {main[-1]:.4f} from {t[0]:.0f}B"
+        f"  N {act / 1e6:.1f}M, D {D / 1e9:.1f}B: forecast {forecast:.4f}; final {curve[-1]['v']:.4f} from {curve[0]['t']:.0f}B"
     )
 
 
@@ -259,244 +265,199 @@ def isoflop():
     """Isoflop curves, MoE against dense, one panel per budget: quadratic fits in log N through each budget's
     selected four-size window (as the sweep readout fits them, every run), the window's seed means and the
     fitted minima."""
-    sweep = jload(SWEEP)
-    cells = macro()["cells"]
-    fig, axes = plt.subplots(1, 3, figsize=(7.2, 4.0), sharey=True)
-    fig.subplots_adjust(left=0.13, right=0.98, top=0.87, bottom=0.2, wspace=0.08)
-    for ax, b in zip(axes, ("1e17", "3e17", "1e18")):
-        for fam, color in (("dense", DENSE), ("s16", BLUE)):
+    sweep, cells = jload(SWEEP), macro()["cells"]
+    panels = []
+    for i, b in enumerate(("1e17", "3e17", "1e18")):
+        x = alt.X("n:Q", scale=alt.Scale(type="log", domain=[1.2e7, 5e8], nice=False), title="Active parameters" if i == 1 else None,
+                  axis=alt.Axis(values=[3e7, 1e8, 3e8], grid=False, labelExpr="format(datum.value / 1e6, 'd') + 'M'"))  # fmt: skip
+        y = alt.Y("v:Q", scale=alt.Scale(domain=[1.30, 1.46], nice=False, zero=False), title="Main-evaluation loss (nats)" if i == 0 else None,
+                  axis=alt.Axis(values=[1.30, 1.35, 1.40, 1.45], grid=True, format=".2f", labels=i == 0))  # fmt: skip
+        layers = []
+        for fam, color, name in (
+            ("dense", NEUTRAL_DARK, "dense"),
+            ("s16", ALLIE, "MoE"),
+        ):
             cell = cells[fam][b]
             runs = [
                 r
                 for r in sweep["runs"]
                 if r["fam"] == fam and r["budget"] == b and r["shape"] in cell["fit"]
             ]
-            n = np.array([r["n"] for r in runs])
-            y = np.array([r["y"]["macro"] for r in runs])
-            c = np.polyfit(np.log(n), y, 2)
-            xs = np.linspace(np.log(n).min() - 0.15, np.log(n).max() + 0.15, 80)
-            ax.plot(np.exp(xs), np.polyval(c, xs), color=color, lw=2.2, zorder=3)
-            means = np.array([(m, y[n == m].mean()) for m in np.unique(n)])
-            ax.plot(*means.T, "o", ms=5.5, color=color, mew=0, zorder=4)
-            v = -c[1] / (2 * c[0])
-            ax.plot(
-                math.exp(v),
-                np.polyval(c, v),
-                "o",
-                ms=10,
-                mfc="none",
-                mec=color,
-                mew=1.8,
-                zorder=5,
+            n, v = (
+                np.array([r["n"] for r in runs]),
+                np.array([r["y"]["macro"] for r in runs]),
             )
-            print(
-                f"  {b} {fam:5s} N* {math.exp(v) / 1e6:6.1f}M L* {np.polyval(c, v):.4f}"
-            )
-            if b == "1e17" and fam == "s16":
-                label(
-                    ax,
-                    "MoE",
-                    (math.exp(v), np.polyval(c, v)),
-                    0,
-                    -16,
-                    ha="center",
-                    color=color,
+            c = np.polyfit(np.log(n), v, 2)
+            xs = np.linspace(np.log(n).min() - 0.15, np.log(n).max() + 0.15, 60)
+            m = -c[1] / (2 * c[0])
+            opt = dict(n=math.exp(m), v=float(np.polyval(c, m)), t=name)
+            layers += [
+                values([dict(n=float(math.exp(t)), v=float(np.polyval(c, t))) for t in xs]).mark_line(color=color, strokeWidth=2.5).encode(x=x, y=y),
+                values([dict(n=float(k), v=float(v[n == k].mean())) for k in np.unique(n)]).mark_circle(color=color, size=40, opacity=1).encode(x=x, y=y),
+                values([opt]).mark_point(color=color, size=170, strokeWidth=2).encode(x=x, y=y),
+            ]  # fmt: skip
+            if i == 0:
+                layers.append(
+                    values([opt])
+                    .mark_text(
+                        dy=20 if fam == "s16" else -18, color=color, fontWeight=600
+                    )
+                    .encode(x=x, y=y, text="t:N")
                 )
-            elif b == "1e17":
-                label(
-                    ax,
-                    "dense",
-                    (np.exp(xs[0]), np.polyval(c, xs[0])),
-                    -2,
-                    6,
-                    ha="left",
-                    va="bottom",
-                    color=color,
-                )
-        ax.set_title(f"{power(cells['s16'][b]['c'])} FLOPs", fontsize=TEXT, color=INK2)
-        logx(ax, [3e7, 1e8, 3e8], lambda v: f"{v / 1e6:g}M")
-        ax.set_xlim(1.2e7, 5e8)
-    axes[0].set_ylim(1.3, 1.46)
-    axes[0].yaxis.set_major_locator(FixedLocator([1.3, 1.35, 1.4, 1.45]))
-    axes[0].set_ylabel("Main-evaluation CE (nats)")
-    axes[1].set_xlabel("Active parameters (log scale)")
-    save(fig, "isoflop")
+            print(f"  {b} {fam:5s} N* {opt['n'] / 1e6:6.1f}M L* {opt['v']:.4f}")
+        c = cells["s16"][b]["c"]
+        e = 10 ** math.floor(math.log10(c))
+        panels.append(alt.layer(*layers).properties(width=202, height=250, title=alt.TitleParams(
+            f"{c / e:.1f} × {power(e)} FLOPs", anchor="start", fontSize=13, fontWeight=600, color=INK, offset=8)))  # fmt: skip
+    chart = alt.hconcat(*panels, spacing=14).properties(title=title(
+        "The mixture of experts beats dense models at every budget",
+        "Main-evaluation loss against model size at three training budgets. Rings mark the best size."))  # fmt: skip
+    save(chart, "isoflop")
 
 
-def law_curves(ax, value, top):
-    """Each family's law at its compute-optimal size, solid over the sweep and dashed up to Allie 2.0's compute,
-    with its isoflop minima and their 90% intervals; value(fam, c) and the cell's (point, interval) keys."""
-    cells = macro()["cells"]
-    point, ci = top
-    for fam, color, name in (("dense", DENSE, "dense"), ("s16", BLUE, "MoE")):
-        last = cells[fam]["1e18"]["c"]
-        for lo, hi, ls in ((5e17, last, "-"), (last, C_ALLIE, (0, (4, 3)))):
-            cs = np.geomspace(lo, hi, 40)
-            ax.plot(cs, [value(fam, c) for c in cs], color=color, lw=2, ls=ls, zorder=3)
-        for b in ("1e17", "3e17", "1e18"):
-            cl = cells[fam][b]
-            ax.errorbar(cl["c"], cl[point], yerr=[[cl[point] - cl[ci][0]], [cl[ci][1] - cl[point]]],
-                        fmt="o", ms=7, color=color, mec=SURFACE, mew=1, elinewidth=1.4, capsize=0, zorder=4)  # fmt: skip
+def moe_vs_dense():
+    """Dense compute needed to match the MoE, as a ratio, from the two fitted laws, with 90% noise-bootstrap intervals."""
+    cm = macro()["cm"]["s16"]
+    rows = [dict(c=cm[b]["c"], v=cm[b]["separate"]["cm"], lo=cm[b]["separate"]["noise"][0], hi=cm[b]["separate"]["noise"][1],
+                 ext=b == "1e19 FLOPs") for b in ("1e17", "3e17", "1e18", "1e19 FLOPs")]  # fmt: skip
+    for r in rows:
+        r["t"] = f"{r['v']:.1f}×" + (" (extrapolated)" if r["ext"] else "")
+    sx, sy = (
+        alt.Scale(type="log", domain=[4e17, 2e19], nice=False),
+        alt.Scale(domain=[0.8, 4.0], nice=False),
+    )
+    x = alt.X(
+        "c:Q",
+        scale=sx,
+        title="Training compute (FLOPs)",
+        axis=alt.Axis(values=[1e18, 1e19], grid=False, labelExpr=power_axis()),
+    )
+    y = alt.Y(
+        "v:Q",
+        scale=sy,
+        title=None,
+        axis=alt.Axis(values=[1, 2, 3, 4], grid=True, labelExpr="datum.value + '×'"),
+    )
+    b = values(rows)
+    chart = alt.layer(
+        values([{"v": 1}]).mark_rule(color=NEUTRAL_DARK, strokeWidth=1.5).encode(y=y),
+        values([{"v": 1, "c": 1.6e19, "t": "dense"}]).mark_text(dy=-9, color=MUTED).encode(x=x, y=y, text="t:N"),
+        b.mark_rule(color=INK2, strokeWidth=1.2).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q"),
+        b.mark_circle(size=150, opacity=1).encode(x=x, y=y, color=alt.condition(alt.datum.ext, alt.value(ALLIE_PALE), alt.value(ALLIE))),
+        b.mark_text(align="left", dx=12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+    ).properties(width=WIDTH + 6, height=260, title=title(
+        "A dense model needs over twice the compute to match the mixture of experts",
+        "Compute a dense model needs to reach the mixture of experts' loss, as a multiple. Whiskers: 90%",
+        "intervals. The last point extrapolates beyond the sweep."))  # fmt: skip
+    save(chart, "moe-vs-dense")
+    for r in rows:
+        print(f"  {r['c']:.2e}: {r['v']:.2f}x [{r['lo']:.2f}, {r['hi']:.2f}]")
 
 
 def frontier():
     """Main-eval CE against training compute: the isoflop minima, each family's law at its compute-optimal size,
     and Allie 2.0 against the law's forecast for its own size and tokens."""
     act, _, D = allie_n()
-    c_allie = C_ALLIE
     final = jload(R / f"lm-eval/{FINAL.name}/strat-v1.json")["macro"]
-    forecast = law("s16")(act, D)
-    fig, ax = figure(right=0.97)
-    law_curves(ax, lambda fam, c: optimum(fam, c)[0], ("l", "l_ci"))
-    label(
-        ax,
-        "dense",
-        (1.1e18, optimum("dense", 1.1e18)[0]),
-        6,
-        6,
-        va="bottom",
-        color=DENSE,
+    forecast, E = law("s16")(act, D), math.exp(macro()["law"]["s16"]["theta"][0])
+    sx, sy = (
+        alt.Scale(type="log", domain=[4e17, 3e21], nice=False),
+        alt.Scale(domain=[1.24, 1.42], nice=False, zero=False),
     )
-    label(
-        ax,
-        "MoE",
-        (1.1e18, optimum("s16", 1.1e18)[0]),
-        -6,
-        -8,
-        ha="right",
-        va="top",
-        color=BLUE,
+    x = alt.X(
+        "c:Q",
+        scale=sx,
+        title="Training compute (FLOPs)",
+        axis=alt.Axis(
+            values=[1e18, 1e19, 1e20, 1e21], grid=False, labelExpr=power_axis()
+        ),
     )
-    E = math.exp(macro()["law"]["s16"]["theta"][0])
-    ax.axhline(E, color=AXIS, lw=1.2, ls=(0, (1.5, 2.5)), zorder=2)
-    label(ax, "MoE fitted floor", (5e17, E), 0, -6, va="top", color=MUTED)
-    ax.plot([c_allie, c_allie], [final, forecast], color=AXIS, lw=1.2, zorder=3)
-    dot(ax, c_allie, forecast, BLUE, hollow=True)
-    label(
-        ax,
-        f"forecast at its\nshape  {forecast:.4f}",
-        (c_allie, forecast),
-        12,
-        0,
-        linespacing=1.15,
+    y = alt.Y(
+        "v:Q",
+        scale=sy,
+        title="Main-evaluation loss (nats)",
+        axis=alt.Axis(values=[1.25, 1.30, 1.35, 1.40], grid=True, format=".2f"),
     )
-    dot(ax, c_allie, final, BLUE, ms=11, z=6)
-    label(
-        ax,
-        f"Allie 2.0\n{final:.4f}",
-        (c_allie, final),
-        12,
-        0,
-        color=INK,
-        linespacing=1.15,
-    )
-    logx(ax, [1e18, 1e19, 1e20], power)
-    ax.set_xlim(4e17, 3e21)
-    ax.set_ylim(1.24, 1.42)
-    ax.yaxis.set_major_locator(MaxNLocator(4))
-    ax.set_xlabel("Training compute (FLOPs, log scale)")
-    ax.set_ylabel("Main-evaluation CE (nats)")
-    save(fig, "frontier")
-    l_opt, n_opt, d_opt = optimum("s16", c_allie)
+    chart = alt.layer(
+        *law_layers(x, y, 0, {"dense": (2.3e18, 1.374), "s16": (6.5e17, 1.311)}),
+        values([{"v": E}]).mark_rule(color=NEUTRAL, strokeDash=[2, 3], strokeWidth=1.5).encode(y=y),
+        values([{"c": 5e17, "v": E, "t": "the law's floor"}]).mark_text(align="left", dy=-9, color=MUTED).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_ALLIE, "v": final, "v2": forecast}]).mark_rule(color=NEUTRAL, strokeWidth=1.5).encode(x=x, y=y, y2="v2:Q"),
+        values([{"c": C_ALLIE, "v": forecast}]).mark_point(color=ALLIE, size=150, strokeWidth=2, filled=False).encode(x=x, y=y),
+        values([{"c": C_ALLIE, "v": forecast, "t": f"Forecast  {forecast:.4f}"}]).mark_text(align="left", dx=12, dy=-4).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_ALLIE, "v": final}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
+        values([{"c": C_ALLIE, "v": final, "t": f"Allie 2.0  {final:.4f}"}]).mark_text(align="left", dx=12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+    ).properties(width=WIDTH, height=300, title=title(
+        "Allie 2.0 landed below the scaling law's forecast",
+        "Best main-evaluation loss at each training budget. Dashed: the law's extrapolation. Allie 2.0 landed",
+        "0.032 below its forecast, and below the law's floor."))  # fmt: skip
+    save(chart, "frontier")
+    l_opt, n_opt, d_opt = optimum("s16", C_ALLIE)
     print(
-        f"  Allie 2.0 {c_allie:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}"
+        f"  Allie 2.0 {C_ALLIE:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}"
     )
     print(
         f"  law optimum at that compute: N* {n_opt / 1e9:.2f}B, D* {d_opt / 1e9:.1f}B; floor E {E:.4f}"
     )
 
 
-def moe_vs_dense():
-    """Dense compute needed to match the MoE, as a ratio, from the two fitted laws, with 90% noise-bootstrap intervals."""
-    cm = macro()["cm"]["s16"]
-    fig, ax = figure(right=0.9)
-    ax.axhline(1, color=DENSE, lw=1.4, zorder=2)
-    label(ax, "dense", (1.0, 1), 6, 0, xycoords=("axes fraction", "data"))
-    pts = [(cm[b]["c"], cm[b]["separate"], False) for b in ("1e17", "3e17", "1e18")]
-    pts.append((cm["1e19 FLOPs"]["c"], cm["1e19 FLOPs"]["separate"], True))
-    for c, s, ext in pts:
-        ax.plot(
-            [c, c], s["noise"], color=BLUE, lw=2.4, alpha=0.18 if ext else 0.3, zorder=3
-        )
-        dot(ax, c, s["cm"], BLUE, hollow=ext)
-        text = f"{s['cm']:.1f}×" + ("\nextrapolated" if ext else "")
-        label(
-            ax,
-            text,
-            (c, s["cm"]),
-            12 if ext else -12,
-            0,
-            ha="left" if ext else "right",
-            linespacing=1.15,
-        )
-    logx(ax, [1e18, 1e19], power)
-    ax.set_xlim(2.5e17, 4e19)
-    ax.set_ylim(0.8, 4)
-    ax.yaxis.set_major_locator(FixedLocator([1, 2, 3, 4]))
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}×"))
-    ax.set_xlabel("Training compute (FLOPs, log scale)")
-    ax.set_ylabel("Dense compute to match MoE (×)")
-    save(fig, "moe-vs-dense")
-    for c, s, _ in pts:
-        print(f"  {c:.2e}: {s['cm']:.2f}x [{s['noise'][0]:.2f}, {s['noise'][1]:.2f}]")
-
-
 def optimal():
     """Compute-optimal active parameters against training compute: the isoflop minima, each law's optimum, and
-    Allie 2.0's size against the law's choice at its compute."""
+    Allie 2.0's size against the law's extrapolated choice at its compute."""
     act, _, D = allie_n()
-    c_allie = C_ALLIE
-    fig, ax = figure(right=0.97)
-    law_curves(ax, lambda fam, c: optimum(fam, c)[1], ("n_opt", "n_ci"))
-    label(
-        ax,
-        "dense",
-        (3e18, optimum("dense", 3e18)[1]),
-        -8,
-        10,
-        ha="right",
-        va="bottom",
-        color=DENSE,
+    _, n_opt, d_opt = optimum("s16", C_ALLIE)
+    sx, sy = (
+        alt.Scale(type="log", domain=[4e17, 3e21], nice=False),
+        alt.Scale(type="log", domain=[1.5e7, 5e9], nice=False),
     )
-    label(ax, "MoE", (1.1e18, optimum("s16", 1.1e18)[1]), 6, -8, va="top", color=BLUE)
-    _, n_opt, d_opt = optimum("s16", c_allie)
-    dot(ax, c_allie, n_opt, BLUE, hollow=True)
-    text = f"extrapolated optimum\n{n_opt / 1e9:.1f}B, {d_opt / 1e9:.0f}B tokens"
-    label(ax, text, (c_allie, n_opt), 12, 0, linespacing=1.15)
-    dot(ax, c_allie, act, BLUE, ms=11, z=6)
-    label(
-        ax,
-        f"Allie 2.0\n{act / 1e9:.2f}B, {D / 1e9:.0f}B tokens",
-        (c_allie, act),
-        12,
-        0,
-        color=INK,
-        linespacing=1.15,
+    label = "datum.value >= 1e9 ? format(datum.value / 1e9, '~g') + 'B' : format(datum.value / 1e6, '~g') + 'M'"
+    x = alt.X(
+        "c:Q",
+        scale=sx,
+        title="Training compute (FLOPs)",
+        axis=alt.Axis(
+            values=[1e18, 1e19, 1e20, 1e21], grid=False, labelExpr=power_axis()
+        ),
     )
-    ax.set_yscale("log")
-    ax.yaxis.set_major_locator(FixedLocator([3e7, 1e8, 3e8, 1e9, 3e9]))
-    ax.yaxis.set_minor_locator(NullLocator())
-    ax.yaxis.set_major_formatter(
-        FuncFormatter(lambda v, _: f"{v / 1e9:g}B" if v >= 1e9 else f"{v / 1e6:g}M")
+    y = alt.Y(
+        "v:Q",
+        scale=sy,
+        title="Active parameters",
+        axis=alt.Axis(values=[3e7, 1e8, 3e8, 1e9, 3e9], grid=True, labelExpr=label),
     )
-    logx(ax, [1e18, 1e19, 1e20], power)
-    ax.set_xlim(4e17, 1.1e22)
-    ax.set_ylim(1.5e7, 5e9)
-    ax.set_xlabel("Training compute (FLOPs, log scale)")
-    ax.set_ylabel("Active parameters")
-    save(fig, "optimal")
+    chart = alt.layer(
+        *law_layers(x, y, 1, {"dense": (9e17, 1.6e8), "s16": (2.5e18, 4.5e7)}),
+        values([{"c": C_ALLIE, "v": n_opt}]).mark_point(color=ALLIE, size=150, strokeWidth=2, filled=False).encode(x=x, y=y),
+        values([{"c": C_ALLIE, "v": n_opt, "t": ["Extrapolated optimum", f"{n_opt / 1e9:.1f}B, {d_opt / 1e9:.0f}B tokens"]}])
+        .mark_text(align="left", dx=14, lineHeight=17).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_ALLIE, "v": act}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
+        values([{"c": C_ALLIE, "v": act, "t": ["Allie 2.0", f"{act / 1e9:.2f}B, {D / 1e9:.0f}B tokens"]}])
+        .mark_text(align="left", dx=14, lineHeight=17, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+    ).properties(width=WIDTH, height=300, title=title(
+        "The law would have picked a larger model on fewer tokens",
+        "Compute-optimal model size: the sweep's best sizes and each law's optimum, dashed beyond the sweep.",
+        "The extrapolation reaches 51 times past the sweep's largest budget."))  # fmt: skip
+    save(chart, "optimal")
     print(
-        f"  law optimum at {c_allie:.3e}: {n_opt / 1e9:.2f}B on {d_opt / 1e9:.1f}B; Allie 2.0 {act / 1e9:.3f}B"
+        f"  law optimum at {C_ALLIE:.3e}: {n_opt / 1e9:.2f}B on {d_opt / 1e9:.1f}B; Allie 2.0 {act / 1e9:.3f}B"
     )
 
 
 # ------------------------------------------------------------------------------------ the model
 
 
-def box(ax, x, y, w, h, text="", ec=AXIS, fc=SURFACE, size=12.5, color=INK, lw=1.2):
-    style = "round,pad=0,rounding_size=0.08"
+def box(ax, x, y, w, h, text="", ec=NEUTRAL, fc="white", size=12.5, color=INK, lw=1.2):
     ax.add_patch(
-        FancyBboxPatch((x, y), w, h, boxstyle=style, fc=fc, ec=ec, lw=lw, zorder=2)
+        FancyBboxPatch(
+            (x, y),
+            w,
+            h,
+            boxstyle="round,pad=0,rounding_size=0.08",
+            fc=fc,
+            ec=ec,
+            lw=lw,
+            zorder=2,
+        )
     )
     if text:
         ax.text(
@@ -511,13 +472,22 @@ def box(ax, x, y, w, h, text="", ec=AXIS, fc=SURFACE, size=12.5, color=INK, lw=1
         )
 
 
-def arrow(ax, a, b, color=AXIS):
+def arrow(ax, a, b, color=NEUTRAL):
     style = {"arrowstyle": "-|>", "mutation_scale": 12, "color": color, "lw": 1.3}
     ax.add_patch(FancyArrowPatch(a, b, shrinkA=0, shrinkB=0, zorder=4, **style))
 
 
 def model():
     """Inputs, one mixture-of-experts block (schematic), the next-move output; coordinates in inches."""
+    for f in FONTS.glob("Inter-*.ttf"):
+        font_manager.fontManager.addfont(str(f))
+    plt.rcParams.update(
+        {
+            "font.family": ["Inter"],
+            "figure.facecolor": PAPER,
+            "savefig.facecolor": PAPER,
+        }
+    )
     fig = plt.figure(figsize=(7.2, 3.6))
     ax = fig.add_axes((0, 0, 1, 1))
     ax.set(xlim=(0, 7.2), ylim=(0, 3.6))
@@ -533,15 +503,15 @@ def model():
     for y, text in ((2.55, "Game +\nratings"), (1.7, "Clock"), (0.85, "Board")):
         box(ax, 0.1, y - 0.3, 1.0, 0.6, text)
         arrow(ax, (1.1, y), (1.4, mid + (y - mid) * 0.35))
-    box(ax, 1.4, 0.2, 4.0, 3.2, ec="#c9d8f5", fc=WASH)
+    box(ax, 1.4, 0.2, 4.0, 3.2, ec="#ddd6c8", fc="#f1ede4")
     ax.text(3.4, 3.15, "MoE block  (23 of 24 blocks)", **small)
     box(ax, 1.55, mid - 0.3, 1.15, 0.6, "Attention")
     ax.plot(
-        [2.7, 2.95, 2.95, 3.75], [mid, mid, 2.6, 2.6], color=BLUE, lw=1.3, zorder=3
+        [2.7, 2.95, 2.95, 3.75], [mid, mid, 2.6, 2.6], color=ALLIE, lw=1.3, zorder=3
     )  # the shared expert
-    box(ax, 3.75, 2.45, 1.05, 0.3, ec=BLUE, fc=CHOSEN)
+    box(ax, 3.75, 2.45, 1.05, 0.3, ec=ALLIE, fc=ALLIE_WASH)
     ax.text(4.275, 2.82, "shared expert", **small | {"va": "bottom"})
-    ax.plot([4.8, 5.15, 5.15], [2.6, 2.6, mid + 0.09], color=BLUE, lw=1.3, zorder=3)
+    ax.plot([4.8, 5.15, 5.15], [2.6, 2.6, mid + 0.09], color=ALLIE, lw=1.3, zorder=3)
     ax.plot(
         [2.7, 3.25], [mid, mid], color=MUTED, lw=1.3, zorder=3
     )  # the router and its routed experts
@@ -551,7 +521,7 @@ def model():
         [False, True, None, False, True, False], np.linspace(2.05, 0.75, 6)
     ):
         if on is None:
-            ax.text(4.275, y, "⋮", **small | {"fontsize": 14, "color": MUTED})
+            ax.text(4.275, y, "···", **small | {"fontsize": 14, "color": MUTED})
             continue
         box(
             ax,
@@ -559,31 +529,34 @@ def model():
             y - 0.09,
             1.05,
             0.18,
-            ec=BLUE if on else AXIS,
-            fc=CHOSEN if on else SURFACE,
+            ec=ALLIE if on else NEUTRAL,
+            fc=ALLIE_WASH if on else "#fbfaf7",
         )
-        color, z = (BLUE, 3) if on else ("#e4e4e7", 2.5)
+        color, z = (ALLIE, 3) if on else ("#e4e0d8", 2.5)
         ax.plot([3.3, 3.75], [mid, y], color=color, lw=1.3, zorder=z)
         ax.plot([4.8, 5.08], [y, mid], color=color, lw=1.3, zorder=z)
     ax.text(4.275, 0.42, "16 of 256 routed experts", **small)
-    ax.add_patch(plt.Circle((5.15, mid), 0.09, fc=SURFACE, ec=MUTED, lw=1.2, zorder=5))
+    ax.add_patch(plt.Circle((5.15, mid), 0.09, fc="white", ec=MUTED, lw=1.2, zorder=5))
     ax.text(5.15, mid, "+", **small | {"fontsize": 10, "color": MUTED, "zorder": 6})
     arrow(ax, (5.24, mid), (5.7, mid), color=MUTED)
-    box(ax, 5.7, mid - 0.4, 1.4, 0.8, "Next-move\ndistribution", ec=BLUE, lw=1.6)
+    box(ax, 5.7, mid - 0.4, 1.4, 0.8, "Next-move\ndistribution", ec=ALLIE, lw=1.6)
     ax.text(
         6.4,
         mid - 0.55,
         "also: time spent,\ngame result",
         **small | {"va": "top", "color": MUTED, "linespacing": 1.2},
     )
-    save(fig, "model")
+    OUT.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUT / "model.png", dpi=200)
+    plt.close(fig)
+    print("wrote docs/figures/model.png")
 
 
 # -------------------------------------------------------------------- comparison with earlier models
 
 
 def previous(name, positions):
-    """An earlier Allie's raw-policy legal-move CE per position on a set (bench: the 80,000 benchmark positions,
+    """The original Allie's raw-policy legal-move CE per position on a set (bench: the 80,000 benchmark positions,
     rating: every scored blitz move), in that set's order; None if not scored."""
     f = ORIGINAL / positions / f"{name}.npz"
     if not f.exists():
@@ -594,7 +567,7 @@ def previous(name, positions):
 
 
 def gflops(name):
-    """An earlier Allie's GFLOPs per move with a key-value cache, counted as for the other models."""
+    """The original Allie's GFLOPs per move with a key-value cache, counted as for the other models."""
     return (
         jload(ORIGINAL / f"flops-{name.split('-')[1]}.json")[
             "flops_per_move_incremental"
@@ -612,116 +585,53 @@ def search_index(n):
 def pareto():
     """Legal-move CE against GFLOPs per move, on the 20,000 benchmark positions that search ran on."""
     rep = jload(SEARCH / "report-bigrun.json")
-    pts = rep["points"]
-    fig, ax = figure(left=0.13, right=0.97)
-    maia = [(pts[f"maia/{m}"]["gflops"], pts[f"maia/{m}"]["ce"]) for m in MAIA]
-    ax.plot(*zip(*maia), color=MAIA["maia3-23m"], lw=1.8, zorder=2)
-    for m, xy, (dx, dy, va) in zip(
-        MAIA, maia, ((10, 8, "bottom"), (10, 8, "bottom"), (10, 8, "bottom"))
-    ):
-        dot(ax, *xy, MAIA[m])
-        label(ax, NAME[m], xy, dx, dy, va=va)
-    line = [pts[k] for k in ("frozen/legal", "devcal/5", "devcal/128")]
-    gx, gy = [p["gflops"] for p in line], [p["ce"] for p in line]
-    ax.plot(gx, gy, color=BLUE, lw=2.6, zorder=3)
-    for x, y, n in zip(gx[1:], gy[1:], ("5", "128")):
-        dot(ax, x, y, BLUE, ms=7)
-        label(
-            ax, f"{n} sims", (x, y), 0, -11, ha="center", va="top", color=MUTED, size=13
-        )
-    dot(ax, gx[0], gy[0], BLUE, ms=11, z=6)
-    label(
-        ax, "Allie 2.0 (raw)", (gx[0], gy[0]), 0, -13, ha="center", va="top", color=INK
-    )
-    label(
-        ax,
-        "Allie 2.0 + search",
-        (gx[2], gy[2]),
-        0,
-        12,
-        ha="right",
-        va="bottom",
-        color=INK,
-    )
-    ix = search_index(rep["n"])
-    for name, text in PREVIOUS.items():
-        ce = previous(name, "bench")
-        if ce is not None:
-            xy = gflops(name), ce[ix].mean()
-            dot(ax, *xy, INK2, hollow=True)
-            label(ax, text, xy, -11, 0, ha="right")
-            print(f"  {text}: {xy[0]:.2f} GF, CE {xy[1]:.4f} on the search positions")
-    logx(ax, [0.5, 1, 2, 5, 10, 20, 50, 100, 200])
-    ax.set_xlim(0.2, 320)
-    ax.set_ylim(1.2, 1.32)
-    ax.yaxis.set_major_locator(FixedLocator([1.2, 1.24, 1.28, 1.32]))
-    ax.set_xlabel("Inference compute per move (GFLOPs, log scale)")
-    ax.set_ylabel("Legal-move CE (nats)")
-    save(fig, "pareto")
-    for k, p in pts.items():
-        print(
-            f"  {k:16s} {p['gflops']:7.2f} GF  CE {p['ce']:.4f}  top-1 {p['acc']:.2f}"
-        )
-
-
-def rating():
-    """Legal-move CE minus Maia-3 79M's per 100-point bin of game rating, on every scored blitz move."""
-    rows = [
-        r for r in jload(X / "bigrun-progress/acc-by-game-rating-final.json") if r["n"]
+    p = rep["points"]
+    pts = [
+        dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name)
+        for m, name in MAIA.items()
     ]
-    x = np.array([np.mean([float(v) for v in r["bin"].split("-")]) for r in rows])
-    big = "bigrun-143051"
-    fig, ax = figure(right=0.76)
-    ref = np.array([r["models"]["maia3-79m"]["ce"][0] for r in rows])
-    ax.axhline(0, color=MAIA["maia3-79m"], lw=1.4, zorder=2)
-    items = [("Maia-3 79M", 0.0)]
-    for m in ("maia3-5m", "maia3-23m"):
-        v = np.array([r["models"][m]["ce"][0] for r in rows]) - ref
-        ax.plot(x, v, color=MAIA[m], lw=1.8, zorder=3)
-        items.append((NAME[m], v[-1]))
-    for (name, text), ls in zip(PREVIOUS.items(), ((0, (5, 2.5)), (0, (1.5, 2)))):
-        ce = previous(name, "rating")
-        if ce is not None:
-            v = binned(ce) - ref
-            ax.plot(x, v, color=INK2, lw=1.6, ls=ls, zorder=3)
-            items.append((text, v[-1]))
-            print(f"  {text} minus 79M per bin: {np.round(v, 3).tolist()}")
-    d = np.array([r["models"][big]["d_ce_79m"] for r in rows])
-    ax.fill_between(x, d[:, 1], d[:, 2], color=BLUE, alpha=0.12, lw=0, zorder=2)
-    ax.plot(x, d[:, 0], color=BLUE, lw=2.6, zorder=4)
-    i = int(np.argmin(np.abs(x - 1950)))
-    label(ax, "Allie 2.0", (x[i], d[i, 1]), 0, -8, ha="center", va="top", color=INK)
-    lo, hi = (
-        min(-0.11, *(y - 0.01 for _, y in items)),
-        max(0.13, *(y + 0.012 for _, y in items)),
+    for k, t in (
+        ("frozen/legal", "Allie 2.0 (raw)"),
+        ("devcal/5", "5 simulations"),
+        ("devcal/128", "128 simulations"),
+    ):
+        pts.append(dict(fam="allie", g=p[k]["gflops"], v=p[k]["ce"], t=t))
+    ce = previous("allie1-medium", "bench")
+    if ce is not None:
+        pts.append(
+            dict(
+                fam="orig",
+                g=gflops("allie1-medium"),
+                v=float(ce[search_index(rep["n"])].mean()),
+                t="Original Allie",
+            )
+        )
+    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.13, 320], nice=False), title="Compute per move (GFLOPs, log scale)",
+              axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20, 50, 100, 200], grid=False, format="~g"))  # fmt: skip
+    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.20, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
+              axis=alt.Axis(values=[1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
+    b = values(pts)
+    maia, allie, orig = (
+        b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "orig")
     )
-    ax.set_ylim(lo, hi)
-    ends(ax, items, (hi - lo) / 15)
-    ax.set_xticks(np.arange(800, 2900, 400))
-    ax.set_xlim(600, 2850)
-    ax.set_xlabel("Game rating (Lichess blitz)")
-    ax.set_ylabel("Δ legal-move CE (nats)")
-    ax.yaxis.set_major_locator(MaxNLocator(5))
-    ax.yaxis.set_major_formatter(
-        FuncFormatter(lambda v, _: f"{v:+.2f}".translate(MINUS) if v else "0")
-    )
-    save(fig, "rating")
-    worse = [r["bin"] for r, v in zip(rows, d[:, 0]) if v > 0]
-    print(
-        f"  {len(rows)} bins; CE above 79M in {worse}; interval below 0 in {(d[:, 2] < 0).sum()}"
-    )
-
-
-def binned(values):
-    """values (rating-set order) averaged per 100-point game-rating bin, weighted to the natural mover mix."""
-    with np.load(DATA / "maia3-bench/rating/games.npz") as z:
-        sel, meta = z["sel"][z["keep"]], z["meta"]
-    m = jload(DATA / "strat-eval-v1/manifest.json")
-    w = (np.array(m["population_moves"]) / np.array(m["scored_moves"]))[sel[:, 2]]
-    rating = meta[sel[:, 0], 2:4].mean(1)
-    edges = np.arange(600, 2901, 100)
-    keep = [(rating >= lo) & (rating < hi) for lo, hi in zip(edges[:-1], edges[1:])]
-    return np.array([np.average(values[k], weights=w[k]) for k in keep if k.any()])
+    raw = alt.datum.t == "Allie 2.0 (raw)"
+    chart = alt.layer(
+        maia.mark_line(color=NEUTRAL_DARK, strokeWidth=2).encode(x=x, y=y),
+        maia.mark_circle(size=110, color=NEUTRAL_DARK, opacity=1).encode(x=x, y=y),
+        maia.mark_text(align="left", dx=10, dy=-10).encode(x=x, y=y, text="t:N"),
+        orig.mark_point(size=110, color=NEUTRAL_DARK, strokeWidth=2, filled=False).encode(x=x, y=y),
+        orig.mark_text(align="right", dx=-11).encode(x=x, y=y, text="t:N"),
+        allie.mark_line(color=ALLIE, strokeWidth=2.4).encode(x=x, y=y),
+        allie.mark_circle(color=ALLIE, opacity=1).encode(x=x, y=y, size=alt.condition(raw, alt.value(170), alt.value(90))),
+        allie.transform_filter(raw).mark_text(dy=20, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+        allie.transform_filter(~raw).mark_text(dy=18).encode(x=x, y=y, text="t:N"),
+    ).properties(width=2 * 300 + 34, height=330, title=title(
+        "Allie 2.0 needs 1.4 GFLOPs per move",
+        "Loss against compute per move on 20,000 blitz positions, every position scored. Compute counts",
+        "matrix multiplies. Grey line: a guide between three separately trained Maia-3 models."))  # fmt: skip
+    save(chart, "pareto")
+    for r in pts:
+        print(f"  {r['t']:16s} {r['g']:7.2f} GF  CE {r['v']:.4f}")
 
 
 def protocol_scores():
@@ -736,41 +646,10 @@ def protocol_scores():
             )
         return (ce, top1) if len(ce) == len(keep) else (ce[keep], top1[keep])
 
-    paths = {NAME[m]: DATA / f"maia3-bench/scores/{m}.npz" for m in MAIA}
+    paths = {name: DATA / f"maia3-bench/scores/{m}.npz" for m, name in MAIA.items()}
     paths["Original Allie"] = ORIGINAL / "bench/allie1-medium.npz"
     paths["Allie 2.0"] = DATA / "maia3-bench/bigrun-v2/step-00143051/scores.npz"
     return {k: read(p) for k, p in paths.items() if Path(p).exists()}
-
-
-def dots(ax, rows, key, scale, color_of):
-    """One row per model: its paired difference from Maia-3 79M and the 95% interval, top to bottom."""
-    for i, (name, r) in enumerate(rows):
-        d = r[key]
-        y = len(rows) - 1 - i
-        c = color_of(name)
-        ax.plot(
-            [d["lo"] * scale, d["hi"] * scale],
-            [y, y],
-            color=c,
-            lw=2.4,
-            alpha=0.35,
-            zorder=3,
-        )
-        dot(ax, d["mean"] * scale, y, c, ms=9 if name == "Allie 2.0" else 8)
-    ax.axvline(0, color=MAIA["maia3-79m"], lw=1.4, zorder=2)
-    ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels([n for n, _ in rows][::-1])
-    ax.set_ylim(-0.6, len(rows) - 0.4)
-    ax.grid(axis="y", visible=False)
-    ax.grid(axis="x", visible=True)
-
-
-def color_of(name):
-    return (
-        BLUE
-        if name == "Allie 2.0"
-        else {**{NAME[m]: c for m, c in MAIA.items()}, "Original Allie": INK2}[name]
-    )
 
 
 def protocol():
@@ -780,45 +659,45 @@ def protocol():
     from allie.eval.maia3 import aggregate
 
     res = aggregate.compare(protocol_scores())["maia_protocol"]
-    order = ["Maia-3 5M", "Maia-3 23M", "Original Allie", "Allie 2.0"]
-    rows = [(n, res[n]) for n in order if n in res]
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.3), sharey=True)
-    fig.subplots_adjust(left=0.22, right=0.97, top=0.86, bottom=0.2, wspace=0.28)
-    dots(axes[0], rows, "d_ce", 1, color_of)
-    dots(axes[1], rows, "d_top1", 1, color_of)
-    axes[0].set_title("Loss (nats)", fontsize=TEXT, color=INK2)
-    axes[1].set_title("Top choice correct (points)", fontsize=TEXT, color=INK2)
-    for ax, fmt in ((axes[0], "{:+.2f}"), (axes[1], "{:+.0f}")):
-        ax.xaxis.set_major_locator(MaxNLocator(4))
-        ax.xaxis.set_major_formatter(
-            FuncFormatter(
-                lambda v, _, f=fmt: f.format(v).translate(MINUS) if v else "0"
+    order = [
+        m
+        for m in ("Allie 2.0", "Maia-3 23M", "Original Allie", "Maia-3 5M")
+        if m in res
+    ]
+    panels = []
+    for i, (key, name, dom, nd, ticks, lnd) in enumerate((
+        ("d_ce", "Loss difference (nats, lower is better)", [-0.04, 0.10], 2, [-0.04, 0, 0.04, 0.08], 3),
+        ("d_top1", "Top-choice accuracy (percentage points)", [-3.0, 1.3], 0, [-3, -2, -1, 0, 1], 2),
+    )):  # fmt: skip
+        rows = [dict(name=m, d=res[m][key]["mean"], lo=res[m][key]["lo"], hi=res[m][key]["hi"], label=signed(res[m][key]["mean"], lnd))
+                for m in order]  # fmt: skip
+        panels.append(
+            diverging(
+                rows,
+                order,
+                dom,
+                nd,
+                ticks,
+                name,
+                alt.datum.name == "Allie 2.0",
+                label_axis=i == 0,
+                width=280,
             )
         )
-    for ax, dx, ha in ((axes[0], 4, "left"), (axes[1], -4, "right")):
-        ax.annotate("Maia-3 79M", (0, 1.0), xycoords=("data", "axes fraction"), xytext=(dx, -2),
-                    textcoords="offset points", ha=ha, va="top", fontsize=12, color=MUTED)  # fmt: skip
-    axes[0].set_xlim(-0.03, 0.09)
-    axes[1].set_xlim(-2.6, 1.0)
-    fig.text(
-        0.595,
-        0.04,
-        "Difference from Maia-3 79M",
-        ha="center",
-        fontsize=TEXT,
-        color=INK2,
-    )
-    save(fig, "protocol")
+    chart = alt.hconcat(*panels, spacing=34).properties(title=title(
+        "Under the Maia-3 protocol, Allie 2.0 performs similarly to Maia-3 79M",
+        f"Difference from Maia-3 79M on {res['positions']:,} blitz positions, scored by the Maia-3 paper's rule.",
+        "Whiskers: 95% intervals."))  # fmt: skip
+    save(chart, "protocol")
     print(f"  {res['positions']} positions")
-    for n, r in rows + [("Maia-3 79M", res["Maia-3 79M"])]:
-        extra = ""
-        if "d_ce" in r:
-            a, b = r["d_ce"], r["d_top1"]
-            extra = f"  dCE {a['mean']:+.4f} [{a['lo']:+.4f}, {a['hi']:+.4f}]  dtop1 {b['mean']:+.2f} [{b['lo']:+.2f}, {b['hi']:+.2f}]"
-        print(f"  {n:16s} CE {r['ce']:.4f} top-1 {r['top1']:.2f}{extra}")
-
-
-CLOCKS = ["<10 s", "10-30 s", "30-60 s", "1-2 min", "2+ min"]
+    for n in order + ["Maia-3 79M"]:
+        r = res[n]
+        d = (
+            f"  dCE {signed(r['d_ce']['mean'], 4)}  dtop1 {signed(r['d_top1']['mean'], 2)}"
+            if "d_ce" in r
+            else ""
+        )
+        print(f"  {n:16s} CE {r['ce']:.4f} top-1 {r['top1']:.2f}{d}")
 
 
 def versatility():
@@ -826,66 +705,135 @@ def versatility():
     5,000 positions per rating band; blitz from the benchmark) and, in blitz, by time left on the mover's clock;
     paired 95% game-bootstrap intervals (allie.eval.maia3.report's aggregate-bigrun.json)."""
     sl = jload(X / "maia3-bench/aggregate-bigrun.json")["slices"]
+    clocks = ["Under 10 s", "10–30 s", "30–60 s", "1–2 min", "Over 2 min"]
     groups = (
-        (
-            "Time control",
-            [(f, sl["format"][f]) for f in ("bullet", "blitz", "rapid", "classical")],
-        ),
-        (
-            "Blitz, by time left",
-            [(t, sl["clock"][k]) for t, k in zip(CLOCKS, sl["clock"])],
-        ),
-    )
-    fig, axes = plt.subplots(
-        1, 2, figsize=(7.2, 3.6), sharey=True, gridspec_kw={"width_ratios": [4, 5]}
-    )
-    fig.subplots_adjust(left=0.13, right=0.98, top=0.86, bottom=0.17, wspace=0.08)
-    for ax, (title, items) in zip(axes, groups):
-        ax.axhline(0, color=MAIA["maia3-79m"], lw=1.4, zorder=2)
-        for i, (name, d) in enumerate(items):
-            e = d["d_ce_maia3-79m"]
-            ax.plot(
-                [i, i], [e["lo"], e["hi"]], color=BLUE, lw=2.4, alpha=0.35, zorder=3
-            )
-            dot(ax, i, e["mean"], BLUE)
-        ax.set_xticks(range(len(items)))
-        ax.set_xticklabels([n for n, _ in items], fontsize=12)
-        ax.set_xlim(-0.5, len(items) - 0.5)
-        ax.set_title(title, fontsize=TEXT, color=INK2)
-    label(axes[0], "Maia-3 79M", (-0.45, 0), 0, 7, va="bottom", color=MUTED, size=12)
-    axes[0].set_ylim(-0.27, 0.04)
-    axes[0].yaxis.set_major_locator(FixedLocator([-0.25, -0.2, -0.15, -0.1, -0.05, 0]))
-    axes[0].yaxis.set_major_formatter(
-        FuncFormatter(lambda v, _: f"{v:+.2f}".translate(MINUS) if v else "0")
-    )
-    axes[0].set_ylabel("Loss minus Maia-3 79M's")
-    save(fig, "versatility")
-    for title, items in groups:
-        for name, d in items:
-            e, a = (
-                d["d_ce_maia3-79m"],
-                d.get("d_top1_maia3-79m") or d.get("d_acc_maia3-79m"),
-            )
+        ("By time control", ["bullet", "blitz", "rapid", "classical"], [sl["format"][f] for f in ("bullet", "blitz", "rapid", "classical")]),
+        ("Blitz, by time left on the clock", clocks, list(sl["clock"].values())),
+    )  # fmt: skip
+    panels = []
+    for name, order, items in groups:
+        rows = [dict(name=n, d=d["d_ce_maia3-79m"]["mean"], lo=d["d_ce_maia3-79m"]["lo"], hi=d["d_ce_maia3-79m"]["hi"],
+                     label=signed(d["d_ce_maia3-79m"]["mean"], 3)) for n, d in zip(order, items)]  # fmt: skip
+        panels.append(diverging(rows, order, [-0.37, 0.06], 1, [-0.3, -0.2, -0.1, 0], name, alt.datum.d == alt.datum.d, width=248)
+                      .properties(height=34 * 5))  # fmt: skip
+        for r in rows:
             print(
-                f"  {title[:12]:12s} {name:10s} n {d['n']:6d}  dCE {e['mean']:+.4f} [{e['lo']:+.4f}, {e['hi']:+.4f}]"
-                f"  dtop1 {100 * a['mean']:+.2f} [{100 * a['lo']:+.2f}, {100 * a['hi']:+.2f}]"
+                f"  {r['name']:11s} dCE {signed(r['d'], 4)} [{signed(r['lo'], 4)}, {signed(r['hi'], 4)}]"
             )
+    chart = alt.hconcat(*panels, spacing=34).properties(title=title(
+        "Allie 2.0's lead is largest in bullet and in time trouble",
+        "Allie 2.0's loss minus Maia-3 79M's; below zero, Allie 2.0 predicts better. Maia-3 never",
+        "trained on bullet, rapid or classical games. Whiskers: 95% intervals."))  # fmt: skip
+    save(chart, "versatility")
+
+
+def rating():
+    """Legal-move CE minus Maia-3 79M's per 100-point bin of game rating, on every scored blitz move."""
+    rows = [
+        r for r in jload(X / "bigrun-progress/acc-by-game-rating-final.json") if r["n"]
+    ]
+    x_ = [float(np.mean([float(v) for v in r["bin"].split("-")])) for r in rows]
+    ref = np.array([r["models"]["maia3-79m"]["ce"][0] for r in rows])
+    pts = []
+    for i, r in enumerate(rows):
+        d = r["models"]["bigrun-143051"]["d_ce_79m"]
+        pts.append(dict(x=x_[i], s="Allie 2.0", d=d[0], lo=d[1], hi=d[2]))
+        pts += [
+            dict(x=x_[i], s=MAIA[m], d=r["models"][m]["ce"][0] - ref[i])
+            for m in ("maia3-5m", "maia3-23m")
+        ]
+    ce = previous("allie1-medium", "rating")
+    if ce is not None:
+        pts += [
+            dict(x=x, s="Original Allie", d=float(v))
+            for x, v in zip(x_, binned(ce) - ref)
+        ]
+    sx, sy = (
+        alt.Scale(domain=[600, 2900], nice=False),
+        alt.Scale(domain=[-0.11, 0.16], nice=False),
+    )
+    x = alt.X(
+        "x:Q",
+        scale=sx,
+        title="Game rating (Lichess blitz)",
+        axis=alt.Axis(
+            values=[800, 1200, 1600, 2000, 2400, 2800], grid=False, format="d"
+        ),
+    )
+    y = alt.Y(
+        "d:Q",
+        scale=sy,
+        title="Loss minus Maia-3 79M's (nats)",
+        axis=alt.Axis(
+            values=[-0.1, -0.05, 0, 0.05, 0.1, 0.15],
+            grid=True,
+            labelExpr=signed_axis(2),
+        ),
+    )
+    b = values(pts)
+    allie = b.transform_filter(alt.datum.s == "Allie 2.0")
+    layers = [values([{"d": 0}]).mark_rule(color=INK, strokeWidth=1.4).encode(y=y),
+              allie.mark_area(color=ALLIE, opacity=0.15).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q")]  # fmt: skip
+    ends = {p["s"]: p["d"] for p in pts}
+    labels = [
+        dict(x=2850, d=-0.016, t="Maia-3 79M"),
+        dict(x=1950, d=-0.04, t="Allie 2.0"),
+    ]
+    for s, color, dash, dy in (
+        ("Maia-3 5M", NEUTRAL, [1, 0], -0.004),
+        ("Maia-3 23M", NEUTRAL_DARK, [1, 0], 0),
+        ("Original Allie", INK2, [5, 3], 0.004),
+    ):
+        if s in ends:
+            layers.append(
+                b.transform_filter(alt.datum.s == s)
+                .mark_line(color=color, strokeWidth=2, strokeDash=dash)
+                .encode(x=x, y=y)
+            )
+            labels.append(dict(x=2850, d=ends[s] + dy, t=s))
+    layers.append(allie.mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y))
+    lab = values(labels)
+    layers += [lab.transform_filter(alt.datum.t != "Allie 2.0").mark_text(align="left", dx=10).encode(x=x, y=y, text="t:N"),
+               lab.transform_filter(alt.datum.t == "Allie 2.0").mark_text(align="left", color=ALLIE, fontWeight=700).encode(x=x, y=y, text="t:N")]  # fmt: skip
+    chart = alt.layer(*layers).properties(width=546, height=300, title=title(
+        "Allie 2.0 predicts well at every rating",
+        "Loss minus Maia-3 79M's by game rating, on all blitz positions of the main evaluation. Below zero is",
+        "better. Band: Allie 2.0's 95% interval; the end bins hold few games."))  # fmt: skip
+    save(chart, "rating")
+    d = np.array([r["models"]["bigrun-143051"]["d_ce_79m"] for r in rows])
+    print(
+        f"  {len(rows)} bins; CE above 79M in {[r['bin'] for r, v in zip(rows, d[:, 0]) if v > 0]}; interval below 0 in {(d[:, 2] < 0).sum()}"
+    )
+
+
+def binned(values_):
+    """values_ (rating-set order) averaged per 100-point game-rating bin, weighted to the natural mover mix."""
+    with np.load(DATA / "maia3-bench/rating/games.npz") as z:
+        sel, meta = z["sel"][z["keep"]], z["meta"]
+    m = jload(DATA / "strat-eval-v1/manifest.json")
+    w = (np.array(m["population_moves"]) / np.array(m["scored_moves"]))[sel[:, 2]]
+    rating = meta[sel[:, 0], 2:4].mean(1)
+    edges = np.arange(600, 2901, 100)
+    keep = [(rating >= lo) & (rating < hi) for lo, hi in zip(edges[:-1], edges[1:])]
+    return np.array([np.average(values_[k], weights=w[k]) for k in keep if k.any()])
 
 
 FIGS = {
-    "training": training,
-    "isoflop": isoflop,
-    "frontier": frontier,
-    "moe-vs-dense": moe_vs_dense,
-    "optimal": optimal,
     "model": model,
+    "isoflop": isoflop,
+    "moe-vs-dense": moe_vs_dense,
+    "frontier": frontier,
+    "optimal": optimal,
+    "training": training,
     "pareto": pareto,
-    "rating": rating,
     "protocol": protocol,
     "versatility": versatility,
+    "rating": rating,
 }
 
 if __name__ == "__main__":
+    plt.switch_backend("agg")
+    vlc.register_font_directory(str(FONTS))
     for name in sys.argv[1:] or FIGS:
         print(name)
         FIGS[name]()

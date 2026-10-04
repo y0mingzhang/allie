@@ -24,6 +24,8 @@ bot = ["huggingface_hub>=0.20", "safetensors>=0.4"]
 # allie.lichess.chat: game chat written by Claude (off unless [chat] enabled)
 chat = ["anthropic>=1.0"]
 test = ["pytest>=8"]
+# docs/make_figures.py: Vega-Lite charts rendered to PNG
+figures = ["altair>=5.5", "vl-convert-python>=1.7"]
 
 [project.scripts]
 allie-train = "allie.cli:train"
