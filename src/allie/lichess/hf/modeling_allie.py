@@ -52,11 +52,8 @@ class AllieModel(PreTrainedModel):
             device or ("cuda" if torch.cuda.is_available() else "cpu")
         )
         dtype = kwargs.get("dtype", kwargs.get("torch_dtype"))
-        dtype = (
-            dtype
-            or getattr(config, "dtype", None)
-            or getattr(config, "torch_dtype", None)
-        )
+        for name in ("dtype", "torch_dtype"):  # set on the config when AutoConfig took it
+            dtype = dtype or config.__dict__.get(name)
         dtype = (
             torch.bfloat16
             if dtype in (None, "auto")
