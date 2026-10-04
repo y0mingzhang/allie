@@ -2,7 +2,7 @@
 into a cache keyed by their source, the chess-library header, Python and pybind11.
 
 A built module loads without the cache's file lock, and a process's threads load it once: a contended flock
-on an NFS cache waits out the server's retry backoff (30 s a round), which stalled live searches."""
+on an NFS cache waits out the client's retry backoff (30 s a round), which stalled live searches."""
 import fcntl
 import hashlib
 import importlib.util

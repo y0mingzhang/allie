@@ -5,7 +5,7 @@ from allie.search import native
 
 def test_threads_load_a_built_module_once_without_the_file_lock(monkeypatch):
     """Games' first searches load the native modules at once. A built module must not take the
-    cache's flock: on the NFS home a contended flock waits out the server's 30 s retry backoff (live
+    cache's flock: on the NFS home a contended flock waits out the client's 30 s retry backoff (live
     load test 2026-10-04: first searches stalled 30, 60 and 90 s), and the threads share one load."""
     native.load(), native.load("value")
     locks = []

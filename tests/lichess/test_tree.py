@@ -198,6 +198,12 @@ def test_a_search_past_its_deadline_stops(tiny_path, monkeypatch):
     monkeypatch.setattr(tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h))
     assert search(game, 32, deadline=time.monotonic() - 1) is None
     assert len(calls) == 1
+    steps, clock = [], iter(range(10**6))
+    monkeypatch.setattr(game.engine, "steps", lambda items, f=game.engine.steps: steps.append(1) or f(items))
+    monkeypatch.setattr(tree, "monotonic", lambda: next(clock))  # nodes 0, their chunks 1, 2, ...
+    assert search(game, 32, deadline=1.5) is None
+    assert calls[1] > 8 and len(steps) == 1  # stopped within the first nodes, after one chunk
+    monkeypatch.setattr(tree, "monotonic", time.monotonic)
     moves, p = search(game, 32)
-    assert len(calls) > 2
+    assert len(calls) > 3
     assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves) and abs(p.sum() - 1) < 1e-9

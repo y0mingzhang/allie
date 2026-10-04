@@ -80,8 +80,11 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     t = time.monotonic()
     reserve = behaviour.PARAMETERS["guard"]["reserve"]
     search.late = True  # past its deadline: the move comes from the policy
-    assert game.decide(play, search, 590).move in legal_of(game)
-    assert search.deadlines[-1] - t == pytest.approx((590 - reserve) / 10, abs=0.5)
+    d = game.decide(play, search, 590)
+    assert search.budgets == [calibration.CAP] * 2
+    assert search.deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
+    legal, p, _, _ = game.position()
+    assert d.probability == pytest.approx(p[legal.index(d.move)])
 
 
 def test_close_serves_queued_requests(tiny):

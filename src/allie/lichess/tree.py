@@ -193,6 +193,8 @@ class Nodes:
         n0 = t.cache.n
         out = []
         for lo in range(0, len(ids), chunk):
+            if monotonic() > t.deadline:
+                raise Late
             batch, items = ids[lo : lo + chunk], []
             caches = t.pool(len(batch))
             for c, i in zip(caches, batch):
