@@ -170,13 +170,13 @@ equal within noise. 95% intervals are bootstrapped over games.
 | PyTorch reference, GPU, BF16, 16 games in one step | −0.0005 [−0.0015, +0.0003] | 58.94% |
 | PyTorch reference, GPU, BF16, whole games in one step | −0.0006 [−0.0015, +0.0002] | 58.90% |
 
-- **Fast against the reference**, on the same positions: CPU int8 +0.0003 [−0.0003, +0.0008] nats; the
-  probability of a move differs by 0.004 on average and at most 0.04, and the top move agrees on 99.4% of
-  positions (CPU BF16: 99.4%, GPU: 99.6%). The C++ kernels round to BF16 where the reference does; the sums
-  run in a different order.
-
-- **int8 against BF16**, on the same positions: +0.0016 ± 0.0011 nats (standard error); the top move agrees on
-  97.5% of positions. This is within the 0.002 we allowed for the CPU default; `int8 = false` keeps BF16.
+- **Fast against the reference**, on the same positions: CPU int8 +0.0003 [−0.0003, +0.0008] nats. A position's
+  largest change in any move's probability is 0.004 on average and 0.04 at most, and the top move agrees on
+  99.4% of positions (CPU BF16: 99.4%, GPU: 99.6%). The C++ kernels round to BF16 where the reference does;
+  the sums run in a different order.
+- **int8 against BF16**, on the same positions: +0.0021 [+0.0000, +0.0043] nats with the fast backend
+  (standard error 0.0011; the PyTorch reference measured +0.0016 ± 0.0011); the top move agrees on 97.6% of
+  positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
 - **CPU against GPU** (BF16): the top move agrees on 99.3% of positions, and no move's probability differs by
   more than 0.076.
 
