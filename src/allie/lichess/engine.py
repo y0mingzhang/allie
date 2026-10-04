@@ -167,11 +167,11 @@ class Game:
         self.used = now
         return self.logits
 
-    def features(self, lo=0):
-        """Clock features of the tokens from position lo on."""
+    def features(self):
+        """Clock features of every token."""
         clocks = fill(self.clocks, self.base)
         f = lambda p: features(p - HEADER + 1, self.base, self.inc, clocks)
-        return [f(p) if p >= HEADER - 1 else [-1] * 3 for p in range(lo, len(self.tokens))]
+        return [f(p) if p >= HEADER - 1 else [-1] * 3 for p in range(len(self.tokens))]
 
     def decide(self, play, search=None, clock=None):
         """The bot's move at the current position. clock: its time left in seconds."""

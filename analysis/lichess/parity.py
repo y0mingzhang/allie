@@ -1,11 +1,11 @@
 """allie.lichess's model against the reference scores of Allie 2.0 on the Maia-3 blitz benchmark.
 
-The reference is allie.eval.maia3.score_moe on the training forward (compiled, GPU, BF16): the
-per-position legal CE and top-1 in <maia3-bench>/bigrun-v2/step-00143051/scores.npz. This runs
-the bot's own code path (fresh Cache per position, model.step) on a stratified subsample and
-reports the paired CE difference (95% game bootstrap), top-1, and the per-position change in the
-played move's probability. --save keeps the legal-move distributions so two runs (CPU vs GPU,
-BF16 vs FP32, fewer experts) can be compared move by move with --against.
+The reference (REFERENCE) is allie.eval.maia3.score_moe's per-position legal CE and top-1 from
+the training forward (compiled, GPU, BF16). This runs the bot's own code path (fresh Cache per
+position, model.step) on a stratified subsample and reports the paired CE difference (95% game
+bootstrap), top-1, and the per-position change in the played move's probability. --save keeps
+the legal-move distributions so two runs (CPU vs GPU, BF16 vs FP32, fewer experts) can be
+compared move by move with --against.
 
 usage: python analysis/lichess/parity.py --model DIR [--device cpu] [--per-band 1250] --out X.json
 """

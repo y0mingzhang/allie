@@ -81,7 +81,6 @@ def main():
     out = dict(device=str(m.device), backend=backend, int8=a.int8, experts=m.keep, threads=threads,
                load_seconds=round(time.perf_counter() - t0, 1))  # fmt: skip
     sync = torch.cuda.synchronize if m.device.type == "cuda" else lambda: None
-    caches = None
     for b in map(int, a.batch.split(",")):
         caches = None  # the last batch's gpu pool slots back first
         games = [game(80 + a.steps + 21, s) for s in range(b)]

@@ -379,7 +379,6 @@ static inline void rows(const float* const* x, int m0, int m1, const W* w, int K
   }
 }
 
-// out[m * ldo + j] = x[m] . w[j] for rows j < n of w (row stride K), tokens m < M
 // one row against one token, eight sums along K: rows read one after another stream from memory
 // faster than rows read side by side (the prefetchers follow one stream)
 template <class W>
@@ -396,6 +395,7 @@ static inline float row1(const float* x, const W* r, int K) {
   return s;
 }
 
+// out[m * ldo + j] = x[m] . w[j] for rows j < n of w (row stride K), tokens m < M
 template <class W>
 static void dots(const float* const* x, int M, const W* w, int K, int n, float* out, int ldo) {
   if (M == 1) {  // a matrix-vector product
@@ -1097,7 +1097,7 @@ void Engine::head(int t, int nt) {
 
 extern "C" {
 
-// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads (unused), then per layer
+// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads 0 (unused), then per layer
 // G ve skip_in skip_out. glob: embed embed2 lm_head feat_embed smear_gate scalars x0_lambdas cos sin
 // board.first board.residual.0 board.residual.1 board.squeeze board.meta board.output
 // skip_gate.0-2 value_embed.*. per layer (20): qkv qkv_s o o_s gates fc fc_s proj proj_s router

@@ -176,7 +176,7 @@ def test_fast_after_fork(tiny_path):
 
 
 def test_fast_concurrent_steps(tiny_path):
-    """Steps from several threads on one model run one at a time (codex: they crashed)."""
+    """Steps from several threads on one model run one at a time."""
     m = Model(tiny_path, dtype=torch.bfloat16, threads=2)
     games = [inputs(random_game(20 + s, 40)) for s in range(4)]
     want = [step(m, [(Cache(m), *x)])[0] for x in games]

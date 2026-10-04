@@ -7,6 +7,7 @@ import torch
 
 from allie.lichess.api import REPO, Allie, parse_moves, parse_time_control
 from allie.lichess.model import Cache, Model, step
+from allie.lichess.tokens import MOVE_ID
 
 from .test_model import inputs
 from .test_tokens import random_game
@@ -42,8 +43,6 @@ def test_predict_matches_model_and_reuses_cache(tiny):
         for m in moves[:n]:
             b.push_uci(m)
         legal = [m.uci() for m in b.legal_moves]
-        from allie.lichess.tokens import MOVE_ID
-
         ref = torch.softmax(z[[MOVE_ID[m] for m in legal]], 0)
         assert list(p) == sorted(legal, key=lambda m: -ref[legal.index(m)].item())
         for m, q in p.items():
@@ -76,7 +75,7 @@ def test_failed_step_drops_its_session(tiny, monkeypatch):
     assert allie.predict(game) == Allie(tiny).predict(game)
 
 
-def test_rejects_other_starts_and_samples_cold():
+def test_rejects_other_starts():
     fen = '[SetUp "1"]\n[FEN "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]\n\n1. e4 *'
     with pytest.raises(ValueError):
         parse_moves(fen)

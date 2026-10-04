@@ -2,8 +2,8 @@
 
 Search nodes extend the game's cache: each node adds one token whose attention reads the game's
 keys and values plus its own path's. Clock bookkeeping is allie.search's (as MoEHandles in
-allie.search.moe_oracle). The output calibration is Allie 2.0's dev refit: the frozen
-calibration.json of allie.search hurts this model at every budget.
+allie.search.moe_oracle). The output calibration is refit for Allie 2.0: allie.search's own
+calibration.json hurts this model at every budget.
 """
 
 import json
@@ -20,7 +20,7 @@ from allie.search.native import from_prefix
 from .tokens import CONTEXT, MOVE_START, MOVES, advance
 
 CALIBRATION = Path(__file__).with_name("calibration-allie-2.0.json")
-# simulations -> the output policy fitted for them (8 and 25 reuse 128's, as the benchmark did)
+# simulations -> the output policy fitted for them (8 and 25 reuse 128's)
 POLICY = {5: "5", 8: "128", 25: "128", 128: "128"}
 
 

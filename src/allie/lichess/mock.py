@@ -171,24 +171,19 @@ class MockLichess:
             return f"{prefix}{self.next_id:07d}"
 
     def challenge(self, challenger, dest, base=180, inc=2, rated=False, color="random",
-                  variant="standard", ratings=(1500, 1500), title=None, kind="clock"):  # fmt: skip
+                  variant="standard", ratings=(1500, 1500)):  # fmt: skip
         cid = self.uid("g")  # as on Lichess, the game keeps the challenge's id
-        tc = (
-            dict(type=kind, limit=base, increment=inc)
-            if kind == "clock"
-            else dict(type=kind)
-        )
         self.challenges[cid] = c = dict(
             id=cid,
             status="created",
             challenger=dict(
-                id=challenger, name=challenger, rating=ratings[0], title=title
+                id=challenger, name=challenger, rating=ratings[0], title=None
             ),
             destUser=dict(id=dest, name=dest, rating=ratings[1]),
             variant=dict(key=variant),
             rated=rated,
-            speed=speed(base, inc) if kind == "clock" else kind,
-            timeControl=tc,
+            speed=speed(base, inc),
+            timeControl=dict(type="clock", limit=base, increment=inc),
             color=color,
             ratings=ratings,
         )
