@@ -115,9 +115,9 @@ On all 80,000 positions, Allie 2.0's loss is 1.2030 against 1.2269 for Maia-3 79
 
 *Each bar compares a model with Maia-3 79M on the same positions.*
 
-Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.0 roughly matches Maia-3 79M.
+Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.0 is slightly ahead of Maia-3 79M.
 
-Its loss is 1.2048 against 1.2180. Its top choice is right 59.37% of the time against 59.06%, a gap of 0.31 points [0.06, 0.56]. The original Allie scores 1.2883 and 57.09%.
+Its loss is 1.2048 against 1.2180, a gap of 0.0132 [0.0100, 0.0166]. Its top choice is right 59.37% of the time against 59.06%, a gap of 0.31 points [0.06, 0.56]. The original Allie scores 1.2883 and 57.09%.
 
 ### Beyond blitz
 
