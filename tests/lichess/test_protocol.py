@@ -309,6 +309,20 @@ def test_plays_through_a_full_disk(engine, tmp_path, monkeypatch):
     assert " over: " in local.read_text()  # the games' ends, logged locally meanwhile
 
 
+def test_slow_opponent_after_both_first_moves_is_not_aborted(engine):
+    def slow(board):
+        if len(board.move_stack) >= 2:
+            time.sleep(3)
+        return next(iter(board.legal_moves)).uci()
+
+    mock, _ = start(engine, MockLichess({"tok": "allie"}, house=slow), abort=1)
+    mock.challenge("slow", "allie", 60, 1, color="white")  # the bot is black
+    wait(lambda: len(mock.games) == 1)
+    g = next(iter(mock.games.values()))
+    wait(lambda: len(g.board.move_stack) >= 4, timeout=30)
+    assert g.status == "started" and not any("/abort" in c[2] for c in mock.calls)
+
+
 @pytest.mark.parametrize("color", ["white", "black"])
 def test_aborts_a_game_the_opponent_never_starts(engine, color):
     """The opponent never makes a first move (live game fG7tNbjC sat an hour after 1. e4, and

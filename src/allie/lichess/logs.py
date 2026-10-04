@@ -4,7 +4,7 @@ A writer thread takes the records off a queue, so no game ever waits on the disk
 the log file by path and reopens it after a failed write: a full quota fails writes (EDQUOT)
 until space is freed, and a remounted filesystem leaves old handles failing while the path works
 again. While the path fails, the lines go to a node-local file, and the log notes the gap once it
-can be written again. Uncaught exceptions in any thread are logged, and also printed to stderr.
+can be written again. With a log file, uncaught exceptions in any thread are logged there too.
 """
 
 import logging
@@ -84,7 +84,7 @@ class Resilient(logging.Handler):
 
 
 def setup(path=None, level=logging.INFO, fmt="%(asctime)s %(message)s"):
-    """Log through a queue to path (or stderr), and log every thread's uncaught exception.
+    """Log through a queue to path (or stderr); with a path, every thread's uncaught exception too.
     Returns the queue listener (stop() flushes it)."""
     handler = Resilient(path) if path else logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(fmt))

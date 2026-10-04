@@ -286,7 +286,7 @@ class Match:
         """Abort a game whose opponent has not made a first move in config.abort seconds:
         Lichess can leave it open for an hour, holding a slot and blocking a drain."""
         wait = self.bot.config.abort
-        if self.waiting and wait and time.monotonic() - self.waiting > wait:
+        if self.waiting and wait and not self.over and time.monotonic() - self.waiting > wait:
             log.info("game %s: no first move from the opponent in %g s; aborting", self.gid, wait)
             self.waiting = time.monotonic()  # if the abort fails, retry a period later
             self.call(self.bot.client.abort, self.gid)
