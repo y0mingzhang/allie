@@ -85,7 +85,7 @@ def verify(n=400):
     rng = np.random.default_rng(1)
     pick = rng.choice(len(meta), min(n, len(meta)), replace=False)
     by_game = {}
-    for g, m, c, c0, c1 in sel:
+    for g, m, *_ in sel:
         by_game.setdefault(g, []).append(m)
     checked = 0
     for g in pick:

@@ -1,6 +1,5 @@
 """Storage roots, overridable by environment: ALLIE_DATA holds the game stores, evaluation sets and benchmark
-files; ALLIE_PROJECT_ROOT (default: this checkout, as for the trainer and evaluator) is the directory whose
-results/ holds studies, runs and scores."""
+files; ALLIE_PROJECT_ROOT (default: this checkout) holds results/: studies, runs and scores."""
 
 import os
 from pathlib import Path

@@ -20,11 +20,8 @@ AUTH = ["-H", f"Authorization: Bearer {TOKEN.read_text().strip()}"] if TOKEN.exi
 
 
 def sha256(path):
-    h = hashlib.sha256()
     with open(path, "rb") as f:
-        while block := f.read(1 << 24):
-            h.update(block)
-    return h.hexdigest()
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def fetch(entry, out):
@@ -57,7 +54,7 @@ def fetch(entry, out):
     return ok()
 
 
-def main(month, out, workers=16):
+def main(month, out):
     year, mo = month.split("-")
     files = [
         f
@@ -67,7 +64,7 @@ def main(month, out, workers=16):
     ]
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    with ThreadPoolExecutor(workers) as ex:
+    with ThreadPoolExecutor(16) as ex:
         ok = list(ex.map(lambda f: fetch(f, out), files))
     print(
         f"{month}: {sum(ok)}/{len(files)} files verified, {sum(f['size'] for f in files) / 1e9:.1f} GB"

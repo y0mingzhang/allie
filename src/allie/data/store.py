@@ -23,6 +23,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from allie import paths
 from allie.data.vocab import (
     BOS,
     INCREMENTS_ID,
@@ -52,10 +53,7 @@ EVAL = re.compile(r"\[%eval (#?)(-?[\d.]+)\]")
 EVAL_MISSING = -32768  # a ply of an analysed game that carries no eval
 MOVETEXT = re.compile(r"\{([^}]*)\}|([^\s{}]+)")
 NOT_MOVE = re.compile(r"\d+\.(?:\.\.)?|1-0|0-1|1/2-1/2|\*|\$\d+")
-VAL_CACHE = (
-    Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
-    / "validation_cache"
-)
+VAL_CACHE = paths.DATA / "validation_cache"
 SCHEMA = pa.schema(
     [
         ("site", pa.string()),
@@ -429,6 +427,15 @@ def val_token_hashes():
     return np.fromiter(out, np.uint64)
 
 
+def large(f):
+    """f with 64-bit offsets: take() concatenates chunks, and > 2 GB of strings or list values needs them."""
+    if f.type == pa.string():
+        return f.with_type(pa.large_string())
+    return (
+        f.with_type(pa.large_list(f.type.value_type)) if pa.types.is_list(f.type) else f
+    )
+
+
 def with_annotations(t):
     """Parts built before the end/evals columns get end -1 (unknown) and no evals;
     data.annotate backfills them."""
@@ -447,19 +454,7 @@ def finalize(a):
     parts = sorted((root / "parts").glob("part-*.parquet"))
     annotated = all({"end", "evals"} <= set(pq.read_schema(p).names) for p in parts)
     table = pa.concat_tables(with_annotations(pq.read_table(p)) for p in parts)
-    # take() concatenates chunks: >2 GB of strings or list values needs 64-bit offsets.
-    table = table.cast(
-        pa.schema(
-            [
-                f.with_type(pa.large_string())
-                if f.type == pa.string()
-                else f.with_type(pa.large_list(f.type.value_type))
-                if pa.types.is_list(f.type)
-                else f
-                for f in table.schema
-            ]
-        )
-    )
+    table = table.cast(pa.schema([large(f) for f in table.schema]))
     welo = table["white_elo"].to_numpy().astype(np.int32)
     belo = table["black_elo"].to_numpy().astype(np.int32)
     fmt = table["format"].to_numpy().astype(np.int32)

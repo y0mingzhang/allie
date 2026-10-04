@@ -29,7 +29,7 @@ LABEL = {
 GFLOPS = {
     "sw-moe-s42": 0.362,
     "bigrun": 1.389,
-}  # 2 x active matmul params, report_sweep1e18.sweep_flops
+}  # 2 x active matmul params; the Maia-3 models' come from flops.json
 PARAMS = {
     "maia3-5m": "5M",
     "maia3-23m": "23M",
@@ -156,7 +156,6 @@ def sliced(
     name,
     title,
     groups,
-    s,
     sc,
     rng,
     out,
@@ -236,7 +235,6 @@ def main():
         "Elo",
         "By the mover's rating, 200-point bins",
         [(label(a, b), (elo >= a) & (elo < b), g) for a, b in ELO],
-        s,
         sc,
         rng,
         out,
@@ -248,7 +246,6 @@ def main():
         "time control",
         "By blitz time control (base seconds + increment)",
         [(t, tc == t, g) for t in TC] + [("other", other, g)],
-        s,
         sc,
         rng,
         out,
@@ -265,7 +262,6 @@ def main():
             )
             for a, b in CLOCK
         ],
-        s,
         sc,
         rng,
         out,
@@ -278,7 +274,6 @@ def main():
             (f"{a}+" if b >= 10**6 else f"{a}-{b - 1}", (ply >= a) & (ply < b), g)
             for a, b in PLY
         ],
-        s,
         sc,
         rng,
         out,

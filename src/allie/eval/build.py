@@ -16,14 +16,12 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
+from allie import paths
 from allie.data import mix as cm
 from allie.data.vocab import BOS
 
 MONTH = cm.STORE / "2026-07"
-OUT = (
-    Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
-    / "strat-eval-v1"
-)
+OUT = paths.DATA / "strat-eval-v1"
 SPLITS = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie")) / "data"
 FORMATS = ["bullet", "blitz", "rapid", "classical"]  # data-v1 format ids 1..4
 BANDS = ["<1400", "1400-2000", "2000-2400", ">=2400"]
@@ -81,9 +79,7 @@ def build(side=None):
     frac = np.minimum(1.0, TARGET / np.maximum(total, 1))
     toks, labels, clks, counts, games = [], [], [], np.zeros(len(CELLS)), 0
     for b in buckets:
-        take = np.ceil(frac * b["games"]).astype(
-            int
-        )  # prefix of the bucket sampled per cell
+        take = np.ceil(frac * b["games"]).astype(int)  # per cell, games sampled from the bucket's start
         need = int(take[rate[b["code"]] > 0].max(initial=0))
         seen = 0
         for shard in b["shards"]:

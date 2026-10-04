@@ -10,7 +10,7 @@ from pathlib import Path
 
 from allie import paths
 
-# the environment modelexp runs the trainer and evaluator in (Allie 2.0 included); the caller's values win
+# the environment experiments.modelexp runs the trainer and evaluator in; the caller's values win
 ENV = dict(
     OMP_NUM_THREADS="4",
     TORCHINDUCTOR_COMPILE_THREADS="4",

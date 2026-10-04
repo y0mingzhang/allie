@@ -19,7 +19,6 @@ import time
 import unicodedata
 import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
 
 import chess
 import numpy as np
@@ -28,14 +27,13 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import requests
 
+from allie import paths
 from allie.data import store as cd
+from allie.data.fetch import sha256
 from allie.data.vocab import BOS, SECONDS, TERM_NORMAL, TERM_OTHER
-from allie.data.mix import SHARD_GAMES
+from allie.data.mix import SHARD_GAMES as SHARD
 
-ROOT = (
-    Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
-    / "ext-v1"
-)
+ROOT = paths.DATA / "ext-v1"
 RAW, PARTS = ROOT / "raw", ROOT / "parts"
 STRAT = ROOT.parent / "strat-eval-v1/strat.npz"
 HEADERS = {
@@ -73,7 +71,6 @@ POOL = {
     5: (709.0, 0.7132),
 }
 SEC = np.array([int(s) for s in SECONDS[:-1]])
-SHARD = SHARD_GAMES
 
 
 def cp(pawns):
@@ -103,18 +100,10 @@ EXTRA = [
 PART_SCHEMA = pa.schema([*cd.SCHEMA, *EXTRA, ("name_key", pa.uint64())])
 
 
-def large(f):
-    if f.type == pa.string():
-        return f.with_type(pa.large_string())
-    return (
-        f.with_type(pa.large_list(f.type.value_type)) if pa.types.is_list(f.type) else f
-    )
-
-
 _core = [f for f in cd.SCHEMA if f.name not in ("end", "evals")]
 STORE_SCHEMA = pa.schema(
     [
-        large(f)
+        cd.large(f)
         for f in [
             *_core,
             pa.field("val_leak", pa.bool_()),
@@ -170,14 +159,6 @@ def urls(src):
                     + re.search(rf'href="(CCRL-{l}\.\[\d+\]\.pgn\.7z)"', html)[1]
                 )
             return out
-
-
-def sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while b := f.read(1 << 24):
-            h.update(b)
-    return h.hexdigest()
 
 
 def fetch_tcec():
@@ -658,11 +639,7 @@ def write_store(t, src, bad, dropped, seed):
                 source=src,
             )
         )
-    old = root / "games.old"
-    if (root / "games").exists():
-        (root / "games").rename(old)
-    games.rename(root / "games")
-    shutil.rmtree(old, ignore_errors=True)
+    cd.swap(root, games)
     plies = pc.list_value_length(t["moves"]).to_numpy()
     stats |= dict(
         buckets=len(buckets),
@@ -699,7 +676,7 @@ def finalize(a):
             bad[p.parent.name][k] = bad[p.parent.name].get(k, 0) + v
         tables.append(f.read())
     t = pa.concat_tables(tables)
-    t = t.cast(pa.schema([large(f) for f in t.schema]))
+    t = t.cast(pa.schema([cd.large(f) for f in t.schema]))
     print(f"{len(t)} parsed games from {len(parts)} parts", flush=True)
     prio = pc.index_in(t["source"], pa.array(list(SOURCES))).to_numpy()
     plies = pc.list_value_length(t["moves"]).to_numpy()

@@ -8,13 +8,13 @@ or edited fails verify().
 
 import hashlib
 import json
-import os
 import sys
 from pathlib import Path
 
-ALLIE = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
-LICHESS = [ALLIE / s for s in ("data-v1", "data-v1-hist", "data-v1-hist2")]
-EXT = [ALLIE / "ext-v1/otb", ALLIE / "ext-v1/engine"]
+from allie.paths import DATA
+
+LICHESS = [DATA / s for s in ("data-v1", "data-v1-hist", "data-v1-hist2")]
+EXT = [DATA / "ext-v1/otb", DATA / "ext-v1/engine"]
 FILES = ("buckets.json", "stats.json")
 
 

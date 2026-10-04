@@ -1,4 +1,4 @@
-"""Final scaling sweep readout (SWEEP-PLAN.md section 2), per metric (golden macro first, then expert macro):
+"""Scaling sweep readout, per metric (main-evaluation macro first, then expert macro):
 isoFLOP parabolas in log N per family and budget, N*(C) across budgets, a per-family L(N, D) refit with an
 identifiability check, and the dense-to-match compute ratio of each family against the reference at the budgets and at a
 node-week, with bootstrap errors and a hardware-offset test. Text on stdout, everything in --out JSON.
@@ -21,8 +21,8 @@ over C (dmix.multiplier). The isoFLOP CM does the same on the parabola minima, t
 log C between its budgets (extended past its ends).
 Errors, 90%: parametric bootstrap, loss + N(0, s^2), s = max(--sigma, pooled seed-repeat SD, the fit's
 dof-corrected RMS); the law's also resamples runs within each budget (shown when every cell has >= 3 runs).
---nw 4e20 useful training FLOPs: one 8 x L40S node for 168 h at ~23% MFU (moe-perf/memmodel.md L40S fit at width
-1536: dense 24.6% -> 4.3e20, S16 19.7% -> 3.5e20). The CM is FLOP-matched; throughput is separate.
+--nw 4e20 useful training FLOPs: one 8 x L40S node for 168 h at ~23% MFU. The CM is FLOP-matched; throughput is
+separate.
 Hardware offset test: one budget's losses shifted by -/+ s for both families (a per-GPU-type offset; each budget
 runs on one type), refit, node-week CM.
 """
@@ -208,9 +208,7 @@ def logc_at(L, Ls, lcs):
 
 def fitlaw(d, shared=False, start=None):
     """experiments.isoflop.additive (its 32 starts, or a warm start) on {"ours": a} or, shared E, {"ours": a, "ref": b},
-    polished on its objective x1e6 at tight tolerances: the raw objective is ~1e-5, under L-BFGS-B's default
-    gradient tolerance, so a warm start stops near where it began and bootstrap spreads come out 5-15x too narrow
-    along the E-alpha / B-beta ridges. Returns {key: theta}."""
+    polished on its objective x1e6 at tight tolerances (see additive()). Returns {key: theta}."""
     b = BOUND(np.concatenate([x[:, 3] for x in d.values()]))
     b = [b[0], *b[1:] * len(d)] if shared else b
     t = (

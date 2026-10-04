@@ -1,10 +1,8 @@
 """Legal-policy CE and top-1 accuracy of an MoE checkpoint on the sampled blitz positions.
 
-Same model loading, source-hash check and full-sequence batched forward as the golden
-evaluator (eval.score, imported for its hashing helpers and copied for the
-restore sequence); this adds the legal-move renormalization and argmax that the CE-only
-evaluator does not produce. It also re-accumulates the canonical per-cell CE over every
-scored blitz move so the run can be checked against the evaluator's strat-v1.json.
+Same model loading, source-hash check and full-sequence batched forward as eval.score, plus the
+legal-move renormalization and argmax it does not compute. It also re-accumulates the per-cell CE
+over every scored move, to check the run against eval.score's strat-v1.json.
 """
 
 import argparse
@@ -22,7 +20,6 @@ from allie.eval.score import read_hashed, training_code
 
 G = paths.DATA / "strat-eval-v1"
 DATA = paths.DATA / "maia3-bench"
-CELLS = (4, 5, 6, 7)
 
 
 def main():

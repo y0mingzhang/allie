@@ -116,7 +116,7 @@ def main():
         )
     paths = sorted(month.glob("games/b*/shard-*.parquet"))
     games = analysed = 0
-    with ProcessPoolExecutor(workers) as ex:  # forked after EVALS is filled
+    with ProcessPoolExecutor(workers) as ex:  # forked after SITES, OFF, VALS are set
         for k, (n, e) in enumerate(ex.map(shard, paths), 1):
             games, analysed = games + n, analysed + e
             if k % 200 == 0 or k == len(paths):

@@ -70,7 +70,6 @@ def main():
     print("self/oppo elo", self_elo, oppo_elo)
     print("ours  ", {k: round(v, 3) for k, v in mine.items()})
     print("engine", theirs)
-    print(out.stdout[-600:] if not theirs else "")
 
 
 if __name__ == "__main__":

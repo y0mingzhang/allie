@@ -26,7 +26,7 @@ G = paths.DATA / "strat-eval-v1"
 HERE = paths.ROOT / "results/recipe10x/bigrun-progress"  # outputs
 EDGES = np.arange(600, 2901, 100)
 REPS, MIN_N = 2000, 3000
-# name -> (label, color, line width); Maia-3 colours as on main's 80K version
+# name -> (label, color, line width)
 MODELS = {
     "maia3-3m": ("Maia-3 3M (ablation)", "#e87ba4", 1.5),
     "maia3-5m": ("Maia-3 5M", "#f2d27a", 2),

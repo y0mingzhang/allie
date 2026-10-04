@@ -1,21 +1,21 @@
-"""Science rounds on the pinned data baseline (B_3) and the ship model recipe.
+"""Frozen Slurm studies on the pinned data baseline (results/recipe10x/data-v1-B3.json) and the
+shipped model recipe.
 
-A wave freezes one study. Its runs are budget x arm x seed, an arm being overrides of the
-baseline: shape (depth, width_mul or absolute layers, width; micro_batch), lr, sched
-fractions, data keys (policy, final_tokens, history, stores, months, feats, aux_time,
-...), arch keys, stop_after legs and extra trainer flags. A wave's pin (data.pin) fixes
-its runs' months and stores and is verified before every training leg; its history file
-replaces B_3's all-history counts. Arms are matched on trainer FLOPs
-(train.trainer.useful_flops): an arm trains for the steps giving the FLOPs of the budget's base shape under the plain
-recipe. Schedule knobs are fractions of training, from the 3e16 base's absolute steps
-(8x512, 2274 steps). pool_frac = run tokens / final_tokens emulates the repetition of a
-final run of final_tokens. Rounds live in results/recipe10x/STUDY/round.py, which imports
-this module and declares, e.g.:
+A round file declares waves; a wave freezes one study. Its runs are budget x arm x seed, an arm
+being overrides of the baseline: shape (depth, width_mul or absolute layers, width; micro_batch),
+lr, sched fractions, data keys (policy, final_tokens, history, stores, months, feats, aux_time,
+...), arch keys, stop_after legs and extra trainer flags. A wave's pin (data.pin) fixes its runs'
+months and stores and is verified before every training leg; its history file replaces the
+baseline's all-history counts. Arms are matched on trainer FLOPs (train.trainer.useful_flops): an
+arm trains for the steps giving the FLOPs of the budget's base shape under the plain recipe.
+Schedule knobs are fractions of training, from the 3e16 base's absolute steps (8x512, 2274 steps).
+pool_frac = run tokens / final_tokens emulates the repetition of a final run of final_tokens. A
+round file (results/recipe10x/STUDY/round.py) imports this module and declares, e.g.:
 
   from allie.experiments.modelexp import MOE, variants, wave
   wave("iso1", "moe-v2-iso1e17", "mi1",
        variants("1e17", {"base": {}, "moe128k4": MOE(128, 4, moe_round=64)}, (42, 43)),
-       "dense ship vs E128 top-4 at 1e17", "preempt4")
+       "dense vs E128 top-4 at 1e17", "preempt4")
 
   plan ROUND WAVE [COMMIT]   freeze COMMIT's (else this checkout's) trainer and evaluator,
                              this driver, the round file, pin, history and recipe tables
@@ -40,16 +40,18 @@ from pathlib import Path
 
 import numpy as np
 
+from allie import paths
 from allie.data import pin as datapin
+from allie.data.pin import sha
 from allie.model.arch import extra_flops
 from allie.train.provenance import source_hashes
 
 ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
-G = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie"))
+G = paths.DATA
 STUDIES = ROOT / "results/recipe10x"
 RECIPES = STUDIES / "recipes"  # data.mix.RECIPES
 DATA = str(G / "lichess_tokens_v2")  # validation rows
-# B_3, the final data recipe (data-v1-ledger.md); these keys are provenance, not inputs
+# the baseline: the final data recipe; these keys are provenance, not inputs
 B3 = STUDIES / "data-v1-B3.json"
 B3_META = ("source_study", "source_run", "final_tokens", "history_counts")
 B3_META += ("history_counts_sha256", "chessmix_sha256", "sha256")
@@ -59,8 +61,8 @@ DATA_FLAGS = dict(
     aux_time="--aux-time",
     aux_wdl="--aux-wdl",
 )
-FINAL_TOKENS = 23e9  # the final run B_3's repetition emulates
-# isoflop-v1 compute-optimal shapes of the plain recipe: each budget's base shape
+FINAL_TOKENS = 23e9  # the final run whose data repetition the baseline emulates
+# each budget's base shape: the plain recipe's compute-optimal one (results/recipe10x/isoflop-v1)
 SIZES = {
     "1e16": dict(layers=8, width=384, steps=1347),
     "3e16": dict(layers=8, width=512, steps=2274),
@@ -70,18 +72,18 @@ SIZES = {
 }
 SCHEDULE = dict(batch_rows=512, plateau=4.0, final_lr=0.2, decay_shape="linear")
 FRAC = dict(warmup=32 / 2274, mtp=64 / 2274, split=65 / 2274, decay=32 / 2274)
-# mean in-game position per token, fitted to r2-3e16-control's logged FLOPs
+# mean in-game position per token, fitted to a 3e16 run's logged FLOPs
 POS = 45.7
 SHIP = dict(board="conv", mlp="swiglu", key_offset=False)
 ROUTER = dict(moe_seq=1e-3, moe_init=0.006, moe_router_lr_mul=0.1, moe_gamma=1e-2)
 ROUTER |= dict(moe_update="prop", moe_kernel="scatter-dualgather")
 MOE = lambda e, k, **kw: dict(arch=dict(moe=[e, k]) | ROUTER | kw)
-# results/recipe10x/gpu-allocation.md fast types as sinfo names them
+# fast GPU types, as sinfo names them
 FAST = "RTX_PRO_6000|H200|H100|A100_80GB|A100_80G|L40S|6000Ada"
 QOS = {"dei-group": "dei_group_qos", "preempt": "preempt_qos", "general": "normal"}
 # one node per line, # comments: every launcher excludes them
 BAD_NODES = G / "bad-nodes"
-# runs that stopped requeueing in a crash loop: main's controller reads them
+# runs that stopped requeueing in a crash loop, one json row each
 ALERTS = G / "alerts.jsonl"
 # lane: runs per task, GPUs per task, partition, gres, constraint, CPUs, GB, array throttle
 LANES = dict(
@@ -103,12 +105,8 @@ FROZEN = lambda rel: "__pycache__" not in rel and "/." not in f"/{rel}" and not 
 EVALUATOR = "source/allie/eval/score.py"
 
 
-def sha(p):
-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-
-
 def baseline():
-    """B_3's data inputs (hash-checked) with the ship model recipe."""
+    """The baseline's data inputs (hash-checked) with the shipped model recipe."""
     b = json.loads(B3.read_text())
     body = {k: v for k, v in b.items() if k != "sha256"}
     digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
@@ -120,7 +118,7 @@ BASE = baseline()
 
 
 def history_file():
-    """The all-history bucket counts B_3 pins."""
+    """The all-history bucket counts the baseline pins."""
     meta = BASE["meta"]
     assert sha(meta["history_counts"]) == meta["history_counts_sha256"]
     assert meta["final_tokens"] == FINAL_TOKENS
@@ -224,7 +222,7 @@ def wave(
 ):
     """Declare a wave. Waves split across lanes share one group (and its 'base' runs).
     pin: a data.pin file fixing every run's months and stores; history: the all-history
-    counts file of history runs (default B_3's)."""
+    counts file of history runs (default the baseline's)."""
     pack, gpus, part, gres, constraint, cpus, mem, throttle = LANES[lane]
     sbatch = ["--account=dippolit", f"--partition={part}", f"--qos={QOS[part]}"]
     sbatch += [f"--gres={gres}"] + [f"--constraint={constraint}"] * bool(constraint)
@@ -623,7 +621,7 @@ def looping(study, r):
 
 
 def alert(study, r):
-    """Stop requeueing r: an ALERT file next to its logs and a row in the shared alerts for main's controller."""
+    """Stop requeueing r: an ALERT file next to its logs and a row in ALERTS."""
     f = failures(study, r)
     row = dict(at=time.time(), run=r["name"], study=str(study), step=f[-1]["step"], failures=f[-2:],
                why="two failures at the same checkpoint step: not requeued")  # fmt: skip
@@ -1014,7 +1012,7 @@ def table(*keys, controls=()):
 
 
 def main():
-    # round files register here, by package path or (older rounds) the flat name
+    # round files import this module by package path or, like configs/allie-2.0/round.py, as modelexp
     this = sys.modules[__name__]
     sys.modules["allie.experiments.modelexp"] = sys.modules["modelexp"] = this
     global ROUND

@@ -1,5 +1,5 @@
 /*
- * C core of fastbuild.py: chessdata.record() on Hugging Face rows (python-chess SAN semantics,
+ * C core of fastbuild.py: store.record() on Hugging Face rows (python-chess SAN semantics,
  * clocks, evals, end state, blake2b hashes), a bucket-sorted zstd spill, and shard columns.
  * A row the fast path cannot reproduce exactly is handed back to Python (fb_parse returns it).
  */
@@ -390,7 +390,7 @@ static void blake_block(u64 h[8], const u8 *blk, u64 t, int last)
 		h[i] ^= v[i] ^ v[i + 8];
 }
 
-/* chessdata.hash64(): blake2b with an 8-byte digest, read little endian */
+/* store.hash64(): blake2b with an 8-byte digest, read little endian */
 static u64 hash64(const u16 *x, size_t n)
 {
 	const u8 *p = (const u8 *)x;
@@ -419,7 +419,7 @@ static u64 num(const char *s, long n)
 	return v;
 }
 
-/* end of the chessdata.STRIP match at s[i], or -1 */
+/* end of the store.STRIP match at s[i], or -1 */
 static long strip(const char *s, long i, long n)
 {
 	const char *e;
@@ -453,7 +453,7 @@ static long strip(const char *s, long i, long n)
 	return n - i >= 7 && !memcmp(s + i, "1/2-1/2", 7) ? i + 7 : -1;
 }
 
-/* chessdata.CLOCK.findall() and whether "%eval" occurs: count, values stored below cap; -1 to fall back */
+/* store.CLOCK.findall() and whether "%eval" occurs: count, values stored below cap; -1 to fall back */
 static long clocks(const char *s, long n, u32 *out, long cap, int *eval)
 {
 	const char *e = s + n, *p = s;
@@ -489,7 +489,7 @@ static long clocks(const char *s, long n, u32 *out, long cap, int *eval)
 	return k;
 }
 
-/* chessdata.EVAL.search() in one comment: 1 and the value, 0 if none, -1 to fall back */
+/* store.EVAL.search() in one comment: 1 and the value, 0 if none, -1 to fall back */
 static int eval_value(const char *a, const char *b, i16 *v)
 {
 	for (const char *p = a; (p = memchr(p, '[', b - p)); p++) {
@@ -544,7 +544,7 @@ static int not_move(const char *t, long n)
 	return i && ((i + 1 == n && t[i] == '.') || (i + 3 == n && !memcmp(t + i, "...", 3)));
 }
 
-/* chessdata.eval_list() of a movetext containing "%eval", stored below cap: length, 0 for [], -1 to fall back */
+/* store.eval_list() of a movetext containing "%eval", stored below cap: length, 0 for [], -1 to fall back */
 static long eval_list(const char *s, long n, i16 *out, long cap)
 {
 	long i = 0, k = 0;
@@ -636,7 +636,7 @@ static int insufficient(const struct pos *p, int c)
 	return 1;
 }
 
-/* chessdata.end_state() */
+/* store.end_state() */
 static int end_state(const struct run *r, const struct pos *p)
 {
 	const struct key *w = r->win;
@@ -748,7 +748,7 @@ static void put(struct run *r, const struct game *g)
 	r->n++;
 }
 
-/* chessdata.record(hf_header(row), movetext) */
+/* store.record(hf_header(row), movetext) */
 static int row(struct run *r, const struct col *c, long i)
 {
 	struct game g;
@@ -1064,7 +1064,7 @@ static int has_val(u64 h)
 
 static int is_bot(const struct game *g, int k) { return !(g->nulls >> k & 1) && g->len[k] == 3 && !memcmp(g->s[k], "BOT", 3); }
 
-/* chessdata.summarize() terms of one game; st layout in fastbuild.py STATS */
+/* store.summarize() terms of one game; st layout in fastbuild.py summary() */
 static void tally(i64 *st, const struct game *g, int leak)
 {
 	i64 pl = g->nm, wm = (pl + 1) / 2, bm = pl / 2, mine;

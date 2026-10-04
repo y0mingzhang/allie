@@ -277,14 +277,7 @@ def build(a):
 
 def schema():
     """The shard schema data.store.finalize writes."""
-    f = [
-        x.with_type(pa.large_string())
-        if x.type == pa.string()
-        else x.with_type(pa.large_list(x.type.value_type))
-        if pa.types.is_list(x.type)
-        else x
-        for x in cd.SCHEMA
-    ]
+    f = [cd.large(x) for x in cd.SCHEMA]
     s = pa.schema([*f, ("val_leak", pa.bool_()), ("bucket", pa.int32())])
     return s.with_metadata({b"annotate": json.dumps(dict(end=1, evals=1)).encode()})
 
