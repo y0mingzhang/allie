@@ -4,6 +4,8 @@ The forward restates the training GPT.forward (allie.model.nanogpt, eval path) o
 with each game's keys and values in a Cache. It matches the trained model up to floating-point
 summation order (analysis/lichess/parity.py). Weights come from export.py: BF16 in F.linear
 layout with the attention lambdas folded in; router, balancing bias, centre and scalars FP32.
+This code is the reference; by default step() runs fast.py instead (C++ kernels on CPU, CUDA
+graphs of this forward on GPU), which matches it within BF16 rounding.
 """
 
 import json
