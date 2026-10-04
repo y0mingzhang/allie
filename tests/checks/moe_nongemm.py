@@ -19,10 +19,10 @@ on live, tie-heavy and special (+-0, +-inf, NaN, subnormal) scores.
 counts: moe_layer.counts against the scatter_add_ histogram, eager and compiled.
 
 seqraw: the sequence balance loss's router gradient on a row whose raw top-1 is always expert 0 but
-whose bias balances the selection (the audit's example, both scores): about 0 from the biased
+whose bias balances the selection (both scores): about 0 from the biased
 counts, the raw top-k formula's (DeepSeek-V3 Eq. 18) with moe_seq_raw.
 
-    inhold.sh tests/checks/moe_nongemm.py [layer|kernels|topk|counts|seqraw ...] [--base COMMIT]
+    <runtime python> tests/checks/moe_nongemm.py [layer|kernels|topk|counts|seqraw ...] [--base COMMIT]
     Allie 2.0's h192: layer --experts 256 --topk 16 --arch moe_shared_frac=0.25 --arch moe_round=16
     .venv/bin/python tests/checks/moe_nongemm.py    # CPU: reruns itself under TRITON_INTERPRET=1
 """

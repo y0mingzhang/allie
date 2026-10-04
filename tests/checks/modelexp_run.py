@@ -1,6 +1,5 @@
 """modelexp.run's watchdog survives a transient non-ENOENT stat error of its watch file
-(errno 512 on the NFS train.jsonl, 09-21): the child is not reaped and run() does not
-raise. CPU only, ~8 s.
+(NFS can return errno 512): the child is not reaped and run() does not raise. CPU only, ~8 s.
 
     .venv/bin/python tests/checks/modelexp_run.py
 """

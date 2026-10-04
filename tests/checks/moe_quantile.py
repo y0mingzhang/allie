@@ -89,7 +89,7 @@ def main():
     print(f"doubled counts: shift equal {torch.equal(doubled, got)}")
     ok &= torch.equal(doubled, got)
 
-    # excluding each expert from its own cutoff cycles [4, 0] <-> [0, 4] here (codex's repro)
+    # excluding each expert from its own cutoff cycles [4, 0] <-> [0, 4] here
     two, b2 = (
         torch.tensor([[0.6, 0.5], [0.7, 0.5], [0.8, 0.5], [0.9, 0.5]], device=device),
         bias[:2],

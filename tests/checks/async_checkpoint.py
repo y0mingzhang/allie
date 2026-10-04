@@ -11,7 +11,7 @@ buffers equal cpu_copy's in bytes and strides, each registered once at its exact
 aligned, and unregistered when freed (cudaHostRegister stubbed). paced(): atomic_save's chunked
 writes and their fault paths. rowlog(): the trainer's log thread. Not covered: real registration,
 CUDA copies and train.trainer's own call sites.
-Run: python test_async_checkpoint.py
+Run: python tests/checks/async_checkpoint.py
 """
 
 import gc

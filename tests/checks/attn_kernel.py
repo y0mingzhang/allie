@@ -1,10 +1,9 @@
 """model.attention (Triton FlashAttention-2) vs the FlexAttention path and an FP32 reference: output and
 q/k/v grads on real rows (64 x 1024 tokens, 24 heads of 64) and on synthetic game layouts (games of
 1-2000 tokens, boundaries on block and row edges, a row without a game start, a row of 1-token games),
-for the WSD windows and sliding ones; then CUDA-event medians (REPS) of forward and backward: Flex
-(128-token blocks, as trained), Flex at 64-token blocks, and the Triton kernels.
+for the WSD windows and sliding ones.
 
-    <runtime python> tests/checks/attn_kernel.py [--rows rows.npy] [--sweep]
+    <runtime python> tests/checks/attn_kernel.py [--rows rows.npy]
 """
 
 import sys
@@ -12,20 +11,14 @@ import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import (
-    _create_sparse_block_from_block_mask,
-    create_block_mask,
-    flex_attention,
-)
 
 from allie import paths
 from allie.model import attention as ma
 from allie.model import network as mm
 
-H, D, SCALE, REPS = 24, 64, 0.1, 30
+H, D, SCALE = 24, 64, 0.1
 DATA = str(paths.DATA / "lichess_tokens_v2")
 WSD, SLIDING = (11 * 128, 23 * 128), (128, 384)
-flex64 = torch.compile(flex_attention, dynamic=False)
 
 
 def load_rows(argv):
@@ -89,38 +82,10 @@ def reference(q, k, v, gate, do, docs, window, row):
     return [torch.cat(x)[None] for x in outs]
 
 
-def mask64(docs, window, row):
-    n = docs.numel()
-
-    def allowed(b, h, q, k):
-        return (q >= k) & (q - k <= window) & (docs[q] == docs[k])
-
-    if window >= row - 1:
-        blocks = mm.game_blocks(docs, 64)
-        return _create_sparse_block_from_block_mask(blocks, allowed, (n, n), 64, 64)
-    return create_block_mask(
-        allowed, 1, None, n, n, "cuda", BLOCK_SIZE=64, _compile=True
-    )
-
-
 def err(a, b):
     d = (a.float() - b.float()).abs().max()
     rel = (d / b.float().abs().max()).item()
     return f"{d.item():.2e}/{rel:.2e}{' bitwise' if torch.equal(a, b) else ''}"
-
-
-def bench(fn, setup=lambda: None):
-    """Median ms of fn(setup()) over REPS, timing fn alone (a fresh forward per backward)."""
-    ev = [[torch.cuda.Event(enable_timing=True) for _ in range(2)] for _ in range(REPS)]
-    for _ in range(3):
-        fn(setup())
-    for a, b in ev:
-        x = setup()
-        a.record()
-        fn(x)
-        b.record()
-    torch.cuda.synchronize()
-    return float(np.median([a.elapsed_time(b) for a, b in ev]))
 
 
 def grads(o, qkv, do):
@@ -241,129 +206,6 @@ def check_qkv(rows, window):
         ("flex-fp32", f, ref),
     ):
         print(f"  {label:12s}", *(err(x, y) for x, y in zip(a, b)), flush=True)
-    lo, hi = tri.short_mask
-    qkv, g, ve, vg = (x.detach() for x in leaves)
-    with torch.no_grad():
-        y, lse = ma.fwd_qkv(qkv, cos, sin, g, ve, vg, lo, hi, SCALE, True)
-        _, dl = ma._delta(dy, y)
-        fw = bench(lambda _: ma.fwd_qkv(qkv, cos, sin, g, ve, vg, lo, hi, SCALE, True))
-        bw = bench(
-            lambda _: ma.bwd_qkv(
-                qkv, cos, sin, dy, g, ve, vg, lse, dl, lo, hi, SCALE, True
-            )
-        )
-        fw0 = bench(
-            lambda _: ma.fwd_qkv(qkv, cos, sin, g, None, None, lo, hi, SCALE, True)
-        )
-        bw0 = bench(
-            lambda _: ma.bwd_qkv(
-                qkv, cos, sin, dy, g, None, None, lse, dl, lo, hi, SCALE, True
-            )
-        )
-    print(
-        f"qkv-fused raw kernels ms: fwd {fw0:.3f} bwd {bw0:.3f}; with value embeddings fwd {fw:.3f} bwd {bw:.3f}",
-        flush=True,
-    )
-
-
-def timing(rows, windows, timed):
-    n, row = rows.shape
-    flex = mm.make_context(rows, *windows, backend="flex", board=False)
-    tri = mm.make_context(rows, *windows, backend="triton", board=False)
-    delta = torch.compile(
-        lambda do, o: (do.float() * o.float()).sum(-1)[0].t().contiguous()
-    )
-    for w in timed:
-        (*qkv, g), do = inputs(n * row, 1)
-        out = [f"window {w} ms:"]
-        run = lambda: mm.attention(*qkv, flex, w, SCALE)  # noqa: E731
-        f = bench(lambda _: run())
-        b = bench(lambda o: torch.autograd.grad(o, qkv, do), run)
-        out.append(f"flex fwd {f:.3f} bwd {b:.3f} sum {f + b:.3f} |")
-        lo, hi = tri.short_mask if w == windows[0] else tri.long_mask
-        run = lambda: mm.attention(*qkv, tri, w, SCALE)  # noqa: E731
-        eager = bench(lambda o: torch.autograd.grad(o, qkv, do), run)
-        with torch.no_grad():
-            o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
-            dl = delta(do, o)
-            f = bench(lambda _: ma.fwd(*qkv, None, lo, hi, SCALE))
-            d = bench(lambda _: delta(do, o))
-            b = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
-            fg = bench(lambda _: ma.fwd(*qkv, g, lo, hi, SCALE))
-            bg = bench(lambda _: ma.bwd(*qkv, do, g, lse, dl, lo, hi, SCALE))
-        out.append(
-            f"triton fwd {f:.3f} bwd {b:.3f} + delta {d:.3f} sum {f + b + d:.3f}"
-            f" (eager autograd bwd {eager:.3f}; gated fwd {fg:.3f} bwd {bg:.3f})"
-        )
-        try:
-            m64 = mask64(flex.documents, w, row)
-            qt = [x.transpose(1, 2) for x in qkv]
-            kw = dict(block_mask=m64, scale=SCALE, kernel_options=dict(fwd_BLOCK_M=64))
-            f = bench(lambda _: flex64(*qt, **kw))
-            dt = do.transpose(1, 2)
-            b = bench(
-                lambda o: torch.autograd.grad(o, qkv, dt), lambda: flex64(*qt, **kw)
-            )
-            out.append(f"| flex64 fwd {f:.3f} bwd {b:.3f} sum {f + b:.3f}")
-        except Exception as e:  # a data point only
-            out.append(f"| flex64 failed: {type(e).__name__}: {str(e)[:200]}")
-        print(*out, flush=True)
-    for backend in ("flex", "triton"):
-        ms = bench(
-            lambda _: mm.make_context(rows, *windows, backend=backend, board=False)
-        )
-        print(f"make_context {backend} {ms:.3f} ms", flush=True)
-    return tri
-
-
-def sweep(rows, tri):
-    n, row = rows.shape
-    (*qkv, _), do = inputs(n * row, 2)
-    lo, hi = tri.short_mask
-    fwds = [
-        (64, 32, 4, 2),
-        (64, 32, 4, 3),
-        (64, 64, 4, 2),
-        (64, 16, 4, 3),
-        (128, 32, 4, 2),
-        (128, 32, 8, 2),
-        (128, 64, 8, 2),
-        (32, 32, 2, 2),
-        (32, 16, 2, 3),
-        (32, 32, 4, 2),
-    ]
-    bwds = [
-        (64, 32, 4, 2),
-        (64, 32, 8, 2),
-        (64, 64, 4, 2),
-        (64, 64, 8, 2),
-        (64, 16, 4, 2),
-        (32, 32, 4, 2),
-        (32, 16, 2, 2),
-        (32, 32, 2, 2),
-        (128, 32, 8, 2),
-        (64, 32, 4, 3),
-    ]
-    fwds, bwds = ([(*c, hf) for hf in (True, False) for c in cs] for cs in (fwds, bwds))  # fmt: skip
-    defaults = ma.FWD, ma.BWD
-    with torch.no_grad():
-        o, lse = ma.fwd(*qkv, None, lo, hi, SCALE)
-        dl = (do.float() * o.float()).sum(-1)[0].t().contiguous()
-        q, k, v = qkv
-        vc = v.contiguous()
-        ms = bench(lambda _: ma.fwd(q, k, vc, None, lo, hi, SCALE))
-        print(f"fwd {ma.FWD} with contiguous v: {ms:.3f}", flush=True)
-        for cfg in fwds:
-            ma.FWD = cfg
-            print(
-                f"fwd {cfg}: {bench(lambda _: ma.fwd(*qkv, None, lo, hi, SCALE)):.3f}",
-                flush=True,
-            )
-        for cfg in bwds:
-            ma.BWD = cfg
-            ms = bench(lambda _: ma.bwd(*qkv, do, None, lse, dl, lo, hi, SCALE))
-            print(f"bwd {cfg}: {ms:.3f}", flush=True)
-    ma.FWD, ma.BWD = defaults
 
 
 def main():
@@ -376,14 +218,10 @@ def main():
         f"{H} heads of {D}; FWD {ma.FWD} BWD {ma.BWD}",
         flush=True,
     )
-    if "--sweep" in sys.argv:
-        sweep(rows, mm.make_context(rows, *WSD, backend="triton", board=False))
     check_qkv(rows, WSD[0])
     check(rows, WSD, "real")
-    timing(rows, WSD, WSD[:1])
     check(rows, WSD, "real", gated=True)
     check(rows, SLIDING, "real")
-    timing(rows, SLIDING, SLIDING)
     syn = torch.as_tensor(synthetic(np.random.default_rng(0), 16, 1024), device="cuda")
     for windows in (WSD, SLIDING, (1023, 64)):
         check(syn, windows, "synthetic")

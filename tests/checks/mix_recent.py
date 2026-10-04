@@ -3,9 +3,9 @@
 Before 90% of training the composed policy's weights equal the table's on every shard (old and recent months), after it
 they equal the table's on recent Lichess months and external sources and are 0 on Lichess months before 2024-01; the
 bucket caps (draw weights) stay the table's in both phases; batches draw across the switch, and after it every accepted
-Lichess game comes from 2024 or later. The months / stores / history of a 1e17 control run of the next run's recipe.
+Lichess game comes from 2024 or later. Months, stores and history come from a run's resume config.
 
-    PYTHONPATH=<data.mix overlay> .venv/bin/python tests/checks/mix_recent.py RUN_CONFIG.json
+    .venv/bin/python tests/checks/mix_recent.py RUN_CONFIG.json
 """
 
 import json

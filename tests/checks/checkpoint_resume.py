@@ -1,4 +1,4 @@
-"""Compiled GPT on the ship recipe (board CNN, SwiGLU MoE E16 top-2 with the shared expert, BF16
+"""Compiled GPT (board CNN, SwiGLU MoE E16 top-2 with the shared expert, BF16
 weights with ZeRO-2 masters, --ckpt eager) on real validation rows; torchrun on one or two GPUs.
 
 recompute: a training step's output and every gradient with the eager block checkpoints equal

@@ -1,14 +1,15 @@
-"""arch moe_shard (model.shard) on CPU, gloo worlds 2 and 4: the GPT (board CNN, dense attention, v2's MoE recipe:
+"""arch moe_shard (model.shard) on CPU, gloo worlds 2 and 4: the GPT (board CNN, dense attention,
 256 experts top-4, shared expert, quantile balancing, router centring, adam_every, gate floor, FP32 small masters; at
-world 4 with log-space gates and blocks 0-1 dense instead, the next run's direction), blocks 0-3 under eager checkpoints and 4-7 not, one micro-batch on even steps and two on odd, real validation rows. Collectives are
-deterministic (FP32 sums in rank order); model.moe_kernels's Triton kernels and polar express run as torch references.
+world 4 with log-space gates and blocks 0-1 dense instead), blocks 0-3 under eager checkpoints and 4-7 not, one
+micro-batch on even steps and two on odd, real validation rows. Collectives are deterministic (FP32 sums in rank
+order); model.moe_kernels's Triton kernels and polar express run as torch references.
 
-replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal. resume: a sharded run saved after 3 steps as train.trainer saves it
-(model.pt with whole experts, each rank's state), rebuilt, loaded and continued through the embed split equals the
-uninterrupted run bit for bit: losses, model.pt, every rank's optimizer state. --moe-remat --moe-chunks 4 (the down
-output rerun in checkpointed blocks, the [T*k, D] products in 4 token chunks) is bitwise the sharded run (on CPU: on
-GPU the gates' grad, a batched matmul per chunk, may round otherwise). eval: an unsharded model loading the final model.pt gives the sharded model's eval
-logits.
+replicated vs sharded: every step's losses and every parameter (the sharded experts gathered whole) are equal.
+resume: a sharded run saved after 3 steps as train.trainer saves it (model.pt with whole experts, each rank's state),
+rebuilt, loaded and continued through the embed split equals the uninterrupted run bit for bit: losses, model.pt,
+every rank's optimizer state. --moe-remat --moe-chunks 4 (the down output rerun in checkpointed blocks, the [T*k, D]
+products in 4 token chunks) is bitwise the sharded run (on CPU: on GPU the gates' grad, a batched matmul per chunk,
+may round otherwise). eval: an unsharded model loading the final model.pt gives the sharded model's eval logits.
 
     TORCH_COMPILE_DISABLE=1 python tests/checks/moe_shard.py
 """
