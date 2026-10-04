@@ -126,8 +126,8 @@ Anderson's group; its open weights made this comparison possible.
 
 **This release's code.** The inference here matches the training code within noise. On 5,000 benchmark
 positions, each scored as a live game reaches it (the last move added to a cached game), CE minus the training
-code's is +0.0003 [−0.0007, +0.0012] nats with the C++ kernels on CPU in BF16, and +0.0010 [−0.0011, +0.0032]
-in int8.
+code's is +0.0003 [−0.0007, +0.0012] nats with the C++ kernels on CPU in BF16, +0.0010 [−0.0011, +0.0032] in
+int8, and +0.0005 [−0.0005, +0.0014] with the CUDA graphs on GPU.
 
 **int8, the CPU default,** costs +0.0008 [−0.0013, +0.0030] nats of CE against BF16 on those positions, and
 the top move agrees on 97.7% of them, for half the memory and about 1.6 times the speed. `int8=False` keeps

@@ -246,15 +246,19 @@ over games.
 | CPU, int8, one game (the default) | +0.0010 [−0.0011, +0.0032] | 58.96% |
 | CPU, int8, 16 games in one step | +0.0012 [−0.0010, +0.0034] | 58.92% |
 | CPU, BF16, one game | +0.0003 [−0.0007, +0.0012] | 58.90% |
+| GPU, BF16, one game (CUDA graphs, the default) | +0.0005 [−0.0005, +0.0014] | 58.92% |
 | PyTorch reference, CPU, BF16, one game | −0.0000 [−0.0010, +0.0009] | 58.86% |
+| PyTorch reference, GPU, BF16, one game | +0.0004 [−0.0005, +0.0014] | 58.90% |
 
 - **Fast against the reference**, on the same positions (CPU BF16): +0.0003 [−0.0002, +0.0008] nats. A
   position's largest change in any move's probability is 0.004 on average and 0.06 at most, and the top move
   agrees on 99.4% of positions. The C++ kernels round to BF16 where the reference does; the sums run in a
   different order. 16 games in one step against one at a time: +0.0002 [−0.0001, +0.0004], the top move
-  agrees on 99.9%.
+  agrees on 99.9%. On GPU, CUDA graphs against the eager reference: +0.0001 [−0.0002, +0.0003], 99.8%.
 - **int8 against BF16**, on the same positions: +0.0008 [−0.0013, +0.0030] nats with the fast backend; the top
   move agrees on 97.7% of positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
+- **CPU against GPU** (BF16, C++ kernels against CUDA graphs): −0.0002 [−0.0006, +0.0002] nats; the top move
+  agrees on 99.5% of positions, and no move's probability differs by more than 0.067.
 - **Before the second anneal** (step 143051, the same positions against its own training-code scores): int8
   +0.0017 [−0.0005, +0.0038], BF16 −0.0005 [−0.0014, +0.0004], GPU CUDA graphs −0.0003 [−0.0012, +0.0006];
   int8 against BF16 +0.0021 [+0.0001, +0.0042].

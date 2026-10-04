@@ -307,7 +307,7 @@ One cached step: the time a move takes once the opponent's move arrives, median 
 
 - **Bandwidth bound.** One game is limited by memory bandwidth: speed rises with threads until the kernels read about 150-165 GB/s. A laptop or desktop streams 50-100 GB/s, so we expect about 10-20 ms a move with 6-8 cores. We have not measured one.
 - **Batching.** Games in one step share each expert's weights: 16 games cost 3.6 to 5 times one game on CPU, and 64 games 9 to 16 times.
-- **Accuracy.** On 5,000 benchmark positions, against the training forward, BF16 weights on CPU change the loss by +0.0003 [−0.0007, +0.0012] nats and the int8 default by +0.0010 [−0.0011, +0.0032]. int8 minus BF16 is +0.0008 [−0.0013, +0.0030], and the two pick the same top move 97.7% of the time. The [bot's guide](../src/allie/lichess/README.md#cost-and-accuracy) has the full comparison.
+- **Accuracy.** On 5,000 benchmark positions, against the training forward, BF16 weights on CPU change the loss by +0.0003 [−0.0007, +0.0012] nats, the int8 default by +0.0010 [−0.0011, +0.0032], and CUDA graphs on GPU by +0.0005 [−0.0005, +0.0014]. int8 minus BF16 is +0.0008 [−0.0013, +0.0030], and the two pick the same top move 97.7% of the time. The [bot's guide](../src/allie/lichess/README.md#cost-and-accuracy) has the full comparison.
 
 ## Reproducing
 
