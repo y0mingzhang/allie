@@ -499,6 +499,7 @@ struct Engine {
       *skip_gate[3];
   const float *scal, *x0l;
   std::vector<float> w1, wr, wsq;  // board CNN weights, FP32, [piece][tap][co], [conv][tap][ci][co], [o][ci]
+  std::vector<float> cnn[2];        // board CNN activations shared by the threads, [10 * 10][32]
   std::vector<const bf16*> ve;
   std::vector<Layer> layers;
   Pool* pool;
@@ -575,47 +576,57 @@ static void clockfeat(const float* t, float* f) {
   }
 }
 
-static void boardcnn(const Engine& m, const uint8_t* st, float* v) {  // channels last, zero border
-  enum { C = 32 / VL, NP = 8 / C };  // NP squares at once: eight independent sums
-  alignas(64) float a[100 * 32] = {0}, b[64 * 32];
-  int piece[100];
+// the board CNN on channels-last activations with a zero border: [10 * 10][32]
+static inline int padded(int p) { return (p / 8 + 1) * 10 + p % 8 + 1; }
+
+static void board_pieces(const uint8_t* st, int* piece) {
   for (int q = 0; q < 100; q++) piece[q] = 13;  // off the board: a zero weight row
-  for (int p = 0; p < 64; p++) piece[(p / 8 + 1) * 10 + p % 8 + 1] = st[p];
-  for (int pass = 0; pass < 3; pass++) {
-    for (int p = 0; p < 64; p += NP) {
-      vf acc[NP][C];
-      for (int j = 0; j < NP; j++)
-        for (int c = 0; c < C; c++) acc[j][c] = vzero();
-      for (int tap = 0; tap < 9; tap++) {
-        int q[NP];
-        for (int j = 0; j < NP; j++) q[j] = ((p + j) / 8 + tap / 3) * 10 + (p + j) % 8 + tap % 3;
-        if (pass == 0) {  // one-hot input: the weights of the piece on each neighbour
-          for (int j = 0; j < NP; j++)
-            for (int c = 0; c < C; c++) acc[j][c] = vadd(acc[j][c], vld(&m.w1[(piece[q[j]] * 9 + tap) * 32 + c * VL]));
-          continue;
-        }
-        const float* w = &m.wr[((pass - 1) * 9 + tap) * 32 * 32];
-        for (int ci = 0; ci < 32; ci++) {
-          vf wc[C];
-          for (int c = 0; c < C; c++) wc[c] = vld(w + ci * 32 + c * VL);
-          for (int j = 0; j < NP; j++) {
-            vf x = vset(a[q[j] * 32 + ci]);
-            for (int c = 0; c < C; c++) acc[j][c] = vfma(x, wc[c], acc[j][c]);
-          }
+  for (int p = 0; p < 64; p++) piece[padded(p)] = st[p];
+}
+
+// pass 0: the first conv on the one-hot board; passes 1, 2: residual convs. Squares [p0, p1)
+// of out = gelu(conv(a)) (+ a for the residual passes), each rounded to BF16
+static void board_pass(const Engine& m, int pass, const int* piece, const float* a, float* out, int p0, int p1) {
+  enum { C = 32 / VL, NP = 8 / C };  // NP squares at once: eight independent sums
+  alignas(64) float y[NP * 32];
+  for (int p = p0; p < p1; p += NP) {
+    vf acc[NP][C];
+    for (int j = 0; j < NP; j++)
+      for (int c = 0; c < C; c++) acc[j][c] = vzero();
+    for (int tap = 0; tap < 9; tap++) {
+      int q[NP];
+      for (int j = 0; j < NP; j++) q[j] = ((p + j) / 8 + tap / 3) * 10 + (p + j) % 8 + tap % 3;
+      if (pass == 0) {  // one-hot input: the weights of the piece on each neighbour
+        for (int j = 0; j < NP; j++)
+          for (int c = 0; c < C; c++) acc[j][c] = vadd(acc[j][c], vld(&m.w1[(piece[q[j]] * 9 + tap) * 32 + c * VL]));
+        continue;
+      }
+      const float* w = &m.wr[((pass - 1) * 9 + tap) * 32 * 32];
+      for (int ci = 0; ci < 32; ci++) {
+        vf wc[C];
+        for (int c = 0; c < C; c++) wc[c] = vld(w + ci * 32 + c * VL);
+        for (int j = 0; j < NP; j++) {
+          vf x = vset(a[q[j] * 32 + ci]);
+          for (int c = 0; c < C; c++) acc[j][c] = vfma(x, wc[c], acc[j][c]);
         }
       }
-      for (int j = 0; j < NP; j++)
-        for (int c = 0; c < C; c++) vst(b + (p + j) * 32 + c * VL, vrb(acc[j][c]));
     }
-    gelu(b, 64 * 32);
-    for (int p = 0; p < 64; p++) {
-      float* ap = a + ((p / 8 + 1) * 10 + p % 8 + 1) * 32;
-      for (int c = 0; c < 32; c++) ap[c] = pass ? rb(ap[c] + b[p * 32 + c]) : b[p * 32 + c];
+    for (int j = 0; j < NP; j++)
+      for (int c = 0; c < C; c++) vst(y + j * 32 + c * VL, vrb(acc[j][c]));
+    gelu(y, NP * 32);
+    for (int j = 0; j < NP; j++) {
+      const float* ap = a + padded(p + j) * 32;
+      float* o = out + padded(p + j) * 32;
+      for (int c = 0; c < 32; c++) o[c] = pass ? rb(ap[c] + y[j * 32 + c]) : y[j * 32 + c];
     }
   }
+}
+
+// squeeze, the castling / en-passant / side features, layer norm: board.output's 544 inputs
+static void board_final(const Engine& m, const uint8_t* st, const float* a, float* v) {
   for (int o = 0; o < 8; o++)
     for (int p = 0; p < 64; p++) {
-      const float* ap = a + ((p / 8 + 1) * 10 + p % 8 + 1) * 32;
+      const float* ap = a + padded(p) * 32;
       float s = 0;
       for (int c = 0; c < 32; c++) s += m.wsq[o * 32 + c] * ap[c];
       v[o * 64 + p] = rb(s);
@@ -632,9 +643,28 @@ static void boardcnn(const Engine& m, const uint8_t* st, float* v) {  // channel
 }
 
 void Engine::embedding(int t, int nt) {
-  for (int k = t; k < T; k += nt) {
-    clockfeat(feats + 3 * k, &f64[k * 64]);
-    boardcnn(*this, boards + 68 * k, &b544[k * 544]);
+  if (T >= nt) {  // a token per thread
+    alignas(64) float a[2][100 * 32] = {};
+    int piece[100];
+    for (int k = t; k < T; k += nt) {
+      clockfeat(feats + 3 * k, &f64[k * 64]);
+      board_pieces(boards + 68 * k, piece);
+      for (int pass = 0; pass < 3; pass++) board_pass(*this, pass, piece, a[pass & 1], a[~pass & 1], 0, 64);
+      board_final(*this, boards + 68 * k, a[1], &b544[k * 544]);
+    }
+  } else {  // all threads on each token: a share of the squares, a barrier between passes
+    int piece[100], p0, p1;
+    split(64, t, nt, 8 / (32 / VL), p0, p1);
+    for (int k = 0; k < T; k++) {
+      if (t == 0) clockfeat(feats + 3 * k, &f64[k * 64]);
+      board_pieces(boards + 68 * k, piece);
+      for (int pass = 0; pass < 3; pass++) {
+        board_pass(*this, pass, piece, &cnn[pass & 1][0], &cnn[~pass & 1][0], p0, p1);
+        pool->barrier();
+      }
+      if (t == 0) board_final(*this, boards + 68 * k, &cnn[1][0], &b544[k * 544]);
+      if (k + 1 < T) pool->barrier();  // the next token's first pass overwrites cnn[1]
+    }
   }
   sync(t, E_CNN);
   int d0, d1;
@@ -949,6 +979,7 @@ void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* c
   m->cosv = B(7), m->sinv = B(8), m->bfirst = B(9), m->bres[0] = B(10), m->bres[1] = B(11);
   m->bsq = B(12), m->bmeta = B(13), m->bout = B(14);
   for (int j = 0; j < 3; j++) m->skip_gate[j] = B(15 + j);
+  m->cnn[0].assign(100 * 32, 0.f), m->cnn[1].assign(100 * 32, 0.f);
   m->w1.assign(14 * 9 * 32, 0.f), m->wr.resize(2 * 9 * 32 * 32), m->wsq.resize(8 * 32);
   for (int co = 0; co < 32; co++)
     for (int tap = 0; tap < 9; tap++) {
