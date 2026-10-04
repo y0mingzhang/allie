@@ -101,7 +101,7 @@ def score(a):
     print("games per format x band", counts.tolist(), flush=True)
     if a.threads:
         torch.set_num_threads(a.threads)
-    m = Model(a.model, a.device, torch.bfloat16, int8=a.int8)
+    m = Model(a.model, a.device, torch.bfloat16, int8=a.int8, backend="torch")
     out = {k: [] for k in ("game", "k", "wdl", "time", "legal")}
     lo = 0
     while lo < len(games):
