@@ -519,6 +519,19 @@ struct Chunk {
   int seg, p0, n;
 };
 
+struct Routing {  // each token's experts and gates, the tokens grouped by expert, the up chunks
+  std::vector<int> idx, cnt, start, at, stok;
+  std::vector<float> gate, sgate;
+  std::vector<const float*> ptok;
+  std::vector<Seg> segs;
+  std::vector<Chunk> upch;
+  void size(int T, int keep, int E) {
+    size_t n = (size_t)T * keep;
+    if (idx.size() < n) idx.resize(n), stok.resize(n), gate.resize(n), sgate.resize(n), ptok.resize(n);
+    cnt.resize(E), start.resize(E), at.resize(E);
+  }
+};
+
 struct Engine {
   int L, D, H, hd, V, nve, E, topk, keep, eh, sh, dh, ctx, backout_layer;
   float scale, floor_;
@@ -540,13 +553,10 @@ struct Engine {
   float* out;
   std::vector<Seq> seq;
   std::vector<int> tseq, last, units;
-  std::vector<float> f64, b544, clk, brd, e, x, x0, x02, h, hf, qkv, g, q, y, tmp, skip[3], bko, rs, gate, acc, hid,
-      shid, xf, z;
-  std::vector<int> idx, cnt, start, at, stok;
-  std::vector<float> sgate;
-  std::vector<const float*> ph, py, phf, pxf, ptok, phid, pshid;
-  std::vector<Seg> segs;
-  std::vector<Chunk> upch;
+  std::vector<float> f64, b544, clk, brd, e, x, x0, x02, h, hf, qkv, g, q, y, tmp, skip[3], bko, rs, acc, hid, shid, xf,
+      z;
+  std::vector<const float*> ph, py, phf, pxf, phid, pshid;
+  Routing shared;
   alignas(64) std::atomic<int> ctr[2];
   struct alignas(64) Count {
     int v;
@@ -556,6 +566,7 @@ struct Engine {
   struct Priv {  // a thread's own copy of the per-token steps (solo)
     std::vector<float> x, h, hf, g;
     std::vector<const float*> ph, phf;
+    Routing r;
   };
   std::vector<Priv> priv;
   int prof = 0;
@@ -586,6 +597,7 @@ struct Engine {
   void attend(int i, int k, int hh, const float* gk, float* sc);
   void blockstep(int i, int t, int nt);
   void ffn(int t, int nt, int dense, int i, bool solo);
+  void group(int i, Routing& R, bool dense);
   void head(int t, int nt);
   void run(int t) {
     int nt = pool->n;
@@ -894,7 +906,7 @@ void Engine::blockstep(int i, int t, int nt) {
 
 // top-k of one token and its gates. Exact ties in the biased scores go to the lower expert id
 // (torch.topk leaves their order unspecified; distinct balancing biases make them rare)
-static void route(Engine& m, const Layer& ly, int k) {
+static void route(const Engine& m, const Layer& ly, int k, Routing& R) {
   const float* s = &m.rs[(size_t)k * m.E];
   float best[64];
   int bi[64], n = 0;
@@ -909,16 +921,46 @@ static void route(Engine& m, const Layer& ly, int k) {
   for (int j = 0; j < m.topk; j++) sum += s[bi[j]];
   float f = (float)std::sqrt((double)m.topk) / std::max(sum, m.floor_);
   for (int j = 0; j < m.keep; j++) {
-    m.idx[(size_t)k * m.keep + j] = bi[j];
-    m.gate[(size_t)k * m.keep + j] = rb(s[bi[j]] * f);
+    R.idx[(size_t)k * m.keep + j] = bi[j];
+    R.gate[(size_t)k * m.keep + j] = rb(s[bi[j]] * f);
   }
+}
+
+// tokens grouped by expert (each expert's weights read once), and the up chunks: 32 pairs
+// (64 rows) a chunk, the shared expert's (most tokens) first
+void Engine::group(int i, Routing& R, bool dense) {
+  const Layer& ly = layers[i];
+  if (dense) {
+    R.segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data()});
+  } else {
+    std::fill(R.cnt.begin(), R.cnt.end(), 0);
+    int na = T * keep;
+    for (int a = 0; a < na; a++) R.cnt[R.idx[a]]++;
+    for (int e = 0, s = 0; e < E; e++) R.start[e] = R.at[e] = s, s += R.cnt[e];
+    for (int a = 0; a < na; a++) {
+      int sl = R.at[R.idx[a]]++;
+      R.stok[sl] = a / keep;
+      R.sgate[sl] = R.gate[a];
+      R.ptok[sl] = &h[(size_t)(a / keep) * D];
+    }
+    R.segs.assign(1, Seg{ly.sup, sh, T, std::max(sh, dh), ph.data(), shid.data()});
+    size_t es = (size_t)2 * eh * D * (q8 ? 1 : 2);
+    for (int e = 0; e < E; e++)
+      if (R.cnt[e]) {
+        Mat A{(const char*)ly.up + e * es, q8 ? ly.ups + (size_t)e * 2 * eh : nullptr, q8};
+        R.segs.push_back(Seg{A, eh, R.cnt[e], eh, &R.ptok[R.start[e]], &hid[(size_t)R.start[e] * eh]});
+      }
+  }
+  R.upch.clear();
+  for (int j = 0; j < (int)R.segs.size(); j++)
+    for (int p = 0; p < R.segs[j].pairs; p += 32) R.upch.push_back(Chunk{j, p, std::min(32, R.segs[j].pairs - p)});
 }
 
 void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
   const Layer& ly = layers[i];
-  if (dense) {
-    if (t == 0) segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data()});
-  } else {
+  // solo: each thread routes and groups the token itself (identical copies): no barrier
+  Routing& R = solo ? priv[t].r : shared;
+  if (!dense) {
     const float* const* fp = solo ? priv[t].phf.data() : phf.data();
     chunks(t, (E + 15) / 16, [&](int c) {
       int lo = 16 * c, n = std::min(16, E - lo);
@@ -927,38 +969,19 @@ void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
         for (int e = lo; e < lo + n; e++) rs[(size_t)k * E + e] = sigm(rs[(size_t)k * E + e]);
     });
     sync(t, B_ROUTER);
-    if (!solo) {
-      for (int k = t; k < T; k += nt) route(*this, ly, k);
-      sync(t, B_TOPK);
-    }
-    if (t == 0) {  // tokens grouped by expert: each expert's weights read once
-      if (solo)
-        for (int k = 0; k < T; k++) route(*this, ly, k);
-      std::fill(cnt.begin(), cnt.end(), 0);
-      int na = T * keep;
-      for (int a = 0; a < na; a++) cnt[idx[a]]++;
-      for (int e = 0, s = 0; e < E; e++) start[e] = at[e] = s, s += cnt[e];
-      for (int a = 0; a < na; a++) {
-        int sl = at[idx[a]]++;
-        stok[sl] = a / keep;
-        sgate[sl] = gate[a];
-        ptok[sl] = &h[(size_t)(a / keep) * D];
-      }
-      segs.assign(1, Seg{ly.sup, sh, T, std::max(sh, dh), ph.data(), shid.data()});
-      size_t es = (size_t)2 * eh * D * (q8 ? 1 : 2);
-      for (int e = 0; e < E; e++)
-        if (cnt[e]) {
-          Mat A{(const char*)ly.up + e * es, q8 ? ly.ups + (size_t)e * 2 * eh : nullptr, q8};
-          segs.push_back(Seg{A, eh, cnt[e], eh, &ptok[start[e]], &hid[(size_t)start[e] * eh]});
-        }
-    }
+    for (int k = solo ? 0 : t; k < T; k += solo ? 1 : nt) route(*this, ly, k, R);
+    if (!solo) sync(t, B_TOPK);
   }
-  if (t == 0) {  // 32 pairs (64 rows) a chunk, the shared expert's (most tokens) first
-    upch.clear();
-    for (int j = 0; j < (int)segs.size(); j++)
-      for (int p = 0; p < segs[j].pairs; p += 32) upch.push_back(Chunk{j, p, std::min(32, segs[j].pairs - p)});
+  if (solo) {
+    group(i, R, dense);
+  } else {
+    if (t == 0) group(i, R, dense);
+    sync(t, B_GROUP);
   }
-  sync(t, B_GROUP);
+  const auto& segs = R.segs;
+  const auto& upch = R.upch;
+  const auto &cnt = R.cnt, &start = R.start, &stok = R.stok;
+  const auto& sgate = R.sgate;
   // up (gate and value halves), SwiGLU
   float* ta = scratch[t].data();
   chunks(t, (int)upch.size(), [&](int c) {
@@ -1136,16 +1159,13 @@ int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, co
   grow(m.qkv, 3 * TD);
   grow(m.g, (size_t)T * 2 * m.H);
   grow(m.rs, (size_t)T * m.E);
-  grow(m.gate, (size_t)T * m.keep);
-  grow(m.sgate, (size_t)T * m.keep);
   grow(m.hid, (size_t)T * m.keep * m.eh);
   grow(m.shid, (size_t)T * std::max(m.sh, m.dh));
   grow(m.xf, (size_t)S * D);
   grow(m.z, (size_t)S * m.V);
-  if (m.idx.size() < (size_t)T * m.keep) m.idx.resize((size_t)T * m.keep), m.stok.resize((size_t)T * m.keep);
-  m.cnt.resize(m.E), m.start.resize(m.E), m.at.resize(m.E);
+  m.shared.size(T, m.keep, m.E);
   m.ph.resize(T), m.py.resize(T), m.phf.resize(T), m.pshid.resize(T), m.pxf.resize(S);
-  m.ptok.resize((size_t)T * m.keep), m.phid.resize((size_t)T * m.keep);
+  m.phid.resize((size_t)T * m.keep);
   for (int k = 0; k < T; k++) {
     m.ph[k] = &m.h[(size_t)k * D], m.py[k] = &m.y[(size_t)k * D], m.phf[k] = &m.hf[(size_t)k * D];
     m.pshid[k] = &m.shid[(size_t)k * std::max(m.sh, m.dh)];
@@ -1163,6 +1183,7 @@ int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, co
       p.g.resize((size_t)T * 2 * m.H);
       p.ph.resize(T), p.phf.resize(T);
       for (int k = 0; k < T; k++) p.ph[k] = &p.h[(size_t)k * D], p.phf[k] = &p.hf[(size_t)k * D];
+      p.r.size(T, m.keep, m.E);
     }
   if (m.prof) m.plast = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   m.phase.assign(nt, Engine::Count{0});
