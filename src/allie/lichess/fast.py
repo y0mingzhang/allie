@@ -1272,8 +1272,16 @@ def library():
     return lib
 
 
+def cpus():
+    """The CPUs this process may run on."""
+    try:
+        return sorted(os.sched_getaffinity(0))
+    except AttributeError:  # macOS, Windows
+        return list(range(os.cpu_count() or 1))
+
+
 def threads_default():
-    return max(1, min(torch.get_num_threads(), len(os.sched_getaffinity(0))))
+    return max(1, min(torch.get_num_threads(), len(cpus())))
 
 
 def _sys(path, default=0):
@@ -1286,20 +1294,20 @@ def _sys(path, default=0):
 def cpu_order(n):
     """n CPUs of this process to pin threads to: within one NUMA node when they fit, spread over
     the node's L3 caches, one thread per core before the cores' second hardware threads."""
-    cpus = sorted(os.sched_getaffinity(0))
-    if len(cpus) < n:
+    ids = cpus()
+    if len(ids) < n:
         return None
-    sys = "/sys/devices/system/cpu/cpu{}/"
-    node = {c: next((int(d.name[4:]) for d in Path(sys.format(c)).glob("node[0-9]*")), 0) for c in cpus}
-    l3 = {c: _sys(sys.format(c) + "cache/index3/id") for c in cpus}
-    first = {c: _sys(sys.format(c) + "topology/thread_siblings_list", c) == c for c in cpus}
-    nodes = sorted(set(node.values()), key=lambda k: -sum(node[c] == k for c in cpus))
-    big = [c for c in cpus if node[c] == nodes[0]]
+    path = "/sys/devices/system/cpu/cpu{}/"
+    node = {c: next((int(d.name[4:]) for d in Path(path.format(c)).glob("node[0-9]*")), 0) for c in ids}
+    l3 = {c: _sys(path.format(c) + "cache/index3/id") for c in ids}
+    first = {c: _sys(path.format(c) + "topology/thread_siblings_list", c) == c for c in ids}
+    nodes = sorted(set(node.values()), key=lambda k: -sum(node[c] == k for c in ids))
+    big = [c for c in ids if node[c] == nodes[0]]
     out = []
     for k in nodes[:1] if len(big) >= n else nodes:
         for primary in (True, False):
             groups = {}
-            for c in cpus:
+            for c in ids:
                 if node[c] == k and first[c] == primary:
                     groups.setdefault(l3[c], []).append(c)
             lists = list(groups.values())
