@@ -19,11 +19,13 @@ from allie.lichess.tokens import HEADER, MOVE_ID, START, advance, features, head
 def game(n=80, seed=0):
     import chess
 
-    rng, board, moves = np.random.default_rng(seed), chess.Board(), []
-    while len(moves) < n and not board.is_game_over():
-        m = list(board.legal_moves)[rng.integers(board.legal_moves.count())]
-        board.push(m)
-        moves.append(m.uci())
+    rng, moves = np.random.default_rng(seed), []
+    while len(moves) < n:  # a random game that ends early is replaced
+        board, moves = chess.Board(), []
+        while len(moves) < n and not board.is_game_over():
+            m = list(board.legal_moves)[rng.integers(board.legal_moves.count())]
+            board.push(m)
+            moves.append(m.uci())
     tokens = header(180, 2, 1500, 1500) + [MOVE_ID[m] for m in moves]
     clocks = [180 - k for k in range(len(moves))]
     feats = [[-1] * 3] * (HEADER - 1) + [
