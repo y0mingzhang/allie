@@ -79,6 +79,11 @@ class Model:
             gates = [self.w.pop(f"{i}.attn_gate"), self.w.pop(f"{i}.ve_gate", None)]
             self.w[f"{i}.gates"] = torch.cat([g for g in gates if g is not None])
         self.moe_mode = None  # None: by device and tokens; or token / group / gather / dense
+        self.views = {  # each routed expert's matrices (and int8 scales), indexed in Python
+            k: [(v[e], self.scales[k][e] if k in self.scales else None) for e in range(len(v))]
+            for k, v in self.w.items()
+            if k.split(".")[-1] in ("up", "down")
+        }
         s = self.w["scalars"]
         n = self.layers
         self.lam, self.x0l = s[:n].tolist(), self.w["x0_lambdas"].view(-1, 2).tolist()
@@ -115,10 +120,12 @@ class Model:
         return f.to(self.dtype) @ self.w["feat_embed"]
 
     def linear(self, x, key, e=None):
-        w = self.w[key] if e is None else self.w[key][e]
-        if key not in self.scales:
+        if e is not None:  # a routed expert: its weights (and int8 scales) as prepared views
+            w, s = self.views[key][e]
+        else:
+            w, s = self.w[key], self.scales.get(key)
+        if s is None:
             return F.linear(x, w)
-        s = self.scales[key] if e is None else self.scales[key][e]
         return torch._weight_int8pack_mm(x.contiguous(), w, s)
 
     def ffn(self, x, up, down, e=None):
@@ -144,12 +151,10 @@ class Model:
 
     def token(self, i, h, idx, gate):
         """Each token's experts one by one: the fewest operations for one or two tokens."""
-        out = torch.zeros(h.shape, dtype=torch.float32, device=h.device)
-        for t, (es, gs) in enumerate(zip(idx.tolist(), gate.tolist())):
-            x, acc = h[t : t + 1], out[t]
-            for e, g in zip(es, gs):
-                acc.add_(self.ffn(x, f"{i}.up", f"{i}.down", e)[0], alpha=g)
-        return out
+        up, down = f"{i}.up", f"{i}.down"
+        ys = [self.ffn(h[t : t + 1], up, down, e) for t, es in enumerate(idx.tolist()) for e in es]
+        y = torch.cat(ys).float().view(*gate.shape, -1)
+        return (y * gate[..., None]).sum(1)
 
     def group(self, i, h, idx, gate):
         """Tokens grouped by expert: one matrix product per routed expert."""
@@ -179,8 +184,8 @@ class Model:
         """Every token through every expert, then the gated sum: reads each expert once and
         needs no host syncs (GPU, a batch of games)."""
         up, down = self.w[f"{i}.up"], self.w[f"{i}.down"]
-        x = h[None].expand(len(up), -1, -1)
-        y = torch.bmm(swiglu(torch.bmm(x, up.transpose(1, 2))), down.transpose(1, 2))
+        y = swiglu(F.linear(h, up.flatten(0, 1)).view(len(h), len(up), -1))  # [T, E, H]
+        y = torch.bmm(y.transpose(0, 1), down.transpose(1, 2))  # [E, T, D]
         combine = torch.zeros(len(h), len(up), device=h.device).scatter_(1, idx, gate)
         return torch.einsum("te,etd->td", combine, y.float())
 
@@ -200,11 +205,13 @@ class Model:
         ve = ve + [None] * (n - 2 * len(ve)) + ve
         skip_in = [i * n // 16 for i in (2, 4, 6)]
         skip_out = [9 * n // 16 + i for i in range(3)]
+        # rotary as z * (cos, cos) + (b, a) * (sin, -sin): the training code's products and sums
         cos, sin = w["cos"][pos][:, None].to(dt), w["sin"][pos][:, None].to(dt)
+        cos, sin = torch.cat((cos, cos), -1), torch.cat((sin, -sin), -1)
 
         def rotary(z):
             a, b = z.chunk(2, dim=-1)
-            return torch.cat((a * cos + b * sin, b * cos - a * sin), -1)
+            return z * cos + torch.cat((b, a), -1) * sin
 
         skips, backout, j = [], None, 0
         heads, hd = self.heads, self.head_dim
@@ -217,7 +224,7 @@ class Model:
             if i == 0:
                 x = (self.lam[0] + self.x0l[0][0]) * x + self.x0l[0][1] * x02
             else:
-                x = self.lam[i] * x + self.x0l[i][0] * x0 + self.x0l[i][1] * x02
+                x = torch.add(self.x0l[i][0] * x0 + self.x0l[i][1] * x02, x, alpha=self.lam[i])
             h = norm(x)
             qkv = self.linear(h, f"{i}.qkv").view(-1, 3 * heads, hd)
             qk, v = rotary(norm(qkv[:, : 2 * heads])), qkv[:, 2 * heads :]

@@ -138,3 +138,12 @@ def test_reader_matches_safetensors(tiny_path):
     assert ours.keys() == ref.keys()
     for k, v in ref.items():
         assert ours[k].dtype == v.dtype and torch.equal(ours[k], v)
+
+
+def test_moe_paths_agree(tiny):
+    h = torch.randn(9, 64)
+    ref = naive_moe(tiny, 2, h, tiny.topk)
+    for mode in ("token", "group", "gather", "dense"):
+        tiny.moe_mode = mode
+        torch.testing.assert_close(tiny.mlp(2, h), ref, atol=1e-5, rtol=1e-5)
+    tiny.moe_mode = None

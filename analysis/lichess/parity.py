@@ -12,6 +12,7 @@ usage: python analysis/lichess/parity.py --model DIR [--device cpu] [--per-band 
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -80,6 +81,10 @@ def main():
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument("--experts", type=int)
     p.add_argument("--int8", action="store_true")
+    p.add_argument("--hf", action="store_true", help="--model is a Hugging Face repo: load it with transformers")
+    p.add_argument("--decode", type=int, default=0,
+                   help="score the last token in steps of this many games (the live path)")  # fmt: skip
+    p.add_argument("--moe", help="force a MoE path: token, group, gather or dense")
     p.add_argument("--threads", type=int)
     p.add_argument("--per-band", type=int, default=1250)
     p.add_argument("--tokens", type=int, default=2048, help="tokens per forward")
@@ -90,7 +95,18 @@ def main():
     if a.threads:
         torch.set_num_threads(a.threads)
     t0 = time.perf_counter()
-    m = Model(a.model, a.device, getattr(torch, a.dtype), a.experts, a.int8)
+    if a.hf:  # the Hugging Face release, through transformers' remote code
+        from transformers import AutoModel
+
+        hf = AutoModel.from_pretrained(a.model, trust_remote_code=True, device=a.device,
+                                       int8=a.int8, experts=a.experts)  # fmt: skip
+        m = hf.allie.model
+        code = sys.modules[type(m).__module__]  # the release's own model.py
+        run, cache = code.step, code.Cache
+    else:
+        m = Model(a.model, a.device, getattr(torch, a.dtype), a.experts, a.int8)
+        run, cache = step, Cache
+    m.moe_mode = a.moe
     load = time.perf_counter() - t0
     index = subsample(a.per_band)
     P = positions(index)
@@ -103,9 +119,15 @@ def main():
         while hi < len(P) and (hi == lo or total + len(P[hi]["prefix"]) <= a.tokens):
             total += len(P[hi]["prefix"])
             hi += 1
-        items = [(Cache(m, len(x["prefix"])), torch.as_tensor(x["prefix"]),
+        items = [(cache(m, len(x["prefix"])), torch.as_tensor(x["prefix"]),
                   torch.as_tensor(x["features"]), boards(x["prefix"])) for x in P[lo:hi]]  # fmt: skip
-        z = step(m, items).double().cpu()
+        if a.decode:  # all but the last token at once, then the last ones as live play does
+            run(m, [(c, x[:-1], f[:-1], b[:-1]) for c, x, f, b in items])
+            z = torch.cat([run(m, [(c, x[-1:], f[-1:], b[-1:]) for c, x, f, b in items[j : j + a.decode]])
+                           for j in range(0, len(items), a.decode)])  # fmt: skip
+        else:
+            z = run(m, items)
+        z = z.double().cpu()
         for i, x in zip(range(lo, hi), P[lo:hi]):
             lg = torch.log_softmax(z[i - lo, 378:2346][torch.as_tensor(x["legal"])], 0)
             t = int(np.flatnonzero(x["legal"] == x["target"])[0])
@@ -121,6 +143,7 @@ def main():
     dp = np.exp(-ce) - np.exp(-ref_ce)
     out = dict(
         model=a.model, device=a.device, dtype=a.dtype, int8=a.int8, experts=a.experts or m.topk,
+        decode=a.decode, moe=a.moe,
         threads=torch.get_num_threads(), positions=len(P), load_seconds=round(load, 1),
         seconds=round(seconds, 1), ms_per_position=round(1000 * seconds / len(P), 1),
         ce=float(ce.mean()), reference_ce=float(ref_ce.mean()),

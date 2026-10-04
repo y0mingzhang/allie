@@ -5,7 +5,7 @@ import chess
 import pytest
 import torch
 
-from allie.lichess.api import Allie, parse_moves, parse_time_control
+from allie.lichess.api import REPO, Allie, parse_moves, parse_time_control
 from allie.lichess.model import Cache, Model, step
 
 from .test_model import inputs
@@ -79,25 +79,15 @@ def test_transformers_remote_code(tiny_path, tmp_path):
 
 
 @pytest.mark.skipif(
-    not os.environ.get("ALLIE_HUB_TEST"), reason="downloads 11 GB from the Hub"
+    not os.environ.get("ALLIE_EXPORT"), reason="set ALLIE_EXPORT to a local export to compare"
 )
 def test_hub_weights_match_local_export():
+    """Downloads the 11 GB release and compares every tensor with a local export."""
     from huggingface_hub import hf_hub_download
 
     from allie.lichess.model import read
 
-    local = Path(
-        os.environ.get(
-            "ALLIE_EXPORT",
-            "/data/group_data/dei-group/yimingz3/allie/lichess/allie-v3.0",
-        )
-    )
-    hub = Path(
-        hf_hub_download(
-            os.environ.get("ALLIE_REPO", "yimingzhang/allie-2.0"), "model.safetensors"
-        )
-    )
-    for (a, x), (b, y) in zip(
-        read(local / "model.safetensors"), read(hub), strict=True
-    ):
+    local = Path(os.environ["ALLIE_EXPORT"]) / "model.safetensors"
+    hub = Path(hf_hub_download(os.environ.get("ALLIE_REPO", REPO), "model.safetensors"))
+    for (a, x), (b, y) in zip(read(local), read(hub), strict=True):
         assert a == b and torch.equal(x, y), a
