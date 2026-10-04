@@ -93,8 +93,9 @@ human-like think times, and handles challenges, draws, resignation and reconnect
   every 200 rating points of its stronger player.
 - **Main run.** 75B tokens: 143,051 steps of 524,288 tokens, on 8 NVIDIA L40S GPUs for 6.6 days.
 - **Second anneal.** From the main run's final checkpoint with a fresh optimizer: 1B tokens (1,907 steps) of
-  Lichess games from January 2024 to August 2026 (July 2026 still held out), at no more than 5% of the main
-  run's peak learning rate, decayed over the last 30% of steps. 2.1 hours on the same GPUs.
+  Lichess games from January 2024 to August 2026 (July 2026 still held out). The learning rate peaks at
+  0.05, where the main run's schedule stood at about 99% (its peak was 4.0), and decays over the last 30% of
+  steps. 2.1 hours on the same GPUs.
 - **Compute.** 3.2e20 training FLOPs in all.
 
 ## Evaluation
