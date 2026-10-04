@@ -13,12 +13,14 @@ import torch
 
 
 def model(c):
+    from .api import resolve
     from .model import Model
 
     if c.threads:
         torch.set_num_threads(c.threads)
     dtype = dict(bfloat16=torch.bfloat16, float32=torch.float32)[c.dtype]
-    return Model(c.model, c.device, dtype, c.experts or None, c.int8)
+    int8 = c.int8 if c.int8 is not None else c.device == "cpu" and dtype == torch.bfloat16
+    return Model(resolve(c.model), c.device, dtype, c.experts or None, int8)
 
 
 def coverage(c):

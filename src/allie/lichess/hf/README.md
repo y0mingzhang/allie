@@ -38,12 +38,21 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
   the clock as unknown, as it did for its clockless training games.
 - **More outputs:** `model.analyze(...)` also returns the mover's win / draw / loss probabilities and their
   expected think time.
-- **Device:** `from_pretrained(..., device="cuda")` (the default when a GPU is visible) or `device="cpu"`.
-  `int8=True` stores the weights in int8 on CPU: half the memory and faster.
+- **Device:** `device="cuda"` (the default when a GPU is visible) or `device="cpu"`. On CPU the weights
+  default to int8 (8 GB, about twice as fast as BF16); `int8=False` keeps BF16 (11 GB).
+  `experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
 - **Speed:** calls that extend the previous call's game reuse its key-value cache, so following a game move
-  by move costs one or two tokens per call.
+  by move costs one new token per call.
 
-The weights are 11 GB in BF16. Loading needs that much memory.
+| Device | Weights | ms per move | Memory |
+|---|---|---:|---:|
+| CPU, 8 threads (AMD EPYC 9354) | int8 (CPU default) | 29 | 8 GB |
+| CPU, 8 threads | int8, 8 of 16 experts | 24 | 8 GB |
+| CPU, 8 threads | BF16 | 69 | 11 GB |
+| GPU (NVIDIA L40S), one game | BF16 | 18 | 11 GB |
+| GPU, 16 games at once (`allie-bot`) | BF16 | 4 per game | 11 GB |
+
+## Play on Lichess, and the command line
 
 ## Play on Lichess, and the command line
 
@@ -104,9 +113,10 @@ human-move prediction, from Ashton Anderson's group; its open weights made this 
 100,000 moves each, CE averaged over cells without legal-move masking: **1.2533**, and 1.1035 over the four
 ≥2400 cells.
 
-**This release's code.** The plain-PyTorch inference here matches the training code within noise: on 5,000
-benchmark positions, CE differs by −0.0003 [−0.0012, +0.0006] nats on CPU (BF16) and −0.0002 [−0.0012, +0.0006]
-on GPU.
+**This release's code.** The plain-PyTorch inference here matches the training code within noise. On 5,000
+benchmark positions, each scored as a live game reaches it (the last move added to a cached game), CE minus
+the training code's is −0.0003 [−0.0013, +0.0006] nats on CPU in BF16 and −0.0006 [−0.0015, +0.0003] on GPU.
+int8 weights add +0.0016 ± 0.0011 nats and lower top-1 accuracy from 58.9% to 58.7%.
 
 ## Intended use and limitations
 

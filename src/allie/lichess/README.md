@@ -1,7 +1,8 @@
 # Allie on Lichess
 
-`allie.lichess` runs Allie 2.0 as a [Lichess bot](https://lichess.org/api#tag/Bot). It needs no GPU: one CPU
-process holds the model once and plays several games at a time.
+`allie.lichess` runs Allie 2.0 as a [Lichess bot](https://lichess.org/api#tag/Bot), and predicts moves from
+Python or the command line. It needs no GPU: one CPU process holds the model once and plays several games at
+a time.
 
 - **Model.** A plain-PyTorch port of the trained network (`model.py`): no Triton kernels and no training code.
   Each game keeps its own key-value cache, so a move costs one or two new tokens. Concurrent games are batched
@@ -13,27 +14,46 @@ process holds the model once and plays several games at a time.
 
 ## Setup
 
-1. **Install.** `uv sync --extra bot` (the extra is only for exporting weights). Add `--extra search` for the `strongest` mode's search.
-2. **Export the weights** from a training checkpoint, once:
+1. **Install.** `uv sync --extra bot` (or `uv tool install "allie[bot] @ git+https://github.com/y0mingzhang/allie"`).
+   Add `--extra search` for the `strongest` mode's search.
+2. **Weights.** By default the bot downloads [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0)
+   from Hugging Face on first start (11 GB). To serve a training checkpoint instead, export it once and set
+   `model` to the directory:
    ```sh
    allie-bot export results/pretrain/allie-2.0/last.pt exports/allie-2.0
    ```
-   This writes `model.safetensors` (11 GB, BF16) and `config.json`. The bot needs only this directory.
 3. **Create a bot account.** Bot accounts must be new accounts that have never played a game. Create one on
    lichess.org, then make a personal API token with the `bot:play` scope at
    <https://lichess.org/account/oauth/token/create?scopes[]=bot:play>. Upgrade the account once:
    ```sh
    curl -d '' https://lichess.org/api/bot/account/upgrade -H "Authorization: Bearer $LICHESS_TOKEN"
    ```
-4. **Configure.** Copy [configs/lichess-bot.toml](../../../configs/lichess-bot.toml) and set `model` to the
-   export directory. The token is never stored in the config: put it in the `LICHESS_TOKEN` environment variable.
+4. **Configure.** Copy [configs/lichess-bot.toml](../../../configs/lichess-bot.toml). The token is never stored in
+   the config: put it in the `LICHESS_TOKEN` environment variable.
 5. **Run.**
    ```sh
    export LICHESS_TOKEN=lip_...
    allie-bot play --config my-bot.toml
    ```
    Any config key can be overridden with `--set`, for example `--set play.rating=1800`. With
-   `--drain-file PATH`, creating that file makes the bot decline new challenges, finish its games and exit.
+   `--drain-file PATH`, creating that file (or sending SIGUSR1) makes the bot decline new challenges, finish
+   its games and exit.
+
+## Predicting moves without the bot
+
+```python
+from allie.lichess.api import Allie
+
+allie = Allie.from_pretrained()  # yimingzhang/allie-2.0; int8 on CPU, BF16 on GPU
+allie.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="180+2")
+allie.analyze(["e2e4", "e7e5"], 1500, 1500, "60+0", clocks=[60, 59])  # also win/draw/loss and think time
+allie.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 player would play it
+```
+
+On the command line: `allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2` prints the most likely moves,
+the win / draw / loss probabilities and the expected think time. The same code ships in the Hugging Face
+repository, so `transformers` alone runs it (`AutoModel.from_pretrained("yimingzhang/allie-2.0",
+trust_remote_code=True)`, see the model card).
 
 ## Playing styles
 
@@ -55,36 +75,47 @@ process holds the model once and plays several games at a time.
 
 ## Cost and accuracy
 
-**Speed and memory.** Time to choose a move, from receiving the opponent's move, on one AMD EPYC 9554 node
-with 8 threads (median of a 60-ply game). The bot appends its own move while the opponent thinks, so each
-decision reads one new token.
+**Speed and memory.** One cached step, the time a move takes once the opponent's move arrives (median of 35
+steps of a game, `analysis/lichess/speed.py`). The bot appends its own move while the opponent thinks, so
+each decision reads one new token. CPU: 8 threads of an AMD EPYC 9354. GPU: one NVIDIA L40S.
 
-| Setting | ms per move | Resident memory |
+| Device | Weights | Experts | ms per move | Memory |
+|---|---|---:|---:|---:|
+| CPU | int8 (CPU default) | 16 | 29 | 8 GB |
+| CPU | int8 | 8 | 24 | 8 GB |
+| CPU | BF16 | 16 | 69 | 11 GB |
+| GPU, one game | BF16 | 16 | 18 | 11 GB |
+| GPU, 16 games in one step | BF16 | 16 | 63 per step, 4 per game | 11 GB |
+
+- **Threads.** On CPU, 6 to 8 threads are best for one game (4 threads: 32 ms); more than the physical cores
+  slows it down.
+- **Search.** `strongest` mode with 5 simulations takes about 0.4 s a move on CPU (BF16), 25 simulations 1.1-1.4 s.
+- **First move.** It also reads the 11-token header: about 0.3 s.
+- **Batching.** On CPU, two games at once take 47 ms per step instead of 29 for one, so batching saves little.
+  On GPU, a step of 16 games costs 3.5 times a step of one.
+- **How.** int8 weights use PyTorch's int8 weight-only kernel with one scale per output row. One or two new
+  tokens run each token's 16 experts one by one; on GPU, a few tokens gather their experts' weights into one
+  batched product, and a batch of games runs every expert at once. Every path is checked against the same
+  reference below.
+
+**Accuracy.** `analysis/lichess/parity.py` scores 5,000 positions of the Maia-3 blitz benchmark, 1,250 per
+rating band, against the trained model's scores (the training forward on a GPU). With `--decode`, each
+position is reached as live play reaches it: the game so far in one step, then its last move as a cached
+step. The port is not bitwise identical, because floating-point sums run in a different order, but BF16 is
+equal within noise. 95% intervals are bootstrapped over games.
+
+| Setting | CE minus the trained model's (nats) | Top-1 (trained model: 58.92%) |
 |---|---:|---:|
-| BF16, all 16 experts (default) | 83 | 11 GB |
-| int8 weights | 40 | 7.7 GB |
-| `strongest` with 5 simulations of search | 440 | 11 GB |
-| `strongest` with 25 simulations of search | 1,100-1,400 | 11 GB |
+| CPU, BF16, one game | −0.0003 [−0.0013, +0.0006] | 58.92% |
+| CPU, int8, one game | +0.0013 [−0.0008, +0.0035] | 58.66% |
+| GPU, BF16, one game | −0.0006 [−0.0015, +0.0003] | 58.82% |
+| GPU, BF16, 16 games in one step | −0.0005 [−0.0015, +0.0003] | 58.94% |
+| GPU, BF16, whole games in one step | −0.0006 [−0.0015, +0.0002] | 58.90% |
 
-The first move of a game also reads the 11-token header: about 0.3 s. On an AMD EPYC 7763, BF16 takes 65-80 ms
-with 8-16 threads, and 8 experts instead of 16 saves about a quarter. More threads than physical cores slow it
-down. Two games at once roughly double each decision's time: on a CPU, batching games saves little.
-
-**Accuracy.** `analysis/lichess/parity.py` scores the bot's own code path on 5,000 positions of the Maia-3 blitz
-benchmark, 1,250 per rating band, against the trained model's scores (the training forward on a GPU). The
-port is not bitwise identical, because floating-point sums run in a different order, but it is equal within
-noise. 95% intervals are bootstrapped over games.
-
-| Setting | CE minus the trained model's (nats) | Same top move as the GPU port |
-|---|---:|---:|
-| GPU, BF16 | −0.0002 [−0.0012, +0.0006] | |
-| CPU, BF16 | −0.0003 [−0.0012, +0.0006] | 99.6% |
-| CPU, int8 weights | +0.0012 [−0.0009, +0.0034] | 97.6% |
-| CPU, 8 of 16 experts | +0.0014 [−0.0003, +0.0031] | 98.6% |
-
-CPU and GPU give the same top move on 99.6% of positions; the largest difference in any move's probability is
-0.055. The int8 and 8-expert rows were measured one revision earlier, before gates were rounded to BF16 as in
-training.
+- **int8 against BF16**, on the same positions: +0.0016 ± 0.0011 nats (standard error); the top move agrees on
+  97.5% of positions. This is within the 0.002 we allowed for the CPU default; `int8 = false` keeps BF16.
+- **CPU against GPU** (BF16): the top move agrees on 99.3% of positions, and no move's probability differs by
+  more than 0.076.
 
 ## Offline testing
 

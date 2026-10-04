@@ -22,12 +22,12 @@ class Challenge:
 
 @dataclass
 class Config:
-    model: str = ""  # export directory: model.safetensors + config.json
+    model: str = "yimingzhang/allie-2.0"  # Hugging Face repo or directory (config.json, weights)
     device: str = "cpu"
     dtype: str = "bfloat16"
     threads: int = 0  # torch CPU threads (0: torch's default)
     experts: int = 0  # routed experts per token (0: all 16; 8 is faster)
-    int8: bool = False  # int8 block matrices (CPU): half the memory
+    int8: bool | None = None  # int8 block matrices (None: on CPU): half the memory, faster
     url: str = "https://lichess.org"
     max_games: int = 4
     greeting: str = ""

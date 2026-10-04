@@ -20,7 +20,7 @@ from .model import Model
 
 class AllieModel(PreTrainedModel):
     """predict(), analyze() and play() as allie.lichess.api.Allie's. The weights live in
-    self.allie.model (BF16 by default, or int8 on CPU), not in torch parameters."""
+    self.allie.model (int8 on CPU and BF16 on GPU by default), not in torch parameters."""
 
     config_class = AllieConfig
 
@@ -29,10 +29,11 @@ class AllieModel(PreTrainedModel):
         self.allie = allie
 
     @classmethod
-    def from_pretrained(cls, name, *args, config=None, device=None, int8=False, experts=None,
+    def from_pretrained(cls, name, *args, config=None, device=None, int8=None, experts=None,
                         torch_dtype=None, **kwargs):  # fmt: skip
-        """device: default CUDA if available. int8: int8 weights on CPU (half the memory,
-        faster). experts: route through only this many of the 16 experts (faster)."""
+        """device: default CUDA if available. int8: int8 weights, the default on CPU (half the
+        memory, twice the speed). experts: route through only this many of the 16 experts
+        (faster, slightly less accurate)."""
         path = Path(name)
         if not path.is_dir():
             from huggingface_hub import snapshot_download
@@ -42,8 +43,11 @@ class AllieModel(PreTrainedModel):
             path = Path(snapshot_download(name, allow_patterns=["*.json", "*.safetensors"], **hub))
         if config is None:
             config = AllieConfig.from_pretrained(path)
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        dtype = torch_dtype if isinstance(torch_dtype, torch.dtype) else torch.bfloat16
+        device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        dtype = kwargs.get("dtype", torch_dtype)
+        dtype = dtype if isinstance(dtype, torch.dtype) else torch.bfloat16
+        if int8 is None:
+            int8 = device.type == "cpu" and dtype == torch.bfloat16
         return cls(config, Allie(Model(path, device, dtype, experts, int8)))
 
     def analyze(self, *args, **kwargs):

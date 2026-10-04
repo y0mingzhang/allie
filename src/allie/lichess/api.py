@@ -61,6 +61,17 @@ def parse_time_control(tc):
     return int(tc[0]), int(tc[1])
 
 
+def resolve(name, **hub):
+    """A local directory with config.json and model.safetensors, downloading a Hugging Face
+    repo's into the Hub cache first."""
+    if Path(name).is_dir():
+        return Path(name)
+    from huggingface_hub import snapshot_download
+
+    files = ["config.json", "model.safetensors"]
+    return Path(snapshot_download(name, allow_patterns=files, **hub))
+
+
 class Allie:
     """Allie 2.0 on CPU or GPU. predict() and play() reuse the key-value cache of a recent call
     whose game they extend, so asking move after move in one game costs one or two new tokens."""
@@ -69,19 +80,18 @@ class Allie:
         self.model, self.sessions, self.keep = model, [], sessions
 
     @classmethod
-    def from_pretrained(cls, name=REPO, device=None, dtype=None, int8=False, experts=None,
+    def from_pretrained(cls, name=REPO, device=None, dtype=None, int8=None, experts=None,
                         **hub):  # fmt: skip
         """name: a Hugging Face repo or a local directory with config.json and
-        model.safetensors. device: default CUDA if available. int8: CPU int8 weights.
-        hub: revision, cache_dir, token, ... for huggingface_hub.snapshot_download."""
-        path = Path(name)
-        if not path.is_dir():
-            from huggingface_hub import snapshot_download
-
-            files = ["config.json", "model.safetensors"]
-            path = Path(snapshot_download(name, allow_patterns=files, **hub))
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        model.safetensors. device: default CUDA if available. int8: int8 weights, the default
+        on CPU (half the memory, twice the speed). experts: route through only this many of
+        the 16 experts (faster, slightly less accurate). hub: revision, cache_dir, token, ...
+        for huggingface_hub.snapshot_download."""
+        path = resolve(name, **hub)
+        device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         dtype = dtype or torch.bfloat16
+        if int8 is None:
+            int8 = device.type == "cpu" and dtype == torch.bfloat16
         return cls(Model(path, device, dtype, experts, int8))
 
     def analyze(self, moves=(), white_elo=1500, black_elo=1500, time_control=None,
@@ -186,13 +196,14 @@ def main(argv=None):
         "--model", default=REPO, help="Hugging Face repo or export directory"
     )
     p.add_argument("--device")
-    p.add_argument("--int8", action="store_true", help="int8 weights (CPU)")
+    p.add_argument("--bf16", action="store_true", help="BF16 weights on CPU (default int8)")
+    p.add_argument("--experts", type=int, help="routed experts per token (default all 16)")
     p.add_argument("--top", type=int, default=5)
     a = p.parse_args(argv)
     clocks = (
         [float(c) if c else None for c in a.clocks.split(",")] if a.clocks else None
     )
-    allie = Allie.from_pretrained(a.model, a.device, int8=a.int8)
+    allie = Allie.from_pretrained(a.model, a.device, int8=False if a.bf16 else None, experts=a.experts)
     white, black = a.white_elo or a.elo, a.black_elo or a.elo
     out = allie.analyze(a.moves, white, black, a.tc, clocks)
     board = chess.Board()
