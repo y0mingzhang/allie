@@ -8,9 +8,7 @@ The released model is **Allie-v3.0**, a mixture-of-experts (MoE) transformer wit
 
 **On held-out Lichess blitz from July 2026, Allie-v3.0 has lower cross-entropy and higher top-1 accuracy than each Maia-3 model, with 6.6x less inference compute per move than Maia-3 79M.** On our main evaluation, which covers all time controls, it scored 1.2533 nats: 0.032 below its scaling-law forecast.
 
-Maia-3 ([Chessformer, ICLR 2026](https://arxiv.org/abs/2605.19091); [models](https://huggingface.co/collections/MaiaChess/maia3)) comes from Ashton Anderson's group at the University of Toronto. It is the state of the art in human-move prediction, after [Maia](https://arxiv.org/abs/2006.01855) (KDD 2020) and [Maia-2](https://arxiv.org/abs/2409.20553) (NeurIPS 2024). Its open weights and inference code are what made a like-for-like comparison possible.
-
-The comparison is not symmetric. Allie reads the clock and the released Maia-3 does not, our training data is more recent, and our compute is counted rather than measured. See [Caveats](#caveats).
+We compare against [Maia-3](https://arxiv.org/abs/2605.19091), the state of the art in human-move prediction. Thanks to its authors for releasing the [models](https://huggingface.co/collections/MaiaChess/maia3). See [Caveats](#caveats).
 
 ![Cross-entropy against inference GFLOPs per move for Maia-3, the original Allie, Allie-v3.0 and Allie-v3.0 with search](docs/figures/pareto.png)
 
