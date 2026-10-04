@@ -55,7 +55,8 @@ static inline float sigm(float x) { return 1.f / (1.f + expf(-x)); }
 
 #if defined(__AVX512F__)
 #define VL 16
-#define MB 4
+#define MB 6
+#define RB 4
 typedef __m512 vf;
 static inline vf vzero() { return _mm512_setzero_ps(); }
 static inline vf vset(float a) { return _mm512_set1_ps(a); }
@@ -87,7 +88,8 @@ static inline vf vrb(vf x) {
 #define SIMD 1
 #elif defined(__AVX2__) && defined(__FMA__)
 #define VL 8
-#define MB 2
+#define MB 6
+#define RB 2
 typedef __m256 vf;
 static inline vf vzero() { return _mm256_setzero_ps(); }
 static inline vf vset(float a) { return _mm256_set1_ps(a); }
@@ -123,7 +125,8 @@ static inline vf vrb(vf x) {
 #define SIMD 1
 #else
 #define VL 8
-#define MB 2
+#define MB 6
+#define RB 2
 struct vf { float v[VL]; };
 #define VOP(name, e) static inline vf name(vf a, vf b) { vf r; for (int i = 0; i < VL; i++) r.v[i] = e; return r; }
 VOP(vadd, a.v[i] + b.v[i]) VOP(vsub, a.v[i] - b.v[i]) VOP(vmul, a.v[i] * b.v[i]) VOP(vdiv, a.v[i] / b.v[i])
@@ -266,68 +269,82 @@ static inline void split(int n, int t, int nt, int align, int& lo, int& hi) {
 
 // ---- matrix kernels: rows of W (int8, BF16 or FP32) against FP32 activations ----
 
-// acc[m * 4 + i] = x[m] . r[i] over K
-template <class W, int M>
+#if defined(__clang__)
+#define UNROLL _Pragma("unroll")
+#elif defined(__GNUC__)
+#define UNROLL _Pragma("GCC unroll 16")
+#else
+#define UNROLL
+#endif
+
+// acc[m * R + i] = x[m] . r[i] over K: R rows of W against M tokens, R * M sums in registers
+template <class W, int R, int M>
 static inline void block(const float* const* x, const W* const* r, int K, float* acc) {
-  vf a[M][4];
-  for (int m = 0; m < M; m++)
-    for (int i = 0; i < 4; i++) a[m][i] = vzero();
+  vf a[M][R];
+  UNROLL for (int m = 0; m < M; m++)
+    UNROLL for (int i = 0; i < R; i++) a[m][i] = vzero();
   int k = 0, kv = K - K % VL;
-  if (M == 1) {  // two partial sums per row: eight independent chains
-    vf b[4] = {vzero(), vzero(), vzero(), vzero()};
+  if (M == 1) {  // two partial sums per row: 2R independent chains
+    vf b[R];
+    UNROLL for (int i = 0; i < R; i++) b[i] = vzero();
     for (; k + 2 * VL <= kv; k += 2 * VL) {
       vf x0 = vld(x[0] + k), x1 = vld(x[0] + k + VL);
-      for (int i = 0; i < 4; i++) {
+      UNROLL for (int i = 0; i < R; i++) {
         a[0][i] = vfma(vld(r[i] + k), x0, a[0][i]);
         b[i] = vfma(vld(r[i] + k + VL), x1, b[i]);
       }
     }
-    for (int i = 0; i < 4; i++) a[0][i] = vadd(a[0][i], b[i]);
+    UNROLL for (int i = 0; i < R; i++) a[0][i] = vadd(a[0][i], b[i]);
   }
   for (; k < kv; k += VL) {
-    vf w0 = vld(r[0] + k), w1 = vld(r[1] + k), w2 = vld(r[2] + k), w3 = vld(r[3] + k);
-    for (int m = 0; m < M; m++) {
+    vf w[R];
+    UNROLL for (int i = 0; i < R; i++) w[i] = vld(r[i] + k);  // each weight converted once for M tokens
+    UNROLL for (int m = 0; m < M; m++) {
       vf xm = vld(x[m] + k);
-      a[m][0] = vfma(w0, xm, a[m][0]);
-      a[m][1] = vfma(w1, xm, a[m][1]);
-      a[m][2] = vfma(w2, xm, a[m][2]);
-      a[m][3] = vfma(w3, xm, a[m][3]);
+      UNROLL for (int i = 0; i < R; i++) a[m][i] = vfma(w[i], xm, a[m][i]);
     }
   }
-  for (int m = 0; m < M; m++)
-    for (int i = 0; i < 4; i++) {
+  UNROLL for (int m = 0; m < M; m++)
+    UNROLL for (int i = 0; i < R; i++) {
       float s = vsum(a[m][i]);
       for (int j = kv; j < K; j++) s += x[m][j] * f32(r[i][j]);
-      acc[m * 4 + i] = s;
+      acc[m * R + i] = s;
     }
+}
+
+// rows [j, j + R) of w (the last row repeated past n) against tokens [m0, m1) in groups of MB
+template <class W, int R>
+static inline void rows(const float* const* x, int m0, int m1, const W* w, int K, int j, int n, float* out, int ldo) {
+  const W* r[R];
+  for (int i = 0; i < R; i++) r[i] = w + (size_t)std::min(j + i, n - 1) * K;
+  int nr = std::min(R, n - j);
+  float acc[MB * R];
+  for (int m = m0; m < m1; m += MB) {
+    int mb = std::min(MB, m1 - m);
+    switch (R == 4 && m1 - m0 == 1 ? 0 : mb) {
+      case 0: block<W, R, 1>(x + m, r, K, acc); break;
+      case 1: block<W, R, 1>(x + m, r, K, acc); break;
+      case 2: block<W, R, 2>(x + m, r, K, acc); break;
+      case 3: block<W, R, 3>(x + m, r, K, acc); break;
+      case 4: block<W, R, 4>(x + m, r, K, acc); break;
+      case 5: block<W, R, 5>(x + m, r, K, acc); break;
+      default: block<W, R, 6>(x + m, r, K, acc); break;
+    }
+    for (int a = 0; a < mb; a++)
+      for (int i = 0; i < nr; i++) out[(size_t)(m + a) * ldo + j + i] = acc[a * R + i];
+  }
 }
 
 // out[m * ldo + j] = x[m] . w[j] for rows j < n of w (row stride K), tokens m < M
 template <class W>
 static void dots(const float* const* x, int M, const W* w, int K, int n, float* out, int ldo) {
-  float acc[MB * 4];
-  int tile = M <= 64 ? M : 32;
-  for (int m0 = 0; m0 < M; m0 += tile) {
-    int m1 = std::min(M, m0 + tile);
-    for (int j = 0; j < n; j += 4) {
-      const W* r[4];
-      for (int i = 0; i < 4; i++) r[i] = w + (size_t)std::min(j + i, n - 1) * K;
-      int nr = std::min(4, n - j);
-      for (int m = m0; m < m1; m += MB) {
-        int mb = std::min(MB, m1 - m);
-        switch (mb) {
-          case 1: block<W, 1>(x + m, r, K, acc); break;
-          case 2: block<W, 2>(x + m, r, K, acc); break;
-#if MB > 2
-          case 3: block<W, 3>(x + m, r, K, acc); break;
-          case 4: block<W, 4>(x + m, r, K, acc); break;
-#endif
-        }
-        for (int a = 0; a < mb; a++)
-          for (int i = 0; i < nr; i++) out[(size_t)(m + a) * ldo + j + i] = acc[a * 4 + i];
-      }
-    }
+  if (M == 1) {  // a matrix-vector product: four rows at a time, eight chains
+    for (int j = 0; j < n; j += 4) rows<W, 4>(x, 0, 1, w, K, j, n, out, ldo);
+    return;
   }
+  int tile = M <= 64 ? M : 48;
+  for (int m0 = 0; m0 < M; m0 += tile)
+    for (int j = 0; j < n; j += RB) rows<W, RB>(x, m0, std::min(M, m0 + tile), w, K, j, n, out, ldo);
 }
 
 struct Mat {
