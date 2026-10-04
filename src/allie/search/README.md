@@ -18,10 +18,10 @@ simulations.
 uv sync --extra search
 ```
 
-The native rules and trees (`native/*.cpp`) compile on first use. They need a C++17 compiler with OpenMP and the
+The native rules and trees (`native/*.cpp`) compile on first use. They need a C++17 compiler with OpenMP. The
 header-only [chess-library](https://github.com/Disservin/chess-library) (MIT, commit
-`53e6a841dcda7059a2af363d85f785ef1817304a`): point `ALLIE_CHESS_INCLUDE` at the directory holding `chess.hpp`
-(default: `vendor/chess-library/include` in the checkout). Builds are cached by content under
+`53e6a841dcda7059a2af363d85f785ef1817304a`) ships in `native/chess-library/`; `ALLIE_CHESS_INCLUDE` points the
+build at another directory holding `chess.hpp`. Builds are cached by content under
 `~/.cache/allie/search` and `~/.cache/allie/board-encoder`; `ALLIE_SEARCH_CACHE` and `ALLIE_BOARD_CACHE` move them.
 
 ## Run

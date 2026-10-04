@@ -21,7 +21,7 @@ def load(kind="tree"):
         raise ValueError("native module must be tree or value")
     import pybind11
     source = SOURCE / (kind + ".cpp")
-    include = Path(os.environ.get("ALLIE_CHESS_INCLUDE", str(SOURCE.parents[3] / "vendor/chess-library/include")))
+    include = Path(os.environ.get("ALLIE_CHESS_INCLUDE", str(SOURCE / "chess-library")))
     parts = [source.read_bytes(), sys.version.encode(), pybind11.__version__.encode()]
     if kind == "tree":
         parts.append((include / "chess.hpp").read_bytes())

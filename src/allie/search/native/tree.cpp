@@ -1,4 +1,4 @@
-// Chess rules (vendor/chess-library, MIT, pinned in README.md) and the search trees.
+// Chess rules (native/chess-library, MIT, pinned in README.md) and the search trees.
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <algorithm>

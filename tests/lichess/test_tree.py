@@ -38,7 +38,7 @@ def test_nodes_match_prefill(tiny):
         np.testing.assert_allclose(z, ref.double().numpy(), atol=3e-5)
 
 
-native = Path(os.environ.get("ALLIE_CHESS_INCLUDE", "vendor/chess-library/include"))
+native = Path(os.environ.get("ALLIE_CHESS_INCLUDE", str(Path(tree.__file__).parents[1] / "search/native/chess-library")))
 
 
 @pytest.mark.skipif(
