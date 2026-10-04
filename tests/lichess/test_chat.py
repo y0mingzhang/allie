@@ -1,0 +1,427 @@
+import json
+import threading
+import time
+from types import SimpleNamespace
+
+import chess
+import pytest
+import torch
+
+from allie.lichess import chat
+from allie.lichess.bot import Bot
+from allie.lichess.chat import Chat, Chatter, clean
+from allie.lichess.client import Lichess
+from allie.lichess.config import Config
+from allie.lichess.engine import WDL, Engine, Play
+from allie.lichess.mock import MockLichess
+from allie.lichess.tokens import MOVE_ID
+
+
+def wait(cond, timeout=60):
+    end = time.monotonic() + timeout
+    while not cond():
+        assert time.monotonic() < end, "timed out"
+        time.sleep(0.02)
+
+
+class Recorder:
+    """A stand-in model: records each prompt, answers with a canned line."""
+
+    def __init__(self, reply="Nice one!", delay=0.0):
+        self.prompts, self.reply, self.delay = [], reply, delay
+
+    def __call__(self, system, prompt):
+        assert "SKIP" in system
+        self.prompts.append(prompt)
+        time.sleep(self.delay)
+        return self.reply
+
+
+def test_clean():
+    assert clean("SKIP") == clean("skip.") == clean("  ") == []
+    assert clean("see https://example.com") == clean("www.x.org is fun") == []
+    assert clean('"Good game!"') == ["Good game!"]
+    assert clean("**Well** played") == ["Well played"]
+    long = clean("word " * 60)[0]
+    assert len(long) <= 140 and long.endswith("…")
+    assert clean("one\n\ntwo\nthree", 2) == ["one", "two"]
+
+
+def test_played():
+    assert chat.played("Nice game!", [])
+    assert not chat.played("Maybe try Nf3 here", ["e2e4", "e7e5"])
+    assert chat.played("1. e4 e5 2. Nf3: a classic", ["e2e4", "e7e5", "g1f3"])
+    assert not chat.played("O-O was safer", ["e2e4"])
+    assert chat.played("Qxf7# was nice", "e2e4 e7e5 f1c4 b8c6 d1h5 g8f6 h5f7".split())
+
+
+class Gate(Recorder):
+    """A model that waits for open() before it answers."""
+
+    def __init__(self, reply="Sure!"):
+        super().__init__(reply)
+        self.gate = threading.Event()
+
+    def __call__(self, system, prompt):
+        self.prompts.append(prompt)
+        self.gate.wait(10)
+        return self.reply
+
+
+def test_quiet_and_close_stop_messages_in_flight():
+    f, llm = Fake(white=True, hello=""), Gate()
+    f.opponent = "inflight-opp"
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    f.say(c, "hi")
+    wait(lambda: llm.prompts)
+    f.say(c, "!quiet")
+    llm.gate.set()
+    wait(lambda: f.posts)
+    time.sleep(0.2)
+    assert f.posts == [("player", chat.QUIET)]
+    f2, llm2 = Fake(white=True, hello=""), Gate()
+    f2.opponent = "closed-opp"
+    c2 = Chatter(f2, llm2)
+    f2.play(c2, [], first=True)
+    f2.say(c2, "hi")
+    wait(lambda: llm2.prompts)
+    c2.close()  # the game thread ended without a final state
+    llm2.gate.set()
+    time.sleep(0.2)
+    assert f2.posts == [] and c2.cancelled
+
+
+def test_views_follow_the_game():
+    """A same-ply view is replaced; a changed history drops the views after it."""
+    f, llm = Fake(white=True, hello=""), Recorder()
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    f.play(c, ["e2e4"], wdl=(0.5, 0.0, 0.5))
+    f.play(c, ["e2e4"], wdl=(0.2, 0.0, 0.8))  # revised features at the same ply
+    assert c.views[1][1] == pytest.approx([0.8, 0.0, 0.2])
+    f.play(c, ["e2e4", "e7e5"])
+    f.play(c, ["d2d4", "d7d5"])  # a different game state on reconnect
+    assert set(c.views) == {0, 2} and c.views[2] is not None
+
+
+def logits(probs, wdl):
+    """A model output with these move probabilities and this (side to move's) win/draw/loss."""
+    z = torch.full((2432,), -50.0)
+    for u, p in probs.items():
+        z[MOVE_ID[u]] = float(torch.tensor(p).log())
+    z[WDL] = torch.tensor(wdl).log()
+    return z
+
+
+class Fake:
+    """A Match and Game in the shape the chat reads, driven by hand."""
+
+    def __init__(self, white=False, **cfg):
+        self.posts = []
+        client = SimpleNamespace(
+            chat=lambda gid, text, room: self.posts.append((room, text))
+        )
+        config = SimpleNamespace(chat=Chat(enabled=True, gap=0, **cfg))
+        self.bot = SimpleNamespace(config=config, client=client, me="allie")
+        self.gid, self.white, self.opponent, self.over = "g1", white, "opp", False
+        self.game = SimpleNamespace(moves=[], board=chess.Board(), logits=None, used=[], tokens=[],
+                                    elo=(1500, 1500))  # fmt: skip
+        self.full = dict(type="gameFull", white=dict(name="Opp", rating=1480),
+                         black=dict(name="allie", rating=1500), speed="blitz", rated=True,
+                         clock=dict(initial=180000, increment=2000))  # fmt: skip
+
+    def play(self, c, moves, probs=None, wdl=(0.4, 0.2, 0.4), status="started", winner=None,
+             first=False):  # fmt: skip
+        """The game reaches `moves`; the model's view there: probs and wdl, for the side to
+        move (probs: uniform over the legal moves by default)."""
+        g = self.game
+        g.moves, g.board = list(moves), chess.Board()
+        for u in moves:
+            g.board.push_uci(u)
+        if probs is None:
+            probs = {m.uci(): 1.0 for m in g.board.legal_moves}
+        g.logits = logits({u: p / sum(probs.values()) for u, p in probs.items()}, wdl)
+        state = dict(type="gameState", moves=" ".join(moves), wtime=170000, btime=171000,
+                     status=status, winner=winner)  # fmt: skip
+        c.seen(self.full | dict(state=state) if first else state)
+
+    def say(self, c, text, who=None, room="player"):
+        who = (
+            who or self.opponent.capitalize()
+        )  # a username; the opponent's id in lower case
+        c.heard(dict(type="chatLine", username=who, room=room, text=text))
+
+
+def test_compliment_and_privacy():
+    """Black bot. White's rare move that Allie rates strong gets a compliment; a rare blunder
+    gets nothing, and an answer during the game leaves it and our good prospects out."""
+    f, llm = Fake(every=0), Recorder()
+    c = Chatter(f, llm)
+    f.play(c, [], {"e2e4": 0.89, "f2f3": 0.01, "d2d4": 0.1}, first=True)  # white's view
+    wait(lambda: f.posts)
+    assert f.posts[0] == ("player", chat.HELLO)
+    f.play(c, ["f2f3"], wdl=(0.2, 0.2, 0.6))  # our view: f3 was strong (0.5 -> 0.3)
+    f.play(c, ["f2f3", "e7e5"], {"g1h3": 0.97, "g2g4": 0.03})
+    wait(lambda: len(f.posts) == 2)
+    assert "rare, strong find" in llm.prompts[0]
+    assert (
+        "1. f3: Allie gave it 1% for a 1480 player (not its top prediction)"
+        in llm.prompts[0]
+    )
+    f.play(c, ["f2f3", "e7e5", "g2g4"], wdl=(0.8, 0.1, 0.1))  # a blunder: 0.5 -> 0.85
+    f.say(c, "what's the best move here?")
+    wait(lambda: len(f.posts) == 3)
+    p = llm.prompts[-1]
+    assert "  Opp: what's the best move here?" in p and "Answer your opponent's" in p
+    assert "Their last move" not in p and "Allie's estimate" not in p
+    f.play(c, ["f2f3", "e7e5", "g2g4", "d8h4"], status="mate", winner="black")
+    wait(lambda: len(f.posts) == 4)
+    p = llm.prompts[-1]
+    assert (
+        "you won by checkmate" in p and "Their last move 2. g4: Allie gave it 3%" in p
+    )
+    assert (
+        "Your last move 2...Qh4#" in p and "Their most surprising move: 1. f3 (1%)" in p
+    )
+    assert len(llm.prompts) == 3  # no remark on the blunder
+
+
+def test_hurt_and_pressure():
+    """White bot. Their expected but costly move: a graceful word; the game sinking from its
+    high: once a game."""
+    f, llm = Fake(white=True, every=0, hello=""), Recorder()
+    f.opponent = "hurt-opp"
+    c = Chatter(f, llm)
+    moves = ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "d2d3", "f8c5"]
+    ours = [0.5, 0.5, 0.3, 0.3, 0.2, 0.2, 0.15, 0.15, 0.1]  # our expected score by ply
+    for k, e in enumerate(ours):
+        mine = (e, 0.0, 1 - e)
+        probs = {moves[k]: 0.9, "a7a6": 0.1} if k % 2 else None  # their moves: expected
+        f.play(c, moves[:k], probs, mine if k % 2 == 0 else mine[::-1], first=k == 0)
+    time.sleep(0.3)
+    tasks = [p.splitlines()[-1] for p in llm.prompts]
+    assert len(tasks) == 2
+    assert "hurt you" in tasks[0] and "1...e5: Allie gave it 90%" in llm.prompts[0]
+    assert "pressing you" in tasks[1]
+
+
+def test_quiet_and_limits():
+    f, llm = Fake(white=True, replies=2), Recorder("Thanks, you too!")
+    f.opponent = "quiet-opp"
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    f.say(c, "hi")
+    f.say(c, "hi", who="allie")  # our own echo
+    f.say(c, "Takeback sent", who="lichess")
+    f.say(c, "nice bot", who="someone", room="spectator")  # spectators: not in rooms
+    wait(lambda: len(f.posts) == 2)
+    assert f.posts == [("player", chat.HELLO), ("player", "Thanks, you too!")]
+    assert len(llm.prompts) == 1
+    f.say(c, "!quiet please")
+    wait(lambda: len(f.posts) == 3)
+    assert f.posts[-1] == ("player", chat.QUIET)
+    f.say(c, "hello?")
+    f.play(c, ["e2e4", "e7e5"], status="mate")
+    time.sleep(0.3)
+    assert len(f.posts) == 3 and len(llm.prompts) == 1
+    c2 = Chatter(f, llm)  # a rematch: still quiet, no hello
+    f.play(c2, [], first=True)
+    time.sleep(0.2)
+    assert len(f.posts) == 3
+
+
+def test_burst_and_budget():
+    """Messages that arrive while the model writes get one answer, to the last; replies stop
+    at the budget."""
+    f, llm = Fake(white=True, replies=3, hello=""), Recorder(delay=0.3)
+    f.opponent = "burst-opp"
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    f.say(c, "a")
+    wait(lambda: llm.prompts)
+    for t in ("b", "c", "d", "e"):
+        f.say(c, t)
+    wait(lambda: len(f.posts) == 2)
+    time.sleep(0.5)
+    assert len(llm.prompts) == 2 and "  Burst-opp: c\n" in llm.prompts[1]
+
+
+def test_slow_model_never_delays_the_game():
+    f, llm = Fake(white=True, every=0, hello=""), Recorder(delay=2)
+    f.opponent = "slow-opp"
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    start = time.monotonic()
+    for _ in range(5):
+        f.say(c, "hey")
+    assert time.monotonic() - start < 0.5
+
+
+@pytest.fixture
+def engine(tiny):
+    e = Engine(tiny)
+    yield e
+    e.close()
+
+
+def test_chat_through_the_protocol(engine, monkeypatch):
+    """The bot on the mock server: the hello, an answer to the opponent and the post-game
+    message (remarks off: the tiny model's are random), and the moves stay legal."""
+    llm = Recorder("Good luck to you too!")
+    monkeypatch.setattr(chat, "model", lambda *a: llm)
+    mock = MockLichess({"tok": "allie"}, house_delay=0.1, max_plies=24)
+    config = Config(
+        play=Play(think_time=False), chat=Chat(enabled=True, gap=0, remarks=0)
+    )
+    bot = Bot(config, Lichess("tok", mock.url, wait=0.1), engine)
+    threading.Thread(target=bot.run, daemon=True).start()
+    try:
+        wait(lambda: bot.me is not None)
+        gid = mock.challenge("x", "allie", color="white")
+        wait(lambda: gid in mock.games and mock.games[gid].board.move_stack)
+        g = mock.games[gid]
+        g.say("x", "hi, have fun")
+        wait(lambda: g.status != "started")
+        wait(lambda: llm.prompts and "game is over" in llm.prompts[-1])
+        wait(lambda: sum(e["username"] == "allie" for e in g.chat) == 3)
+        ours = [e["text"] for e in g.chat if e["username"] == "allie"]
+        assert ours[0] == chat.HELLO and ours[1:] == ["Good luck to you too!"] * 2
+        assert any(
+            "Answer your opponent's" in p and "x: hi, have fun" in p
+            for p in llm.prompts
+        )
+        assert not mock.rejected
+    finally:
+        bot.stop()
+        mock.close()
+        bot.join()
+
+
+def test_config_section(tmp_path):
+    from allie.lichess.config import load
+
+    p = tmp_path / "bot.toml"
+    p.write_text('[chat]\nenabled = true\nrooms = ["player", "spectator"]\nevery = 6\n')
+    c = load(p)
+    assert c.chat.enabled and "spectator" in c.chat.rooms and c.chat.every == 6
+    assert not load(p, ["chat.enabled=false"]).chat.enabled
+    p.write_text("[chat]\nbogus = 1\n")
+    with pytest.raises(ValueError):
+        load(p)
+
+
+def test_ledger(tmp_path, caplog):
+    """Caps per UTC day and month; silent once reached, logged once, until the window turns;
+    the spend survives a restart."""
+    t = [chat.datetime(2026, 10, 4, 23, tzinfo=chat.UTC)]
+    path = tmp_path / "spend.json"
+    ledger = lambda: chat.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
+    a = ledger()
+    assert a.allows()
+    assert a.add(0.6) == [0.6, 0.6] and a.allows()
+    a.add(0.5)
+    assert not a.allows() and not a.allows()
+    assert sum("2026-10-04" in r.message for r in caplog.records) == 1
+    b = ledger()  # a restart
+    assert not b.allows()
+    t[0] = chat.datetime(2026, 10, 5, 1, tzinfo=chat.UTC)  # a new day, the same month
+    assert b.allows()
+    assert b.add(0.4) == pytest.approx([0.4, 1.5]) and not b.allows()  # the month's cap
+    t[0] = chat.datetime(2026, 11, 1, tzinfo=chat.UTC)
+    assert b.allows()
+    path.write_text("{not json")
+    assert ledger().allows()  # a corrupt ledger starts over
+
+
+class FakeAPI:
+    """A local Messages API: records each request, answers from a script of
+    ("text", stop_reason) or (HTTP status,) or ("sleep", seconds)."""
+
+    def __init__(self, script):
+        import json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        self.script, self.requests = list(script), []
+        api = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                api.requests.append(
+                    ({k.lower(): v for k, v in self.headers.items()}, body)
+                )
+                step = api.script.pop(0)
+                if step[0] == "sleep":
+                    time.sleep(step[1])
+                    step = ("late", "end_turn")
+                if isinstance(step[0], int):
+                    out, code = (
+                        {"type": "error", "error": {"type": "x", "message": "no"}},
+                        step[0],
+                    )
+                else:
+                    usage = dict(input_tokens=300, output_tokens=12, cache_read_input_tokens=700,
+                                 cache_creation_input_tokens=0)  # fmt: skip
+                    out, code = dict(id="msg_1", type="message", role="assistant",
+                                     model=body["model"], content=[dict(type="text", text=step[0])],
+                                     stop_reason=step[1], stop_sequence=None, usage=usage), 200  # fmt: skip
+                data = json.dumps(out).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+def test_claude_requests(monkeypatch, tmp_path):
+    """The SDK path against a local API: the request's shape, the key file, refusals, timeouts,
+    and a bad key turning the model off."""
+    pytest.importorskip("anthropic")
+    api = FakeAPI([("Nice move!", "end_turn"), ("x", "refusal"), ("sleep", 1.5), (401,),
+                   ("never", "end_turn")])  # fmt: skip
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", api.url)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    path = tmp_path / "key"
+    path.write_text("sk-test-123\n")
+    path.chmod(0o600)
+    ledger = tmp_path / "spend" / "ledger.json"
+    cfg = Chat(enabled=True, timeout=1.0, key_file=str(path), ledger=str(ledger))
+    m = chat.make(cfg)
+    assert m("system text", "facts") == "Nice move!"
+    headers, body = api.requests[0]
+    assert headers["x-api-key"] == "sk-test-123"
+    assert "server-side-fallback-2026-07-01" in headers["anthropic-beta"]
+    assert body["model"] == "claude-sonnet-5-5" and body["max_tokens"] == 200
+    assert body["thinking"] == {"type": "between_tools"}
+    assert body["output_config"] == {"effort": "low"} and body["fallbacks"] == "default"
+    assert body["system"] == [
+        dict(type="text", text="system text", cache_control=dict(type="ephemeral"))
+    ]
+    assert body["messages"] == [dict(role="user", content="facts")]
+    assert m("s", "p") == ""  # refusal
+    start = time.monotonic()
+    assert m("s", "p") == ""  # timeout
+    assert time.monotonic() - start < 1.4
+    assert m("s", "p") == ""  # 401: off
+    assert m("s", "p") == "" and len(api.requests) == 4
+    assert m.usage["calls"] == 2 and m.usage["cached"] == 1400
+    usd = (300 * 2 + 700 * 0.2 + 12 * 10) / 1e6  # each answered call, refusals too
+    assert m.usage["usd"] == pytest.approx(2 * usd)
+    day = chat.datetime.now(chat.UTC).strftime("%Y-%m-%d")
+    assert json.loads(ledger.read_text())[day] == pytest.approx(2 * usd)
+    api.script = [("over the cap", "end_turn")] * 2
+    capped = chat.make(
+        Chat(enabled=True, key_file=str(path), ledger=str(ledger), day_cap=3 * usd)
+    )
+    assert capped("s", "p") == "over the cap"  # $0.0017 of $0.0026: one more call
+    assert capped("s", "p") == "" and len(api.script) == 1
+    path.unlink()
+    assert chat.make(cfg)("s", "p") == ""  # no key: fixed lines only
