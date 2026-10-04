@@ -62,26 +62,78 @@ trust_remote_code=True)`, see the model card).
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
 | `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
 
-- **Think time.** The bot waits for a think time drawn from the model's think-time head: a full
-  distribution over 63 bins, from 0 s to over an hour, conditioned on the position, both clocks and both
-  ratings. A draw, not the average, so it plays fast moves fast and sometimes thinks long, as people do.
-  A guard keeps every wait under a share of the clock left (plus the increment), fitted so that human moves
-  almost never exceed it. Compute time counts toward the wait. Each side's first move takes 0.5-2 s.
-- **Resigning.** Each turn, the bot resigns with the probability that a human of its rating resigns in that
-  situation: a hazard fitted on held-out human games, from the model's win / draw / loss estimate, the ply,
-  the rating, the time control and the clock. It never resigns while the model gives it a real chance (the
-  1st percentile of P(loss) at human resignations). `play.resign = false` turns it off.
-- **Draws.** It offers draws as often as humans end games by agreement in that situation, and accepts an offer
-  unless it is clearly better (expected score above where 95% of human agreements happen).
-  `play.draws = false` turns both off.
-- **Calibration.** `analysis/lichess/human.py` scores the main evaluation's July 2026 games, fits
-  `behaviour.json` on half of them and compares on the other half, then plays the bot against itself in the
-  same ratings and time controls to compare its games with the humans'. See "Human-likeness" below.
+- **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
+  63 bins, from 0 s to over an hour, given the position, both clocks and both ratings. It is a draw, not
+  the average, so the bot plays obvious moves fast and sometimes thinks long, as people do. Human times
+  are measured by the server, so the bot takes the network lag (`play.lag`, 0.1 s) off the draw. Compute
+  time counts toward the wait. Each side's first move takes 0.5-2 s.
+- **Clock safety.** The wait never exceeds half of the clock left above a 1 s reserve, plus the increment,
+  and never the clock above the reserve itself (the increment arrives only after the move). Fewer than 1%
+  of human moves would be cut by this guard.
+- **Resigning.** At each position, the bot resigns with the probability that a human of its rating resigns
+  there: on its turn instead of moving, or right after its own move, when the new position shows it is
+  lost. The probability is a hazard fitted on held-out human games, from the model's win / draw / loss
+  estimate, the ply, the rating, the time control and the clock. It never resigns below the P(loss) under
+  which humans almost never resign (the 5th percentile of their resignations, 0.56). `play.resign = false`
+  turns it off.
+- **Draws.** It ends games by agreement about as often as humans do in the same situation, by offering a
+  draw with its move. It accepts an offer unless it is clearly better: above an expected score of 0.62,
+  where three quarters of human agreements happen at or below. The game data show agreements, not offers,
+  so these rules are heuristics. `play.draws = false` turns both off.
+- **Calibration.** `analysis/lichess/human.py` scores the main evaluation's games, fits `behaviour.json` on
+  half of them and checks it on the other half. It then plays the bot against itself in those games'
+  ratings and time controls, and compares its games with the humans'. See "Human-likeness" below.
 - **Modes.** `play.mode` names a function in `engine.MODES`. It chooses the move from `game.position()` and
   passes it to `game.behave()`, which adds the think time, resignation and draw offer.
 - **Challenges.** `[challenge]` sets the accepted speeds, base times, increments, rated or casual games, humans
   or bots, and games per opponent. Only standard chess from the starting position is accepted. Beyond
   `max_games`, challenges are declined with "later".
+
+## Human-likeness
+
+Measured on the main evaluation's July 2026 games between two humans with every clock known, 12,159 games.
+Parameters come from the even-numbered half; every number below is from the odd half.
+
+**Think time.** Seconds per move, from the think-time head's draws at the human positions, against the
+humans' own times there. The model draws as humans spend.
+
+| Positions | Human median | Bot median | Human 90th percentile | Bot 90th percentile |
+|---|---:|---:|---:|---:|
+| bullet | 1 | 1.2 | 4 | 4.0 |
+| blitz | 2 | 2.5 | 11 | 10.7 |
+| rapid | 5 | 4.8 | 23 | 22.8 |
+| classical | 9 | 8.9 | 49 | 47.0 |
+| under 10% of the clock left | 1 | 1.1 | 6 | 5.7 |
+| one legal move | 2 | 2.1 | 8 | 7.9 |
+
+The clock guard cuts 1% of these draws. The rule it replaced, which capped every wait at 10% of the clock
+left, cut 12% of them, and 55% when under 10% of the clock was left.
+
+**Resigning.** On the held-out games, humans resign in 22.5% of player-games. Their P(loss) at resignation,
+by the model, is 0.56 at the 5th percentile, 0.86 at the 25th and 0.95 at the median; 87% resign on their
+own turn. The fitted hazard, sampled along the same games, resigns at P(loss) 0.66 / 0.83 / 0.94 (5th, 25th,
+median). The previous rule resigned only at P(loss) 0.97 / 0.98 / 0.98, about 15 plies later than humans.
+Like a human, the hazard sometimes resigns a game that could still have been saved: for 1.7% of
+player-games, against 0.1% for the previous rule.
+
+**Whole games.** 400 games of the bot against itself, 25 per format and rating band, in held-out games'
+ratings and time controls. Clocks are virtual, and each move costs its think time (at least 0.05 s of
+compute) plus 0.1 s of lag. Endings, bot (human):
+
+| Format | Mate | Resignation | Flag | Draw |
+|---|---:|---:|---:|---:|
+| bullet | 40% (25%) | 35% (24%) | 19% (50%) | 6% (1%) |
+| blitz | 32% (30%) | 54% (48%) | 3% (18%) | 11% (4%) |
+| rapid | 29% (22%) | 61% (68%) | 1% (6%) | 9% (4%) |
+| classical | 29% (32%) | 64% (52%) | 0% (7%) | 7% (9%) |
+
+- **Resignation** happens about as often as in human games, and 7-22% of the bot's resignations come right
+  after its own move, against 13% for humans.
+- **Flags** are much rarer than between humans: the bot does not fall into time trouble as humans do, and
+  the guard stops it from flagging. In 9 of the 100 bullet games, a bot flagged while the model did not
+  count it as losing.
+- **Draws** include repetition, stalemate and insufficient material. The bot agrees to draws in 2-3% of
+  blitz to classical games, as humans do.
 
 ## Chat
 
