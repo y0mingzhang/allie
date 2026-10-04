@@ -4,7 +4,7 @@
     python -m allie.lichess.hub upload OUT_DIR             # private unless --public
 
 The folder runs with transformers alone (AutoModel, trust_remote_code): it ships this package's
-api.py, model.py and tokens.py unchanged, plus hf/'s configuration, modeling wrapper and card.
+api.py, fast.py, model.py and tokens.py unchanged, plus hf/'s configuration, modeling wrapper and card.
 """
 
 import argparse
@@ -17,7 +17,7 @@ from .api import REPO
 
 GITHUB = "https://github.com/y0mingzhang/allie"
 HERE = Path(__file__).parent
-CODE = ("api.py", "model.py", "tokens.py")
+CODE = ("api.py", "fast.py", "model.py", "tokens.py")
 WRAPPER = ("configuration_allie.py", "modeling_allie.py", "README.md")
 
 

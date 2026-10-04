@@ -13,6 +13,7 @@ from transformers import PreTrainedModel
 
 from .api import Allie, resolve
 from .configuration_allie import AllieConfig
+from .fast import Fast  # noqa: F401 - transformers copies only directly imported files
 from .model import Model
 from .tokens import (
     HEADER,  # noqa: F401 - transformers copies only directly imported files
@@ -34,11 +35,14 @@ class AllieModel(PreTrainedModel):
 
     @classmethod
     def from_pretrained(cls, name, *args, config=None, device=None, device_map=None,
-                        int8=None, active_experts=None, **kwargs):  # fmt: skip
+                        int8=None, active_experts=None, backend=None, threads=None,
+                        **kwargs):  # fmt: skip
         """device (or a single-device device_map): default CUDA if available. dtype /
         torch_dtype: bfloat16 (default) or float32. int8: int8 weights, the CPU default with
-        bfloat16 (half the memory, twice the speed). active_experts: route each token through
-        only this many of its 16 experts (faster, slightly less accurate)."""
+        bfloat16 (half the memory, faster). active_experts: route each token through
+        only this many of its 16 experts (faster, slightly less accurate). backend: "fast"
+        (C++ kernels compiled on first use, the CPU default) or "torch" (the PyTorch
+        reference). threads: the fast backend's CPU threads."""
         hub = {k: kwargs[k] for k in ("revision", "cache_dir", "token", "local_files_only",
                                       "force_download") if k in kwargs}  # fmt: skip
         path = resolve(name, **hub)
@@ -63,7 +67,8 @@ class AllieModel(PreTrainedModel):
             raise ValueError("dtype must be bfloat16 or float32")
         if int8 is None:
             int8 = device.type == "cpu" and dtype == torch.bfloat16
-        return cls(config, Allie(Model(path, device, dtype, active_experts, int8)))
+        model = Model(path, device, dtype, active_experts, int8, backend, threads)
+        return cls(config, Allie(model))
 
     def analyze(self, *args, **kwargs):
         return self.allie.analyze(*args, **kwargs)

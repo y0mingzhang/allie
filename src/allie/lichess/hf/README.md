@@ -39,18 +39,21 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
 - **More outputs:** `model.analyze(...)` also returns the mover's win / draw / loss probabilities and their
   expected think time.
 - **Device:** `device="cuda"` (the default when a GPU is visible) or `device="cpu"`. On CPU the weights
-  default to int8 (8 GB, about twice as fast as BF16); `int8=False` keeps BF16 (11 GB).
+  default to int8 (6.4 GB, about 1.6 times as fast as BF16); `int8=False` keeps BF16 (11 GB).
   `active_experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
-- **Speed:** calls that extend the previous call's game reuse its key-value cache, so following a game move
-  by move costs one new token per call.
+- **Speed:** on CPU the model runs C++ kernels compiled for your machine on first use (a few seconds; it needs
+  a C++ compiler, and without one runs the plain PyTorch code), on GPU replayed CUDA graphs. `backend="torch"`
+  runs the plain PyTorch reference, `threads=` sets the CPU threads. Calls that extend the previous call's
+  game reuse its key-value cache, so following a game move by move costs one new token per call.
 
 | Device | Weights | ms per move | Memory |
 |---|---|---:|---:|
-| CPU, 8 threads (AMD EPYC 9354) | int8 (CPU default) | 29 | 8 GB |
-| CPU, 8 threads | int8, 8 of 16 experts | 24 | 8 GB |
-| CPU, 8 threads | BF16 | 69 | 11 GB |
-| GPU (NVIDIA L40S), one game | BF16 | 18 | 11 GB |
-| GPU, 16 games at once (`allie-bot`) | BF16 | 4 per game | 11 GB |
+| CPU, 8 threads (AMD EPYC 9755) | int8 (CPU default) | 6.3 | 6.4 GB |
+| CPU, 32 threads (AMD EPYC 9755) | int8 | 4.6 | 6.4 GB |
+| CPU, 8 threads, AVX2 only | int8 | 6.7 | 6.4 GB |
+| CPU, 16 threads (AMD EPYC 9755) | BF16 | 7.8 | 11 GB |
+| GPU (NVIDIA RTX A6000), one game | BF16 | 7.3 | 11 GB |
+| GPU, 16 games in one step | BF16 | 1.5 per game | 11 GB |
 
 ## Play on Lichess, and the command line
 

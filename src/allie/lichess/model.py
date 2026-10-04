@@ -4,9 +4,12 @@ The forward restates the training GPT.forward (allie.model.nanogpt, eval path) o
 with each game's keys and values in a Cache. It matches the trained model up to floating-point
 summation order (analysis/lichess/parity.py). Weights come from export.py: BF16 in F.linear
 layout with the attention lambdas folded in; router, balancing bias, centre and scalars FP32.
+This code is the reference; by default step() runs fast.py instead (C++ kernels on CPU, CUDA
+graphs of this forward on GPU), which matches it within BF16 rounding.
 """
 
 import json
+import warnings
 from pathlib import Path
 
 import torch
@@ -46,19 +49,26 @@ def read(path):
 
 
 def quantize(w):
-    """Symmetric int8 per output row: (int8 weights, BF16 scales)."""
-    w = w.float()
-    s = w.abs().amax(-1).clamp_min(1e-12) / 127
-    q = (w / s[..., None]).round().clamp(-127, 127).to(torch.int8)
-    return q.contiguous(), s.to(torch.bfloat16)
+    """Symmetric int8 per output row: (int8 weights, BF16 scales). In slices of the first
+    dimension, so the FP32 copy is small."""
+    q, s = torch.empty(w.shape, dtype=torch.int8), torch.empty(w.shape[:-1], dtype=torch.bfloat16)
+    for a in range(0, len(w), 16):
+        x = w[a : a + 16].float()
+        r = x.abs().amax(-1).clamp_min(1e-12) / 127
+        q[a : a + 16], s[a : a + 16] = (x / r[..., None]).round().clamp(-127, 127), r
+    return q, s
 
 
 class Model:
     """active_experts: route each token through only the best `active_experts` of its top-k,
     with the gates they have in the top-k (the speed knob; None = all). int8: the block
-    matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory."""
+    matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory.
+    backend: "fast" runs step() in fast.py: its C++ kernels on CPU (BF16 activations), CUDA
+    graphs of forward() on GPU; "torch" in the PyTorch code below (the reference); None: fast
+    where it applies (CPU with BF16, any GPU) and works."""
 
-    def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False):
+    def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False,
+                 backend=None, threads=None):  # fmt: skip
         path = Path(path)
         self.config = c = json.loads((path / "config.json").read_text())
         self.device, self.dtype = torch.device(device), dtype
@@ -90,6 +100,20 @@ class Model:
         self.smear, self.backout = s[3 * n].item(), s[3 * n + 1].item()
         self.skip_lambdas = s[3 * n + 2 : 3 * n + 5]
         self.ve = c["value_embeds"]
+        self.fast = self.graphs = None
+        assert backend in (None, "fast", "torch"), backend
+        if backend != "torch" and (backend or self.device.type == "cuda" or dtype == torch.bfloat16):
+            try:
+                from .fast import Fast, Graphs
+
+                if self.device.type == "cuda":
+                    self.graphs = Graphs(self, strict=backend == "fast")
+                else:
+                    self.fast = Fast(self, threads)
+            except Exception as e:
+                if backend == "fast":
+                    raise
+                warnings.warn(f"Allie's fast backend is unavailable, using PyTorch: {e}")
 
     def board(self, states):
         w, dt = self.w, self.dtype
@@ -249,8 +273,9 @@ class Cache:
 
     def __init__(self, model, capacity=128):
         self.model, self.n, self.capacity = model, 0, 0
-        self.k = self.v = self.e = None
-        self.reserve(capacity)
+        self.k = self.v = self.e = self.slot = None
+        if not (model.graphs and model.graphs.attach(self)):  # a slot of the GPU pool, or our own
+            self.reserve(capacity)
 
     def reserve(self, n):
         if n <= self.capacity:
@@ -275,6 +300,10 @@ def step(model, items):
     """Append tokens to caches in one batched forward. items: (cache, ids, feats, boards) with
     ids [m] int64, feats [m, 3] and boards [m, 68] uint8 tensors on the model's device. Returns
     the logits [len(items), 2432] FP32 at each item's last new token."""
+    if model.fast is not None:
+        return model.fast.step(items)
+    if model.graphs is not None and (z := model.graphs.step(items)) is not None:
+        return z
     spans, lo = [], 0
     for cache, ids, *_ in items:
         cache.reserve(cache.n + len(ids))

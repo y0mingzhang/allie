@@ -15,7 +15,7 @@ def tiny_export(path, layers=6, width=64, head_dim=16, experts=8, topk=4, seed=0
     heads, ve, eh, sh, dense, vocab = (
         width // head_dim,
         min(5, layers // 2),
-        8,
+        16,  # torch's int8 kernel reads past rows shorter than 16 on avx-512 cpus
         16,
         32,
         2432,
