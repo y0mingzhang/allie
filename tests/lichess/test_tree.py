@@ -52,7 +52,7 @@ def test_coverage_search_plays_legal_moves(tiny):
     game.update(random_game(6, 12), 175, 176)
     search = tree.Coverage()
     play = Play(mode="strongest", search=5)
-    moves, p = search(game, 5)
+    moves, p = search(game, 5)[:2]
     assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
     assert abs(p.sum() - 1) < 1e-9
     assert game.decide(play, search).move in moves
@@ -170,7 +170,7 @@ def test_concurrent_searches_match_sequential(tiny_path):
     for t in [blocker, *threads]:
         t.join()
     assert engine.widest > 8  # more than one search chunk in a forward: requests merged
-    for (m1, p1), (m2, p2) in zip(alone, together):
+    for (m1, p1, *_), (m2, p2, *_) in zip(alone, together):
         assert m1 == m2
         assert np.abs(np.asarray(p1) - np.asarray(p2)).max() < 2e-3
     p, q = (torch.softmax(z[378:2346].float(), -1) for z in (got[0], expected))
@@ -204,7 +204,7 @@ def test_a_search_past_its_deadline_stops(tiny_path, monkeypatch):
     assert search(game, 32, deadline=1.5) is None
     assert calls[1] > 8 and len(steps) == 1  # stopped within the first nodes, after one chunk
     monkeypatch.setattr(tree, "monotonic", time.monotonic)
-    moves, p = search(game, 32)
+    moves, p = search(game, 32)[:2]
     assert len(calls) > 3
     assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves) and abs(p.sum() - 1) < 1e-9
 

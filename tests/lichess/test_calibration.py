@@ -26,8 +26,8 @@ def test_the_clock_caps_the_budget():
         for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 1000.0):
             n = calibration.affordable(kind, budget, clock, reserve=1.0)
             tenth = calibration.limit(clock, 1.0) / 2
-            assert n in (0, *calibration.LADDER[kind]) and n <= budget and n * calibration.SECONDS[kind] <= tenth
-            assert all(b * calibration.SECONDS[kind] > tenth for b in calibration.LADDER[kind] if n < b <= budget)
+            assert n in (0, *calibration.LADDER[kind]) and n <= budget and n * calibration.COST[kind] <= tenth
+            assert all(b * calibration.COST[kind] > tenth for b in calibration.LADDER[kind] if n < b <= budget)
     assert calibration.affordable("coverage", 256, 0.2) == 0 and calibration.affordable("coverage", 256, None) == 256
     assert calibration.limit(51.0, 1.0) == 10.0
 
@@ -40,8 +40,8 @@ def test_tilt():
 
 
 class Search:
-    """Records budgets and deadlines; coverage gives the last legal move certain, lookahead a flat
-    prior with the last move valued 1 and the others -1."""
+    """Records budgets and deadlines; gives the legal moves, coverage's calibrated distribution with
+    the first move certain, and a flat prior with the last move valued 1 and the others -1."""
 
     def __init__(self, kind):
         self.kind, self.budgets, self.deadlines, self.late = kind, [], [], False
@@ -52,10 +52,10 @@ class Search:
         if self.late:
             return None
         moves = [m.uci() for m in game.board.legal_moves]
-        last = np.arange(len(moves)) == len(moves) - 1
+        last, prior = np.arange(len(moves)) == len(moves) - 1, np.full(len(moves), 1 / len(moves))
         if self.kind == "coverage":
-            return moves, last.astype(float)
-        return moves, np.full(len(moves), 1 / len(moves)), np.where(last, 1.0, -1.0)
+            return moves, (np.arange(len(moves)) == 0).astype(float), prior, np.where(last, 1.0, -1.0)
+        return moves, prior, np.where(last, 1.0, -1.0)
 
 
 def test_calibrated_mode(tiny_path, tiny, monkeypatch):
@@ -77,20 +77,22 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     game = Game(engine, 2000, 2000, 600, 5, "rapid", seed=0)
     game.update(random_game(3, 20), 590, 585)
     assert game.decide(play, None, 590).move in legal_of(game)  # no searcher: the policy
-    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # the cell's searched distribution
-    assert search["coverage"].budgets == [256]
+    assert game.decide(play, search, 590).move == legal_of(game)[0]  # coverage's calibrated distribution
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", 256, 40.0)})
+    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # coverage's values: prior exp(40 Q)
+    assert search["coverage"].budgets == [256, 256]
     monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("lookahead", 8, 40.0)})
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # prior exp(40 Q)
     assert search["lookahead"].budgets == [8]
     monkeypatch.setattr(calibration, "CELLS", {})
     game.decide(play, search, 590)
-    assert search["coverage"].budgets == [256] and search["lookahead"].budgets == [8]  # no cell: no search
+    assert search["coverage"].budgets == [256, 256] and search["lookahead"].budgets == [8]  # no cell: no search
     monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", 256, None)})
     t = time.monotonic()
     reserve = behaviour.PARAMETERS["guard"]["reserve"]
     search["coverage"].late = True  # past its deadline: the move comes from the policy
     d = game.decide(play, search, 590)
-    assert search["coverage"].budgets == [256, 256]
+    assert search["coverage"].budgets == [256] * 3
     assert search["coverage"].deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
     legal, p, _, _ = game.position()
     assert d.probability == pytest.approx(p[legal.index(d.move)])

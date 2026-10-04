@@ -217,8 +217,9 @@ class Nodes:
 
 
 class Coverage:
-    """search(game, simulations, deadline) -> (legal moves, searched human-move probabilities), or
-    None if the search runs past deadline (time.monotonic())."""
+    """search(game, simulations, deadline) -> (legal moves, searched human-move probabilities, their
+    prior, their searched values for the mover), or None if the search runs past deadline
+    (time.monotonic())."""
 
     def __init__(self, threads=4):
         self.parameters = json.loads(CALIBRATION.read_text())
@@ -253,7 +254,8 @@ class Coverage:
             out = run() if concurrent else game.engine.run(run)
         except Late:
             return None
-        return [MOVES[t - MOVE_START] for t in out["tokens"]], out["probabilities"]
+        moves = [MOVES[t - MOVE_START] for t in out["tokens"]]
+        return moves, out["probabilities"], out["legal_prior"], out["values"]
 
 
 class Lookahead:

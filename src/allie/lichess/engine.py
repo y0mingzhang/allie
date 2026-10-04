@@ -278,7 +278,7 @@ def strongest(game, play, search, clock):
     """The most likely move, or the searched distribution's (play.search simulations)."""
     legal, p, wdl, time = game.position()
     if search is not None and play.search:
-        moves, q = search(game, play.search)
+        moves, q = search(game, play.search)[:2]
         p = np.zeros(len(legal))
         p[[legal.index(m) for m in moves]] = q
     i = int(p.argmax())
@@ -292,7 +292,7 @@ def calibrated(game, play, search, clock):
     start = monotonic()
     legal, p, wdl, time = game.position()
     s, cell = p, calibration.cell(game.elo[len(game.moves) % 2], game.speed)
-    # searches cost what calibration.SECONDS assumes only on the fast CPU backend
+    # searches cost what calibration.COST assumes only on the fast CPU backend
     if search and cell and len(legal) > 1 and game.engine.model.fast is not None:
         kind, budget, beta = cell
         left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
@@ -300,7 +300,7 @@ def calibrated(game, play, search, clock):
         n = calibration.affordable(kind, budget, left, reserve)
         deadline = monotonic() + calibration.limit(left, reserve)
         if n and (found := search[kind](game, n, deadline)) is not None:
-            moves, q = found if kind == "coverage" else (found[0], calibration.tilt(*found[1:], beta))
+            moves, q = found[0], found[1] if beta is None else calibration.tilt(*found[-2:], beta)
             s = np.zeros(len(legal))
             s[[legal.index(m) for m in moves]] = q
     i = int(game.rng.choice(len(legal), p=s / s.sum()))
