@@ -38,6 +38,7 @@ class Tree:
         self.v, self.e = torch.empty_like(self.k), torch.empty(capacity, m.width, **kw)
         self.k[:, :, 0] = self.v[:, :, 0] = 0  # slot 0 (the root's id) pads shorter paths
         self.capacity, self.new_tokens = capacity, 0
+        self.concurrent = False  # nodes through the engine's queue (a search on the game's thread)
 
     def reset(self):
         self.new_tokens = 0
@@ -190,11 +191,14 @@ class Nodes:
                 c.truncate(n0)
                 c.reserve(n0 + len(p))
                 for d, j in enumerate(p[:-1]):
-                    c.k[:, :, n0 + d], c.v[:, :, n0 + d], c.e[n0 + d] = t.k[:, :, j], t.v[:, :, j], t.e[j]
+                    r = n0 + d
+                    c.k[:, :, r], c.v[:, :, r], c.e[r] = t.k[:, :, j], t.v[:, :, j], t.e[j]
                 c.n = n0 + len(p) - 1
-                items.append((c, torch.as_tensor(self.token[[i]]), torch.as_tensor(self.feats[[i]], dtype=torch.float32),
-                              torch.as_tensor(np.frombuffer(self.board[i], np.uint8).reshape(1, 68).copy())))  # fmt: skip
-            out.append(m.fast.step(items).double().numpy())
+                board = np.frombuffer(self.board[i], np.uint8).reshape(1, 68).copy()
+                feats = torch.as_tensor(self.feats[[i]], dtype=torch.float32)
+                items.append((c, torch.as_tensor(self.token[[i]]), feats, torch.as_tensor(board)))
+            z = t.game.engine.steps(items) if t.concurrent else m.fast.step(items)
+            out.append(z.double().numpy())
             for c, i in zip(caches, batch):
                 r = c.n - 1
                 t.k[:, :, i], t.v[:, :, i], t.e[i] = c.k[:, :, r], c.v[:, :, r], c.e[r]
@@ -221,11 +225,16 @@ class Coverage:
             legal=from_prefix(np.asarray(game.tokens)).legal(),
         )
 
+        concurrent = game.engine.model.fast is not None
+
         def run():
             tree = Tree(game, z, capacity=4 * simulations + 256)
-            s = Search(tree, threads=self.threads, calibration=self.parameters)
+            tree.concurrent = concurrent
+            s = Search(tree, threads=1 if concurrent else self.threads, calibration=self.parameters)
             return s._batch([row], [feats], "coverage", simulations, "predicted",
                             False, 0.9, 2.0, 1.25)[0]  # fmt: skip
 
-        out = game.engine.run(run)
+        # on the fast backend, the search runs on this game's thread and its nodes join the
+        # engine's batches with other games' moves and searches; otherwise it has the engine alone
+        out = run() if concurrent else game.engine.run(run)
         return [MOVES[t - MOVE_START] for t in out["tokens"]], out["probabilities"]

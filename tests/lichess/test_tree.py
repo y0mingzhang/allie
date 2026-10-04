@@ -117,3 +117,43 @@ def test_fast_nodes_match_reference(tiny_path, tiny):
     assert (got - hi).abs().max() < 2 * (ref - hi).abs().max() + 0.02
     p, q = (torch.softmax(z[:, 378:2346].float(), -1) for z in (got, ref))
     assert (p - q).abs().max() < 1e-3
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_concurrent_searches_match_sequential(tiny_path):
+    """On the fast backend, searches run on the games' threads and their nodes share the engine's
+    batches: the same distributions as one search at a time, up to BF16 batching noise."""
+    pytest.importorskip("pybind11")
+    import threading
+
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)
+    engine, search = Engine(model), tree.Coverage()
+    games = []
+    for s in range(4):
+        g = Game(engine, 2400, 2400, 1800, 20, "classical")
+        g.update(random_game(s, 12 + 2 * s), 1700, 1690)
+        games.append(g)
+    alone = [search(g, 32) for g in games]
+    together = [None] * len(games)
+
+    def go(i):
+        together[i] = search(games[i], 32)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(len(games))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for (m1, p1), (m2, p2) in zip(alone, together):
+        assert m1 == m2
+        assert np.abs(np.asarray(p1) - np.asarray(p2)).max() < 2e-3
+    assert engine.forwards > 0

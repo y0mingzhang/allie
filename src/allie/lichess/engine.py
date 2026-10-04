@@ -31,12 +31,12 @@ class Play:
 
 
 class Engine:
-    """Owns the model; game threads call extend() and run(), which the inference thread serves,
-    batching concurrent extend() calls into one forward."""
+    """Owns the model; game threads call extend(), steps() and run(), which the inference thread
+    serves, batching concurrent extend() and steps() calls into one forward of up to max_items."""
 
-    def __init__(self, model, max_batch=32):
+    def __init__(self, model, max_batch=32, max_items=64):
         behaviour.check()
-        self.model, self.max_batch = model, max_batch
+        self.model, self.max_batch, self.max_items = model, max_batch, max_items
         self.requests = queue.SimpleQueue()
         self.forwards = self.tokens = 0
         self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
@@ -50,6 +50,10 @@ class Engine:
         """Append tokens to a game's cache; logits at the last one."""
         return self._call((cache, ids, feats, boards))
 
+    def steps(self, items):
+        """extend() for several caches at once (a search's nodes); logits [len(items), vocab]."""
+        return self._call(list(items))
+
     def run(self, fn):
         """fn() on the inference thread, alone."""
         return self._call(fn)
@@ -61,33 +65,42 @@ class Engine:
 
     def _loop(self):
         while (first := self.requests.get()) is not None:
-            batch = [first]
-            while len(batch) < self.max_batch:
+            batch, items = [first], self._size(first[0])
+            while len(batch) < self.max_batch and items < self.max_items:
                 try:
                     batch.append(self.requests.get_nowait())
                 except queue.Empty:
                     break
+                items += self._size(batch[-1][0])
             if None in batch:  # close(): serve what came before it, then stop
                 self.requests.put(None)
                 batch = batch[: batch.index(None)]
-            steps = [(r, f) for r, f in batch if isinstance(r, tuple)]
-            if steps:
+            groups = [(r if isinstance(r, list) else [r], f, isinstance(r, list))
+                      for r, f in batch if not callable(r)]  # fmt: skip
+            if groups:
+                flat = [it for g, _, _ in groups for it in g]
                 try:
-                    logits = step(self.model, [r for r, _ in steps]).cpu()
+                    logits = step(self.model, flat).cpu()
                 except Exception as e:  # noqa: BLE001 - every waiting game gets the error
-                    for _, f in steps:
+                    for _, f, _ in groups:
                         f.set_exception(e)
                 else:
                     self.forwards += 1
-                    self.tokens += sum(len(r[1]) for r, _ in steps)
-                    for (_, f), z in zip(steps, logits):
-                        f.set_result(z)
+                    self.tokens += sum(len(it[1]) for it in flat)
+                    lo = 0
+                    for g, f, many in groups:
+                        f.set_result(logits[lo : lo + len(g)] if many else logits[lo])
+                        lo += len(g)
             for r, f in batch:
                 if callable(r):
                     try:
                         f.set_result(r())
                     except Exception as e:  # noqa: BLE001
                         f.set_exception(e)
+
+    @staticmethod
+    def _size(r):
+        return len(r) if isinstance(r, list) else 0 if r is None or callable(r) else 1
 
 
 @dataclass
