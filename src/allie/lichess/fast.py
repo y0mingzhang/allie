@@ -1350,8 +1350,17 @@ def cpus():
         return list(range(os.cpu_count() or 1))
 
 
+def numa(c):
+    """CPU c's NUMA node (0 where the system does not say)."""
+    path = Path(f"/sys/devices/system/cpu/cpu{c}")
+    return next((int(d.name[4:]) for d in path.glob("node[0-9]*")), 0)
+
+
 def threads_default():
-    return max(1, min(torch.get_num_threads(), len(cpus())))
+    """torch's thread count, within the NUMA node that has most of our CPUs: threads on two
+    sockets run slower than on one (remote memory, cross-socket barriers)."""
+    nodes = [numa(c) for c in cpus()]
+    return max(1, min(torch.get_num_threads(), max(map(nodes.count, set(nodes)))))
 
 
 def _sys(path, default=0):
@@ -1363,35 +1372,25 @@ def _sys(path, default=0):
 
 def cpu_order(n):
     """n CPUs of this process to pin threads to: within one NUMA node when they fit, spread over
-    the node's L3 caches, one thread per core before the cores' second hardware threads."""
+    the node's L3 caches, one thread per core before the cores' second hardware threads. Also
+    each one's node and cache group (numbered from 0)."""
     ids = cpus()
     if len(ids) < n:
         return None
     path = "/sys/devices/system/cpu/cpu{}/"
-    node = {
-        c: next((int(d.name[4:]) for d in Path(path.format(c)).glob("node[0-9]*")), 0)
-        for c in ids
-    }
+    node = {c: numa(c) for c in ids}
     l3 = {c: _sys(path.format(c) + "cache/index3/id") for c in ids}
-    first = {
-        c: _sys(path.format(c) + "topology/thread_siblings_list", c) == c for c in ids
-    }
+    first = {c: _sys(path.format(c) + "topology/thread_siblings_list", c) == c for c in ids}
     nodes = sorted(set(node.values()), key=lambda k: -sum(node[c] == k for c in ids))
-    big = [c for c in ids if node[c] == nodes[0]]
     out = []
-    for k in nodes[:1] if len(big) >= n else nodes:
+    for k in nodes[:1] if sum(node[c] == nodes[0] for c in ids) >= n else nodes:
         for primary in (True, False):
             groups = {}
             for c in ids:
                 if node[c] == k and first[c] == primary:
                     groups.setdefault(l3[c], []).append(c)
             lists = list(groups.values())
-            out += [
-                g[j]
-                for j in range(max(map(len, lists), default=0))
-                for g in lists
-                if j < len(g)
-            ]
+            out += [g[j] for j in range(max(map(len, lists), default=0)) for g in lists if j < len(g)]
     out = out[:n]
     caches = sorted({(node[c], l3[c]) for c in out})
     return out, [node[c] for c in out], [caches.index((node[c], l3[c])) for c in out]
@@ -1473,8 +1472,9 @@ class Fast:
         order = cpu_order(self.threads) if pin else None
         self.cpus, nodes, groups = order or (None, None, None)
         place = place and os.environ.get("ALLIE_NUMA") != "0"
-        if place and nodes and Path("/sys/devices/system/node/node1").exists():
-            # weights on the NUMA node of the threads (bound), or spread over theirs (interleaved)
+        if place and nodes and len(set(nodes)) == 1 and Path("/sys/devices/system/node/node1").exists():
+            # the weights' pages moved to the threads' NUMA node (threads on several nodes: left
+            # where they are; interleaving them split huge pages and lost at batch 1)
             ts = [t for t in self.tensors if t is not None]
             nodes = sorted(set(nodes))
             self.lib.allie_place(arr(ctypes.c_void_p, [t.data_ptr() for t in ts]),
