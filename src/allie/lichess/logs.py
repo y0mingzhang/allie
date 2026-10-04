@@ -83,13 +83,22 @@ class Resilient(logging.Handler):
         super().close()
 
 
+class Listener(logging.handlers.QueueListener):
+    def stop(self, timeout=None):
+        """Flush the queue, waiting at most timeout seconds: a write to a dead filesystem can
+        hang for many minutes. True if the writer finished."""
+        self.enqueue_sentinel()
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+
 def setup(path=None, level=logging.INFO, fmt="%(asctime)s %(message)s"):
     """Log through a queue to path (or stderr); with a path, every thread's uncaught exception too.
     Returns the queue listener (stop() flushes it)."""
     handler = Resilient(path) if path else logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(fmt))
     q = queue.SimpleQueue()
-    listener = logging.handlers.QueueListener(q, handler)
+    listener = Listener(q, handler)
     listener.start()
     root = logging.getLogger()
     root.handlers[:] = [logging.handlers.QueueHandler(q)]

@@ -224,15 +224,17 @@ def test_stalled_stream_reconnects(engine, kind):
 
 
 def test_game_survives_unexpected_errors(engine, monkeypatch, caplog):
-    """An unexpected error in the game thread is logged and the game resumes from a fresh
-    stream; a persistent one resigns the game rather than leaving it to time out."""
+    """Unexpected errors in the game thread are logged and the game resumes from a fresh
+    stream. Scattered ones never add up (the count restarts once the bot moves); ERRORS in a
+    row resign the game rather than leave it to time out."""
     from allie.lichess import bot as botmod
 
-    real, failures = botmod.Match.on_state, [1]
+    real, scattered, every = botmod.Match.on_state, {2, 4, 6, 8}, [False]
 
     def flaky(self, s):
-        if failures[0] and len(s["moves"].split()) >= 4:
-            failures[0] -= 1
+        n = len(s["moves"].split())
+        if every[0] or n in scattered:  # the bot's turns: it is white
+            scattered.discard(n)
             raise RuntimeError("injected")
         return real(self, s)
 
@@ -243,14 +245,14 @@ def test_game_survives_unexpected_errors(engine, monkeypatch, caplog):
     wait(lambda: finished(mock))
     g = next(iter(mock.games.values()))
     assert g.status in ("mate", "draw", "stalemate") and len(g.board.move_stack) > 10
-    failures[0] = 10**9  # from now on every state fails: the bot resigns its game
+    assert not scattered and sum("error 1 of 3" in r.message for r in caplog.records) == 4
+    every[0] = True  # from now on every state fails: the bot resigns its game
     wait(lambda: not bot.games)  # else the same challenger may meet per_user = 1 ("later")
     mock.challenge("random", "allie", 60, 1, color="black")
     wait(lambda: finished(mock, 2))
     g2 = list(mock.games.values())[1]
     assert g2.status == "resign" and g2.winner == "black"  # the challenger; the bot was white
-    assert sum("error 1 of 3" in r.message for r in caplog.records) == 2
-    assert any("giving up" in r.message for r in caplog.records)
+    assert sum("giving up" in r.message for r in caplog.records) == 1
 
 
 def test_plays_through_a_full_disk(engine, tmp_path, monkeypatch):

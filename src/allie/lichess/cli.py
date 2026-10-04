@@ -8,6 +8,7 @@ import signal
 import sys
 import threading
 import time
+import traceback
 
 import torch
 
@@ -81,7 +82,12 @@ def main():
             logging.getLogger("allie").exception("allie-bot failed")
         raise
     finally:
-        listener.stop()
+        if not listener.stop(timeout=30):  # its handler's lock would hang the exit, too
+            print("allie-bot: the log writer is stuck; exiting without it", file=sys.stderr)
+            if sys.exc_info()[1]:  # the error on its way out, which the log never got
+                traceback.print_exc()
+            sys.stderr.flush()
+            os._exit(1)
 
 
 def run_command(a):

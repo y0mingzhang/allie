@@ -39,7 +39,7 @@ def screen(c, rules, busy):
     return None
 
 
-ERRORS = 5  # unexpected errors in one game before the bot resigns it
+ERRORS = 5  # unexpected errors in one game, with no move of the bot's between, before it resigns
 
 
 class Bot:
@@ -146,9 +146,10 @@ class Bot:
 
     def play(self, match):
         """Serve one game's stream until it ends. Network errors reconnect; any other error
-        is logged and the game resumes from a fresh stream, until ERRORS of them (a persistent
-        bug), when the bot resigns rather than leave the game to time out."""
-        gid, backoff, errors = match.gid, 1, 0
+        is logged and the game resumes from a fresh stream, until ERRORS of them with no move
+        of the bot's between (a persistent bug), when the bot resigns rather than leave the game
+        to time out."""
+        gid, backoff, errors, since = match.gid, 1, 0, match.moved
         try:
             while not match.over and not self.stopped.is_set():
                 try:
@@ -172,6 +173,8 @@ class Bot:
                     backoff = min(2 * backoff, 30)
                 except Exception:
                     abandon.set()
+                    if match.moved != since:  # the game went on since the last error
+                        errors, since = 0, match.moved
                     errors += 1
                     log.exception("game %s: error %d of %d; resuming", gid, errors, ERRORS)
                     if errors >= ERRORS:
