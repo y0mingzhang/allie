@@ -144,7 +144,7 @@ def main():
     dp = np.exp(-ce) - np.exp(-ref_ce)
     out = dict(
         model=a.model, device=a.device, dtype=a.dtype, int8=a.int8, experts=a.active_experts or m.topk,
-        backend="fast" if getattr(m, "fast", None) else "torch",
+        backend="fast" if m.fast else f"graphs ({len(m.graphs.graphs)} captured)" if m.graphs else "torch",
         decode=a.decode, moe=a.moe,
         threads=torch.get_num_threads(), positions=len(P), load_seconds=round(load, 1),
         seconds=round(seconds, 1), ms_per_position=round(1000 * seconds / len(P), 1),
