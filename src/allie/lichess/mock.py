@@ -333,9 +333,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not changed:
                     self.line()
                     continue
-                for e in g.chat[said:]:
+                new = g.chat[said:]  # append-only: the cursor moves by what is sent
+                said += len(new)
+                for e in new:
                     self.line(e)
-                said = len(g.chat)
                 if (s := g.state()) != last:
                     self.line(s)
                     last, sent = s, sent + 1

@@ -272,6 +272,8 @@ class Match:
     def close(self):
         if self.claim:
             self.claim.cancel()
+        if self.chat:
+            self.chat.close()
         if self.stats:
             ms = sorted(1000 * s for s in self.stats)
             log.info("game %s: %d moves, decision ms median %.0f max %.0f", self.gid, len(ms),

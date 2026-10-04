@@ -46,6 +46,64 @@ def test_clean():
     assert clean("one\n\ntwo\nthree", 2) == ["one", "two"]
 
 
+def test_played():
+    assert chat.played("Nice game!", [])
+    assert not chat.played("Maybe try Nf3 here", ["e2e4", "e7e5"])
+    assert chat.played("1. e4 e5 2. Nf3: a classic", ["e2e4", "e7e5", "g1f3"])
+    assert not chat.played("O-O was safer", ["e2e4"])
+    assert chat.played("Qxf7# was nice", "e2e4 e7e5 f1c4 b8c6 d1h5 g8f6 h5f7".split())
+
+
+class Gate(Recorder):
+    """A model that waits for open() before it answers."""
+
+    def __init__(self, reply="Sure!"):
+        super().__init__(reply)
+        self.gate = threading.Event()
+
+    def __call__(self, system, prompt):
+        self.prompts.append(prompt)
+        self.gate.wait(10)
+        return self.reply
+
+
+def test_quiet_and_close_stop_messages_in_flight():
+    f, llm = Fake(white=True, hello=""), Gate()
+    f.opponent = "inflight-opp"
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    f.say(c, "hi")
+    wait(lambda: llm.prompts)
+    f.say(c, "!quiet")
+    llm.gate.set()
+    wait(lambda: f.posts)
+    time.sleep(0.2)
+    assert f.posts == [("player", chat.QUIET)]
+    f2, llm2 = Fake(white=True, hello=""), Gate()
+    f2.opponent = "closed-opp"
+    c2 = Chatter(f2, llm2)
+    f2.play(c2, [], first=True)
+    f2.say(c2, "hi")
+    wait(lambda: llm2.prompts)
+    c2.close()  # the game thread ended without a final state
+    llm2.gate.set()
+    time.sleep(0.2)
+    assert f2.posts == [] and c2.cancelled
+
+
+def test_views_follow_the_game():
+    """A same-ply view is replaced; a changed history drops the views after it."""
+    f, llm = Fake(white=True, hello=""), Recorder()
+    c = Chatter(f, llm)
+    f.play(c, [], first=True)
+    f.play(c, ["e2e4"], wdl=(0.5, 0.0, 0.5))
+    f.play(c, ["e2e4"], wdl=(0.2, 0.0, 0.8))  # revised features at the same ply
+    assert c.views[1][1] == pytest.approx([0.8, 0.0, 0.2])
+    f.play(c, ["e2e4", "e7e5"])
+    f.play(c, ["d2d4", "d7d5"])  # a different game state on reconnect
+    assert set(c.views) == {0, 2} and c.views[2] is not None
+
+
 def logits(probs, wdl):
     """A model output with these move probabilities and this (side to move's) win/draw/loss."""
     z = torch.full((2432,), -50.0)

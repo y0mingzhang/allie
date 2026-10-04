@@ -51,10 +51,11 @@ def read(path):
     if h["Result"] == "1/2-1/2":
         status = "draw"
     winner = {"1-0": "white", "0-1": "black"}.get(h["Result"])
-    return dict(id=h["GameId"], white=white, names=(h["White"], h["Black"]),
-                ratings=(int(h["WhiteElo"]), int(h["BlackElo"])), base=base, inc=inc,
-                moves=moves, clocks=clocks, status=status, winner=winner,
-                rated=h["Event"].lower().startswith("rated"), speed=h["Event"].split()[1].lower())  # fmt: skip
+    event = h["Event"].lower().split()
+    return {"id": h["GameId"], "white": white, "names": (h["White"], h["Black"]),
+            "ratings": (int(h["WhiteElo"]), int(h["BlackElo"])), "base": base, "inc": inc,
+            "moves": moves, "clocks": clocks, "status": status, "winner": winner,
+            "rated": event[0] == "rated", "speed": event[1]}  # fmt: skip
 
 
 def states(g):
@@ -82,7 +83,7 @@ def record(a):
         for k, (w, b) in enumerate(states(g)):
             game.update(g["moves"][:k], w / 1000, b / 1000)
             logits.append(game.sync().half())
-        out.append(g | dict(logits=torch.stack(logits), elo=(them, them)))
+        out.append(g | {"logits": torch.stack(logits), "elo": (them, them)})
         print(g["id"], len(g["moves"]), "plies", flush=True)
     torch.save(out, a.out)
     engine.close()

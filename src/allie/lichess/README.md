@@ -86,11 +86,16 @@ costliest move.
   their move costs the bot 15 points, or (once a game) when its expected score sinks 25 points below its
   high and under 40%; an answer when someone writes; a post-game message. At most `remarks` unprompted remarks a game, `every` plies apart, and `gap` seconds between
   messages. Messages that arrive while the model writes get one answer, to the last.
-- **Fair play.** During the game the model never sees Stockfish, the opponent's mistakes (a move that
-  helped the bot) or the bot's estimate when it is above 55%, and is told never to suggest moves or point
-  out threats. `!quiet` from the opponent mutes the bot for that game and their rematches.
-- **Never in the way.** Each game's chat runs on its own thread; a call that takes over `timeout` (3 s)
-  is dropped, a remark is dropped if the game moved on two plies, and an error only skips a message.
+- **Fair play.** Stockfish runs only after the game. During it the model gets the position and Allie's
+  numbers, but not the notes that would point the opponent somewhere: their last move when it helped the
+  bot, the bot's estimate when its expected score is above 55%, or the move Allie expected instead. It is
+  told never to suggest moves or point out threats, and a mid-game message that names a move not yet
+  played is dropped. `!quiet` from the opponent mutes the bot for that game and their rematches, including
+  a message already being written.
+- **Never in the way.** Each game's chat runs on its own thread (the game thread only notes Allie's view
+  and queues work); a call that takes over `timeout` (3 s) is dropped, a remark is dropped if the game
+  moved on two plies, and an error only skips a message. A game that ends without a final state (a
+  crash, shutdown) drops what is queued.
   A bad key or model turns the model off (the hello and `!quiet` reply stay); a rate limit pauses it a
   minute.
 - **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`

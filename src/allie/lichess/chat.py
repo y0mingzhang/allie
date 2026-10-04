@@ -1,9 +1,10 @@
 """Game chat: short remarks a language model (Claude) writes from Allie's own numbers, at
 notable moments only, and answers to what the opponent writes. Off unless [chat] enabled.
 
-Fair play: during the game the model sees only what Allie itself thinks, minus anything that
-would help the opponent (their mistakes, Allie's good prospects). Stockfish runs only after the
-game. A move never waits for the chat: each game's chat has its own thread.
+Fair play: Stockfish runs only after the game. During it the model gets the position and
+Allie's numbers minus the notes that would point the opponent somewhere (their mistakes, Allie's
+good prospects, its alternatives); it is told never to advise, and a message that names a move
+not yet played is dropped. A move never waits for the chat: each game's chat has its own thread.
 """
 
 import functools
@@ -111,10 +112,19 @@ class Chat:
 
 class Job(NamedTuple):
     kind: str  # hello, quiet: text is the message; remark, reply, end: a prompt
-    ply: int
+    moves: tuple  # the game when it was queued
     rooms: tuple
-    text: object  # a string, or for "end" a function that returns the prompt
+    text: object  # the message, or a function that returns the prompt
     lines: int = 1
+
+
+class State(NamedTuple):
+    """What the game thread knew, for a prompt the chat thread writes."""
+
+    moves: tuple
+    views: dict
+    clocks: dict
+    lines: tuple
 
 
 def safe(f):
@@ -131,15 +141,16 @@ def safe(f):
 
 
 class Chatter:
-    """One game's chat. The game thread calls seen() after each gameFull or gameState and
-    heard() for each chatLine; both only read the game and queue work for the chat thread."""
+    """One game's chat. The game thread calls seen() after each gameFull or gameState, heard()
+    for each chatLine and close() when it ends; they only note Allie's view and queue work.
+    Prompts, the model and posts run on the chat's own thread."""
 
     def __init__(self, match, llm=None):
         self.match, self.cfg, self.llm = match, match.bot.config.chat, llm
         self.views, self.clocks = {}, {}  # by ply: Allie's view, both clocks (ms)
-        self.lines, self.info = [], {}  # the chat so far; the gameFull event
+        self.seq, self.lines, self.info = [], [], {}  # views' moves; the chat; gameFull
         self.high, self.last, self.said, self.answered = 0.0, -math.inf, 0, 0
-        self.greeted = self.done = self.pressed = False
+        self.greeted = self.done = self.cancelled = self.pressed = False
         self.posted = 0.0
         self.jobs = queue.Queue()
         name = f"chat-{match.gid}"
@@ -155,26 +166,28 @@ class Chatter:
         if event["type"] == "gameFull":
             self.info = event
         if g is None:  # aborted at the start
-            return self.close() if m.over else None
+            return self.finish() if m.over else None
         s = event.get("state", event)
         moves = s["moves"].split()  # at the end, the game may lack the last move
-        n = len(moves)
-        for k in [k for k in self.views if k > n]:  # a takeback
-            del self.views[k]
-        if g.logits is not None and len(g.used) == len(g.tokens) and len(g.moves) == n:
-            self.views.setdefault(n, view(g, m.white))
+        n, k = len(moves), 0
+        while k < min(n, len(self.seq)) and moves[k] == self.seq[k]:
+            k += 1
+        for j in [j for j in self.views if j > k]:  # a takeback, or a changed history
+            del self.views[j]
+        self.seq = moves
+        if g.logits is not None and len(g.used) == len(g.tokens) and g.moves == moves:
+            self.views[n] = view(g, m.white)
         self.clocks[n] = s["wtime"], s["btime"]
         if s["status"] not in ("created", "started"):
             if s["status"] in ENDS and n >= 2 and not self.muted():
-                end = functools.partial(
-                    self.ending, moves, s["status"], s.get("winner")
-                )
-                self.jobs.put(Job("end", n, self.cfg.rooms, end, 2))
-            return self.close()
+                end = functools.partial(self.ending, self.state(moves), s["status"],
+                                        s.get("winner"))  # fmt: skip
+                self.jobs.put(Job("end", tuple(moves), self.cfg.rooms, end, 2))
+            return self.finish()
         if not self.greeted:
             self.greeted = True
             if self.cfg.hello and n < 2 and not self.muted():
-                self.jobs.put(Job("hello", n, ("player",), self.cfg.hello))
+                self.jobs.put(Job("hello", tuple(moves), ("player",), self.cfg.hello))
         elif n >= 2 and (n % 2 == 1) == m.white:  # we just moved
             self.remark(moves)
 
@@ -189,21 +202,21 @@ class Chatter:
         if room == "spectator" and "spectator" not in self.cfg.rooms:
             return
         self.lines.append((who, text))
+        g = self.match.game
         if who.lower() == them and text.lower().startswith("!quiet"):
             if not self.muted():
                 MUTED.add(them)
-                self.jobs.put(Job("quiet", 0, (room,), QUIET))
+                self.jobs.put(Job("quiet", (), (room,), QUIET))
             return
-        g = self.match.game
         if self.done or g is None or self.muted() or self.answered >= self.cfg.replies:
             return
         self.answered += 1
-        moves = list(g.moves)
-        lines = self.facts(moves, private=True) + ["Recent chat:"]
-        lines += [f"  {w}: {t}" for w, t in self.lines[-8:]]
         whom = "your opponent" if who.lower() == them else f"the spectator {who}"
-        lines.append(f"Answer {whom}'s last message, or SKIP.")
-        self.jobs.put(Job("reply", len(moves), (room,), "\n".join(lines)))
+        task = f"Answer {whom}'s last message, or SKIP."
+        st = self.state(g.moves)
+        self.jobs.put(
+            Job("reply", st.moves, (room,), functools.partial(self.prompt, st, task))
+        )
 
     def remark(self, moves):
         """After our move at ply n - 1: a word on their move at n - 2, or on the game's turn."""
@@ -225,35 +238,54 @@ class Chatter:
         if self.said >= self.cfg.remarks or n - self.last < self.cfg.every:
             return
         self.said, self.last, self.pressed = self.said + 1, n, self.pressed or pressure
-        prompt = "\n".join(self.facts(moves, private=True) + [task])
-        self.jobs.put(Job("remark", n, self.cfg.rooms, prompt))
+        st = self.state(moves)
+        prompt = functools.partial(self.prompt, st, task)
+        self.jobs.put(Job("remark", st.moves, self.cfg.rooms, prompt))
 
-    def close(self):
+    def state(self, moves):
+        return State(
+            tuple(moves), dict(self.views), dict(self.clocks), tuple(self.lines)
+        )
+
+    def finish(self):
+        """The game is over: say what is queued, then stop."""
         self.done = True
         self.jobs.put(None)
+
+    def close(self):
+        """The game thread is done. Unless the game ended, drop what is queued."""
+        if not self.done:
+            self.cancelled = True
+            self.finish()
 
     def muted(self):
         return self.match.opponent in MUTED
 
-    # facts for the model
+    # prompts (the chat thread)
 
-    def facts(self, moves, private):
-        """The game so far from our side. private (during the game): without what would help
-        the opponent: their mistakes and our good prospects."""
-        m, g, views, n = self.match, self.match.game, self.views, len(moves)
+    def prompt(self, st, task):
+        out = self.facts(st, private=True)
+        if task.startswith("Answer"):
+            out += ["Recent chat:", *[f"  {w}: {t}" for w, t in st.lines[-8:]]]
+        return "\n".join([*out, task])
+
+    def facts(self, st, private):
+        """The game so far from our side. private (during the game): without the notes that
+        would help the opponent: their mistakes, our good prospects, Allie's alternatives."""
+        m, moves, views, n = self.match, st.moves, st.views, len(st.moves)
         us, them = ("white", "black") if m.white else ("black", "white")
         opp = self.info.get(them) or {}
         board = board_at(moves, n)
         name, rating = opp.get("name", "anonymous"), opp.get("rating", "?")
         out = [
-            f"You are Allie, playing {us} as a {g.elo[us == 'black']}-rated player would.",
+            f"You are Allie, playing {us} as a {m.game.elo[us == 'black']}-rated player would.",
             f"Opponent: {name} ({them}, rated {rating}). {kind(self.info)}.",
             f"Moves: {movetext(moves)}",
             f"FEN: {board.fen()}",
             f"Material: {material(board, m.white)}",
         ]
-        if n in self.clocks:
-            w, b = self.clocks[n]
+        if n in st.clocks:
+            w, b = st.clocks[n]
             out.append(
                 f"Clocks: you {mmss(w if m.white else b)}, them {mmss(b if m.white else w)}"
             )
@@ -271,20 +303,21 @@ class Chatter:
                 out.append(
                     f"Their last move {san(moves, j)}: Allie gave it "
                     f"{pct(probs.get(moves[j], 1.0))} for a {rating} player "
-                    f"({top(moves, j, probs, private)}); they thought {self.think(j)}. {effect(d)}"
+                    f"({top(moves, j, probs, private)}); they thought {self.think(st, j)}. "
+                    f"{effect(d)}"
                 )
         if k < n and k in views:
             out.append(
                 f"Your last move {san(moves, k)}: Allie gave it "
-                f"{pct(views[k][0].get(moves[k], 1.0))}; you thought {self.think(k)}."
+                f"{pct(views[k][0].get(moves[k], 1.0))}; you thought {self.think(st, k)}."
             )
         return out
 
-    def ending(self, moves, status, winner):
+    def ending(self, st, status, winner):
         """The post-game prompt: the result, Allie's view of the whole game, Stockfish's."""
-        m, views = self.match, self.views
+        m, moves, views = self.match, st.moves, st.views
         us = "white" if m.white else "black"
-        out = self.facts(moves, private=False)
+        out = self.facts(st, private=False)
         result = "a draw" if not winner else "you won" if winner == us else "you lost"
         out.append(f"The game is over: {result} by {ENDS[status]}.")
         es = {k: score(v[1]) for k, v in views.items() if k > 0}
@@ -317,9 +350,9 @@ class Chatter:
         )
         return "\n".join(out)
 
-    def think(self, j):
+    def think(self, st, j):
         """Move j's think time, from its mover's clock before and after it."""
-        a, b = self.clocks.get(j), self.clocks.get(j + 1)
+        a, b = st.clocks.get(j), st.clocks.get(j + 1)
         if a is None or b is None:
             return "an unknown time"
         inc = (self.info.get("clock") or {}).get("increment", 0)
@@ -346,25 +379,30 @@ class Chatter:
     def run(self, j):
         if j.kind in ("hello", "quiet"):
             lines = [j.text]
-        elif self.muted():
+        elif self.muted() or self.cancelled:
             return
         else:
             self.llm = self.llm or model(self.cfg)
-            prompt = j.text() if callable(j.text) else j.text
-            lines = clean(self.llm(SYSTEM, prompt), j.lines)
-            if j.kind == "remark" and len(self.match.game.moves) - j.ply > 2:
-                log.info(
-                    "game %s chat: the remark at ply %d came late",
-                    self.match.gid,
-                    j.ply,
+            text = self.llm(SYSTEM, j.text())
+            if j.kind != "end" and not played(text, j.moves):
+                return log.info(
+                    "game %s chat: dropped a mid-game move: %s", self.match.gid, text
                 )
-                return
+            lines = clean(text, j.lines)
+            now = list(self.match.game.moves)
+            if j.kind == "remark" and (
+                len(now) - len(j.moves) > 2 or now[: len(j.moves)] != list(j.moves)
+            ):
+                return log.info("game %s chat: a remark came late", self.match.gid)
         for line in lines:
             for room in j.rooms:
-                self.post(line, room)
+                self.post(line, room, j.kind == "quiet")
 
-    def post(self, text, room):
+    def post(self, text, room, always=False):
+        """Send a line after the gap, unless !quiet or the end of the bot came first."""
         time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
+        if not always and (self.muted() or self.cancelled):
+            return
         try:
             self.match.bot.client.chat(self.match.gid, text, room)
         except OSError as e:  # HTTP and network errors, after the client's retries
@@ -451,6 +489,24 @@ def material(board, white):
     return (
         "even" if d == 0 else f"you are {'up' if d > 0 else 'down'} {abs(d)} (pawn = 1)"
     )
+
+
+SAN = re.compile(
+    r"\b(?:O-O(?:-O)?|[KQRBN][a-h]?[1-8]?x?[a-h][1-8]|[a-h](?:x[a-h])?[1-8](?:=?[QRBN])?)(?![\w-])"
+)
+
+
+def played(text, moves):
+    """Does text name only moves already played (no move suggestions mid-game)?"""
+    named = set(SAN.findall(text))
+    if not named:
+        return True
+    board, seen = chess.Board(), set()
+    for u in moves:
+        m = chess.Move.from_uci(u)
+        seen.add(board.san(m).rstrip("+#"))
+        board.push(m)
+    return named <= seen
 
 
 def clean(text, lines=1):
