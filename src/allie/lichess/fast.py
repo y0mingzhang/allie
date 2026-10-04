@@ -348,88 +348,9 @@ static inline void block(const float* const* x, const W* const* r, int K, float*
     }
 }
 
-// int8 rows against int16 activations: integer products summed in 32 bits (VNNI where the CPU
-// has it), then FP32. acc: the sums in units of the activations' scales
-#if defined(__AVX512BW__)
-#define QL 32  // int16 lanes a step
-typedef __m512i vi;
-static inline vi qzero() { return _mm512_setzero_si512(); }
-static inline vi qld(const int8_t* p) { return _mm512_cvtepi8_epi16(_mm256_loadu_si256((const __m256i*)p)); }
-static inline vi qld(const int16_t* p) { return _mm512_loadu_si512(p); }
-static inline vi qdot(vi a, vi w, vi x) {
-#if defined(__AVX512VNNI__)
-  return _mm512_dpwssd_epi32(a, w, x);
-#else
-  return _mm512_add_epi32(a, _mm512_madd_epi16(w, x));
-#endif
-}
-static inline float qsum(vi a) { return _mm512_reduce_add_ps(_mm512_cvtepi32_ps(a)); }
-#define QSIMD 1
-#elif defined(__AVX2__)
-#define QL 16
-typedef __m256i vi;
-static inline vi qzero() { return _mm256_setzero_si256(); }
-static inline vi qld(const int8_t* p) { return _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i*)p)); }
-static inline vi qld(const int16_t* p) { return _mm256_loadu_si256((const __m256i*)p); }
-static inline vi qdot(vi a, vi w, vi x) {
-#if defined(__AVXVNNI__)
-  return _mm256_dpwssd_avx_epi32(a, w, x);
-#else
-  return _mm256_add_epi32(a, _mm256_madd_epi16(w, x));
-#endif
-}
-static inline float qsum(vi a) { return vsum(_mm256_cvtepi32_ps(a)); }
-#define QSIMD 1
-#endif
-
-template <class W, int R, int M>
-static inline void block(const int16_t* const* x, const W* const* r, int K, float* acc) {
-  static_assert(sizeof(W) == 1, "int16 activations take int8 weights");
-  int k = 0;
-#ifdef QSIMD
-  vi a[M][R];
-  UNROLL for (int m = 0; m < M; m++)
-    UNROLL for (int i = 0; i < R; i++) a[m][i] = qzero();
-  int kv = K - K % QL;
-  if (M == 1) {  // two partial sums per row
-    vi b[R];
-    UNROLL for (int i = 0; i < R; i++) b[i] = qzero();
-    for (; k + 2 * QL <= kv; k += 2 * QL) {
-      vi x0 = qld(x[0] + k), x1 = qld(x[0] + k + QL);
-      KEEP(x0);
-      KEEP(x1);
-      UNROLL for (int i = 0; i < R; i++) {
-        a[0][i] = qdot(a[0][i], qld(r[i] + k), x0);
-        b[i] = qdot(b[i], qld(r[i] + k + QL), x1);
-      }
-    }
-    UNROLL for (int i = 0; i < R; i++) acc[i] = qsum(b[i]);
-  }
-  for (; k < kv; k += QL) {
-    vi w[R];
-    UNROLL for (int i = 0; i < R; i++) w[i] = qld(r[i] + k);
-    UNROLL for (int m = 0; m < M; m++) {
-      vi xm = qld(x[m] + k);
-      KEEP(xm);
-      UNROLL for (int i = 0; i < R; i++) a[m][i] = qdot(a[m][i], w[i], xm);
-    }
-  }
-  UNROLL for (int m = 0; m < M; m++)
-    UNROLL for (int i = 0; i < R; i++) acc[m * R + i] = qsum(a[m][i]) + (M == 1 ? acc[i] : 0.f);
-#else
-  for (int m = 0; m < M * R; m++) acc[m] = 0;
-#endif
-  for (int m = 0; m < M; m++)
-    for (int i = 0; i < R; i++) {
-      int64_t s = 0;
-      for (int j = k; j < K; j++) s += (int32_t)x[m][j] * r[i][j];
-      acc[m * R + i] += (float)s;
-    }
-}
-
 // rows [j, j + R) of w (the last row repeated past n) against tokens [m0, m1) in groups of MB
-template <class W, class X, int R>
-static inline void rows(const X* const* x, int m0, int m1, const W* w, int K, int j, int n, float* out, int ldo) {
+template <class W, int R>
+static inline void rows(const float* const* x, int m0, int m1, const W* w, int K, int j, int n, float* out, int ldo) {
   const W* r[R];
   for (int i = 0; i < R; i++) r[i] = w + (size_t)std::min(j + i, n - 1) * K;
   int nr = std::min(R, n - j);
@@ -468,31 +389,14 @@ static inline float row1(const float* x, const W* r, int K) {
 }
 
 template <class W>
-static inline float row1(const int16_t* x, const W* r, int K) {
-  static_assert(sizeof(W) == 1, "int16 activations take int8 weights");
-  int k = 0;
-  float s = 0;
-#ifdef QSIMD
-  vi a[4] = {qzero(), qzero(), qzero(), qzero()};
-  for (; k + 4 * QL <= K; k += 4 * QL)
-    UNROLL for (int u = 0; u < 4; u++) a[u] = qdot(a[u], qld(r + k + u * QL), qld(x + k + u * QL));
-  for (; k + QL <= K; k += QL) a[0] = qdot(a[0], qld(r + k), qld(x + k));
-  s = qsum(a[0]) + qsum(a[1]) + qsum(a[2]) + qsum(a[3]);
-#endif
-  int64_t t = 0;
-  for (; k < K; k++) t += (int32_t)x[k] * r[k];
-  return s + (float)t;
-}
-
-template <class W, class X>
-static void dots(const X* const* x, int M, const W* w, int K, int n, float* out, int ldo) {
+static void dots(const float* const* x, int M, const W* w, int K, int n, float* out, int ldo) {
   if (M == 1) {  // a matrix-vector product
     for (int j = 0; j < n; j++) out[j] = row1(x[0], w + (size_t)j * K, K);
     return;
   }
   int tile = M <= 64 ? M : 48;
   for (int m0 = 0; m0 < M; m0 += tile)
-    for (int j = 0; j < n; j += RB) rows<W, X, RB>(x, m0, std::min(M, m0 + tile), w, K, j, n, out, ldo);
+    for (int j = 0; j < n; j += RB) rows<W, RB>(x, m0, std::min(M, m0 + tile), w, K, j, n, out, ldo);
 }
 
 struct Mat {
@@ -517,55 +421,6 @@ static void mm(const Mat& A, int K, int r0, int n, const float* const* x, int M,
       for (; j + VL <= n; j += VL) vst(ym + j, vrb(vld(ym + j)));
       for (; j < n; j++) ym[j] = rb(ym[j]);
     }
-  }
-}
-
-// n values as int16 with one scale (x ~ q * scale, |q| <= 32767); returns the scale
-static float quant(const float* x, int n, int16_t* q) {
-  int i = 0;
-  float m = 0;
-#if defined(__AVX512F__)
-  __m512 a = _mm512_setzero_ps();
-  for (; i + 16 <= n; i += 16) a = _mm512_max_ps(a, _mm512_abs_ps(_mm512_loadu_ps(x + i)));
-  m = _mm512_reduce_max_ps(a);
-#elif defined(__AVX2__)
-  __m256 a = _mm256_setzero_ps();
-  for (; i + 8 <= n; i += 8) a = _mm256_max_ps(a, _mm256_andnot_ps(_mm256_set1_ps(-0.f), _mm256_loadu_ps(x + i)));
-  float t[8];
-  _mm256_storeu_ps(t, a);
-  for (float v : t) m = std::max(m, v);
-#endif
-  for (; i < n; i++) m = std::max(m, std::fabs(x[i]));
-  if (m == 0) {
-    memset(q, 0, n * sizeof(int16_t));
-    return 0.f;
-  }
-  float r = 32767.f / m;
-  i = 0;
-#if defined(__AVX512F__)
-  for (; i + 16 <= n; i += 16)
-    _mm256_storeu_si256((__m256i*)(q + i), _mm512_cvtsepi32_epi16(_mm512_cvtps_epi32(_mm512_mul_ps(_mm512_loadu_ps(x + i), _mm512_set1_ps(r)))));
-#elif defined(__AVX2__)
-  for (; i + 16 <= n; i += 16) {
-    __m256i lo = _mm256_cvtps_epi32(_mm256_mul_ps(_mm256_loadu_ps(x + i), _mm256_set1_ps(r)));
-    __m256i hi = _mm256_cvtps_epi32(_mm256_mul_ps(_mm256_loadu_ps(x + i + 8), _mm256_set1_ps(r)));
-    _mm256_storeu_si256((__m256i*)(q + i), _mm256_permute4x64_epi64(_mm256_packs_epi32(lo, hi), 0xd8));
-  }
-#endif
-  for (; i < n; i++) q[i] = (int16_t)lrintf(std::max(-32767.f, std::min(32767.f, x[i] * r)));
-  return m / 32767.f;
-}
-
-// y[m * ldy + j] = (int8 row r0 + j of A) . (q[m] * qs[m]) * the row's scale, rounded to BF16
-static void mmq(const Mat& A, int K, int r0, int n, const int16_t* const* q, const float* qs, int M, float* y, int ldy) {
-  if (n <= 0 || M <= 0) return;
-  dots(q, M, (const int8_t*)A.w + (size_t)r0 * K, K, n, y, ldy);
-  for (int m = 0; m < M; m++) {
-    float* ym = y + (size_t)m * ldy;
-    vf a = vset(qs[m]);
-    int j = 0;
-    for (; j + VL <= n; j += VL) vst(ym + j, vrb(vmul(vmul(vld(ym + j), a), vld(A.s + r0 + j))));
-    for (; j < n; j++) ym[j] = rb(ym[j] * qs[m] * f32(A.s[r0 + j]));
   }
 }
 
@@ -653,7 +508,7 @@ static void silu_mul(const float* a, const float* b, float* y, int n) {  // rb(r
 
 // ---- the model ----
 
-enum { E_CNN, E_ROWS, E_SMEAR, B_NORM, B_QKV, B_ROTARY, B_ATTN, B_O, B_NORM2, B_ROUTER, B_TOPK, B_GROUP, B_UP,
+enum { S_START, E_CNN, E_ROWS, E_SMEAR, B_NORM, B_QKV, B_ROTARY, B_ATTN, B_O, B_NORM2, B_ROUTER, B_TOPK, B_GROUP, B_UP,
        B_DOWN, H_NORM, H_HEAD, NPHASE };
 
 struct Layer {
@@ -674,8 +529,6 @@ struct Seg {  // one up / fc matrix (rows: gate halves, then value halves) for s
   int pairs, ntok, ldo;
   const float* const* x;
   float* out;
-  const int16_t* const* q;  // the same tokens as int16, and their scales (int8 weights)
-  const float* qs;
 };
 
 struct Chunk {
@@ -686,13 +539,12 @@ struct Routing {  // each token's experts and gates, the tokens grouped by exper
   std::vector<int> idx, cnt, start, at, stok;
   std::vector<float> gate, sgate;
   std::vector<const float*> ptok;
-  std::vector<const int16_t*> ptq;
-  std::vector<float> sqs;
   std::vector<Seg> segs;
   std::vector<Chunk> upch;
+  std::vector<int> active;  // the experts with tokens
   void size(int T, int keep, int E) {
     size_t n = (size_t)T * keep;
-    if (idx.size() < n) idx.resize(n), stok.resize(n), gate.resize(n), sgate.resize(n), ptok.resize(n), ptq.resize(n), sqs.resize(n);
+    if (idx.size() < n) idx.resize(n), stok.resize(n), gate.resize(n), sgate.resize(n), ptok.resize(n);
     cnt.resize(E), start.resize(E), at.resize(E);
   }
 };
@@ -721,10 +573,6 @@ struct Engine {
   std::vector<float> f64, b544, clk, brd, e, x, x0, x02, h, hf, qkv, g, q, y, tmp, skip[3], bko, rs, acc, hid, shid, xf,
       z;
   std::vector<const float*> ph, py, phf, pxf, phid, pshid;
-  std::vector<int16_t> hq;  // h as int16 (exact == 0 and int8 weights), its scales and rows
-  std::vector<float> hqs;
-  std::vector<const int16_t*> phq;
-  int qx = 0;
   Routing shared;
   alignas(64) std::atomic<int> ctr[2];
   struct alignas(64) Count {
@@ -733,10 +581,8 @@ struct Engine {
   std::vector<Count> phase;  // per thread: phases passed this step
   std::vector<std::vector<float>> scratch;
   struct Priv {  // a thread's own copy of the per-token steps (solo)
-    std::vector<float> x, h, hf, g, hqs;
-    std::vector<int16_t> hq;
+    std::vector<float> x, h, hf, g;
     std::vector<const float*> ph, phf;
-    std::vector<const int16_t*> phq;
     Routing r;
   };
   std::vector<Priv> priv;
@@ -749,11 +595,7 @@ struct Engine {
     pool->barrier(t);
     if (t == 0) {
       ctr[phase[0].v & 1].store(0, std::memory_order_relaxed);
-      if (prof) {
-        double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        ptime[p] += now - plast;
-        plast = now;
-      }
+      if (prof) mark(p);
     }
     phase[t].v++;
   }
@@ -770,8 +612,14 @@ struct Engine {
   void ffn(int t, int nt, int dense, int i, bool solo);
   void group(int i, Routing& R, bool dense);
   void head(int t, int nt);
+  void mark(int p) {  // thread 0, profiling: the time since the last mark is phase p's
+    double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    ptime[p] += now - plast;
+    plast = now;
+  }
   void run(int t) {
     int nt = pool->n;
+    if (prof && t == 0) mark(S_START);  // from the call: pinning, waking the pool
     embedding(t, nt);
     for (int i = 0; i < L; i++) blockstep(i, t, nt);
     head(t, nt);
@@ -1031,23 +879,11 @@ void Engine::blockstep(int i, int t, int nt) {
   bool solo = T <= 2, dense = ly.fc.w != nullptr;
   Priv& pv = priv[t];
   float *xs = solo ? pv.x.data() : x.data(), *gs = solo ? pv.g.data() : g.data();
-  int16_t* hqk = solo ? pv.hq.data() : hq.data();
-  float* hqsk = solo ? pv.hqs.data() : hqs.data();
-  for (int k = solo ? 0 : t; k < T; k += solo ? 1 : nt) {
-    float* hk = solo ? &pv.h[(size_t)k * D] : &h[(size_t)k * D];
-    resid(i, k, &x[(size_t)k * D], &xs[(size_t)k * D], hk, &gs[k * G]);
-    if (qx) hqsk[k] = quant(hk, D, hqk + (size_t)k * D);
-  }
+  for (int k = solo ? 0 : t; k < T; k += solo ? 1 : nt)
+    resid(i, k, &x[(size_t)k * D], &xs[(size_t)k * D], solo ? &pv.h[(size_t)k * D] : &h[(size_t)k * D], &gs[k * G]);
   if (!solo) sync(t, B_NORM);
   const float* const* hp = solo ? pv.ph.data() : ph.data();
-  const int16_t* const* hpq = solo ? pv.phq.data() : phq.data();
-  chunks(t, (3 * D + 63) / 64, [&](int c) {
-    int lo = 64 * c, n = std::min(64, 3 * D - lo);
-    if (qx)
-      mmq(ly.qkv, D, lo, n, hpq, hqsk, T, &qkv[lo], 3 * D);
-    else
-      mm(ly.qkv, D, lo, n, hp, T, &qkv[lo], 3 * D);
-  });
+  chunks(t, (3 * D + 63) / 64, [&](int c) { mm(ly.qkv, D, 64 * c, std::min(64, 3 * D - 64 * c), hp, T, &qkv[64 * c], 3 * D); });
   sync(t, B_QKV);
   float* sc = scratch[t].data();
   if (T == S) {  // one new token a game: rotary and attention in one pass per (game, head)
@@ -1081,9 +917,7 @@ void Engine::blockstep(int i, int t, int nt) {
       float* fk = solo ? &pv.hf[(size_t)k * D] : &hf[(size_t)k * D];
       for (int d = 0; d < D; d++) fk[d] = hk[d] - ly.mu[d];
     }
-    if (solo && t != 0) continue;
-    if (solo) memcpy(&h[(size_t)k * D], hk, D * sizeof(float));  // for the experts
-    if (qx) hqs[k] = quant(hk, D, &hq[(size_t)k * D]);
+    if (solo && t == 0) memcpy(&h[(size_t)k * D], hk, D * sizeof(float));  // for the experts
   }
   if (!solo || dense) sync(t, B_NORM2);  // solo: the router reads each thread's own copy
   ffn(t, nt, dense, i, solo);
@@ -1116,7 +950,7 @@ static void route(const Engine& m, const Layer& ly, int k, Routing& R) {
 void Engine::group(int i, Routing& R, bool dense) {
   const Layer& ly = layers[i];
   if (dense) {
-    R.segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data(), phq.data(), hqs.data()});
+    R.segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data()});
   } else {
     std::fill(R.cnt.begin(), R.cnt.end(), 0);
     int na = T * keep;
@@ -1127,16 +961,15 @@ void Engine::group(int i, Routing& R, bool dense) {
       R.stok[sl] = a / keep;
       R.sgate[sl] = R.gate[a];
       R.ptok[sl] = &h[(size_t)(a / keep) * D];
-      R.ptq[sl] = &hq[(size_t)(a / keep) * D];
-      R.sqs[sl] = qx ? hqs[a / keep] : 0.f;
     }
-    R.segs.assign(1, Seg{ly.sup, sh, T, std::max(sh, dh), ph.data(), shid.data(), phq.data(), hqs.data()});
+    R.segs.assign(1, Seg{ly.sup, sh, T, std::max(sh, dh), ph.data(), shid.data()});
     size_t es = (size_t)2 * eh * D * (q8 ? 1 : 2);
+    R.active.clear();
     for (int e = 0; e < E; e++)
       if (R.cnt[e]) {
+        R.active.push_back(e);
         Mat A{(const char*)ly.up + e * es, q8 ? ly.ups + (size_t)e * 2 * eh : nullptr, q8};
-        R.segs.push_back(Seg{A, eh, R.cnt[e], eh, &R.ptok[R.start[e]], &hid[(size_t)R.start[e] * eh],
-                             &R.ptq[R.start[e]], &R.sqs[R.start[e]]});
+        R.segs.push_back(Seg{A, eh, R.cnt[e], eh, &R.ptok[R.start[e]], &hid[(size_t)R.start[e] * eh]});
       }
   }
   R.upch.clear();
@@ -1176,13 +1009,8 @@ void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
     const Chunk& u = upch[c];
     const Seg& s = segs[u.seg];
     float *a = ta, *b = ta + (size_t)s.ntok * u.n;
-    if (qx) {
-      mmq(s.A, D, u.p0, u.n, s.q, s.qs, s.ntok, a, u.n);
-      mmq(s.A, D, s.pairs + u.p0, u.n, s.q, s.qs, s.ntok, b, u.n);
-    } else {
-      mm(s.A, D, u.p0, u.n, s.x, s.ntok, a, u.n);
-      mm(s.A, D, s.pairs + u.p0, u.n, s.x, s.ntok, b, u.n);
-    }
+    mm(s.A, D, u.p0, u.n, s.x, s.ntok, a, u.n);
+    mm(s.A, D, s.pairs + u.p0, u.n, s.x, s.ntok, b, u.n);
     for (int m = 0; m < s.ntok; m++)
       silu_mul(a + (size_t)m * u.n, b + (size_t)m * u.n, s.out + (size_t)m * s.ldo + u.p0, u.n);
   });
@@ -1196,9 +1024,16 @@ void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
       for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tb[(size_t)k * n], n);
     } else {
       for (int k = 0; k < T; k++) memset(&acc[(size_t)k * D + lo], 0, n * sizeof(float));
-      size_t es = (size_t)D * eh * (q8 ? 1 : 2);
-      for (int e = 0; e < E; e++) {
-        if (!cnt[e]) continue;
+      size_t es = (size_t)D * eh * (q8 ? 1 : 2), rs = (size_t)n * eh * (q8 ? 1 : 2);
+      const auto& act = R.active;
+      auto ahead = [&](const char* p, size_t bytes) {  // a short block: fetched before it is read
+        for (size_t o = 0; o < bytes; o += 64) __builtin_prefetch(p + o);
+      };
+      ahead((const char*)ly.sdown.w + (size_t)lo * sh * (q8 ? 1 : 2), (size_t)n * sh * (q8 ? 1 : 2));
+      if (!act.empty()) ahead((const char*)ly.down + act[0] * es + lo * (rs / n), rs);
+      for (size_t a = 0; a < act.size(); a++) {
+        int e = act[a];
+        if (a + 1 < act.size()) ahead((const char*)ly.down + act[a + 1] * es + lo * (rs / n), rs);
         Mat A{(const char*)ly.down + e * es, q8 ? ly.downs + (size_t)e * D : nullptr, q8};
         int s0 = start[e];
         mm(A, eh, lo, n, &phid[s0], cnt[e], tb, n);
@@ -1248,7 +1083,7 @@ void Engine::head(int t, int nt) {
 
 extern "C" {
 
-// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads exact, then per layer
+// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads (unused), then per layer
 // G ve skip_in skip_out. glob: embed embed2 lm_head feat_embed smear_gate scalars x0_lambdas cos sin
 // board.first board.residual.0 board.residual.1 board.squeeze board.meta board.output
 // skip_gate.0-2 value_embed.*. per layer (20): qkv qkv_s o o_s gates fc fc_s proj proj_s router
@@ -1259,7 +1094,6 @@ void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* c
   m->L = cfg[0], m->D = cfg[1], m->H = cfg[2], m->hd = cfg[3], m->V = cfg[4], m->nve = cfg[5], m->E = cfg[6];
   m->topk = cfg[7], m->keep = cfg[8], m->eh = cfg[9], m->sh = cfg[10], m->dh = cfg[11], m->q8 = cfg[12];
   m->ctx = cfg[13], m->backout_layer = cfg[14];
-  m->qx = m->q8 && !cfg[16];  // int8 weights against int16 activations unless exact
   m->scale = fl[0], m->floor_ = fl[1];
   auto B = [&](int j) { return (const bf16*)glob[j]; };
   m->embed = B(0), m->embed2 = B(1), m->lm_head = B(2), m->feat = B(3), m->smear_gate = B(4);
@@ -1358,10 +1192,6 @@ int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, co
   grow(m.xf, (size_t)S * D);
   grow(m.z, (size_t)S * m.V);
   m.shared.size(T, m.keep, m.E);
-  if (m.hq.size() < TD) m.hq.resize(TD);
-  if (m.hqs.size() < (size_t)T) m.hqs.resize(T);
-  m.phq.resize(T);
-  for (int k = 0; k < T; k++) m.phq[k] = &m.hq[(size_t)k * D];
   m.ph.resize(T), m.py.resize(T), m.phf.resize(T), m.pshid.resize(T), m.pxf.resize(S);
   m.phid.resize((size_t)T * m.keep);
   for (int k = 0; k < T; k++) {
@@ -1382,9 +1212,6 @@ int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, co
       p.ph.resize(T), p.phf.resize(T);
       for (int k = 0; k < T; k++) p.ph[k] = &p.h[(size_t)k * D], p.phf[k] = &p.hf[(size_t)k * D];
       p.r.size(T, m.keep, m.E);
-      if (p.hq.size() < TD) p.hq.resize(TD);
-      p.hqs.resize(T), p.phq.resize(T);
-      for (int k = 0; k < T; k++) p.phq[k] = &p.hq[(size_t)k * D];
     }
   if (m.prof) m.plast = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   m.phase.assign(nt, Engine::Count{0});
@@ -1597,7 +1424,7 @@ def cpu_order(n):
     return out, [node[c] for c in out], [caches.index((node[c], l3[c])) for c in out]
 
 
-PHASES = ("board cnn", "embedding rows", "smear", "norm", "qkv", "rotary", "attention", "o",
+PHASES = ("start", "board cnn", "embedding rows", "smear", "norm", "qkv", "rotary", "attention", "o",
           "norm2", "router", "top-k", "group", "up", "down", "head norm", "head")  # fmt: skip
 LAYER = ("qkv", "o", "gates", "fc", "proj", "router", "moe_bias", "mu", "up", "down", "shared_up",
          "shared_down")  # fmt: skip
@@ -1607,7 +1434,7 @@ SCALED = ("qkv", "o", "fc", "proj", "up", "down", "shared_up", "shared_down")
 class Fast:
     """model.py's step() for a CPU Model with BF16 activations (int8 or BF16 matrices)."""
 
-    def __init__(self, model, threads=None, pin=True, spin=0.002, place=True, exact=None):
+    def __init__(self, model, threads=None, pin=True, spin=0.002, place=True):
         assert model.device.type == "cpu" and model.dtype == torch.bfloat16
         c, w, n = model.config, model.w, model.layers
         assert model.head_dim % 16 == 0 and model.head_dim <= 256 and model.topk <= 64
@@ -1616,9 +1443,6 @@ class Fast:
             and w["board.output"].shape[0] == 544
         )
         self.lib, self.model = library(), model
-        # exact: FP32 activations everywhere; otherwise int8 weights meet int16 activations
-        # (one scale a row) in the integer products, where the row is whole in one place
-        self.exact = os.environ.get("ALLIE_EXACT") == "1" if exact is None else exact
         if threads is not None and threads < 1:
             raise ValueError("threads must be at least 1")
         # spinning threads must never outnumber the CPUs
@@ -1635,7 +1459,7 @@ class Fast:
         )
         cfg = [n, model.width, model.heads, model.head_dim, c["vocab"], model.ve, c["experts"],
                model.topk, model.keep, c["expert_hidden"], c["shared_hidden"], dense, int(int8),
-               w["cos"].shape[0], skip_out[-1], self.threads, int(self.exact)]  # fmt: skip
+               w["cos"].shape[0], skip_out[-1], self.threads, 0]  # fmt: skip
         for i in range(n):
             cfg += [w[f"{i}.gates"].shape[0], -1 if ve[i] is None else ve[i],
                     skip_in.index(i) if i in skip_in else -1,
