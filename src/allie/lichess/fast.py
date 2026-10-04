@@ -1019,10 +1019,12 @@ void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
       silu_mul(a + (size_t)m * u.n, b + (size_t)m * u.n, s.out + (size_t)m * s.ldo + u.p0, u.n);
   });
   sync(t, B_UP);
-  // down: 16 output features a chunk, summed over the tokens' experts
+  // down: a share of the output features a chunk (about three a thread: each expert's rows of
+  // a chunk are then a longer run), summed over the tokens' experts
   float* tb = scratch[t].data();
-  chunks(t, (D + 15) / 16, [&](int c) {
-    int lo = 16 * c, n = std::min(16, D - lo);
+  int dr = std::max(16, std::min(128, D / (3 * nt) / 16 * 16));
+  chunks(t, (D + dr - 1) / dr, [&](int c) {
+    int lo = dr * c, n = std::min(dr, D - lo);
     if (dense) {
       mm(ly.proj, dh, lo, n, pshid.data(), T, tb, n);
       for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tb[(size_t)k * n], n);
@@ -1204,7 +1206,7 @@ int allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, co
   }
   for (int s = 0; s < S; s++) m.pxf[s] = &m.xf[(size_t)s * D];
   for (size_t a = 0; a < (size_t)T * m.keep; a++) m.phid[a] = &m.hid[a * m.eh];
-  size_t need = std::max({(size_t)m.ctx + 64, (size_t)D, (size_t)T * 64});  // scores, previous, up / down blocks
+  size_t need = std::max({(size_t)m.ctx + 64, (size_t)D, (size_t)T * 128});  // scores, previous, up / down blocks
   m.scratch.resize(nt);
   for (auto& s : m.scratch)
     if (s.size() < need) s.resize(need);

@@ -4,9 +4,9 @@
 Python or the command line. It needs no GPU: one CPU process holds the model once and plays several games at
 a time.
 
-- **Model.** A plain-PyTorch port of the trained network (`model.py`): no Triton kernels and no training code.
-  Each game keeps its own key-value cache, so a move costs one or two new tokens. Concurrent games are batched
-  into one forward pass.
+- **Model.** A plain-PyTorch port of the trained network (`model.py`, the reference), run by default through
+  `fast.py`: C++ kernels on CPU, compiled for your machine on first use, and CUDA graphs on GPU. Each game keeps
+  its own key-value cache, so a move costs one or two new tokens. Concurrent games are batched into one step.
 - **Inputs as in training.** The game header carries both ratings and the time control. Each move carries the
   board, both clocks and the mover's previous think time, computed as the training data computes them.
 - **Client.** The Bot API over the standard library (`client.py`): challenges, game streams, moves, draws,
