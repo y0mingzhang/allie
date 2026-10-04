@@ -235,31 +235,29 @@ each decision reads one new token; a step of 16 games reads one token for each. 
   itself, the reference everything is checked against.
 
 **Accuracy.** `analysis/lichess/parity.py` scores 5,000 positions of the Maia-3 blitz benchmark, 1,250 per
-rating band, against the trained model's scores (the training forward on a GPU). With `--decode`, each
-position is reached as live play reaches it: the game so far in one step, then its last move as a cached
-step. The port is not bitwise identical, because floating-point sums run in a different order, but BF16 is
-equal within noise. 95% intervals are bootstrapped over games.
+rating band, against the training code's scores of the same model (the training forward on a GPU), here the
+released, annealed Allie 2.0. With `--decode`, each position is reached as live play reaches it: the game so
+far in one step, then its last move as a cached step. The port is not bitwise identical, because
+floating-point sums run in a different order, but BF16 is equal within noise. 95% intervals are bootstrapped
+over games.
 
-| Setting | CE minus the trained model's (nats) | Top-1 (trained model: 58.92%) |
+| Setting | CE minus the training code's (nats) | Top-1 (training code: 59.00%) |
 |---|---:|---:|
-| CPU, int8, one game (the default) | +0.0017 [−0.0005, +0.0038] | 58.74% |
-| CPU, BF16, one game | −0.0005 [−0.0014, +0.0004] | 58.74% |
-| GPU, BF16, one game (CUDA graphs, the default) | −0.0003 [−0.0012, +0.0006] | 58.84% |
-| PyTorch reference, CPU, int8, one game | +0.0013 [−0.0008, +0.0035] | 58.66% |
-| PyTorch reference, CPU, BF16, one game | −0.0003 [−0.0013, +0.0006] | 58.92% |
-| PyTorch reference, GPU, BF16, one game | −0.0006 [−0.0015, +0.0003] | 58.82% |
-| PyTorch reference, GPU, BF16, 16 games in one step | −0.0005 [−0.0015, +0.0003] | 58.94% |
-| PyTorch reference, GPU, BF16, whole games in one step | −0.0006 [−0.0015, +0.0002] | 58.90% |
+| CPU, int8, one game (the default) | +0.0010 [−0.0011, +0.0032] | 58.96% |
+| CPU, int8, 16 games in one step | +0.0012 [−0.0010, +0.0034] | 58.92% |
+| CPU, BF16, one game | +0.0003 [−0.0007, +0.0012] | 58.90% |
+| PyTorch reference, CPU, BF16, one game | −0.0000 [−0.0010, +0.0009] | 58.86% |
 
-- **Fast against the reference**, on the same positions: CPU int8 +0.0003 [−0.0003, +0.0008] nats. A position's
-  largest change in any move's probability is 0.004 on average and 0.04 at most, and the top move agrees on
-  99.4% of positions (CPU BF16: 99.4%, GPU: 99.6%). The C++ kernels round to BF16 where the reference does;
-  the sums run in a different order.
-- **int8 against BF16**, on the same positions: +0.0021 [+0.0001, +0.0042] nats with the fast backend
-  (the PyTorch reference measured +0.0016, standard error 0.0011); the top move agrees on 97.6% of
-  positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
-- **CPU against GPU** (BF16): the top move agrees on 99.3% of positions, and no move's probability differs by
-  more than 0.076.
+- **Fast against the reference**, on the same positions (CPU BF16): +0.0003 [−0.0002, +0.0008] nats. A
+  position's largest change in any move's probability is 0.004 on average and 0.06 at most, and the top move
+  agrees on 99.4% of positions. The C++ kernels round to BF16 where the reference does; the sums run in a
+  different order. 16 games in one step against one at a time: +0.0002 [−0.0001, +0.0004], the top move
+  agrees on 99.9%.
+- **int8 against BF16**, on the same positions: +0.0008 [−0.0013, +0.0030] nats with the fast backend; the top
+  move agrees on 97.7% of positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
+- **Before the second anneal** (step 143051, the same positions against its own training-code scores): int8
+  +0.0017 [−0.0005, +0.0038], BF16 −0.0005 [−0.0014, +0.0004], GPU CUDA graphs −0.0003 [−0.0012, +0.0006];
+  int8 against BF16 +0.0021 [+0.0001, +0.0042].
 
 ## Offline testing
 
