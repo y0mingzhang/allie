@@ -14,6 +14,7 @@ dependencies = [
     "chess>=1.10",
     "zstandard>=0.22",
     "matplotlib>=3.9",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]

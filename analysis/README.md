@@ -7,4 +7,4 @@ The scripts behind two results, kept as they ran (they read and write our group 
   `ladder.py`), benchmark positions and fixed-budget search (`adapter.py`). `docs/make_figures.py` reads
   `report.py bigrun`'s `report-bigrun.json` and `run.py`'s `bigrun/legal/*.npz`.
 - `frontier_report.py`: the benchmark tables and cost plot of every scored model against Maia-3 and Allie 2.0
-  (`tables.md`, `report.json`, `pareto.png`).
+  (`tables.md`, `report.json`, `pareto.png`), including the annealed model's numbers in DETAILS.
