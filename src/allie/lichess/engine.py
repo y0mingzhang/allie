@@ -287,23 +287,22 @@ def strongest(game, play, search, clock):
 
 def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
-    sampled from the policy, or from coverage search's distribution with a budget that grows with
-    the predicted human think time and the rating."""
+    sampled at temperature 1 from the policy, or from the distribution its cell's searcher gives.
+    search: {"coverage": tree.Coverage(), "lookahead": tree.Lookahead()}."""
     start = monotonic()
     legal, p, wdl, time = game.position()
-    rating = game.elo[len(game.moves) % 2]
-    n = 0  # search costs what calibration.HW assumes only on the fast CPU backend
-    if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
+    s, cell = p, calibration.cell(game.elo[len(game.moves) % 2], game.speed)
+    # searches cost what calibration.SECONDS assumes only on the fast CPU backend
+    if search and cell and len(legal) > 1 and game.engine.model.fast is not None:
+        kind, budget, beta = cell
         left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
         reserve = behaviour.PARAMETERS["guard"]["reserve"]
-        most = calibration.ceiling(left, reserve)
-        n = calibration.pick(calibration.budget(rating, time, game.speed), game.rng, most)
+        n = calibration.affordable(kind, budget, left, reserve)
         deadline = monotonic() + calibration.limit(left, reserve)
-    s = p
-    if n and (found := search(game, n, deadline)) is not None:
-        moves, q = found
-        s = np.zeros(len(legal))
-        s[[legal.index(m) for m in moves]] = q
+        if n and (found := search[kind](game, n, deadline)) is not None:
+            moves, q = found if kind == "coverage" else (found[0], calibration.tilt(*found[1:], beta))
+            s = np.zeros(len(legal))
+            s[[legal.index(m) for m in moves]] = q
     i = int(game.rng.choice(len(legal), p=s / s.sum()))
     return game.behave(play, clock, legal[i], s[i], wdl, time)
 

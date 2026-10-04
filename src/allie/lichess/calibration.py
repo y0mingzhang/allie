@@ -1,64 +1,47 @@
 """Calibrated strength (`play.mode = "calibrated"`): Allie asked to play at rating R makes moves of
-the quality an R-rated human makes at the same time control, without giving up the policy's
-diversity. The move is sampled at temperature 1 from the policy, or from allie.search coverage's
-calibrated human-move distribution after
+the quality an R-rated human makes at the same time control, predicting human moves no worse than
+its policy does. Per time control and 200-point rating bin (CELLS), the move is sampled at
+temperature 1 from the policy, from allie.search coverage's calibrated human-move distribution after
+a fixed number of simulations, or from the policy tilted by allie.search lookahead's values,
+pi ~ prior exp(beta Q), after a fixed number of network calls.
 
-    N = min(CAP, K t^ALPHA exp(GAMMA (R - 1700) / 1000), HW t)
+Chosen on 220,000 positions of the golden evaluation's July 2026 human games (up to 5,000 per time
+control and bin, 800-2600): per cell, the searcher and budget whose expected move accuracy and
+blunder rate (Stockfish scoring every legal move) are closest in Elo to the humans', among those
+whose human-move cross-entropy is at or below the policy's; the policy where none is.
 
-simulations, t being the predicted human think time (s) for the position. The time control enters
-through t: humans think longer in slower games and on harder moves, and the search follows. N goes
-onto LADDER by random rounding in log2(1 + N), as the fit interpolated, and the rung it lands on
-never exceeds a tenth of the clock left above the reserve at HW simulations a second; a search
-still running at a fifth of it (a machine at under half that speed) stops, and the move comes from
-the policy. No search in bullet: there it raises the human-move cross-entropy above the policy's.
-
-HW is what a 6-CPU bot playing two games searches per second on the fast backend (about 17 ms a
-simulation), so the search costs about three quarters of the think time the bot waits anyway at
-most.
-
-Fitted on 220,000 positions of the golden evaluation's July 2026 human games (up to 5,000 per time
-control and 200-point rating band from 800 to 2600): the model sees what the human saw, Stockfish
-scores every legal move, and the rule minimizes the paired gaps in move accuracy and blunder rate
-between its move distribution and the human's moves, with the human-move cross-entropy held at or
-below the policy's in every time control and rating band.
+A search is sized for a tenth of the clock left above the reserve at SECONDS a simulation or call
+(a 6-CPU bot with other games searching): the budget steps down its searcher's ladder until it fits.
+A search still running at a fifth of the clock stops, and the move comes from the policy.
 """
 
 import numpy as np
 
-K, ALPHA, GAMMA, CAP, HW = 2.0, 1.0, 3.75, 256, 40.0  # provisional: refit on the annealed model
-LADDER = (0, 32, 128, 256)
-NO_SEARCH = ("ultraBullet", "bullet")
-_U = np.log2(1 + np.array(LADDER))
-_BINS = np.arange(63)
-SECONDS = np.where(_BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06))  # think-time head bins
+# (speed, bin) -> (searcher, budget, beta); a cell not listed plays the policy
+CELLS = {}
+LADDER = dict(coverage=(8, 32, 128, 256), lookahead=(1, 2, 4, 8, 16))
+SECONDS = dict(coverage=1 / 40, lookahead=0.3)
 
 
-def budget(rating, time, speed="blitz"):
-    """Coverage simulations (continuous) for a player of `rating`; time: the think-time head's
-    63-bin distribution for the position."""
-    if speed in NO_SEARCH:
-        return 0.0
-    t = float(np.asarray(time, float) @ SECONDS / np.sum(time))
-    return float(min(CAP, K * t**ALPHA * np.exp(GAMMA * (rating - 1700) / 1000), HW * t))
+def cell(rating, speed):
+    """(searcher, budget, beta) for a player of `rating` at `speed`, or None: the policy."""
+    return CELLS.get((speed, min(max(int(rating) // 200 * 200, 800), 2600)))
 
 
 def limit(clock, reserve=1.0):
-    """Seconds a search may take: a fifth of the clock left above the reserve, twice what ceiling()
-    sizes it for (None: no clock)."""
+    """Seconds a search may take: a fifth of the clock left above the reserve (None: no clock)."""
     return np.inf if clock is None else max(clock - reserve, 0.0) / 5
 
 
-def ceiling(clock, reserve=1.0):
-    """The most simulations the clock allows: a tenth of the clock left above the reserve (half of
-    limit()) at HW simulations a second."""
-    return HW * limit(clock, reserve) / 2
+def affordable(searcher, budget, clock, reserve=1.0):
+    """The largest rung of the searcher's ladder up to `budget` that fits a tenth of the clock left
+    above the reserve (half of limit()); 0: none."""
+    fits = limit(clock, reserve) / 2
+    return max((b for b in LADDER[searcher] if b <= budget and b * SECONDS[searcher] <= fits), default=0)
 
 
-def pick(n, rng, most=np.inf):
-    """n onto LADDER: one of its two neighbours, at random, linearly in log2(1 + n) (as the fit
-    interpolated; this keeps the mean of log2(1 + N), not of N), then the largest rung within
-    `most`, the hard limit."""
-    i = float(np.interp(np.log2(1 + n), _U, np.arange(len(_U))))
-    lo = int(i)
-    rung = LADDER[lo + 1] if lo + 1 < len(LADDER) and rng.random() < i - lo else LADDER[lo]
-    return max(b for b in LADDER if b <= max(min(rung, most), 0))
+def tilt(prior, q, beta):
+    """Lookahead's distribution: pi ~ prior exp(beta Q)."""
+    z = np.log(np.maximum(prior, 1e-300)) + beta * np.asarray(q, float)
+    z = np.exp(z - z.max())
+    return z / z.sum()

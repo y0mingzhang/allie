@@ -220,3 +220,39 @@ def test_lookahead_values_every_move(tiny):
     moves, prior, q = tree.Lookahead(m=4, k=2)(game, 3)
     assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
     assert abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all() and (np.abs(q) <= 1).all()
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path):
+    """On the fast backend lookahead runs on the games' threads through the engine's batches: the
+    same values as one at a time, up to BF16 batching noise; past its deadline it gives None."""
+    pytest.importorskip("pybind11")
+    import threading
+
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    engine, search = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)), tree.Lookahead(m=4, k=2)
+    games = []
+    for s in range(3):
+        games.append(Game(engine, 2400, 2400, 1800, 20, "classical"))
+        games[-1].update(random_game(s, 12 + 2 * s), 1700, 1690)
+    alone, together = [search(g, 4) for g in games], [None] * len(games)
+
+    def go(i):
+        together[i] = search(games[i], 4)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(len(games))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for (m1, p1, q1), (m2, p2, q2) in zip(alone, together):
+        assert m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 1e-2
+    assert search(games[0], 4, deadline=time.monotonic() - 1) is None

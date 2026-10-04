@@ -26,11 +26,16 @@ def model(c):
 
 
 def coverage(c):
-    if not (c.play.mode == "calibrated" or c.play.mode == "strongest" and c.play.search):
-        return None
-    from .tree import Coverage
+    """The searcher play.mode uses: coverage for strongest, coverage and lookahead for calibrated."""
+    if c.play.mode == "calibrated":
+        from .tree import Coverage, Lookahead
 
-    return Coverage()
+        return dict(coverage=Coverage(), lookahead=Lookahead())
+    if c.play.mode == "strongest" and c.play.search:
+        from .tree import Coverage
+
+        return Coverage()
+    return None
 
 
 def watch(bot, path):
