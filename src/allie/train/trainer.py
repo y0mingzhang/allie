@@ -57,6 +57,10 @@ SAME_SINCE = dict(
     moe_remat=False,
     moe_chunks=1,
 )
+# SAME arguments --resume-retune may change (recorded in source_changes): lr_scale, every optimizer group's lr
+# from this step on (TrainingManager.retune), and mix, a policy that drew identically up to this step
+# (data.mix.same_until)
+RETUNABLE = ("lr_scale", "mix")
 # Config fields --init-from may change: they leave the function the parent computes unchanged
 INIT_FREE = ("scheduled_steps", "input_lr_mul", "ckpt", "ckpt_frac")
 
@@ -334,6 +338,12 @@ def main():
         "copy of the history counts (recorded as source_changes)",
     )
     p.add_argument(
+        "--resume-retune",
+        action="store_true",
+        help="resume with another --lr-scale (every optimizer group's lr from this step on) or --mix (a "
+        "cool/recent tail of the checkpoint's policy whose mark is not yet passed), recorded as source_changes",
+    )
+    p.add_argument(
         "--data",
         default="/scratch/yimingz3/allie/lichess_tokens_v2",
         help="packed corpus of the validation rows",
@@ -423,7 +433,7 @@ def main():
     assert a.initial_batch_rows == schedule.batch_rows
     assert 0 < a.wsd_end_step <= a.steps
     assert sum(bool(x) for x in (a.resume, a.wsd_fork_from, a.wsd_continue_from)) <= 1
-    assert a.resume or not a.resume_new_source
+    assert a.resume or not (a.resume_new_source or a.resume_retune)
     fork_steps = (
         set(map(int, a.wsd_fork_steps.split(","))) if a.wsd_fork_steps else set()
     )
@@ -487,6 +497,7 @@ def main():
         ROW,
         Prefetch,
         Sampler,
+        same_until,
     )  # its data dependencies only where it samples
 
     kw = dict(pool_frac=a.mix_pool_frac, aux=aux, feats=bool(a.clock_feats))
@@ -532,10 +543,20 @@ def main():
         local = torch.load(
             directory / f"rank{rank}.pt", weights_only=False, map_location="cpu"
         )
+        source_changes = shared.get("source_changes", [])
+        # retune rewrites the rank state's lr_scale and loads its sampler state under another policy: both the parent's
+        assert not a.resume_retune or (local["manager"]["config"], local["data"]["policy"]) == (
+            shared["config"], shared["args"]["mix"]
+        ), "rank state is not the checkpoint's"
         for key in SAME:
-            same = shared["args"][key] == vars(a)[key]
+            old, new = shared["args"][key], vars(a)[key]
+            same = old == new
             if not same and a.resume_new_source:
-                same = migratable(key, shared["args"][key], vars(a)[key])
+                same = migratable(key, old, new)
+            if not same and a.resume_retune and key in RETUNABLE:
+                frac = local["data"]["seen"] / train.total_rows
+                same = key == "lr_scale" or same_until(old, new, frac)
+                source_changes = [*source_changes, dict(step=shared["step"], changed=key, parent=old, now=new)]
             assert same, f"Resume changes {key}"
         assert not shared["args"].get("kd_teacher"), (
             "a distillation run: resume it with the trainer that trained it"
@@ -546,7 +567,6 @@ def main():
             )
         old_row = shared["args"].get("row_tokens", 1024)
         assert old_row == a.row_tokens, "Resume changes row_tokens"
-        source_changes = shared.get("source_changes", [])
         if shared["source_sha256"] != sources or shared["args"]["arch"] != a.arch:
             assert a.resume_new_source, "Resume requires the frozen training source"
             source_changes = [
@@ -564,6 +584,8 @@ def main():
                 "Rank/model configuration mismatch"
             )
             local["manager"]["config"] = dict(local["manager"]["config"], arch=cfg.arch)
+        if shared["args"]["lr_scale"] != a.lr_scale:  # --resume-retune, admitted above
+            manager.retune(local["manager"])
         assert shared["runtime"] == runtime, (
             "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
         )

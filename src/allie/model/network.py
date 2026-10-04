@@ -400,6 +400,15 @@ class TrainingManager(core.TrainingManager):
         self.mtp_weights = self.mtp_weights_schedule[self.schedule_step]
         self.model.split_embed = saved["split_embed"]
 
+    def retune(self, saved):
+        """--resume-retune: a rank state saved at another lr_scale, at this manager's. Its optimizer groups take
+        the fresh groups' initial_lr (base lr x lr_scale, halved under adam_every, as at a fresh start); lr
+        follows at the next step, and with it the lr^2-coupled cautious weight decay."""
+        for opt, state in zip(self.optimizers, saved["optimizers"]):
+            for group, g in zip(opt.param_groups, state["param_groups"]):
+                g["initial_lr"] = g["lr"] = group["initial_lr"]
+        saved["config"] = dict(saved["config"], lr_scale=self.cfg.lr_scale)
+
 
 def config_dict(cfg):
     return asdict(cfg) | dict(
