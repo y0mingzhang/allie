@@ -223,6 +223,15 @@ def test_clocks_takeback_and_late(engine):
     m.gate.set()
     c.q.join()
     assert g.posts == []  # late
+    stopped = threading.Event()
+    g.match.bot.stopped = stopped
+    m.gate = threading.Event()
+    c.put(g.say("still there?"))
+    wait(lambda: len(m.calls) == 2)
+    stopped.set()  # the bot stops while the reply is written
+    m.gate.set()
+    c.q.join()
+    assert g.posts == []
 
 
 def test_split():

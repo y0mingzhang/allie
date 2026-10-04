@@ -202,7 +202,8 @@ class Chatter:
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
         self.last, self.posted, self.until = -math.inf, -math.inf, math.inf
-        self.heard, self.timings, self.latest = Counter(), [], []
+        self.heard, self.timings = Counter(), []
+        self.seen, self.latest = [], []  # the moves analyzed, and the reader's latest
         name = f"chat-{self.gid}"
         threading.Thread(target=self.serve, daemon=True, name=name).start()
 
@@ -360,6 +361,7 @@ class Chatter:
             self.see(moves[: j + 1], w, b)
             self.ply(t, j)
         self.clocks[len(moves)] = s["wtime"], s["btime"]
+        self.seen = moves
         self.events(t, s)
 
     def common(self, moves):
@@ -541,7 +543,7 @@ class Chatter:
         turn = "\n".join([*self.pending, self.now(), f"(You are called for {reason}.)"])
         messages = [*self.convo, {"role": "user", "content": turn}]
         self.llm = self.llm or model(self.cfg)
-        start, then = time.monotonic(), list(self.latest)
+        start, then = time.monotonic(), list(self.seen)  # the moves in the prompt
         r = self.llm(self.system, messages)
         if r is None:  # an error, a refusal, the spend cap: the updates wait
             return
@@ -566,10 +568,10 @@ class Chatter:
         rated game, a move it names not yet played; the seconds it took, or None."""
         if unprompted:
             time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
-        now = list(self.latest)
+        now, stopped = list(self.latest), getattr(self.match.bot, "stopped", None)
         why = (
             "quiet" if self.muted() and text != QUIET
-            else "cancelled" if self.cancelled
+            else "cancelled" if self.cancelled or stopped and stopped.is_set()
             else "late" if unprompted and then is not None
             and (len(now) - len(then) > 2 or now[: len(then)] != then)
             else "an unplayed move, rated" if self.info.get("rated") and not self.status
