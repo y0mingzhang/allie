@@ -7,7 +7,8 @@ The golden eval samples each mover-Elo band at its own rate, so every position i
 cell's population / sampled moves (strat-eval-v1 manifest): within a bin the mix of movers is then
 the natural July 2026 one. Intervals: 95%, 2,000 bootstrap draws of whole games.
 
-usage: plot_rating.py BIGRUN_SCORES_NAME   (e.g. bigrun-143051, a file in rating/scores/)
+usage: plot_rating.py SCORES_NAME [OUT]   (e.g. bigrun-143051, a file in rating/scores/; OUT: the outputs' stem,
+default acc-by-game-rating-final)
 """
 
 import json
@@ -54,6 +55,7 @@ def boot(games, w, xs, rng):
 
 def main():
     big = sys.argv[1]
+    stem = sys.argv[2] if len(sys.argv) > 2 else "acc-by-game-rating-final"
     rng = np.random.default_rng(7)
     with np.load(DATA / "rating" / "games.npz") as z:
         sel, meta = z["sel"][z["keep"]], z["meta"]
@@ -62,9 +64,9 @@ def main():
     game = sel[:, 0]
     rating = meta[game, 2:4].mean(1)
     info = json.loads((DATA / "rating" / "scores" / f"{big}.json").read_text())
-    final = info["step"] == 143051
-    tag = "final" if final else f"step {info['step']:,}"
-    models = dict(MODELS) | {big: (f"our big run ({tag})", "#0b0b0b", 3)}
+    tag = "final" if info["step"] == 143051 else f"step {info['step']:,}"
+    name = f"our big run ({tag})" if big.startswith("bigrun-") else big
+    models = dict(MODELS) | {big: (name, "#0b0b0b", 3)}
     sc = {k: scores(k) for k in models}
     rows, centers = [], (EDGES[:-1] + EDGES[1:]) / 2
     for lo, hi in zip(EDGES[:-1], EDGES[1:]):
@@ -129,14 +131,14 @@ def main():
         color=muted, fontsize=9.5, x=0.01, ha="left",
     )  # fmt: skip
     fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(HERE / "acc-by-game-rating-final.png", facecolor=surface)
+    fig.savefig(HERE / f"{stem}.png", facecolor=surface)
 
     f = lambda t, s=100, fmt="{:+.2f}": (
         f"{fmt.format(t[0] * s)} [{fmt.format(t[1] * s)}, {fmt.format(t[2] * s)}]"
     )
     names = list(models)
     lines = [
-        f"Top-1 accuracy % by game rating (big run = {tag}, model sha256 {info['model_sha256'][:12]}); weighted to the natural mover mix. "
+        f"Top-1 accuracy % by game rating ({name}, model sha256 {info['model_sha256'][:12]}); weighted to the natural mover mix. "
         f"Bins with < {MIN_N:,} positions are marked *.",
         "",
         "| game rating | positions | games | " + " | ".join(models[k][0] for k in names)
@@ -152,10 +154,8 @@ def main():
             + " | ".join(f"{mm[k]['acc'][0] * 100:.1f}" for k in names)
             + f" | {f(mm[big]['d_acc_79m'])} | {f(mm[big]['d_ce_79m'], 1, '{:+.4f}')} |"
         )
-    (HERE / "acc-by-game-rating-final.md").write_text("\n".join(lines) + "\n")
-    (HERE / "acc-by-game-rating-final.json").write_text(
-        json.dumps(rows, indent=1) + "\n"
-    )
+    (HERE / f"{stem}.md").write_text("\n".join(lines) + "\n")
+    (HERE / f"{stem}.json").write_text(json.dumps(rows, indent=1) + "\n")
     print("\n".join(lines))
 
 
