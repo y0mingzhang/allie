@@ -288,6 +288,26 @@ The final run uses all three changes. It also drops multi-token prediction, whos
 - A floor of 1e-12 on that sum touches about 0.2% of that layer's tokens. Every other token is bitwise unchanged.
 - The run resumed from step 59,392 and lost about 50 minutes.
 
+## Fast inference
+
+One cached step: the time a move takes once the opponent's move arrives, median of 35 steps of a game (`analysis/lichess/speed.py`). A step of 16 or 64 games reads one new token for each. CPU: int8 weights and the C++ kernels (`fast` backend) unless noted. Memory: the process's resident size. Share of bandwidth: the weights one game reads per move (0.74 GB in int8) per second, against the best streaming read the same threads reach on that machine (`allie.lichess.fast.bandwidth`).
+
+| Device | Threads | 1 game: ms per move | Share of bandwidth | 16 games: ms per step | 64 games: ms per step | Memory |
+|---|---:|---:|---:|---:|---:|---:|
+| AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 6.3 | 55% | 32 (500 moves/s) | 101 | 6.4 GB |
+| AMD EPYC 9755 | 32 | 4.6 | 75% | 17 (960 moves/s) | 41 (1,570 moves/s) | 6.4 GB |
+| AMD EPYC 9755, PyTorch reference | 8 | 19.5 | | 185 | | 6.4 GB |
+| AMD EPYC 9755, AVX2 only | 4 / 8 | 11.7 / 6.7 | | 93 / 48 | | 6.4 GB |
+| AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 7.6 / 5.0 / 4.4 | 50% / 73% / 82% | 51 / 30 / 20 | 165 / 93 / 56 | 6.4 GB |
+| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 12.7 / 8.0 | 66% / 74% | 76 / 42 | 246 / 136 | 6.4 GB |
+| AMD EPYC 9755, BF16 weights | 16 | 7.8 | | 30 | | 11 GB |
+| NVIDIA RTX A6000, BF16, CUDA graphs | | 7.3 | | 25 | | 11 GB |
+| NVIDIA RTX A6000, PyTorch reference | | 46.5 | | 186 | | 11 GB |
+
+- **Bandwidth bound.** One game is limited by memory bandwidth: speed rises with threads until the kernels read about 150-165 GB/s. A laptop or desktop streams 50-100 GB/s, so we expect about 10-20 ms a move with 6-8 cores. We have not measured one.
+- **Batching.** Games in one step share each expert's weights: 16 games cost 3.6 to 5 times one game on CPU, and 64 games 9 to 16 times.
+- **Accuracy.** The int8 CPU default changes the benchmark loss by +0.0017 [−0.0005, +0.0038] nats against the training forward; BF16 on CPU or GPU is within noise. The [bot's guide](../src/allie/lichess/README.md#cost-and-accuracy) has the full comparison.
+
 ## Reproducing
 
 | Module | What it is |

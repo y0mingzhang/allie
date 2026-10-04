@@ -18,8 +18,7 @@ Our main test set covers every time control and rating level. Its games come fro
 
 - Its loss on our main test set is **1.2533**, against 1.3526 for the original Allie.
 - In blitz, its top choice is the move played **59.3%** of the time. For players rated 2400 and above, it is **63.0%**.
-- It runs on an ordinary CPU: 6-9 ms per move on 8 cores of a recent server (a laptop's memory bandwidth
-  allows about 10-20 ms).
+- It runs on an ordinary CPU: about 4-7 ms per move on a recent server ([fast inference](#fast-inference)).
 
 You can [play it on Lichess](#play-against-allie-on-lichess) or [download it](#download-and-run-the-model).
 
@@ -194,7 +193,17 @@ model.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="1
 model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player would play it
 ```
 
-`predict` gives every legal move's probability; `analyze` adds the win, draw and loss chances and the expected think time. On a CPU the weights load in int8 (6.4 GB, 6-9 ms a move on 8 cores of a recent server, with C++ kernels compiled for the machine on first use); on a GPU, in BF16 (about 7 ms, replayed CUDA graphs). This package has the same code, a command line (`allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2`) and the Lichess bot. See [src/allie/lichess/README.md](src/allie/lichess/README.md).
+`predict` gives every legal move's probability; `analyze` adds the win, draw and loss chances and the expected think time. On a CPU the weights load in int8, on a GPU in BF16. This package has the same code, a command line (`allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2`) and the Lichess bot. See [src/allie/lichess/README.md](src/allie/lichess/README.md).
+
+### Fast inference
+
+Allie 2.0 has 5.6B parameters, yet it plays a move in about 4-7 ms on a recent server CPU with 8 to 32 threads, in 6.4 GB of memory. Batching 64 games, it plays about 1,500 moves a second.
+
+- **It reads little.** Each move reads only the 0.7B parameters it routes through.
+- **It reads fast.** C++ kernels, compiled for the machine on first use, stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach.
+- **Elsewhere.** On a GPU a move takes about 7 ms (CUDA graphs). A laptop has less memory bandwidth: we estimate 10-20 ms a move, untested.
+
+Every measurement is in [DETAILS](docs/DETAILS.md#fast-inference).
 
 ---
 
