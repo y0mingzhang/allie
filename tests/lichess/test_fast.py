@@ -40,11 +40,12 @@ def play(model, games, lengths, steps=10):
 
 @pytest.mark.parametrize("int8", [False, True])
 @pytest.mark.parametrize("keep", [None, 2])
-def test_fast_matches_reference(tiny_path, tiny, int8, keep):
+@pytest.mark.parametrize("n", [1, 3])  # one game: steps of one or two tokens (each thread alone)
+def test_fast_matches_reference(tiny_path, tiny, int8, keep, n):
     """Fast and PyTorch BF16 paths differ by BF16 rounding only: the fast one is no further
     from FP32 than the reference is (a routing near-tie can flip in either)."""
-    games = [inputs(random_game(s, 30 + 7 * s)) for s in range(3)]
-    lengths = [HEADER + 5, HEADER, HEADER + 9]
+    games = [inputs(random_game(s, 30 + 7 * s)) for s in range(n)]
+    lengths = [HEADER + 5, HEADER, HEADER + 9][:n]
     kw = dict(dtype=torch.bfloat16, int8=int8, active_experts=keep)
     ref = play(Model(tiny_path, backend="torch", **kw), games, lengths)
     got = play(Model(tiny_path, backend="fast", threads=3, **kw), games, lengths)

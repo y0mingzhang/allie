@@ -525,6 +525,11 @@ struct Engine {
   };
   std::vector<Count> phase;  // per thread: phases passed this step
   std::vector<std::vector<float>> scratch;
+  struct Priv {  // a thread's own copy of the per-token steps (solo)
+    std::vector<float> x, h, hf, g;
+    std::vector<const float*> ph, phf;
+  };
+  std::vector<Priv> priv;
   int prof = 0;
   double ptime[NPHASE] = {0}, plast = 0;
 
@@ -548,8 +553,11 @@ struct Engine {
     for (int i; (i = c.fetch_add(1, std::memory_order_relaxed)) < n;) f(i);
   }
   void embedding(int t, int nt);
+  void resid(int i, int k, const float* src, float* dst, float* hk, float* gk);
+  void rotary(int i, int k, int hh, const float* gk);
+  void attend(int i, int k, int hh, const float* gk, float* sc);
   void blockstep(int i, int t, int nt);
-  void ffn(int t, int nt, int dense, int i);
+  void ffn(int t, int nt, int dense, int i, bool solo);
   void head(int t, int nt);
   void run(int t) {
     int nt = pool->n;
@@ -707,125 +715,153 @@ void Engine::embedding(int t, int nt) {
   sync(t, E_SMEAR);
 }
 
+// token k's residual stream from src into dst: skip connection, x0 blend; hk = norm(dst); its gates
+void Engine::resid(int i, int k, const float* src, float* dst, float* hk, float* gk) {
+  const Layer& ly = layers[i];
+  const float *a = &x0[(size_t)k * D], *b = &x02[(size_t)k * D];
+  if (ly.skout >= 0) {
+    int j = ly.skout;
+    float gs = sigm(scal[3 * L + 2 + j]) * 2;
+    float gg = rb(gs * rb(sigm(rb(dot(a, skip_gate[j], 16)))));
+    axpy_rb(dst, src, gg, &skip[2 - j][(size_t)k * D], D);
+    src = dst;
+  }
+  float c0 = x0l[2 * i], c1 = x0l[2 * i + 1], lam = scal[i];
+  int d = 0;
+  if (i == 0) {
+    float c = (float)((double)lam + (double)c0);
+    for (; d + VL <= D; d += VL)
+      vst(dst + d, vrb(vadd(vrb(vmul(vset(c), vld(src + d))), vrb(vmul(vset(c1), vld(b + d))))));
+    for (; d < D; d++) dst[d] = rb(rb(c * src[d]) + rb(c1 * b[d]));
+  } else {
+    for (; d + VL <= D; d += VL) {
+      vf s = vrb(vadd(vrb(vmul(vset(c0), vld(a + d))), vrb(vmul(vset(c1), vld(b + d)))));
+      vst(dst + d, vrb(vfma(vset(lam), vld(src + d), s)));
+    }
+    for (; d < D; d++) dst[d] = rb(rb(rb(c0 * a[d]) + rb(c1 * b[d])) + lam * src[d]);
+  }
+  norm(dst, hk, D);
+  for (int r = 0; r < ly.G; r++) gk[r] = rb(sigm(rb(dot(hk, ly.gates + r * 16, 16))));
+}
+
+// token k, head hh: q and k normed and rotated, v (+ value embedding); k and v into the cache
+void Engine::rotary(int i, int k, int hh, const float* gk) {
+  const Layer& ly = layers[i];
+  const Seq& s = seq[tseq[k]];
+  int64_t p = s.n0 + (k - s.off);
+  int half = hd / 2;
+  const float* row = &qkv[(size_t)k * 3 * D];
+  float qn[256], kk[256];
+  norm(row + hh * hd, qn, hd);
+  norm(row + (H + hh) * hd, kk, hd);
+  const bf16 *cs = cosv + p * half, *sn = sinv + p * half;
+  float* qo = &q[(size_t)k * D + hh * hd];
+  bf16* kc = s.k + (((size_t)i * H + hh) * s.cap + p) * hd;
+  bf16* vc = s.v + (((size_t)i * H + hh) * s.cap + p) * hd;
+  for (int c = 0; c < half; c++) {
+    float co = f32(cs[c]), si = f32(sn[c]);
+    qo[c] = rb(rb(qn[c] * co) + rb(qn[c + half] * si));
+    qo[c + half] = rb(rb(qn[c + half] * co) - rb(qn[c] * si));
+    kc[c] = tobf(rb(rb(kk[c] * co) + rb(kk[c + half] * si)));
+    kc[c + half] = tobf(rb(rb(kk[c + half] * co) - rb(kk[c] * si)));
+  }
+  const float* v = row + (2 * H + hh) * hd;
+  if (ly.ve >= 0) {
+    float g2 = rb(2 * gk[H + hh]);
+    const bf16* vr = ve[ly.ve] + (size_t)ids[k] * D + hh * hd;
+    for (int c = 0; c < hd; c++) vc[c] = tobf(rb(v[c] + rb(g2 * f32(vr[c]))));
+  } else {
+    for (int c = 0; c < hd; c++) vc[c] = tobf(v[c]);
+  }
+}
+
+// token k's attention in head hh over its game's cache, times the output gate; sc: scores
+void Engine::attend(int i, int k, int hh, const float* gk, float* sc) {
+  const Seq& s = seq[tseq[k]];
+  const bf16* K = s.k + ((size_t)i * H + hh) * s.cap * hd;
+  const bf16* Vv = s.v + ((size_t)i * H + hh) * s.cap * hd;
+  int64_t p = s.n0 + (k - s.off);
+  const float* qv = &q[(size_t)k * D + hh * hd];
+  vf qr[16];
+  for (int c = 0; c < hd / VL; c++) qr[c] = vld(qv + c * VL);
+  float mx = -INFINITY;
+  for (int64_t r = 0; r <= p; r++) {
+    vf a = vzero();
+    for (int c = 0; c < hd / VL; c++) a = vfma(qr[c], vld(K + r * hd + c * VL), a);
+    sc[r] = vsum(a) * scale;
+    mx = std::max(mx, sc[r]);
+  }
+  int64_t r = 0, n = p + 1;
+  vf vs = vzero();
+  for (; r + VL <= n; r += VL) {
+    vf ex = vexp(vsub(vld(sc + r), vset(mx)));
+    vst(sc + r, ex);
+    vs = vadd(vs, ex);
+  }
+  float sum = vsum(vs);
+  for (; r < n; r++) sum += sc[r] = expf(sc[r] - mx);
+  vf o[16];
+  for (int c = 0; c < hd / VL; c++) o[c] = vzero();
+  for (r = 0; r < n; r++) {
+    vf pr = vset(sc[r]);
+    for (int c = 0; c < hd / VL; c++) o[c] = vfma(pr, vld(Vv + r * hd + c * VL), o[c]);
+  }
+  float* yo = &y[(size_t)k * D + hh * hd];
+  float og = gk[hh], ov[256];
+  for (int c = 0; c < hd / VL; c++) vst(ov + c * VL, o[c]);
+  for (int c = 0; c < hd; c++) yo[c] = rb(rb(ov[c] / sum) * og);
+}
+
 void Engine::blockstep(int i, int t, int nt) {
   const Layer& ly = layers[i];
-  // residual stream: skip connection in, x0 blend; h = norm(x); output and value-embedding gates
-  for (int k = t; k < T; k += nt) {
-    float* xk = &x[(size_t)k * D];
-    const float *a = &x0[(size_t)k * D], *b = &x02[(size_t)k * D];
-    if (ly.skout >= 0) {
-      int j = ly.skout;
-      float gs = sigm(scal[3 * L + 2 + j]) * 2;
-      float gg = rb(gs * rb(sigm(rb(dot(a, skip_gate[j], 16)))));
-      axpy_rb(xk, xk, gg, &skip[2 - j][(size_t)k * D], D);
-    }
-    float c0 = x0l[2 * i], c1 = x0l[2 * i + 1], lam = scal[i];
-    int d = 0;
-    if (i == 0) {
-      float c = (float)((double)lam + (double)c0);
-      for (; d + VL <= D; d += VL)
-        vst(xk + d, vrb(vadd(vrb(vmul(vset(c), vld(xk + d))), vrb(vmul(vset(c1), vld(b + d))))));
-      for (; d < D; d++) xk[d] = rb(rb(c * xk[d]) + rb(c1 * b[d]));
-    } else {
-      for (; d + VL <= D; d += VL) {
-        vf s = vrb(vadd(vrb(vmul(vset(c0), vld(a + d))), vrb(vmul(vset(c1), vld(b + d)))));
-        vst(xk + d, vrb(vfma(vset(lam), vld(xk + d), s)));
-      }
-      for (; d < D; d++) xk[d] = rb(rb(rb(c0 * a[d]) + rb(c1 * b[d])) + lam * xk[d]);
-    }
-    float* hk = &h[(size_t)k * D];
-    norm(xk, hk, D);
-    for (int r = 0; r < ly.G; r++) g[(size_t)k * ly.G + r] = rb(sigm(rb(dot(hk, ly.gates + r * 16, 16))));
-  }
-  sync(t, B_NORM);
-  chunks(t, (3 * D + 63) / 64, [&](int c) { mm(ly.qkv, D, 64 * c, std::min(64, 3 * D - 64 * c), ph.data(), T, &qkv[64 * c], 3 * D); });
+  int G = ly.G;
+  // solo: one or two tokens; every thread does the per-token steps itself, into its own buffers,
+  // rather than wait at a barrier for one thread
+  bool solo = T <= 2, dense = ly.fc.w != nullptr;
+  Priv& pv = priv[t];
+  float *xs = solo ? pv.x.data() : x.data(), *gs = solo ? pv.g.data() : g.data();
+  for (int k = solo ? 0 : t; k < T; k += solo ? 1 : nt)
+    resid(i, k, &x[(size_t)k * D], &xs[(size_t)k * D], solo ? &pv.h[(size_t)k * D] : &h[(size_t)k * D], &gs[k * G]);
+  if (!solo) sync(t, B_NORM);
+  const float* const* hp = solo ? pv.ph.data() : ph.data();
+  chunks(t, (3 * D + 63) / 64, [&](int c) { mm(ly.qkv, D, 64 * c, std::min(64, 3 * D - 64 * c), hp, T, &qkv[64 * c], 3 * D); });
   sync(t, B_QKV);
-  // q, k: per-head norm and rotary; v (+ value embedding); k, v into the cache
-  int half = hd / 2;
-  for (int u = t; u < T * H; u += nt) {
-    int k = u / H, hh = u % H;
-    const Seq& s = seq[tseq[k]];
-    int64_t p = s.n0 + (k - s.off);
-    const float* row = &qkv[(size_t)k * 3 * D];
-    float qn[256], kk[256];
-    norm(row + hh * hd, qn, hd);
-    norm(row + (H + hh) * hd, kk, hd);
-    const bf16 *cs = cosv + p * half, *sn = sinv + p * half;
-    float* qo = &q[(size_t)k * D + hh * hd];
-    bf16* kc = s.k + (((size_t)i * H + hh) * s.cap + p) * hd;
-    bf16* vc = s.v + (((size_t)i * H + hh) * s.cap + p) * hd;
-    for (int c = 0; c < half; c++) {
-      float co = f32(cs[c]), si = f32(sn[c]);
-      qo[c] = rb(rb(qn[c] * co) + rb(qn[c + half] * si));
-      qo[c + half] = rb(rb(qn[c + half] * co) - rb(qn[c] * si));
-      kc[c] = tobf(rb(rb(kk[c] * co) + rb(kk[c + half] * si)));
-      kc[c + half] = tobf(rb(rb(kk[c + half] * co) - rb(kk[c] * si)));
-    }
-    const float* v = row + (2 * H + hh) * hd;
-    if (ly.ve >= 0) {
-      float g2 = rb(2 * g[(size_t)k * ly.G + H + hh]);
-      const bf16* vr = ve[ly.ve] + (size_t)ids[k] * D + hh * hd;
-      for (int c = 0; c < hd; c++) vc[c] = tobf(rb(v[c] + rb(g2 * f32(vr[c]))));
-    } else {
-      for (int c = 0; c < hd; c++) vc[c] = tobf(v[c]);
-    }
-  }
-  sync(t, B_ROTARY);
-  // attention: (sequence, head, query block) units
   float* sc = scratch[t].data();
-  int nu = (int)units.size() / 3;
-  for (int u = t; u < nu * H; u += nt) {
-    int w = u / H, hh = u % H;
-    const Seq& s = seq[units[3 * w]];
-    const bf16* K = s.k + ((size_t)i * H + hh) * s.cap * hd;
-    const bf16* Vv = s.v + ((size_t)i * H + hh) * s.cap * hd;
-    for (int k = units[3 * w + 1]; k < units[3 * w + 2]; k++) {
-      int64_t p = s.n0 + (k - s.off);
-      const float* qv = &q[(size_t)k * D + hh * hd];
-      vf qr[16];
-      for (int c = 0; c < hd / VL; c++) qr[c] = vld(qv + c * VL);
-      float mx = -INFINITY;
-      for (int64_t r = 0; r <= p; r++) {
-        vf a = vzero();
-        for (int c = 0; c < hd / VL; c++) a = vfma(qr[c], vld(K + r * hd + c * VL), a);
-        sc[r] = vsum(a) * scale;
-        mx = std::max(mx, sc[r]);
-      }
-      int64_t r = 0, n = p + 1;
-      vf vs = vzero();
-      for (; r + VL <= n; r += VL) {
-        vf ex = vexp(vsub(vld(sc + r), vset(mx)));
-        vst(sc + r, ex);
-        vs = vadd(vs, ex);
-      }
-      float sum = vsum(vs);
-      for (; r < n; r++) sum += sc[r] = expf(sc[r] - mx);
-      vf o[16];
-      for (int c = 0; c < hd / VL; c++) o[c] = vzero();
-      for (r = 0; r < n; r++) {
-        vf pr = vset(sc[r]);
-        for (int c = 0; c < hd / VL; c++) o[c] = vfma(pr, vld(Vv + r * hd + c * VL), o[c]);
-      }
-      float* yo = &y[(size_t)k * D + hh * hd];
-      float og = g[(size_t)k * ly.G + hh], ov[256];
-      for (int c = 0; c < hd / VL; c++) vst(ov + c * VL, o[c]);
-      for (int c = 0; c < hd; c++) yo[c] = rb(rb(ov[c] / sum) * og);
+  if (T == S) {  // one new token a game: rotary and attention in one pass per (game, head)
+    for (int u = t; u < T * H; u += nt) {
+      rotary(i, u / H, u % H, &gs[(u / H) * G]);
+      attend(i, u / H, u % H, &gs[(u / H) * G], sc);
     }
+  } else {
+    for (int u = t; u < T * H; u += nt) rotary(i, u / H, u % H, &gs[(u / H) * G]);
+    sync(t, B_ROTARY);
+    int nu = (int)units.size() / 3;  // (game, head, query block)
+    for (int u = t; u < nu * H; u += nt)
+      for (int k = units[3 * (u / H) + 1]; k < units[3 * (u / H) + 2]; k++) attend(i, k, u % H, &gs[k * G], sc);
   }
   sync(t, B_ATTN);
   chunks(t, (D + 31) / 32, [&](int c) {
     int lo = 32 * c, n = std::min(32, D - lo);
     mm(ly.o, D, lo, n, py.data(), T, &tmp[lo], D);
-    for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tmp[(size_t)k * D + lo], n);
+    for (int k = 0; k < T; k++) {
+      size_t a = (size_t)k * D + lo;
+      int j = 0;
+      for (; j + VL <= n; j += VL) vst(&x[a + j], vrb(vadd(vld(&xs[a + j]), vld(&tmp[a + j]))));
+      for (; j < n; j++) x[a + j] = rb(xs[a + j] + tmp[a + j]);
+    }
   });
   sync(t, B_O);
-  for (int k = t; k < T; k += nt) {
-    norm(&x[(size_t)k * D], &h[(size_t)k * D], D);
-    if (!ly.fc.w)
-      for (int d = 0; d < D; d++) hf[(size_t)k * D + d] = h[(size_t)k * D + d] - ly.mu[d];
+  for (int k = solo ? 0 : t; k < T; k += solo ? 1 : nt) {
+    float* hk = solo ? &pv.h[(size_t)k * D] : &h[(size_t)k * D];
+    norm(&x[(size_t)k * D], hk, D);
+    if (!dense) {
+      float* fk = solo ? &pv.hf[(size_t)k * D] : &hf[(size_t)k * D];
+      for (int d = 0; d < D; d++) fk[d] = hk[d] - ly.mu[d];
+    }
+    if (solo && t == 0) memcpy(&h[(size_t)k * D], hk, D * sizeof(float));  // for the experts
   }
-  sync(t, B_NORM2);
-  ffn(t, nt, ly.fc.w != nullptr, i);
+  if (!solo || dense) sync(t, B_NORM2);  // solo: the router reads each thread's own copy
+  ffn(t, nt, dense, i, solo);
 }
 
 static void route(Engine& m, const Layer& ly, int k) {  // top-k of one token, its gates
@@ -848,21 +884,26 @@ static void route(Engine& m, const Layer& ly, int k) {  // top-k of one token, i
   }
 }
 
-void Engine::ffn(int t, int nt, int dense, int i) {
+void Engine::ffn(int t, int nt, int dense, int i, bool solo) {
   const Layer& ly = layers[i];
   if (dense) {
     if (t == 0) segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data()});
   } else {
+    const float* const* fp = solo ? priv[t].phf.data() : phf.data();
     chunks(t, (E + 15) / 16, [&](int c) {
       int lo = 16 * c, n = std::min(16, E - lo);
-      mm(Mat{ly.router, nullptr, 2}, D, lo, n, phf.data(), T, &rs[lo], E);
+      mm(Mat{ly.router, nullptr, 2}, D, lo, n, fp, T, &rs[lo], E);
       for (int k = 0; k < T; k++)
         for (int e = lo; e < lo + n; e++) rs[(size_t)k * E + e] = sigm(rs[(size_t)k * E + e]);
     });
     sync(t, B_ROUTER);
-    for (int k = t; k < T; k += nt) route(*this, ly, k);
-    sync(t, B_TOPK);
+    if (!solo) {
+      for (int k = t; k < T; k += nt) route(*this, ly, k);
+      sync(t, B_TOPK);
+    }
     if (t == 0) {  // tokens grouped by expert: each expert's weights read once
+      if (solo)
+        for (int k = 0; k < T; k++) route(*this, ly, k);
       std::fill(cnt.begin(), cnt.end(), 0);
       int na = T * keep;
       for (int a = 0; a < na; a++) cnt[idx[a]]++;
@@ -1073,6 +1114,14 @@ void allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, c
   m.scratch.resize(nt);
   for (auto& s : m.scratch)
     if (s.size() < need) s.resize(need);
+  m.priv.resize(nt);
+  if (T <= 2)
+    for (auto& p : m.priv) {
+      for (auto* v : {&p.x, &p.h, &p.hf}) v->resize(TD);
+      p.g.resize((size_t)T * 2 * m.H);
+      p.ph.resize(T), p.phf.resize(T);
+      for (int k = 0; k < T; k++) p.ph[k] = &p.h[(size_t)k * D], p.phf[k] = &p.hf[(size_t)k * D];
+    }
   if (m.prof) m.plast = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   m.phase.assign(nt, Engine::Count{0});
   m.ctr[0].store(0), m.ctr[1].store(0);
