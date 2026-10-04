@@ -162,7 +162,7 @@ def main():
             return r
 
         c = ref["c"] = Chatter(match, logged, a.seed + i)
-        h, moves, opp = replay(c, posts, path, kind == "rated", int(plies), script)
+        h, moves, _ = replay(c, posts, path, kind == "rated", int(plies), script)
         b = chess.Board()
         sans = []
         for u in moves:
