@@ -96,3 +96,64 @@ into `sys.path` any more; run with the package installed (`uv sync`) or `PYTHONP
   to themselves) and read the Maia-3 code from `MAIA3_REPO` (default: the clone under `ALLIE_DATA/maia3-bench`).
   `ALLIE_PROJECT_ROOT` defaults to the checkout, as for the trainer; `allie.experiments.modelexp` keeps its own
   default, `/home/yimingz3/src/allie`.
+
+# Rebasing onto the de-slop (branch `deslop`)
+
+The de-slop trims comments and docstrings everywhere, deletes research leftovers and removes dead code. Behaviour is
+unchanged: a 30-step 2-GPU run trains bitwise identically before and after, and the evaluator, the Maia-3 scorers,
+MoE search and Allie 2.0's inference give identical outputs. This file is deleted by the next commit; recover it
+with `git show <that commit>^:REBASE.md`.
+
+- **Hashed files** (`model/*.py`, `train/*.py`, `data/{packed,mix,vocab}.py`) changed in comments only (code
+  AST-identical), so their sha256 changed: `eval.score.EQUIVALENT`'s package digest is now `333a8a0d...`, and a
+  checkpoint trained on the pre-de-slop package needs `--resume-new-source` to resume. A branch that edits comments
+  in these files will conflict on lines only; keep its code and take either comment.
+- **Most edits are comment-only and local.** Conflicts are lines a branch also touched; take the branch's code.
+
+## Deleted files
+
+| Deleted | Instead |
+|---|---|
+| `REBASE.md` | this text, in history |
+| `src/allie/search/ALLIE_REVIEW.md`, `SEARCH_MATH.md`, `TIME_ROUTER_REPORT.md`, `TRANSFER_REPORT.md`, `explainer/index.html` | research reports, dropped (in history) |
+| `src/allie/search/MOE_ORACLE.md` | folded into `src/allie/search/README.md` |
+| `src/allie/search/runtime.py` (`ShipOracle`, `HandleOracle`, `ShipHandles`, `setup`, `FUNCTION_SHA256`), `export.py`, `configuration_allie.py`, `__main__.py` (`python -m allie.search`), `sglang_models/` | SGLang serving of the dense research checkpoints, dropped; MoE checkpoints use `moe_oracle.MoEOracle` |
+| `src/allie/search/native/board_encode.cpp`, `native/move-table.json` | the byte-identical `src/allie/model/board_encode.cpp`, `model/move-table.json` |
+| `tests/checks/attn_layer.py` | a benchmark, dropped |
+
+## Removed or changed symbols
+
+- `allie.search.board`: `BOARD_IN`, `meta`, `BoardConv` (use `allie.model.board.BoardConv`); `SOURCE` now points at
+  `src/allie/model/`.
+- `allie.search.native`: `MOVES`, `MOVE_ID` now come from `allie.data.vocab` (same table).
+- `allie.search.policy`: `evaluate(theta, x, logp, mask, target, weights, ridge)` is `temperature(theta, x, logp,
+  mask)` (no fitting branch); `choose` is folded into `route(cells, params, budgets)` (no `feat`, Elo routing only);
+  `output(logits, values, legal, alpha, beta)` has no `direction` (always the former `"reverse"`).
+- `allie.search.model`: no `clock`/`elo` inputs, `key_offset`, relu² MLP, `DenseBackend.shift_keys` or backend
+  `trace` hooks (`load_checkpoint` already rejected them).
+- `allie.search.moe_oracle`: `sha`, `MoEOracle.calls`, `MoEOracle.step` removed; `load_model` returns
+  `(model, checkpoint)`.
+- `native/tree.cpp`: C++ no binding reached (`BackupTree` merged into `CompactTree`, `snapshot`, `backups`,
+  `exported`, `next_compact`, `reduce`, `prefix_evals`, `next_forest`'s prefixes); Python bindings unchanged.
+- `analysis/search-bench`: `adapter.load`, `adapter.export`, `adapter.subsample`, `run.py --export` (`--moe` is
+  required); `fit.py` reads `allie.search.algorithm.CALIBRATION`; `report.py` reads
+  `results/recipe10x/maia3-bench/aggregate-sweep1e18.json`.
+- `allie.eval.score`: `cuda`, `ROOT`, `G` (use `allie.paths.ROOT` / `DATA`). `allie.eval.maia3.score_moe.CELLS`.
+  `allie.eval.maia3.report.sliced` lost its unused `s` argument.
+- `allie.data.external`: `large`, `sha256` (now `allie.data.store.large`, new, and `allie.data.fetch.sha256`);
+  its store swap is `store.swap`. `allie.data.pin.ALLIE` (use `allie.paths.DATA`). `allie.data.fetch.main` lost
+  `workers` (always 16).
+- `allie.experiments.modelexp.sha` is `allie.data.pin.sha`, imported (same code).
+- `allie.lichess.mock.MockLichess.challenge`: no `title`, `kind` (always a clock game, untitled challenger).
+  `allie.lichess.engine.Game.features`: no `lo` (always from 0).
+- `tests/checks/attn_kernel.py`: no `--sweep` or timing; `tests/lichess/test_api.py`:
+  `test_rejects_other_starts_and_samples_cold` is `test_rejects_other_starts`.
+- `pyproject.toml`: the `search` extra no longer lists `safetensors` (the `bot` extra still does).
+
+## Files with comment-only edits in `src/allie/lichess` (for `behavior`, chat v2 and the calibrated mode)
+
+`fast.py` (C++ comments inside `SOURCE`: the kernels recompile once), `tree.py` (module docstring, one comment),
+`engine.py` (`Game.features` above), `mock.py` (`challenge` above), `analysis/lichess/parity.py` (docstring),
+`analysis/lichess/speed.py` (a dead `caches = None`), `tests/lichess/test_api.py`, `test_fast.py`. Untouched:
+`api.py`, `bot.py`, `chat.py`, `cli.py`, `client.py`, `config.py`, `export.py`, `hub.py`, `model.py`, `selfplay.py`,
+`tokens.py`, `hf/`, `README.md`, `calibration-allie-2.0.json`, `chat_dryrun.py`, `test_chat.py`, `test_protocol.py`.
