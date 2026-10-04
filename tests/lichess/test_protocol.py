@@ -159,3 +159,17 @@ def test_engine_runs_calls_alone(tiny):
     e = Engine(tiny)
     assert e.run(lambda: 42) == 42
     e.close()
+
+
+def test_restart_resumes_games(engine):
+    mock, first = start(engine)
+    mock.challenge("random", "allie", 60, 1, color="black")
+    wait(lambda: len(mock.games) == 1)
+    g = next(iter(mock.games.values()))
+    wait(lambda: len(g.board.move_stack) >= 10)
+    first.stop()  # the process dies mid-game (preemption)
+    first.join()
+    _, second = start(engine, mock)
+    wait(lambda: g.status != "started")
+    assert not mock.rejected and g.status != "outoftime" and len(g.board.move_stack) > 12
+    assert g.id in second.finished

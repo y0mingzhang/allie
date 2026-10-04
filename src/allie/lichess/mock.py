@@ -299,6 +299,9 @@ class Handler(BaseHTTPRequestHandler):
         self.open_stream()
         q = self.mock.events[user]
         try:
+            for g in list(self.mock.games.values()):  # as Lichess: ongoing games on connect
+                if g.status == "started" and g.color(user):
+                    self.line(dict(type="gameStart", game=dict(gameId=g.id, id=g.id)))
             while not self.mock.closing.is_set():
                 try:
                     self.line(q.get(timeout=1))

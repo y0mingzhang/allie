@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import signal
 import sys
 import threading
 import time
@@ -48,6 +49,7 @@ def main():
     e.add_argument("out")
     run = sub.add_parser("play", help="play on Lichess (token: LICHESS_TOKEN)")
     run.add_argument("--drain-file", help="once this file exists, finish the games and exit")
+    run.epilog = "SIGUSR1 also drains: no new games, exit once the current ones end."
     s = sub.add_parser("selfplay", help="offline games on a local mock Lichess")
     s.add_argument("--games", type=int, default=2)
     s.add_argument("--opponent", choices=["self", "random"], default="self")
@@ -85,6 +87,7 @@ def main():
         bot = Bot(c, Lichess(token, c.url), Engine(model(c)), coverage(c))
         if a.drain_file:
             threading.Thread(target=watch, args=(bot, a.drain_file), daemon=True).start()
+        signal.signal(signal.SIGUSR1, lambda *_: bot.drain())
         bot.run()
         return
     from .selfplay import bench, selfplay
