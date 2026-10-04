@@ -168,7 +168,7 @@ involved.
   - its own mistake, once the opponent has punished it;
   - the opponent's good move;
   - the endgame starting;
-  - a clock under `scramble` seconds;
+  - its own clock under `scramble` seconds;
   - the finish (in games of `min_plies` or more, not aborted);
   - a declined draw offer, a takeback request, the opponent leaving.
 
@@ -180,7 +180,7 @@ involved.
   Never a dig at the opponent's mistakes.
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
   In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
-  message naming a piece move or capture not yet played is dropped. After the game it reviews from
+  message naming a move not yet played (a bare square only if it is a legal pawn push) is dropped. After the game it reviews from
   Allie's view when asked.
 - **`!quiet`.** It mutes the bot for that game and their rematches, including a message already being
   written.

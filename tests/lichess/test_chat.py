@@ -128,7 +128,8 @@ def test_clean_and_played():
     moves = [m.uci() for m in b.move_stack]
     assert played("Nf3, the classic", moves) and played("nice game", moves)
     assert not played("try Nc6 here", moves) and not played("maybe Bb5", moves)
-    assert played("my c6 pawn was loose", moves)  # a square, not a suggestion
+    assert played("my c6 pawn was loose", ["e2e4", "c7c6"])  # a square, not a move
+    assert not played("Next I want to push d4.", moves)  # a legal push: a suggestion
 
 
 def test_conversation(engine):
@@ -319,6 +320,41 @@ def test_recent_survives_an_outage(engine, tmp_path, caplog, monkeypatch):
     assert r.read() == []  # corrupt: empty, and rewritten with the next line
     r.add("five")
     assert r.read() == ["five"]
+
+
+def test_one_goodbye(engine):
+    """A finish remark queued when their gg arrives in the same batch: the fixed reply
+    goes out and the remark is dropped, so the bot says goodbye once."""
+    m = Model("A line.")
+    g = Game(
+        engine, opp="bye", hello="", quiet_p_moment=1, p_end=1, min_plies=2, linger=5
+    )
+    c = g.chatter(m)
+    g.feed(g.full(), state("e2e4"), state("e2e4 e7e5"))
+    m.gate.clear()
+    c.put(state("e2e4 e7e5 g1f3", status="resign", winner="white"))
+    c.put(g.say("gg"))
+    m.gate.set()
+    c.q.join()
+    goodbyes = [x for x in g.posts if x[1] in (chat.GG, "A line.")]
+    assert len(goodbyes) == 1
+
+
+def test_recent_keeps_lines_when_a_read_fails(tmp_path, monkeypatch):
+    path = tmp_path / "recent.json"
+    r = chat.Recent(str(path), 5)
+    r.add("one")
+    real = open
+
+    def stale(file, mode="r", *args, **kwargs):
+        if str(file) == str(path) and "r" in mode:
+            raise OSError(116, "Stale file handle")
+        return real(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", stale)
+    r.add("two")
+    monkeypatch.setattr("builtins.open", real)
+    assert json.loads(path.read_text()) == ["one"]  # not replaced by ["two"]
 
 
 def test_traded_and_hanging():

@@ -41,24 +41,25 @@ from .tokens import MOVE_ID
 log = logging.getLogger(__name__)
 
 LIMIT = 140  # Lichess's longest chat line
-GOOD, SWING = (
-    0.10,
-    0.12,
-)  # their move costing you this much expected score; yours, this much
+# expected score lost to their move that makes it a good one; to yours, a mistake
+GOOD, SWING = 0.10, 0.12
 PLAN = 0.15  # chance per own middlegame move that the plan remark comes up
 KINDS = {  # the remarks, what the model is asked for, and their slot in a quiet game
     "opening": (
         "the opening: a short, friendly remark on it (its name, character or idea)",
         "opening",
     ),
-    "plan": ("your plan: the idea behind the move you just played, briefly", "middle"),
+    "plan": (
+        "your plan: the idea behind the move you just played (not what comes next)",
+        "middle",
+    ),
     "mistake": (
         "your own mistake, now punished: own it briefly and with good grace",
         None,
     ),
     "compliment": ("their good move: a brief, genuine compliment", "middle"),
     "endgame": ("the endgame starting: a short remark on it", None),
-    "scramble": ("the clocks running low: a short remark on the time trouble", None),
+    "scramble": ("your clock running low: a short remark on your time trouble", None),
     "finish": ("the end of the game: a short, gracious closing line", "finish"),
     "draw": (
         "their draw offer, which you declined: a short, friendly word on it",
@@ -103,7 +104,7 @@ an earlier message, in this game or from your recent lines in the header. You gr
 (the fixed greeting); if they greet you, answer briefly without another hello.
 
 Each turn brings the game updates since your last turn:
-- Their moves, like "12. Nf3 them 14s, takes your bishop, check | you expected Nc3 41% Nf3* \
+- Their moves, like "12. Nf3 them 14s, takes a bishop, check | you expected Nc3 41% Nf3* \
 22% d4 9% | usual 8s | feel 41/20/39 | material: you -3": the move and their time; what it \
 did; what you expected them to play (* on the move played, after a comma when it wasn't \
 among your top guesses) and how long that usually takes; how the game feels to you (your \
@@ -134,7 +135,7 @@ their good move, the endgame, the clocks, the finish, or an event. Say something
 that, in a way you haven't yet, using the game's concrete facts; or stay silent if you have \
 nothing worth saying.
 - During the game, never point out or react to their mistakes: nothing that could read as \
-a dig or as gloating.
+a dig or as gloating. Never mention a piece of yours left hanging before it is taken.
 Reply with JSON: {"speak": true, "text": "..."} or {"speak": false, "text": ""}.
 
 The game header says whether the game is casual or rated.
@@ -142,7 +143,9 @@ The game header says whether the game is casual or rated.
 at that level often play.
 - Rated: don't help your opponent during the game: no suggestions, no verdicts on their \
 moves or the position, no hints about threats or about your plans ahead. You can talk about \
-your feelings, the idea behind a move you already played, the opening, the clock. When \
+your feelings, the idea behind a move you already played, the opening, the clock, and a \
+short compliment on a move they already played (without saying why or what it threatens). \
+When \
 asked for advice or an evaluation, deflect kindly and differently each time, or say \
 nothing; never mention that the game is rated or any rule, and don't say "after the game".
 - After the game, in both: if asked, review it from your own sense of the game: where it \
@@ -187,12 +190,10 @@ class Chat:
     quiet_p_moment: float = 0.6
     unanswered: int = 2
     every: int = 6  # plies from any call to an unprompted one, at least
-    scramble: float = (
-        20.0  # seconds: the clock remark once a clock is under this (or 10%)
-    )
-    recent: int = (
-        50  # unprompted lines remembered across games, not to be reused (0 = off)
-    )
+    # seconds: the clock remark once our clock is under this (or a tenth of the base)
+    scramble: float = 20.0
+    # unprompted lines remembered across games, not to be reused (0 = off)
+    recent: int = 50
     recent_file: str = ""  # where ("" = recent-lines.json beside the ledger)
     replies: int = 30  # calls for chat messages per game
     gap: float = 4.0  # seconds from our last message to an unprompted one, at least
@@ -474,7 +475,7 @@ class Chatter:
 
     def ply(self, t, j, did, before):
         """Move j's line (what it did, how it felt); a moment for a remark kind it brings up."""
-        a, b, board = self.views.get(j), self.views.get(j + 1), self.board
+        a, b, board, n = self.views.get(j), self.views.get(j + 1), self.board, j + 1
         ours = (j % 2 == 0) == self.white
         u = board.move_stack[j].uci()
         line = [f"{num(j)}{self.sans[j]} {'you' if ours else 'them'} {self.think(j)}"]
@@ -488,39 +489,39 @@ class Chatter:
             line.append(f"feel {wdl(b.wdl)}")
         if (diff := material_diff(board, self.white)) != before:
             line.append(f"material: you {diff:+d}" if diff else "material: even")
-        if ours and (loose := hanging(board, self.white, traded(board))):
+        loose = ours and hanging(board, self.white, traded(board))
+        if loose:
             line.append("left hanging: " + ", ".join(loose))
         self.note(" | ".join(line))
-        n, drop = (
-            j + 1,
-            lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl),
-        )
+        drop = lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl)
         if ours:
-            if j >= 5 and opening(board):
+            if 5 <= j < 30 and opening(board):
                 self.moment(t, "opening")
-            if phase(board, n) == "middlegame" and self.rng.random() < PLAN:
+            middle = phase(board, n) == "middlegame"
+            if (
+                middle and not loose and self.rng.random() < PLAN
+            ):  # never with a piece loose
                 self.moment(t, "plan")
         elif j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
             if drop(j - 1) >= SWING and any(x.startswith("takes") for x in did):
                 self.moment(t, "mistake")  # your last move, punished by this one
             elif drop(j) >= GOOD:
                 self.moment(t, "compliment")
-        if not self.endgame and not self.want and phase(board, n) == "endgame":
-            self.endgame = True  # once a game, when nothing else is due
-            self.moment(t, "endgame")
+        if not self.endgame and phase(board, n) == "endgame":
+            # one chance a game, once it can be taken
+            self.endgame = self.moment(t, "endgame")
 
     def clock(self, t, s):
-        """The clock remark, once a clock runs under `scramble` seconds (or a tenth of the
-        base time) in a game of 3 minutes or more."""
+        """The clock remark: one chance once our clock runs under `scramble` seconds (or a
+        tenth of the base time), in a game of 3 minutes or more."""
         base = (self.info.get("clock") or {}).get("initial", 0)
-        low = max(self.cfg.scramble * 1000, base / 10)
+        ours = s["wtime" if self.white else "btime"]
         if (
-            self.scrambled or self.want or base < 180_000
-        ):  # once, when nothing else is due
-            return
-        if min(s["wtime"], s["btime"]) < low:
-            self.scrambled = True
-            self.moment(t, "scramble")
+            not self.scrambled
+            and base >= 180_000
+            and ours < max(self.cfg.scramble * 1000, base / 10)
+        ):
+            self.scrambled = self.moment(t, "scramble")
 
     def events(self, t, s):
         us, them = ("w", "b") if self.white else ("b", "w")
@@ -618,6 +619,10 @@ class Chatter:
             self.talked, self.unreplied = True, 0
             if not self.closed and self.post(GG, room, False) is not None:  # no call
                 self.note(f'You posted: "{GG}"')
+                if (
+                    self.want and self.want[2]
+                ):  # a queued finish would be a second goodbye
+                    self.want = None
             return
         if user == self.opp:
             self.talked, self.unreplied = True, 0
@@ -631,21 +636,22 @@ class Chatter:
     def moment(self, t, kind, p=None, spaced=True, budget=True):
         """Maybe call the model for a remark of this kind: once a kind a game, by chance,
         within the game's budget, `every` plies from the last call; while they don't chat,
-        only in the quiet slots, one remark a slot."""
+        only in the quiet slots, one remark a slot. Whether the chance was taken."""
         c, engaged = self.cfg, self.engaged()
         slot = KINDS[kind][1]
         if self.want or self.muted() or kind in self.kinds:
-            return
+            return False
         if not engaged and (slot is None or slot in self.slots):
-            return
+            return False
         if engaged and budget and self.said >= c.remarks:
-            return
+            return False
         if spaced and len(self.sans) - self.last < c.every:
-            return
+            return False
         if self.rng.random() < (
             (c.p_moment if p is None else p) if engaged else c.quiet_p_moment
         ):
             self.want = (kind, c.rooms[0], True, t)
+        return True
 
     def note(self, text):
         self.pending.append(text)
@@ -717,6 +723,7 @@ class Chatter:
         why = (
             "quiet" if self.muted() and text != QUIET
             else "cancelled" if self.cancelled or stopped and stopped.is_set()
+            else "said already" if unprompted and self.status and self.closed
             else "late" if unprompted and then is not None
             and (len(now) - len(then) > 2 or now[: len(then)] != then)
             else "stale" if not unprompted and asked is not None
@@ -945,17 +952,17 @@ def hanging(board, color, skip=None):
 class Recent:
     """The last n unprompted lines, across games and restarts: a JSON list in a file shared
     by processes. Best effort, on the chat thread only: a corrupt file reads as empty; a
-    filesystem error (or a lock held over a second) leaves the file alone for RETRY seconds,
-    logged once."""
+    filesystem error, or another process holding the lock over a second, leaves the file
+    alone for RETRY seconds, logged once. (A hung NFS server can still block the chat
+    threads, never a game.)"""
 
     RETRY = 300
 
     def __init__(self, path, n):
         self.path, self.n, self.lock, self.retry = path, n, threading.Lock(), 0.0
 
-    def read(self):
-        if not self.n or time.monotonic() < self.retry:
-            return []
+    def load(self):
+        """The lines; [] for a missing or corrupt file; OSError for anything else."""
         try:
             with open(self.path) as f:
                 lines = json.load(f)
@@ -963,13 +970,19 @@ class Recent:
             return []
         except ValueError:
             return []  # rewritten with the next line
-        except OSError as e:
-            return self.fail(e)
         return (
             [x for x in lines if isinstance(x, str)][-self.n :]
             if isinstance(lines, list)
             else []
         )
+
+    def read(self):
+        if not self.n or time.monotonic() < self.retry:
+            return []
+        try:
+            return self.load()
+        except OSError as e:
+            return self.fail(e)
 
     def fail(self, e):
         if time.monotonic() >= self.retry:
@@ -989,9 +1002,8 @@ class Recent:
             try:
                 os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
                 with open(self.path + ".lock", "a") as lock:
-                    for _ in range(
-                        10
-                    ):  # a lock on a stalled NFS server must not hang the chat
+                    # another process holding the lock: wait a second at most
+                    for _ in range(10):
                         try:
                             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                             break
@@ -999,7 +1011,7 @@ class Recent:
                             time.sleep(0.1)
                     else:
                         raise TimeoutError("the lock is held")
-                    lines = [*(x for x in self.read() if x != text), text][-self.n :]
+                    lines = [*(x for x in self.load() if x != text), text][-self.n :]
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(lines, f, indent=0)
                     os.replace(self.path + ".tmp", self.path)
@@ -1043,15 +1055,24 @@ SAN = re.compile(
 
 
 def played(text, moves):
-    """Does text name only moves already played (UCI moves)? A bare pawn push ("c6") reads as
-    a square name too, so only piece moves, captures and promotions count."""
-    named = {x for x in SAN.findall(text) if not re.fullmatch(r"[a-h][1-8]", x)}
-    if not named:
-        return True
+    """Does text name only moves already played (UCI moves)? A bare square ("my c6 pawn")
+    counts only if it is a pawn push legal now for either side ("push d4")."""
     b, seen = chess.Board(), set()
     for u in moves:
         seen.add(b.san(m := b.parse_uci(u)).rstrip("+#"))
         b.push(m)
+    pushes = set()
+    for color in (chess.WHITE, chess.BLACK):
+        side = b.copy(stack=False)
+        side.turn, side.ep_square = color, None
+        pushes |= {chess.square_name(m.to_square) for m in side.pseudo_legal_moves
+                   if side.piece_type_at(m.from_square) == chess.PAWN and not m.promotion
+                   and not side.is_capture(m)}  # fmt: skip
+    named = {
+        x
+        for x in SAN.findall(text)
+        if not re.fullmatch(r"[a-h][1-8]", x) or x in pushes
+    }
     return named <= seen
 
 
