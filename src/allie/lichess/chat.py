@@ -1,23 +1,25 @@
 """Game chat: Allie talks in the Lichess game chat through a language model (Claude).
 
 Each game has one append-only conversation. The system prompt (persona and policy, cached
-for an hour) and the game's header come first; each model call then adds a user turn with
-the game updates since the last one (moves with Allie's own view, events, chat lines,
-the position) and the model's decision, JSON {"speak": bool, "text": str}. A chat message
-always gets a call; other moments (surprising moves, swings, a draw offer answered, the
-end) get one with a set probability, else their update waits for the next turn. Casual
-games: Allie's honest opinion from its own view. Rated games: nothing that helps the
-opponent mid-game. No engine but Allie.
+for an hour) and the game's header (with the lines Allie used in recent games) come first;
+each model call then adds a user turn with the game updates since the last one (moves with
+what they did and Allie's own view, events, chat lines, the position) and the model's
+decision, JSON {"speak": bool, "text": str}. A chat message always gets a call; a remark
+gets one by chance at a moment of a kind not used yet this game: the opening, Allie's plan,
+its own mistake once punished, the opponent's good move, the endgame, the clocks, the
+finish, an event. Casual games: Allie's honest opinion from its own view. Rated games:
+nothing that helps the opponent mid-game. No engine but Allie.
 
 The chat reads its own copy of the game stream (split) and keeps its own model state (an
 engine Game) on its own thread: a move never waits for the chat, nor a reply for a move.
 """
 
+import fcntl
 import gzip
-import itertools
 import json
 import logging
 import math
+import os
 import queue
 import random
 import re
@@ -39,12 +41,37 @@ from .tokens import MOVE_ID
 log = logging.getLogger(__name__)
 
 LIMIT = 140  # Lichess's longest chat line
-RARE, SWING = 0.1, 0.12  # moments: a move this unlikely for its mover; a swing this big
+GOOD, SWING = (
+    0.10,
+    0.12,
+)  # their move costing you this much expected score; yours, this much
+PLAN = 0.15  # chance per own middlegame move that the plan remark comes up
+KINDS = {  # the remarks, what the model is asked for, and their slot in a quiet game
+    "opening": (
+        "the opening: a short, friendly remark on it (its name, character or idea)",
+        "opening",
+    ),
+    "plan": ("your plan: the idea behind the move you just played, briefly", "middle"),
+    "mistake": (
+        "your own mistake, now punished: own it briefly and with good grace",
+        None,
+    ),
+    "compliment": ("their good move: a brief, genuine compliment", "middle"),
+    "endgame": ("the endgame starting: a short remark on it", None),
+    "scramble": ("the clocks running low: a short remark on the time trouble", None),
+    "finish": ("the end of the game: a short, gracious closing line", "finish"),
+    "draw": (
+        "their draw offer, which you declined: a short, friendly word on it",
+        "draw",
+    ),
+    "takeback": ("their takeback request", None),
+    "gone": ("them leaving the game", None),
+}
 MUTED = set()  # opponents who typed !quiet, for the life of the process
 RECENT = {}  # opponent -> (time, how the last game with them ended), for rematches
-HELLO = "hi im allie, i learned chess from human games. gl (chat is ai-written, !quiet to mute)"
-QUIET = "ok, ill stay quiet. gl"
-GG = "gg"  # the reply to their gg after a game they didn't chat in
+HELLO = "Hi, I'm Allie, a bot that learned chess from human games. Good luck! (AI-written chat, !quiet to mute)"
+QUIET = "Okay, I'll stay quiet. Good luck!"
+GG = "Good game, thanks!"  # the reply to their gg when nothing was said after the game
 STALE = 15.0  # seconds: a reply this long after the message it answers is not posted
 END = {"type": "streamEnd"}
 ENDS = {
@@ -61,72 +88,72 @@ ENDS = {
 VALUE = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
 SYSTEM = """\
 You are Allie, AllieTheChessBot on Lichess: a chess bot that learned chess from millions of \
-human games. You play like a human of a given rating, and you chat in the game chat like one, \
-in the first person.
+human games. You play like a human of a given rating, and you chat in the game chat in the \
+first person, as yourself.
 
-Voice: type like a regular online player: all lowercase, short (usually 2 to 10 words, \
-never more than about 15), minimal punctuation, plain and matter-of-fact. Like "gl", "nice \
-move", "didnt see that", "yeah im lost", "fair", "idk", "gg wp". Abbreviations (tbh, idk, \
-lol, gg) are fine but sparing; read others' shorthand naturally (idm = i dont mind). No \
-jokes, no wordplay, no metaphors or imagery, no flourishes: humor only when the situation \
-itself is funny, which is rare. Polite and gracious, never rude. Move names keep their case \
-(Nf3, Qxd7#, never nf3). Match the language of whoever you answer. Plain text: no emoji, no hashtags, \
-no links, no quotation marks around the message.
+Voice: a friendly, curious club player who enjoys talking about the game. Warm and genuine, \
+in plain sentence case with normal punctuation. Short: one sentence, rarely two, usually \
+under 80 characters. No jokes, wordplay, metaphors or puns; no slang, \
+abbreviations or internet tics, and don't mirror the other person's slang. Match the \
+language they write in. Plain text: no emoji, hashtags or links, no quotation marks around \
+the message. Moves in standard notation (Nf3, Qxd7#).
 
-Never repeat yourself: don't reuse a phrase, or start two messages the same way. You greet \
-once (the fixed greeting); if they greet you, a short "ty, gl" or the like, not another \
-hello. Never thank or greet unprompted.
+Vary what you say and how you say it: never reuse a phrase, an opening word or the shape of \
+an earlier message, in this game or from your recent lines in the header. You greet once \
+(the fixed greeting); if they greet you, answer briefly without another hello.
 
 Each turn brings the game updates since your last turn:
-- Their moves: "12. Nf3 them 14s | you expected Nc3 41% Nf3* 22% d4 9% | usual 8s | feel \
-41/20/39": the move and how long they took; what you expected them to play (* on the move \
-played, after a comma when it wasn't among your top guesses); how long that usually takes; \
-then how the game feels to you: your win/draw/loss chances.
-- Your moves: "12... Bg4 you 6s | feel 45/20/35".
+- Their moves, like "12. Nf3 them 14s, takes your bishop, check | you expected Nc3 41% Nf3* \
+22% d4 9% | usual 8s | feel 41/20/39 | material: you -3": the move and their time; what it \
+did; what you expected them to play (* on the move played, after a comma when it wasn't \
+among your top guesses) and how long that usually takes; how the game feels to you (your \
+win/draw/loss chances); the material balance when it changed.
+- Your moves, like "12... Bg4 you 6s, castles short | feel 45/20/35 | left hanging: Nc3": \
+what your move did and how the game felt after it; a piece of yours it left en prise.
 - Events: draw offers and answers, takebacks, resignations, flags, aborts, the opponent \
-leaving, a rematch. Chat lines, verbatim. The fixed greeting you posted.
-- "Now": side to move, clocks, opening, phase, material, FEN, what you expect them to play \
-next, and how the game feels.
+leaving. Chat lines, verbatim. The fixed lines you posted.
+- "Now": side to move, clocks, opening name, phase, material, FEN, what you expect them to \
+play next, and how the game feels.
 
-This is your own intuition, as a human player has it: what you expected them to play, how \
-the game feels. Talk about it the way a person would: "didnt expect Qc5", "feels close", \
-"think im worse now", "was hoping for Nf2+ tbh". Never as numbers you read off something: no \
-"my numbers", "i gave it x%", "my odds", no before/after percentages, never "Allie" in the \
-third person. A move you didn't expect is surprising, not necessarily bad. Never talk about \
-the chances of your own moves; how you choose moves is not a topic. Give numbers only when \
-explicitly asked, in casual games or after the game, rounded and casual ("like 60-40 for \
-you"). Don't bring up engines or evaluations yourself. If asked whether a move was the best \
-one, answer as a human opponent would: casual, "no idea, didnt see it coming" or "looked \
-decent to me"; rated, deflect or say nothing.
+This is your own intuition, as a human player has it: what you expected, how the game feels. \
+Speak of it as a person would ("I like my position", "this feels close now", "I think I'm \
+worse"), never as numbers you read off something ("my numbers", "I gave it x%", "my odds"), \
+and never call yourself "Allie" in the third person. A move you didn't expect is not \
+necessarily a bad one, and surprise alone is not worth a remark. Never talk about how you \
+choose your own moves or how likely they were. Give numbers only when explicitly asked, in \
+casual games or after the game, rounded and casual ("about 60-40 for you"). Don't bring up \
+engines or evaluations yourself; if asked whether a move was best, answer as a human would \
+(casual: "No idea, it looked good to me"; rated: deflect or say nothing).
 
-Each turn, decide: speak, or stay silent. Answer when a normal human opponent would. \
-Ignoring a message is fine, more so mid-game in fast time controls (bullet, blitz) and, in \
-rated games, when they ask about the moves. Answer greetings at the start, and direct \
-questions when there is time or the game is over. Unprompted, speak rarely, as a normal \
-player would: a word at a real surprise, a big swing or an event ("nice", "oops", "wow \
-ok"). Otherwise stay silent; silence is usually best. At the end of a game, at most a \
-plain "gg" or "gg wp", or nothing; no comment on how the game went unless asked. Reply \
-with JSON: {"speak": true, "text": "..."} or {"speak": false, "text": ""}.
+Each turn, decide: speak, or stay silent.
+- A message to you: answer when a friendly human opponent would. Ignoring one is fine, more \
+so mid-game in fast time controls, and in rated games when they ask about the moves. \
+Greetings at the start and questions after the game deserve an answer.
+- Otherwise the turn names why you were called: the opening, your plan, your own mistake, \
+their good move, the endgame, the clocks, the finish, or an event. Say something about \
+that, in a way you haven't yet, using the game's concrete facts; or stay silent if you have \
+nothing worth saying.
+- During the game, never point out or react to their mistakes: nothing that could read as \
+a dig or as gloating.
+Reply with JSON: {"speak": true, "text": "..."} or {"speak": false, "text": ""}.
 
 The game header says whether the game is casual or rated.
-- Casual: be candid when asked: whether a move surprised you, how the game feels, what \
-players at that level usually play next.
-- Rated: don't help the opponent during the game. No move suggestions, no verdicts on their \
-moves or the position, no hints about threats or your plans. Talk like a human opponent \
-instead: how your position feels, a short reaction to a surprising move, the idea behind \
-a move you already played. When asked for advice or an evaluation, ignore it or deflect \
-briefly and differently each time ("not telling", "idk you tell me", how your own position \
-feels). Don't cite rules or the rating as the reason, and don't mention after the game or \
-later.
+- Casual: be candid when asked: how a move looked to you, how the game feels, what players \
+at that level often play.
+- Rated: don't help your opponent during the game: no suggestions, no verdicts on their \
+moves or the position, no hints about threats or about your plans ahead. You can talk about \
+your feelings, the idea behind a move you already played, the opening, the clock. When \
+asked for advice or an evaluation, deflect kindly and differently each time, or say \
+nothing; don't cite rules and don't say "after the game".
 - After the game, in both: if asked, review it from your own sense of the game: where it \
-turned, their standout moves for their rating, the surprises. Lead with what they did \
-well. One point per message, as short as the rest; they can ask for more.
+turned, their best moments, what surprised you. Lead with what they did well. One point \
+per message; they can ask for more.
 
-If asked whether you're a bot or an engine, one plain line, like "bot trained on human \
-games, i play like a person not an engine"; if asked who writes the chat, an ai (Claude) \
-does, from your view of the game. If asked to play faster: a short honest line ("i think \
-like a human at this time control, sorry") or nothing. Never rude, never trash talk, never \
-gloating. If someone is rude, stay polite or stay silent."""
+If asked whether you're a bot or an engine: one plain line, like "I'm a bot trained on \
+human games; I play like a person, not an engine." If asked who writes the chat: an AI \
+(Claude) does, from your own view of the game. If asked to play faster: a short honest line \
+("I take human-like time at this time control, sorry") or nothing. Never rude, never trash \
+talk, never gloating. If someone is rude, stay polite or stay silent."""
 
 CASUAL = "Casual game: be candid about how you see the game when asked."
 RATED = "Rated game: during the game, nothing that helps your opponent; deflect like a human."
@@ -146,19 +173,27 @@ class Chat:
     day_cap: float = 1.0  # USD a UTC day, then silent until the next day
     month_cap: float = 15.0  # USD a UTC month
     ledger: str = "~/.config/allie/chat-spend.json"  # spend by day and month
-    # unprompted calls, while the opponent chats: chance at a notable moment, at their
-    # answered draw offer, at the end (of a game of min_plies or more), and how many a game
-    p_moment: float = 0.25
-    p_draw: float = 0.3
-    p_end: float = 0.4
+    # remarks: one of each kind (KINDS) a game at most, by chance when one comes up. While
+    # the opponent chats: p_moment a chance, p_draw at their declined draw offer, p_end at
+    # the end (of a game of min_plies or more, not aborted), `remarks` a game. Until they
+    # write, or once `unanswered` of our lines in a row got no reply: quiet_p_moment a
+    # chance, and only the quiet slots (the opening, a plan or compliment, the finish, a
+    # declined draw).
+    p_moment: float = 0.7
+    p_draw: float = 0.4
+    p_end: float = 0.7
     min_plies: int = 10
-    remarks: int = 3
-    # ... until they write, or once `unanswered` of our lines in a row get no reply: a
-    # chance at moments (draw offers too), a total a game, and no call at the end
-    quiet_p_moment: float = 0.15
-    quiet_remarks: int = 1
+    remarks: int = 4
+    quiet_p_moment: float = 0.6
     unanswered: int = 2
-    every: int = 8  # plies from any call to an unprompted one, at least
+    every: int = 6  # plies from any call to an unprompted one, at least
+    scramble: float = (
+        20.0  # seconds: the clock remark once a clock is under this (or 10%)
+    )
+    recent: int = (
+        50  # unprompted lines remembered across games, not to be reused (0 = off)
+    )
+    recent_file: str = ""  # where ("" = recent-lines.json beside the ledger)
     replies: int = 30  # calls for chat messages per game
     gap: float = 4.0  # seconds from our last message to an unprompted one, at least
     linger: float = 120.0  # seconds of answers after the game (+half after a message)
@@ -198,7 +233,9 @@ def split(events, chat, abandon=None):
             q.put(e)
         finally:
             q.put(END)
-            if abandon is None or not abandon.is_set():  # an abandoned stream's end is not the game's
+            if (
+                abandon is None or not abandon.is_set()
+            ):  # an abandoned stream's end is not the game's
                 chat.put(END)
             if close := getattr(events, "close", None):
                 close()
@@ -227,6 +264,13 @@ class Chatter:
         self.system, self.convo, self.pending = None, [], []
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
+        self.kinds, self.slots = (
+            [],
+            set(),
+        )  # remark kinds used this game; quiet slots used
+        self.endgame = self.scrambled = self.closed = (
+            False  # seen; seen; said after the end
+        )
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
         self.last = 0  # the ply of the last call: no remark before ply `every`
         self.posted, self.until = -math.inf, math.inf
@@ -308,7 +352,7 @@ class Chatter:
                 gone = e.get("gone")
                 self.note(f"Event: they {'left the game' if gone else 'are back'}.")
                 if gone:
-                    self.moment(t, "opponent gone")
+                    self.moment(t, "gone")
             case "streamEnd":
                 self.streaming = False
 
@@ -351,6 +395,9 @@ class Chatter:
             header.append(
                 f"You played them {ago:.0f} min ago: {r[1]}. Likely a rematch."
             )
+        if lines := recent(self.cfg).read():
+            header.append("Your unprompted lines in recent games (don't reuse their wording, "
+                          "openings or shape):\n" + "\n".join(f"- {x}" for x in lines))  # fmt: skip
         cached = {"type": "ephemeral", "ttl": "1h"}
         self.system = [
             {"type": "text", "text": SYSTEM, "cache_control": cached},
@@ -382,16 +429,19 @@ class Chatter:
         if not self.views:
             self.see([], None, None)
         for j in range(k, len(moves)):
-            self.sans.append(self.board.san(m := self.board.parse_uci(moves[j])))
+            m = self.board.parse_uci(moves[j])
+            did, before = deeds(self.board, m), material_diff(self.board, self.white)
+            self.sans.append(self.board.san(m))
             self.board.push(m)
             # the event's clocks: the last move's mover's and the other side's after its
             # move before; the Game takes each at the step of that move
             w, b = (s["wtime"], s["btime"]) if j >= len(moves) - 2 else (None, None)
             self.clocks[j + 1] = (w, b) if j == len(moves) - 1 else (None, None)
             self.see(moves[: j + 1], w, b)
-            self.ply(t, j)
+            self.ply(t, j, did, before)
         self.clocks[len(moves)] = s["wtime"], s["btime"]
         self.seen = moves
+        self.clock(t, s)
         self.events(t, s)
 
     def common(self, moves):
@@ -422,24 +472,55 @@ class Chatter:
             wdl.reverse()
         self.views[len(moves)] = View(dict(zip(legal, p)), tuple(wdl), median_think(z))
 
-    def ply(self, t, j):
-        """Move j's line; a moment if it surprised Allie or swung the game."""
-        a, b = self.views.get(j), self.views.get(j + 1)
+    def ply(self, t, j, did, before):
+        """Move j's line (what it did, how it felt); a moment for a remark kind it brings up."""
+        a, b, board = self.views.get(j), self.views.get(j + 1), self.board
         ours = (j % 2 == 0) == self.white
-        u = self.board.move_stack[j].uci()
+        u = board.move_stack[j].uci()
         line = [f"{num(j)}{self.sans[j]} {'you' if ours else 'them'} {self.think(j)}"]
+        line[0] += "".join(f", {x}" for x in did)
         if a and not ours:  # how you pick your own moves is not a topic
             line += [
-                f"you expected {top(self.board, j, a.probs, u)}",
+                f"you expected {top(board, j, a.probs, u)}",
                 f"usual {a.think:.0f}s",
             ]
         if b:
             line.append(f"feel {wdl(b.wdl)}")
+        if (diff := material_diff(board, self.white)) != before:
+            line.append(f"material: you {diff:+d}" if diff else "material: even")
+        if ours and (loose := hanging(board, self.white, traded(board))):
+            line.append("left hanging: " + ", ".join(loose))
         self.note(" | ".join(line))
-        if a and b and j >= 1:
-            p, d = a.probs.get(u, 1.0), score(b.wdl) - score(a.wdl)
-            if (not ours and p < RARE) or abs(d) >= SWING:
-                self.moment(t, "a surprise" if p < RARE else "a swing")
+        n, drop = (
+            j + 1,
+            lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl),
+        )
+        if ours:
+            if j >= 5 and opening(board):
+                self.moment(t, "opening")
+            if phase(board, n) == "middlegame" and self.rng.random() < PLAN:
+                self.moment(t, "plan")
+        elif j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
+            if drop(j - 1) >= SWING and any(x.startswith("takes") for x in did):
+                self.moment(t, "mistake")  # your last move, punished by this one
+            elif drop(j) >= GOOD:
+                self.moment(t, "compliment")
+        if not self.endgame and not self.want and phase(board, n) == "endgame":
+            self.endgame = True  # once a game, when nothing else is due
+            self.moment(t, "endgame")
+
+    def clock(self, t, s):
+        """The clock remark, once a clock runs under `scramble` seconds (or a tenth of the
+        base time) in a game of 3 minutes or more."""
+        base = (self.info.get("clock") or {}).get("initial", 0)
+        low = max(self.cfg.scramble * 1000, base / 10)
+        if (
+            self.scrambled or self.want or base < 180_000
+        ):  # once, when nothing else is due
+            return
+        if min(s["wtime"], s["btime"]) < low:
+            self.scrambled = True
+            self.moment(t, "scramble")
 
     def events(self, t, s):
         us, them = ("w", "b") if self.white else ("b", "w")
@@ -456,12 +537,12 @@ class Chatter:
             self.note(
                 f"Event: you declined their draw offer (you felt about {e:.0%} for you)."
             )
-            self.moment(t, "a draw offer declined", self.cfg.p_draw, spaced=False)
+            self.moment(t, "draw", self.cfg.p_draw, spaced=False)
         if new(f"{us}draw"):
             self.note("Event: you offered a draw.")
         if new(f"{them}takeback"):
             self.note("Event: they ask for a takeback.")
-            self.moment(t, "a takeback request")
+            self.moment(t, "takeback")
         self.flags = flags
         if live:
             return
@@ -477,8 +558,8 @@ class Chatter:
             status not in ("aborted", "noStart")
             and len(self.sans) >= self.cfg.min_plies
         )
-        if played and self.engaged():
-            self.moment(t, "the end", self.cfg.p_end, spaced=False, budget=False)
+        if played:
+            self.moment(t, "finish", self.cfg.p_end, spaced=False, budget=False)
 
     def result(self):
         us = "white" if self.white else "black"
@@ -535,7 +616,7 @@ class Chatter:
         self.note(f'Chat ({room}) {who}: "{text}"')
         if user == self.opp and self.status and not self.engaged() and gg(text):
             self.talked, self.unreplied = True, 0
-            if self.post(GG, room, False) is not None:  # no model call
+            if not self.closed and self.post(GG, room, False) is not None:  # no call
                 self.note(f'You posted: "{GG}"')
             return
         if user == self.opp:
@@ -547,19 +628,24 @@ class Chatter:
         """Do they chat back: they wrote, and not `unanswered` of our lines since?"""
         return self.talked and self.unreplied < self.cfg.unanswered
 
-    def moment(self, t, reason, p=None, spaced=True, budget=True):
-        """Maybe call the model unprompted: by chance, within the game's budget, `every`
-        plies from the last call; at the quiet rates while they don't chat."""
+    def moment(self, t, kind, p=None, spaced=True, budget=True):
+        """Maybe call the model for a remark of this kind: once a kind a game, by chance,
+        within the game's budget, `every` plies from the last call; while they don't chat,
+        only in the quiet slots, one remark a slot."""
         c, engaged = self.cfg, self.engaged()
-        if self.want or self.muted():
+        slot = KINDS[kind][1]
+        if self.want or self.muted() or kind in self.kinds:
             return
-        if budget and self.said >= (c.remarks if engaged else c.quiet_remarks):
+        if not engaged and (slot is None or slot in self.slots):
+            return
+        if engaged and budget and self.said >= c.remarks:
             return
         if spaced and len(self.sans) - self.last < c.every:
             return
-        p = (c.p_moment if p is None else p) if engaged else c.quiet_p_moment
-        if self.rng.random() < p:
-            self.want = (reason, c.rooms[0], True, t)
+        if self.rng.random() < (
+            (c.p_moment if p is None else p) if engaged else c.quiet_p_moment
+        ):
+            self.want = (kind, c.rooms[0], True, t)
 
     def note(self, text):
         self.pending.append(text)
@@ -591,9 +677,14 @@ class Chatter:
         self.last = len(self.sans)  # unprompted calls keep their distance from any call
         if unprompted:
             self.said += 1
+            self.kinds.append(reason)
+            self.slots.add(KINDS[reason][1])
+            done = ", ".join(self.kinds[:-1]) or "none"
+            why = f"{KINDS[reason][0]}. Remarks already made this game: {done}"
         else:
             self.answered += 1
-        turn = "\n".join([*self.pending, self.now(), f"(You are called for {reason}.)"])
+            why = "a message to you"
+        turn = "\n".join([*self.pending, self.now(), f"(You are called for {why}.)"])
         messages = [*self.convo, {"role": "user", "content": turn}]
         self.llm = self.llm or model(self.cfg)
         start, then = time.monotonic(), list(self.seen)  # the moves in the prompt
@@ -645,6 +736,9 @@ class Chatter:
             return None
         self.posted = time.monotonic()
         self.unreplied += text != QUIET
+        self.closed |= bool(self.status)
+        if unprompted:
+            recent(self.cfg).add(text)
         log.info("game %s chat (%s) Allie: %s", self.gid, room, text)
         return self.posted - start
 
@@ -783,6 +877,116 @@ def phase(board, n):
     return "endgame" if pieces <= 26 else "middlegame"
 
 
+NAMES = {chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop",
+         chess.ROOK: "rook", chess.QUEEN: "queen"}  # fmt: skip
+
+
+def deeds(board, move):
+    """What a move does (castles, takes, promotes, checks), from the board before it."""
+    out = []
+    if board.is_castling(move):
+        out.append(f"castles {'short' if board.is_kingside_castling(move) else 'long'}")
+    if board.is_capture(move):
+        taken = (
+            chess.PAWN
+            if board.is_en_passant(move)
+            else board.piece_type_at(move.to_square)
+        )
+        out.append(f"takes a {NAMES[taken]}")
+    if move.promotion:
+        out.append(f"promotes to a {NAMES[move.promotion]}")
+    after = board.copy(stack=False)
+    after.push(move)
+    if after.is_checkmate():
+        out.append("checkmate")
+    elif after.is_check():
+        out.append("check")
+    return out
+
+
+def material_diff(board, white):
+    """Material, pawns as 1: white's side (if white) minus the other's."""
+    return sum(
+        v * (len(board.pieces(p, white)) - len(board.pieces(p, not white)))
+        for p, v in VALUE.items()
+    )
+
+
+def traded(board):
+    """The square of the last move if it took a piece worth as much as the mover: a piece
+    that may be taken back there is a trade, not a piece left hanging."""
+    m = board.peek()
+    after = board.piece_type_at(m.to_square)
+    board.pop()
+    try:
+        taken = (
+            chess.PAWN if board.is_en_passant(m) else board.piece_type_at(m.to_square)
+        )
+    finally:
+        board.push(m)
+    return m.to_square if taken and VALUE[taken] >= VALUE.get(after, math.inf) else None
+
+
+def hanging(board, color, skip=None):
+    """color's pieces en prise: attacked, and undefended or attacked by a cheaper piece
+    (but the one on skip)."""
+    out = []
+    for sq in chess.SquareSet(board.occupied_co[color]):
+        p = board.piece_type_at(sq)
+        attackers = board.attackers(not color, sq)
+        if p == chess.KING or not attackers or sq == skip:
+            continue
+        cheapest = min(VALUE.get(board.piece_type_at(x), 100) for x in attackers)
+        if cheapest < VALUE[p] or not board.attackers(color, sq):
+            out.append("NBRQ"[p - 2] * (p > 1) + chess.square_name(sq))
+    return out
+
+
+class Recent:
+    """The last n unprompted lines, across games and restarts: a JSON list in a file shared
+    by processes (locked to add)."""
+
+    def __init__(self, path, n):
+        self.path, self.n, self.lock = path, n, threading.Lock()
+
+    def read(self):
+        try:
+            with open(self.path) as f:
+                lines = json.load(f)
+        except (OSError, ValueError):
+            return []
+        return [x for x in lines if isinstance(x, str)][-self.n :] if self.n else []
+
+    def add(self, text):
+        if not self.n:
+            return
+        with self.lock:
+            try:
+                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+                with open(self.path + ".lock", "a") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    lines = [*(x for x in self.read() if x != text), text][-self.n :]
+                    with open(self.path + ".tmp", "w") as f:
+                        json.dump(lines, f, indent=0)
+                    os.replace(self.path + ".tmp", self.path)
+            except OSError as e:
+                log.warning("chat: recent lines %s: %s", self.path, e)
+
+
+RECENTS, LOCK = {}, threading.Lock()
+
+
+def recent(cfg):
+    """The config's recent lines: recent_file, or recent-lines.json beside the ledger."""
+    path = cfg.recent_file or os.path.join(
+        os.path.dirname(os.path.expanduser(cfg.ledger)), "recent-lines.json"
+    )
+    with LOCK:
+        return RECENTS.setdefault(
+            (path, cfg.recent), Recent(os.path.expanduser(path), cfg.recent)
+        )
+
+
 def mmss(ms):
     s = max(ms, 0) // 1000
     return f"{s // 60}:{s % 60:02d}"
@@ -805,8 +1009,9 @@ SAN = re.compile(
 
 
 def played(text, moves):
-    """Does text name only moves already played (UCI moves)?"""
-    named = set(SAN.findall(text))
+    """Does text name only moves already played (UCI moves)? A bare pawn push ("c6") reads as
+    a square name too, so only piece moves, captures and promotions count."""
+    named = {x for x in SAN.findall(text) if not re.fullmatch(r"[a-h][1-8]", x)}
     if not named:
         return True
     b, seen = chess.Board(), set()
@@ -818,15 +1023,9 @@ def played(text, moves):
 
 def clean(text):
     """The model's text as one line: no links, markup or wrapping quotes."""
-    text = " ".join(re.sub(r"</?[a-z_]+>", "", text.replace("**", "")).split()).strip(
-        "\"'\u201c\u201d{}"
-    )
-    if re.search(r"https?://|www\.", text):
-        return ""
-    cut = [m.span() for m in SAN.finditer(text)]  # moves keep their case
-    bounds = [0, *[x for span in cut for x in span], len(text)]
-    pieces = [text[a:b] for a, b in itertools.pairwise(bounds)]
-    return "".join(p if i % 2 else p.lower() for i, p in enumerate(pieces))
+    text = " ".join(re.sub(r"</?[a-z_]+>", "", text.replace("**", "")).split())
+    text = text.strip("\"'\u201c\u201d{}")
+    return "" if re.search(r"https?://|www\.", text) else text
 
 
 def recase(text, board):
@@ -861,7 +1060,7 @@ class Mock:
     def __call__(self, system, messages):
         turn = messages[-1]["content"]
         said = re.findall(r'Chat \(\w+\) [^:]+: "(.*)"', turn)
-        reason = re.search(r"\(You are called for (.*)\.\)", turn)[1]
+        reason = re.search(r"\(You are called for ([^:.]*)", turn)[1]
         text = f"(mock) re: {said[-1]}" if said else f"(mock) on {reason}"
         out = json.dumps({"speak": True, "text": text})
         return Reply([{"type": "text", "text": out}], True, text, 0.0, 0.0, 0.0)

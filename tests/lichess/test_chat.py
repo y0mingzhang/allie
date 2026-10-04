@@ -62,7 +62,7 @@ class Game:
             chat=lambda gid, text, room, **kw: self.posts.append((room, text)),
             chat_lines=lambda gid, **kw: self.lines,
         )
-        cfg = Chat(enabled=True, gap=0, poll=0.05, **cfg)
+        cfg = Chat(enabled=True, gap=0, poll=0.05, **{"recent": 0} | cfg)
         config = SimpleNamespace(chat=cfg, play=Play())
         bot = SimpleNamespace(me="allie", config=config, client=client, engine=engine)
         self.match = SimpleNamespace(bot=bot, gid="g1", over=False)
@@ -96,9 +96,8 @@ def state(moves, status="started", **kw):
 
 
 def test_clean_and_played():
-    assert clean('"Good game!"') == "good game!" and clean("see https://x.org") == ""
-    assert clean("May the best pawn win.</text>") == "may the best pawn win."
-    assert clean("Nice, Qxd7# and O-O. Bxe4 WOW") == "nice, Qxd7# and O-O. Bxe4 wow"
+    assert clean('"Good game!"') == "Good game!" and clean("see https://x.org") == ""
+    assert clean("May the best pawn win.</text>") == "May the best pawn win."
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
     for t in (
         "why did you say gg?",
@@ -128,7 +127,8 @@ def test_clean_and_played():
         b.push_uci(u)
     moves = [m.uci() for m in b.move_stack]
     assert played("Nf3, the classic", moves) and played("nice game", moves)
-    assert not played("try Nc6 here", moves)
+    assert not played("try Nc6 here", moves) and not played("maybe Bb5", moves)
+    assert played("my c6 pawn was loose", moves)  # a square, not a suggestion
 
 
 def test_conversation(engine):
@@ -193,40 +193,120 @@ def test_moments_draw_resign(engine):
     assert len(m.calls) == 4  # each line once
 
 
+def script(c, feel):
+    """Allie's views from a script: feel(ply) -> our expected score; uniform moves."""
+
+    def see(moves, w, b):
+        c.game.update(
+            moves, None if w is None else w / 1000, None if b is None else b / 1000
+        )
+        board = chess.Board()
+        for u in moves:
+            board.push_uci(u)
+        legal = [m.uci() for m in board.legal_moves]
+        e = feel(len(moves))
+        c.views[len(moves)] = chat.View(
+            dict.fromkeys(legal, 1 / len(legal)), (e, 0.0, 1 - e), 5.0
+        )
+
+    c.see = see
+
+
 def test_reciprocity(engine, caplog):
-    """While they don't chat: one unprompted call at most, none at the end, and their gg
-    after the game gets a gg from code. Once they chat, the chatty rates; after two of our
-    lines without a reply, the quiet ones again. Their lines are logged."""
+    """While they don't chat, remarks only in the quiet slots (the opening, a plan or a
+    compliment, the finish); their gg after the game gets the fixed reply only if nothing
+    was said after the game. Once they chat, the chatty rates; after two of our lines
+    without a reply, the quiet ones again. Their lines are logged."""
     caplog.set_level("INFO", logger="allie.lichess.chat")
-    m = Model("ok")
-    g = Game(engine, opp="shy", hello="", p_moment=1, quiet_p_moment=1, every=0, p_end=1,
-             min_plies=0, linger=5)  # fmt: skip
+    m = Model("Nice.")
+    g = Game(engine, opp="shy", hello="", quiet_p_moment=1, every=0, p_end=1, linger=5,
+             min_plies=4)  # fmt: skip
     c = g.chatter(m)
-    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5".split()
+    script(c, lambda n: 0.5 if n < 9 else 0.3)  # their 5th move (ply 9) is strong
+    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5 c2c3 d7d6".split()
     g.feed(g.full())
-    for k in range(1, len(moves)):
-        g.feed(state(" ".join(moves[:k])))  # the chat thread is idle after each
-        c.moment(time.monotonic(), "a test")  # as a surprise or a swing would
-        if c.want:
-            c.respond()
-    assert len(m.calls) == 1 and c.said == 1  # quiet_remarks
+    for k in range(1, len(moves) + 1):
+        g.feed(state(" ".join(moves[:k])))
+    assert c.kinds == ["opening", "compliment"]  # not the plan: the middle slot is used
     g.feed(state(" ".join(moves), status="resign", winner="black"))
-    assert len(m.calls) == 1  # quiet: no call at the end
+    assert c.kinds[-1] == "finish" and len(m.calls) == 3
     g.feed(g.say("gg wp"))
-    assert g.posts[-1] == ("player", chat.GG) and len(m.calls) == 1
+    assert g.posts[-1] == ("player", "Nice.") and len(g.posts) == 3  # no second gg
     assert "game g1 chat (player) Shy: gg wp" in caplog.text
-    assert "game g1 chat (player) Allie: gg" in caplog.text
-    g.feed(g.say("how did i play?"))
-    assert len(m.calls) == 2  # they chat now: the model answers
+    q = Game(engine, opp="shy2", hello="", quiet_p_moment=0, p_end=0, min_plies=0)
+    q.chatter(Model("x"))
+    q.feed(q.full(), state("e2e4 e7e5", status="resign", winner="black"), q.say("gg"))
+    assert q.posts == [
+        ("player", chat.GG)
+    ]  # nothing said after the game: the fixed reply
     d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=0, every=0)
     c = d.chatter(Model("hey"))
     d.feed(d.full(), d.say("hi"))
     assert c.engaged()
-    c.moment(time.monotonic(), "a test")
+    c.moment(time.monotonic(), "endgame")  # a kind with no quiet slot
     c.respond()
     assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
-    c.moment(time.monotonic(), "a test")
-    assert c.want is None  # quiet_p_moment 0
+    c.moment(time.monotonic(), "scramble")
+    assert c.want is None
+
+
+def test_facts_and_kinds(engine):
+    """Each move's line says what it did (captures, checks, material, a piece left hanging);
+    the mistake remark comes once our bad move is punished, the endgame and clock remarks
+    once each; no remark for a mere surprise."""
+    m = Model("")
+    g = Game(engine, opp="tac", white=True, hello="", p_moment=1, every=0, scramble=150)
+    c = g.chatter(m)
+    script(c, lambda n: 0.5 if n < 5 else 0.3)  # our 3rd move (ply 5) is a mistake
+    g.feed(g.full(), g.say("hi"))  # they chat: the chatty rates
+    moves = "e2e4 d7d5 e4d5 d8d5 d1h5 d5h5".split()  # 3. Qh5?? Qxh5
+    for k in range(1, 6):
+        g.feed(state(" ".join(moves[:k])))
+    g.feed(state(" ".join(moves), wtime=140000))
+    turns = "\n".join(m.turn(i) for i in range(len(m.calls)))
+    assert "2. exd5 you" in turns and "takes a pawn | feel" in turns
+    assert "material: you +1" in turns and "left hanging: d5" not in turns  # a trade
+    assert "3. Qh5 you" in turns and "left hanging: Qh5" in turns
+    assert "3... Qxh5 them" in turns and "takes a queen" in turns
+    assert "material: you -9" in turns
+    assert c.kinds == ["mistake"]  # the clock remark waits: one call at a time
+    g.feed(state(" ".join(moves + ["b1c3"]), wtime=130000))
+    g.feed(state(" ".join(moves + ["b1c3", "h5e5"]), wtime=130000))
+    assert c.kinds[0] == "mistake" and c.kinds[-1] == "scramble"  # the opening between
+
+
+def test_traded_and_hanging():
+    b = chess.Board("4k3/8/8/3p4/4K3/8/8/8 w - - 0 1")
+    b.push_uci("e4d5")  # the king takes: never a trade square, never hanging
+    assert chat.traded(b) is None and chat.hanging(b, chess.WHITE) == []
+    b = chess.Board()
+    for u in "e2e4 d7d5 e4d5".split():
+        b.push_uci(u)
+    assert chat.traded(b) == chess.D5 and chat.hanging(b, chess.WHITE, chess.D5) == []
+    assert chat.hanging(b, chess.WHITE) == ["d5"]
+
+
+def test_recent_lines(engine, tmp_path):
+    """Unprompted lines are remembered across games and passed in as not to be reused."""
+    path = str(tmp_path / "recent.json")
+    g = Game(
+        engine,
+        opp="r1",
+        hello="",
+        quiet_p_moment=1,
+        every=0,
+        recent=3,
+        recent_file=path,
+    )
+    g.chatter(Model("A line to remember."))
+    g.feed(g.full())
+    for k, _ in enumerate("e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()):
+        g.feed(state(" ".join("e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()[: k + 1])))
+    assert json.loads(open(path).read()) == ["A line to remember."]
+    h = Game(engine, opp="r2", hello="", recent=3, recent_file=path)
+    c = h.chatter(Model("x"))
+    h.feed(h.full())
+    assert "- A line to remember." in c.system[1]["text"]
 
 
 def test_short_game_ends_quietly(engine):
@@ -236,7 +316,7 @@ def test_short_game_ends_quietly(engine):
     g = Game(engine, opp="brief", hello="", quiet_p_moment=1, p_end=0, every=0)
     c = g.chatter(m)
     g.feed(g.full())
-    c.ply = lambda t, j: c.moment(t, "a surprise")  # every move a moment
+    c.ply = lambda t, j, *a: c.moment(t, "compliment")  # every move a moment
     g.feed(state("e2e4 e7e5", status="resign", winner="black"))
     assert m.calls == [] and g.posts == []
 
@@ -312,7 +392,7 @@ def test_clocks_takeback_and_late(engine):
     assert c.game.clocks == ref.clocks == [170, 171]
     g.feed(state("e2e4 e7e5 g1f3"), state("e2e4"))  # a takeback of two plies
     assert c.game.moves == ["e2e4"] and c.sans == ["e4"] and max(c.views) == 1
-    c.want = ("a test", "player", True, time.monotonic())
+    c.want = ("plan", "player", True, time.monotonic())
     c.put({"type": "opponentGone", "gone": False})
     wait(lambda: m.calls)
     for k in range(2, 6):

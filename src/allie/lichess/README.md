@@ -142,37 +142,46 @@ compute) plus 0.1 s of lag. Endings, bot (human):
 ## Chat
 
 With `[chat] enabled = true` (default off), the bot talks in the game chat in natural language, written
-by Claude (`claude-sonnet-5-5`, effort low, thinking off) from Allie's own numbers. No engine is involved.
+by Claude (`claude-sonnet-5-5`, effort low, thinking off) from Allie's own view of the game. No engine is
+involved.
 
 - **One conversation per game.** The persona and policy (cached for an hour) and the game's header come
-  first. Each model call appends a user turn with everything since the last call, then the model's
+  first. The header includes the bot's last `recent` unprompted lines from earlier games, which it must
+  not reuse. Each model call appends a user turn with everything since the last call, then the model's
   decision as JSON `{"speak": bool, "text": str}`. Earlier turns are never edited, so each call reads
   the conversation from the prompt cache.
-  - **Moves:** each one with Allie's prediction for its mover at their rating (top moves with
-    probabilities, the move played marked), the think time typical there and the one taken, and the bot's
-    win/draw/loss after it.
+  - **Moves:** what each one did (castles, takes, promotes, checks), the material when it changed, and
+    for the bot's own moves a piece left en prise. For the opponent's moves, Allie's prediction for
+    them at their rating (top moves with probabilities, the move played marked) and the usual think
+    time; for every move, the bot's win/draw/loss after it.
   - **Events:** draw offers and the bot's answer, takebacks, resignation, flag, abort, the opponent
-    leaving, a rematch.
+    leaving.
   - **Chat lines:** verbatim.
   - **The position:** clocks, the opening (Lichess's names), phase, material, FEN, Allie's prediction for
     the side to move.
 - **When it calls the model.** Every chat message does (the model may still stay silent, as a
-  human opponent often would), during the game and for `linger` seconds after it. Other moments
-  call it by chance, decided in code before any call, at least `every` plies after the last call:
-  - while the opponent chats: `p_moment` at a surprising move or a swing in the win/draw/loss,
-    `p_draw` once their draw offer is answered, `remarks` such calls a game, and `p_end` at the
-    end of a game of `min_plies` or more;
-  - until they write, or once `unanswered` of the bot's lines in a row get no reply:
-    `quiet_p_moment` at a moment, `quiet_remarks` a game, no call at the end, and a fixed `gg`
-    (no call) if they say gg after the game.
+  human opponent often would), during the game and for `linger` seconds after it. Otherwise it remarks
+  on a moment, at most one remark of each kind a game, by chance, decided in code before any call,
+  at least `every` plies after the last call. The kinds:
+  - the opening (once a name is known);
+  - its plan after one of its middlegame moves;
+  - its own mistake, once the opponent has punished it;
+  - the opponent's good move;
+  - the endgame starting;
+  - a clock under `scramble` seconds;
+  - the finish (in games of `min_plies` or more, not aborted);
+  - a declined draw offer, a takeback request, the opponent leaving.
 
-  Otherwise the update waits in the next turn.
-- **Voice.** Lowercase, short and plain, like a regular online player ("gl", "nice move", "gg
-  wp"); no jokes or flourishes. Move names keep their case.
-- **Casual or rated.** In casual games the bot gives its honest opinion from Allie's numbers when asked.
+  Rates: while the opponent chats, `p_moment` (`p_draw`, `p_end`) and `remarks` a game. Until they
+  write, or once `unanswered` of the bot's lines in a row get no reply, `quiet_p_moment` and only
+  these slots, one remark each: the opening, a plan or a compliment, the finish, a declined draw. A
+  "gg" after the game gets a fixed reply (no call) if the bot said nothing after the game.
+- **Voice.** A friendly, curious club player, in plain sentence case: short, warm, no jokes or slang.
+  Never a dig at the opponent's mistakes.
+- **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
   In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
-  message naming a move not yet played is dropped. After the game it reviews from Allie's numbers when
-  asked.
+  message naming a piece move or capture not yet played is dropped. After the game it reviews from
+  Allie's view when asked.
 - **`!quiet`.** It mutes the bot for that game and their rematches, including a message already being
   written.
 - **Never in the way.** The chat reads its own copy of the game stream on a reader thread and keeps its

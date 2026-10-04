@@ -12,6 +12,7 @@ usage: python analysis/lichess/chat_dryrun.py --config bot.toml [--llm claude|mo
 
 import argparse
 import logging
+import tempfile
 from types import SimpleNamespace
 
 import chess.pgn
@@ -101,10 +102,17 @@ def main():
     p.add_argument("--llm", choices=["claude", "mock"], default="mock")
     p.add_argument("--ledger", help="the spend ledger (default: the config's)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--recent", help="the recent-lines file (default: a new temporary one)"
+    )
     p.add_argument("--prompts", action="store_true", help="print each call's new turn")
     p.add_argument("games", nargs="+", help="PGN:casual|rated:plies")
     a = p.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    logging.getLogger("allie.lichess.chat").addFilter(
+        lambda r: "not posted" in r.getMessage() or r.levelno >= logging.WARNING
+    )
+    logging.getLogger("allie.lichess.chat").setLevel(logging.INFO)
 
     from allie.lichess.cli import model
     from allie.lichess.config import load
@@ -114,6 +122,7 @@ def main():
     config.chat.enabled, config.chat.llm, config.chat.gap = True, a.llm, 0.0
     if a.ledger:
         config.chat.ledger = a.ledger
+    config.chat.recent_file = a.recent or tempfile.mktemp(suffix=".json")
     engine = Engine(model(config))
     llm = chat.model(config.chat)
     for i, spec in enumerate(a.games):
