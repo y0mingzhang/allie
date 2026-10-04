@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 from pathlib import Path
 
 import numpy as np
@@ -125,7 +126,8 @@ def test_fast_nodes_match_reference(tiny_path, tiny):
 )
 def test_concurrent_searches_match_sequential(tiny_path):
     """On the fast backend, searches run on the games' threads and their nodes share the engine's
-    batches: the same distributions as one search at a time, up to BF16 batching noise."""
+    batches with other games' moves: the same results as one at a time, up to BF16 batching noise.
+    The engine is held busy while the requests queue, so they must merge."""
     pytest.importorskip("pybind11")
     import threading
 
@@ -137,23 +139,39 @@ def test_concurrent_searches_match_sequential(tiny_path):
         pytest.skip(f"no fast kernels: {e}")
     model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)
     engine, search = Engine(model), tree.Coverage()
-    games = []
-    for s in range(4):
+
+    def setup(s):
         g = Game(engine, 2400, 2400, 1800, 20, "classical")
         g.update(random_game(s, 12 + 2 * s), 1700, 1690)
-        games.append(g)
+        return g
+
+    games = [setup(s) for s in range(4)]
     alone = [search(g, 32) for g in games]
-    together = [None] * len(games)
+    other = setup(9)  # a game whose move arrives during the searches
+    moves = other.moves + [next(iter(other.board.legal_moves)).uci()]
+    ref = setup(9)
+    ref.update(moves, 1690, 1690)
+    expected = ref.sync()
+    other.sync()
+    other.update(moves, 1690, 1690)
+    release, together, got = threading.Event(), [None] * len(games), []
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
 
     def go(i):
         together[i] = search(games[i], 32)
 
     threads = [threading.Thread(target=go, args=(i,)) for i in range(len(games))]
+    threads.append(threading.Thread(target=lambda: got.append(other.sync())))
     for t in threads:
         t.start()
-    for t in threads:
+    time.sleep(0.5)  # every first request is queued behind the blocker
+    release.set()
+    for t in [blocker, *threads]:
         t.join()
+    assert engine.widest > 8  # more than one search chunk in a forward: requests merged
     for (m1, p1), (m2, p2) in zip(alone, together):
         assert m1 == m2
         assert np.abs(np.asarray(p1) - np.asarray(p2)).max() < 2e-3
-    assert engine.forwards > 0
+    p, q = (torch.softmax(z[378:2346].float(), -1) for z in (got[0], expected))
+    assert (p - q).abs().max() < 1e-3

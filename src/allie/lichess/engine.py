@@ -38,7 +38,7 @@ class Engine:
         behaviour.check()
         self.model, self.max_batch, self.max_items = model, max_batch, max_items
         self.requests = queue.SimpleQueue()
-        self.forwards = self.tokens = 0
+        self.forwards = self.tokens = self.widest = 0  # widest: most items in one forward
         self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
         self.thread.start()
 
@@ -68,35 +68,45 @@ class Engine:
             batch, items = [first], self._size(first[0])
             while len(batch) < self.max_batch and items < self.max_items:
                 try:
-                    batch.append(self.requests.get_nowait())
+                    batch.append(r := self.requests.get_nowait())
                 except queue.Empty:
                     break
-                items += self._size(batch[-1][0])
-            if None in batch:  # close(): serve what came before it, then stop
-                self.requests.put(None)
-                batch = batch[: batch.index(None)]
+                if r is None:  # close(): serve what came before it, then stop
+                    self.requests.put(None)
+                    batch.pop()
+                    break
+                items += self._size(r[0])
             groups = [(r if isinstance(r, list) else [r], f, isinstance(r, list))
                       for r, f in batch if not callable(r)]  # fmt: skip
             if groups:
-                flat = [it for g, _, _ in groups for it in g]
-                try:
-                    logits = step(self.model, flat).cpu()
-                except Exception as e:  # noqa: BLE001 - every waiting game gets the error
-                    for _, f, _ in groups:
-                        f.set_exception(e)
-                else:
-                    self.forwards += 1
-                    self.tokens += sum(len(it[1]) for it in flat)
-                    lo = 0
-                    for g, f, many in groups:
-                        f.set_result(logits[lo : lo + len(g)] if many else logits[lo])
-                        lo += len(g)
+                self._forward(groups)
             for r, f in batch:
                 if callable(r):
                     try:
                         f.set_result(r())
                     except Exception as e:  # noqa: BLE001
                         f.set_exception(e)
+
+    def _forward(self, groups):
+        """One forward for every group's items; if it fails, each group alone, so one bad request
+        fails only its own caller."""
+        flat = [it for g, _, _ in groups for it in g]
+        try:
+            logits = step(self.model, flat).cpu()
+        except Exception as e:  # noqa: BLE001
+            if len(groups) > 1:
+                for g in groups:
+                    self._forward([g])
+                return
+            groups[0][1].set_exception(e)
+            return
+        self.forwards += 1
+        self.tokens += sum(len(it[1]) for it in flat)
+        self.widest = max(self.widest, len(flat))
+        lo = 0
+        for g, f, many in groups:
+            f.set_result(logits[lo : lo + len(g)] if many else logits[lo])
+            lo += len(g)
 
     @staticmethod
     def _size(r):
@@ -276,21 +286,20 @@ def strongest(game, play, search, clock):
 
 def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
-    the policy, or coverage search's distribution with a budget that grows with the predicted human
-    think time, sharpened by a temperature that falls with the rating."""
+    sampled from the policy, or from coverage search's distribution with a budget that grows with
+    the predicted human think time and the rating."""
     legal, p, wdl, time = game.position()
     rating = game.elo[len(game.moves) % 2]
-    n = 0
-    if search is not None and len(legal) > 1:
-        n = calibration.pick(calibration.budget(rating, time, clock), game.rng)
+    n = 0  # search costs what calibration.HW assumes only on the fast CPU backend
+    if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
+        n = calibration.pick(calibration.budget(rating, time, clock, game.speed), game.rng)
     s = p
     if n:
         moves, q = search(game, n)
         s = np.zeros(len(legal))
         s[[legal.index(m) for m in moves]] = q
-    pi = calibration.sharpen(s, calibration.temperature(rating))
-    i = int(game.rng.choice(len(legal), p=pi))
-    return game.behave(play, clock, legal[i], p[i], wdl, time)
+    i = int(game.rng.choice(len(legal), p=s / s.sum()))
+    return game.behave(play, clock, legal[i], s[i], wdl, time)
 
 
 # play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and

@@ -39,13 +39,14 @@ class Tree:
         self.k[:, :, 0] = self.v[:, :, 0] = 0  # slot 0 (the root's id) pads shorter paths
         self.capacity, self.new_tokens = capacity, 0
         self.concurrent = False  # nodes through the engine's queue (a search on the game's thread)
+        self.caches = []  # the fast backend's pool
 
     def reset(self):
         self.new_tokens = 0
 
     def pool(self, n):
         """n caches holding the game's prefix (the fast backend's leaves), copied once per tree."""
-        caches = self.__dict__.setdefault("caches", [])
+        caches = self.caches
         g, n0 = self.cache, self.cache.n
         while len(caches) < n:
             c = Cache(self.model, n0 + 8)
@@ -166,7 +167,6 @@ class Nodes:
         z = m.forward(tok, pos, feats, boards, previous, attend)
         return z.double().cpu().numpy()
 
-
     def path(self, i):
         """The node's ancestors below the root, then itself."""
         p, j = [], int(i)
@@ -175,11 +175,12 @@ class Nodes:
             j = int(self.parent[j])
         return p[::-1]
 
-    def fast(self, ids, chunk=16):
+    def fast(self, ids, chunk=8):
         """The nodes' logits from the fast backend. Each node runs on a copy of the game's cache
         (pooled: the kernel writes only past the root, so the copied prefix stays) holding its
         ancestors' keys, values and embeddings at their own positions (kept in the tree's slots when
-        they ran); only the node's own token is new. Up to `chunk` nodes run in one step."""
+        they ran); only the node's own token is new. Up to `chunk` nodes run in one step: the pool holds
+        that many copies (about 13 MB each at move 40, 1 024 tokens at most: 150 MB)."""
         t, m = self.tree, self.tree.model
         n0 = t.cache.n
         out = []
