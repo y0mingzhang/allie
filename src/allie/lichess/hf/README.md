@@ -39,7 +39,7 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
 - **More outputs:** `model.analyze(...)` also returns the mover's win / draw / loss probabilities and their
   expected think time.
 - **Device:** `device="cuda"` (the default when a GPU is visible) or `device="cpu"`. On CPU the weights
-  default to int8 (6.4 GB, about twice as fast as BF16); `int8=False` keeps BF16 (11 GB).
+  default to int8 (6.4 GB, about 1.6 times as fast as BF16); `int8=False` keeps BF16 (11 GB).
   `active_experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
 - **Speed:** on CPU the model runs C++ kernels compiled for your machine on first use (a few seconds; it needs
   a C++ compiler, and without one runs the plain PyTorch code), on GPU replayed CUDA graphs. `backend="torch"`
