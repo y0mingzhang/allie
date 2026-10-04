@@ -157,10 +157,10 @@ def qb_edges(device):
     return torch.cat((-up.flip(0), up.new_zeros(1), up)).to(device)
 
 
-def qb_shift(hist, k):
+def qb_shift(hist, k, e=None):
     """The d_j putting k / e of each expert's counted tokens below it, the CDF linear within a bin
-    (exact at bin edges, so the error is within one bin)."""
-    e = hist.shape[0]
+    (exact at bin edges, so the error is within one bin). e: the experts per layer (hist may stack layers)."""
+    e = e or hist.shape[0]
     # integer cumsum: a float one has no deterministic CUDA kernel
     h, cum = hist.double(), hist.long().cumsum(1).double()
     q = cum[:, -1:] * (k / e)
@@ -358,3 +358,43 @@ class MoE(nn.Module):
             )
         )  # fmt: skip
         self.load.zero_()
+
+
+@torch.no_grad()
+def rebalance_all(layers):
+    """Every layer's rebalance() with the collectives and the per-layer reductions batched (train.trainer
+    --moe-batched-rebalance): one all-reduce of the stacked loads and one of the stacked histograms (sums of
+    integer-valued counts, exact in any order, so the same biases; the summed margins, logged only, may round
+    otherwise), one qb_shift, the stats in one pass. Each bias's mean stays a per-layer kernel (its reduction order);
+    the centring layers reduce their own sums."""
+    e, k = layers[0].experts, layers[0].topk
+    assert all((m.experts, m.topk) == (e, k) for m in layers)
+    loads = torch.stack([m.load for m in layers])
+    hists = torch.stack([m.hist for m in layers])
+    dist.all_reduce(loads)
+    dist.all_reduce(hists)
+    shifts = qb_shift(hists.flatten(0, 1), k, e).view(len(layers), e)
+    biases = torch.stack([m.bias for m in layers]) + shifts
+    for m, b in zip(layers, biases):
+        m.bias.copy_(b - b.mean())
+    load = loads[:, :e]
+    dropped, moved, tokens, margin = loads[:, e:].unbind(1)
+    mean = load.sum(1).clamp(min=1) / e
+    tokens = tokens.clamp(min=1)
+    for m in layers:
+        if m.center:  # the first step takes its mean outright
+            dist.all_reduce(m.mu_sum)
+            beta = torch.where(m.mu_steps > 0, m.center, 0.0)
+            m.mu.lerp_(m.mu_sum[:-1] / m.mu_sum[-1].clamp(min=1), 1 - beta)
+            m.mu_steps += 1
+            m.mu_sum.zero_()
+    bias = torch.stack([m.bias for m in layers])
+    stats = torch.stack(
+        (
+            load.amax(1) / mean, load.amin(1) / mean, (load < 0.1 * mean[:, None]).sum(1).float(),
+            dropped / (mean * e), moved / tokens, bias.amax(1) - bias.amin(1), margin / tokens,
+        ),
+        1,
+    )  # fmt: skip
+    torch._foreach_copy_([m.stats for m in layers], list(stats.unbind(0)))
+    torch._foreach_zero_([m.load for m in layers] + [m.hist for m in layers])

@@ -439,6 +439,12 @@ def main():
         "(published after each optimizer step) on the copy engines instead of NCCL all-gathers (bitwise)",
     )
     p.add_argument(
+        "--moe-batched-rebalance",
+        action="store_true",
+        help="the MoE layers' bias rebalance with the loads' and histograms' all-reduces, the quantile shifts and the "
+        "stats batched over the layers (exact integer sums: the same biases; the logged margin may round otherwise)",
+    )
+    p.add_argument(
         "--optimizers-reversed",
         action="store_true",
         help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
@@ -515,6 +521,7 @@ def main():
     expert_shard.LATE = a.shard_late_prefetch
     expert_shard.DEPTH, expert_shard.HOLD = a.shard_prefetch, a.shard_hold
     expert_shard.HOST = a.shard_host_gather
+    network.core.BATCHED_REBALANCE = a.moe_batched_rebalance
     assert a.shard_prefetch >= 1
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0

@@ -62,6 +62,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
     "name, args, torchrun, env",
     [
         check("async_checkpoint"),
+        check("batched_rebalance"),
         check("center_first"),
         check("modelexp_run", marks=STUDY),
         check("moe_quantile"),
