@@ -28,16 +28,12 @@ def test_think_draws_from_the_head():
 
 def test_think_never_spends_the_reserve():
     rng = np.random.default_rng(0)
-    g = behaviour.PARAMETERS["guard"]
-    for clock in (0.5, 1, 3, 10, 60):
-        for inc in (0, 2):
-            t = behaviour.think(time_probs(62), rng, clock, inc, 40)
-            assert (
-                t
-                <= max(0, clock - g["reserve"]) * g["share"]
-                + inc * g["increment"]
-                + 1e-9
-            )
+    reserve = behaviour.PARAMETERS["guard"]["reserve"]
+    for clock in (0.0, 0.5, 1, 1.5, 3, 10, 60, 600):
+        for inc in (0, 2, 30, 180):  # the increment arrives only after the move
+            for b in (0, 20, 62):
+                t = behaviour.think(time_probs(b), rng, clock, inc, 40)
+                assert 0 <= t <= max(0.0, clock - reserve) + 1e-9, (clock, inc, b, t)
 
 
 def test_resign_only_when_lost():
@@ -52,6 +48,10 @@ def test_resign_only_when_lost():
     assert hits > 0
     x = behaviour.features(lost, 60, 1500, 1, 100, 180)
     assert abs(hits / 1000 - behaviour.hazard("resign", x)) < 0.05
+    assert not any(behaviour.resign(lost, 1, 1500, 1, 100, 180, rng) for _ in range(100))
+    off = sum(behaviour.resign(lost, 60, 1500, 1, 100, 180, rng, on_turn=False) for _ in range(1000))
+    xo = behaviour.features(lost, 60, 1500, 1, 100, 180, on_turn=False)
+    assert abs(off / 1000 - behaviour.hazard("resign", xo)) < 0.05
 
 
 def test_draws():

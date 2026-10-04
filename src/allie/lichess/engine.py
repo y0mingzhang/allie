@@ -33,6 +33,7 @@ class Engine:
     batching concurrent extend() calls into one forward."""
 
     def __init__(self, model, max_batch=32):
+        behaviour.check()
         self.model, self.max_batch = model, max_batch
         self.requests = queue.SimpleQueue()
         self.forwards = self.tokens = 0
@@ -187,6 +188,21 @@ class Game:
         p = torch.softmax(z[[MOVE_ID[m] for m in legal]], 0).numpy()
         return legal, p, tuple(torch.softmax(z[WDL], 0).tolist()), torch.softmax(z[TIME], 0).numpy()
 
+    def concede(self, play, clock, white):
+        """After the bot's own move (the opponent to move): resign now, as a human would on
+        seeing the new position? clock: the bot's time left."""
+        if not play.resign:
+            return False
+        try:
+            w, d, loss = torch.softmax(self.sync().double()[WDL], 0).tolist()
+        except OverflowError:
+            return False
+        ply, me = len(self.moves), 0 if white else 1
+        if ply % 2 == me:  # the bot is to move: not after its own move
+            return False
+        x = ((loss, d, w), ply, self.elo[me], FORMATS.get(self.speed, 1), clock, self.base)
+        return behaviour.resign(*x, self.rng, on_turn=False)
+
     def behave(self, play, clock, move, probability, wdl, time):
         """A Decision for this move: think time, resignation and draw offer as humans of the
         bot's rating behave (behaviour.py)."""
@@ -197,7 +213,7 @@ class Game:
             think=behaviour.think(time, self.rng, clock, self.inc, ply) if play.think_time else 0.0,
             wdl=wdl,
             probability=float(probability),
-            resign=play.resign and ply >= 2 and behaviour.resign(*x, self.rng),
+            resign=play.resign and behaviour.resign(*x, self.rng),
             offer_draw=play.draws and behaviour.offer_draw(*x, self.rng),
         )
 

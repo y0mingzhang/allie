@@ -125,13 +125,23 @@ def test_draw_offer_and_resign(engine, monkeypatch):
     wait(lambda: finished(mock))
     g = next(iter(mock.games.values()))
     assert g.status == "draw"
-    monkeypatch.setattr(behaviour, "resign", lambda *args: True)
+    def on_turn_from_ply_2(wdl, ply, *args, on_turn=True):
+        return on_turn and ply >= 2
+
+    monkeypatch.setattr(behaviour, "resign", on_turn_from_ply_2)
     mock2, _ = start(engine, resign=True)
     mock2.challenge("random", "allie", 60, 1, color="white")
     wait(lambda: finished(mock2))
     g2 = next(iter(mock2.games.values()))
-    # the bot (black) resigns at its first turn after each side has moved
+    # the bot (black) resigns instead of its second move
     assert g2.status == "resign" and g2.winner == "white" and len(g2.board.move_stack) == 3
+    monkeypatch.setattr(behaviour, "resign", lambda wdl, ply, *args, on_turn=True: not on_turn)
+    mock3, _ = start(engine, resign=True)
+    mock3.challenge("random", "allie", 60, 1, color="white")
+    wait(lambda: finished(mock3))
+    g3 = next(iter(mock3.games.values()))
+    # ... or right after its first move
+    assert g3.status == "resign" and g3.winner == "white" and len(g3.board.move_stack) == 2
 
 
 def test_rejects_bad_token():

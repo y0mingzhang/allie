@@ -169,7 +169,7 @@ class Match:
     def __init__(self, bot, gid):
         self.bot, self.gid = bot, gid
         self.game, self.white, self.over, self.opponent = None, None, False, None
-        self.moved = self.answered = -1
+        self.moved = self.answered = self.conceded = -1
         self.claim = None
         self.stats = []
         self.chat = Chatter(self) if bot.config.chat.enabled else None
@@ -225,7 +225,12 @@ class Match:
             self.answered = len(moves)
             self.call(self.bot.client.draw, self.gid, game.accept_draw(play, self.white))
         if (len(moves) % 2 == 0) != self.white:
-            game.sync()  # the bot's own move joins the cache while the opponent thinks
+            # the bot's own move joins the cache while the opponent thinks; a human might
+            # resign right after a move that turns out badly
+            clock = (s["wtime"] if self.white else s["btime"]) / 1000
+            if self.conceded < len(moves) and game.concede(play, clock, self.white):
+                self.call(self.bot.client.resign, self.gid)
+            self.conceded = len(moves)
             return
         if self.moved == len(moves):
             return

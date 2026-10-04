@@ -1,9 +1,14 @@
 """When the bot thinks, resigns and agrees to draws, calibrated on held-out human games.
 
-analysis/lichess/human.py fits behaviour.json on July 2026 games with every clock known: a
-per-turn resignation hazard (logistic in the model's win / draw / loss probabilities for the side
-to move, the ply, its rating, the format and its clock), a draw-offer hazard of the same form, the
-expected score at which humans agree draws, and a think-time guard against flagging.
+analysis/lichess/human.py fits behaviour.json on half of the main evaluation's July 2026 games
+(every clock known) and checks it on the other half:
+- resignation: a per-position hazard for each player, on its turn (instead of moving) or right
+  after its own move, logistic in the model's win / draw / loss probabilities for that player,
+  the ply, its rating, the format and its clock; never below a P(loss) floor;
+- draws: a hazard of the same form for ending a game by agreement on one's turn (the data show
+  agreements, not offers, so this is a heuristic policy), and the expected score up to which
+  humans agree;
+- think time: a soft guard from human time use, under a hard cap that keeps a reserve.
 """
 
 import json
@@ -13,10 +18,18 @@ from pathlib import Path
 import numpy as np
 
 PATH = Path(__file__).with_name("behaviour.json")
-PARAMETERS = json.loads(PATH.read_text()) if PATH.exists() else {}  # absent only while fitting
+PARAMETERS = (
+    json.loads(PATH.read_text()) if PATH.exists() else {}
+)  # empty only while fitting
 # allie.search's formats: bullet, blitz, rapid, classical
 FORMATS = dict(ultraBullet=0, bullet=0, blitz=1, rapid=2, classical=3, correspondence=3)
-CENTRES = np.r_[np.arange(16), 16 * np.exp(np.arange(47) / 7.06)]
+KEYS = ("resign", "draw", "guard")
+
+
+def check():
+    missing = [k for k in KEYS if k not in PARAMETERS]
+    if missing:
+        raise RuntimeError(f"{PATH} lacks {missing}: run analysis/lichess/human.py fit")
 
 
 def logit(p):
@@ -24,9 +37,9 @@ def logit(p):
     return math.log(p / (1 - p))
 
 
-def features(wdl, ply, elo, fmt, clock, base):
-    """The hazards' inputs. wdl: the side to move's win / draw / loss probabilities; fmt: 0..3;
-    clock, base: seconds (None if the game has no clock)."""
+def features(wdl, ply, elo, fmt, clock, base, on_turn=True):
+    """The hazards' inputs. wdl: the player's own win / draw / loss probabilities; ply: the
+    position's (moves played); fmt: 0..3; clock (that player's), base: seconds or None."""
     w, d, loss = wdl
     left = 1.0 if not base or clock is None else min(max(clock / base, 0.0), 1.5)
     x = [
@@ -38,7 +51,7 @@ def features(wdl, ply, elo, fmt, clock, base):
         (elo - 1500) / 500,
         left,
     ]
-    return x + [float(fmt == f) for f in (0, 2, 3)]
+    return x + [float(fmt == f) for f in (0, 2, 3)] + [float(on_turn)]
 
 
 def hazard(name, x):
@@ -47,31 +60,32 @@ def hazard(name, x):
 
 
 def think(time_probs, rng, clock, increment, ply):
-    """Seconds to wait before moving: a draw from the think-time head (bin, then uniform
-    within it), held under the guard so the clock is never spent below its reserve."""
+    """Seconds to spend on this move, compute included: a draw from the think-time head (bin,
+    then uniform within it), under a soft guard fitted on human time use (a share of the clock
+    plus the increment) and a hard cap that always leaves the reserve on the clock."""
     if (
         ply < 2
     ):  # no think time is recorded for each side's first move; humans move fast
-        return float(rng.uniform(0.5, 2.0))
-    p = np.asarray(time_probs, np.float64)
-    b = int(rng.choice(len(p), p=p / p.sum()))
-    u = rng.uniform(-0.5, 0.5)
-    t = max(b + u, 0.0) if b < 16 else 16 * math.exp((b - 16 + u) / 7.06)
+        t = float(rng.uniform(0.5, 2.0))
+    else:
+        p = np.asarray(time_probs, np.float64)
+        b = int(rng.choice(len(p), p=p / p.sum()))
+        u = rng.uniform(-0.5, 0.5)
+        t = max(b + u, 0.0) if b < 16 else 16 * math.exp((b - 16 + u) / 7.06)
     if clock is None:
         return t
     g = PARAMETERS["guard"]
-    budget = (
-        max(0.0, clock - g["reserve"]) * g["share"] + (increment or 0) * g["increment"]
-    )
-    return min(t, budget)
+    hard = max(0.0, clock - g["reserve"])
+    return min(t, hard * g["share"] + (increment or 0), hard)
 
 
-def resign(wdl, ply, elo, fmt, clock, base, rng):
-    """Resign now, as a human of this rating would at this turn? Never while the model gives
-    the side to move a real chance (P(loss) under the floor)."""
-    if wdl[2] < PARAMETERS["resign"]["floor"]:
+def resign(wdl, ply, elo, fmt, clock, base, rng, on_turn=True):
+    """Resign now, as a human of this rating would here? on_turn: instead of moving; otherwise
+    right after one's own move, with wdl that player's view of the new position."""
+    if ply < 2 or wdl[2] < PARAMETERS["resign"]["floor"]:
         return False
-    return rng.random() < hazard("resign", features(wdl, ply, elo, fmt, clock, base))
+    x = features(wdl, ply, elo, fmt, clock, base, on_turn)
+    return rng.random() < hazard("resign", x)
 
 
 def offer_draw(wdl, ply, elo, fmt, clock, base, rng):
