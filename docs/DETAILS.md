@@ -137,7 +137,7 @@ We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embe
 | MoE | 1.27 [1.26, 1.28] | 0.54 [0.42, 0.67] | 1.06 [1.01, 1.11] | 0.0026 |
 | dense | 1.27 [1.26, 1.29] | 0.54 [0.44, 0.66] | 1.03 [0.95, 1.10] | 0.0020 |
 
-- The MoE's compute multiplier over dense is 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] at the three budgets.
+- A dense model needs 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] the MoE's compute to match it at the three budgets.
 - The compute-optimal size grows as C^0.66.
 - B and β are correlated at 0.98 in the fit.
 - Allie 2.0 (N = 0.69B, D = 75B, 109 tokens per parameter) was forecast at 1.2856 and scored 1.2533.
@@ -168,7 +168,7 @@ Small-model results behind the choices in the README. CE differences are on the 
 
 **Mixture of experts.**
 
-- 256 experts with 12 active against 128 with 6: the MoE's advantage, as a compute multiplier, grows from 1.04× to 1.34× across the sweep's budgets. 512 experts with 24 active: −0.0019, but about 20% slower. 64 experts lose.
+- 256 experts with 12 active against 128 with 6: its advantage, in matching compute, grows from 1.04× to 1.34× across the sweep's budgets. 512 experts with 24 active: −0.0019, but about 20% slower. 64 experts lose.
 - A shared expert at a quarter of the block width: 1.13-1.15× compute. Without one: 0.89-1.06×.
 - Quantile balancing of the routing biases: no change in loss, but starved experts fell to zero, so it was kept for router health.
 

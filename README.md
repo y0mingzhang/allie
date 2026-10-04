@@ -26,7 +26,7 @@ You can [play it on Lichess](#play-against-allie-on-lichess) or [download it](#d
 
 ### Scaling laws
 
-Before training Allie 2.0, we trained 45 dense and MoE models at three compute budgets, from 6.3×10¹⁷ to 6.2×10¹⁸ FLOPs. At each budget we varied the model size and found the size with the lowest loss.
+Before training Allie 2.0, we trained 45 dense and MoE models at three compute budgets, from 6.3×10¹⁷ to 6.2×10¹⁸ FLOPs. At each budget we varied the model size and found the size with the lowest loss (the isoFLOP method of [Chinchilla](https://arxiv.org/abs/2203.15556)).
 
 ![Isoflop curves: main-evaluation CE against active parameters for dense and MoE models at three budgets](docs/figures/isoflop.png)
 
@@ -34,11 +34,11 @@ Before training Allie 2.0, we trained 45 dense and MoE models at three compute b
 
 The MoE was better at every budget. A dense model needs 2.2 to 2.5 times the compute to match it, and the advantage grows slowly with scale.
 
-![Compute multiplier of the MoE over dense at three budgets, with intervals](docs/figures/multiplier.png)
+![Dense compute needed to match the MoE at three budgets, with intervals](docs/figures/moe-vs-dense.png)
 
 *The compute a dense model needs to reach the MoE's loss, divided by the MoE's compute, from the two fitted laws. Bars are 90% intervals from refitting both laws to noise-resampled runs. The last point extrapolates beyond the sweep.*
 
-We fit a scaling law, L(N, D) = E + A·N^−α + B·D^−β, to each family. N is active parameters and D is training tokens. The law predicted 1.2856 for Allie 2.0's size and token count. Allie 2.0 scored 1.2533, below even the law's fitted floor E = 1.27.
+Also following Chinchilla, we fit a scaling law, L(N, D) = E + A·N^−α + B·D^−β, to each family. N is active parameters and D is training tokens. The law predicted 1.2856 for Allie 2.0's size and token count. Allie 2.0 scored 1.2533, below even the law's fitted floor E = 1.27.
 
 ![Main-evaluation CE against training compute: the sweep's minima, each family's law extrapolated, and Allie 2.0 below its forecast](docs/figures/frontier.png)
 

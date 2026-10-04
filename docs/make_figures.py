@@ -406,8 +406,8 @@ def frontier():
     )
 
 
-def multiplier():
-    """The MoE's compute multiplier over dense from the two fitted laws, with 90% noise-bootstrap intervals."""
+def moe_vs_dense():
+    """Dense compute needed to match the MoE, as a ratio, from the two fitted laws, with 90% noise-bootstrap intervals."""
     cm = macro()["cm"]["s16"]
     fig, ax = figure(right=0.9)
     ax.axhline(1, color=DENSE, lw=1.4, zorder=2)
@@ -435,8 +435,8 @@ def multiplier():
     ax.yaxis.set_major_locator(FixedLocator([1, 2, 3, 4]))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}×"))
     ax.set_xlabel("Training compute (FLOPs, log scale)")
-    ax.set_ylabel("Compute multiplier of MoE")
-    save(fig, "multiplier")
+    ax.set_ylabel("Dense compute to match MoE (×)")
+    save(fig, "moe-vs-dense")
     for c, s, _ in pts:
         print(f"  {c:.2e}: {s['cm']:.2f}x [{s['noise'][0]:.2f}, {s['noise'][1]:.2f}]")
 
@@ -728,7 +728,7 @@ FIGS = {
     "training": training,
     "isoflop": isoflop,
     "frontier": frontier,
-    "multiplier": multiplier,
+    "moe-vs-dense": moe_vs_dense,
     "optimal": optimal,
     "model": model,
     "pareto": pareto,

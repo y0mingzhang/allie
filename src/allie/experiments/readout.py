@@ -1,6 +1,6 @@
 """Final scaling sweep readout (SWEEP-PLAN.md section 2), per metric (golden macro first, then expert macro):
 isoFLOP parabolas in log N per family and budget, N*(C) across budgets, a per-family L(N, D) refit with an
-identifiability check, and the compute multiplier (CM) of each family over the reference at the budgets and at a
+identifiability check, and the dense-to-match compute ratio of each family against the reference at the budgets and at a
 node-week, with bootstrap errors and a hardware-offset test. Text on stdout, everything in --out JSON.
 
   readout.py [--ref dense] [--only FAM,..] [--metrics macro,expert_macro] [--nw 4e20] [--sigma 0.0015]
