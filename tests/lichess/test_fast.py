@@ -145,6 +145,7 @@ def _forked_step():
     return step(m, [(Cache(m), *x)])[0]
 
 
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded")
 def test_fast_after_fork(tiny_path):
     """A forked child has none of the parent's pool threads: its first step makes its own."""
     import multiprocessing
