@@ -38,6 +38,8 @@ SOURCE = r"""
 #endif
 #if defined(__linux__)
 #include <sched.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 typedef uint16_t bf16;
@@ -184,14 +186,8 @@ struct Pool {
   void (*fn)(void*, int) = nullptr;
   void* arg = nullptr;
 
-  Pool(int n_, int pin_, double spin_) : n(n_), pin(pin_ != 0), spin(spin_) {
-#if defined(__linux__)
-    cpu_set_t set;
-    if (sched_getaffinity(0, sizeof set, &set) == 0)
-      for (int c = 0; c < CPU_SETSIZE; c++)
-        if (CPU_ISSET(c, &set)) cpus.push_back(c);
-#endif
-    if ((int)cpus.size() < n) pin = false;
+  Pool(int n_, const int32_t* cpu, double spin_) : n(n_), pin(cpu != nullptr), spin(spin_) {  // cpu: thread t's CPU
+    if (pin) cpus.assign(cpu, cpu + n);
     for (int t = 1; t < n; t++) th.emplace_back([this, t] { work(t); });
   }
   ~Pool() {
@@ -477,7 +473,10 @@ struct Seg {  // one up / fc matrix (rows: gate halves, then value halves) for s
   int pairs, ntok, ldo;
   const float* const* x;
   float* out;
-  double cost0, cost;
+};
+
+struct Chunk {
+  int seg, p0, n;
 };
 
 struct Engine {
@@ -503,21 +502,37 @@ struct Engine {
   std::vector<float> f64, b544, clk, brd, e, x, x0, x02, h, hf, qkv, g, q, y, tmp, skip[3], bko, rs, gate, acc, hid,
       shid, xf, z;
   std::vector<int> idx, cnt, start, at, stok;
-  double segcost;
   std::vector<float> sgate;
   std::vector<const float*> ph, py, phf, pxf, ptok, phid, pshid;
   std::vector<Seg> segs;
+  std::vector<Chunk> upch;
+  alignas(64) std::atomic<int> ctr[2];
+  struct alignas(64) Count {
+    int v;
+  };
+  std::vector<Count> phase;  // per thread: phases passed this step
   std::vector<std::vector<float>> scratch;
   int prof = 0;
   double ptime[NPHASE] = {0}, plast = 0;
 
-  void sync(int t, int phase) {  // barrier; thread 0 charges the time since the last one to phase
+  // barrier; thread 0 charges the time since the last one to phase p, and clears the work
+  // counter of phase p for the phase after next
+  void sync(int t, int p) {
     pool->barrier();
-    if (prof && t == 0) {
-      double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-      ptime[phase] += now - plast;
-      plast = now;
+    if (t == 0) {
+      ctr[phase[0].v & 1].store(0, std::memory_order_relaxed);
+      if (prof) {
+        double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        ptime[p] += now - plast;
+        plast = now;
+      }
     }
+    phase[t].v++;
+  }
+  template <class F>
+  void chunks(int t, int n, F f) {  // f(c) for c < n, shared out as threads come free
+    std::atomic<int>& c = ctr[phase[t].v & 1];
+    for (int i; (i = c.fetch_add(1, std::memory_order_relaxed)) < n;) f(i);
   }
   void embedding(int t, int nt);
   void blockstep(int i, int t, int nt);
@@ -652,7 +667,6 @@ void Engine::embedding(int t, int nt) {
 
 void Engine::blockstep(int i, int t, int nt) {
   const Layer& ly = layers[i];
-  int lo, hi;
   // residual stream: skip connection in, x0 blend; h = norm(x); output and value-embedding gates
   for (int k = t; k < T; k += nt) {
     float* xk = &x[(size_t)k * D];
@@ -682,8 +696,7 @@ void Engine::blockstep(int i, int t, int nt) {
     for (int r = 0; r < ly.G; r++) g[(size_t)k * ly.G + r] = rb(sigm(rb(dot(hk, ly.gates + r * 16, 16))));
   }
   sync(t, B_NORM);
-  split(3 * D, t, nt, 4, lo, hi);
-  mm(ly.qkv, D, lo, hi - lo, ph.data(), T, &qkv[lo], 3 * D);
+  chunks(t, (3 * D + 63) / 64, [&](int c) { mm(ly.qkv, D, 64 * c, std::min(64, 3 * D - 64 * c), ph.data(), T, &qkv[64 * c], 3 * D); });
   sync(t, B_QKV);
   // q, k: per-head norm and rotary; v (+ value embedding); k, v into the cache
   int half = hd / 2;
@@ -758,9 +771,11 @@ void Engine::blockstep(int i, int t, int nt) {
     }
   }
   sync(t, B_ATTN);
-  split(D, t, nt, 4, lo, hi);
-  mm(ly.o, D, lo, hi - lo, py.data(), T, &tmp[lo], D);
-  for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tmp[(size_t)k * D + lo], hi - lo);
+  chunks(t, (D + 31) / 32, [&](int c) {
+    int lo = 32 * c, n = std::min(32, D - lo);
+    mm(ly.o, D, lo, n, py.data(), T, &tmp[lo], D);
+    for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tmp[(size_t)k * D + lo], n);
+  });
   sync(t, B_O);
   for (int k = t; k < T; k += nt) {
     norm(&x[(size_t)k * D], &h[(size_t)k * D], D);
@@ -793,15 +808,15 @@ static void route(Engine& m, const Layer& ly, int k) {  // top-k of one token, i
 
 void Engine::ffn(int t, int nt, int dense, int i) {
   const Layer& ly = layers[i];
-  int lo, hi;
   if (dense) {
-    if (t == 0) segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data(), 0, 0});
+    if (t == 0) segs.assign(1, Seg{ly.fc, dh, T, std::max(sh, dh), ph.data(), shid.data()});
   } else {
-    split(E, t, nt, 4, lo, hi);
-    Mat R{ly.router, nullptr, 2};
-    mm(R, D, lo, hi - lo, phf.data(), T, &rs[lo], E);
-    for (int k = 0; k < T; k++)
-      for (int e = lo; e < hi; e++) rs[(size_t)k * E + e] = sigm(rs[(size_t)k * E + e]);
+    chunks(t, (E + 15) / 16, [&](int c) {
+      int lo = 16 * c, n = std::min(16, E - lo);
+      mm(Mat{ly.router, nullptr, 2}, D, lo, n, phf.data(), T, &rs[lo], E);
+      for (int k = 0; k < T; k++)
+        for (int e = lo; e < lo + n; e++) rs[(size_t)k * E + e] = sigm(rs[(size_t)k * E + e]);
+    });
     sync(t, B_ROUTER);
     for (int k = t; k < T; k += nt) route(*this, ly, k);
     sync(t, B_TOPK);
@@ -816,44 +831,37 @@ void Engine::ffn(int t, int nt, int dense, int i) {
         sgate[sl] = gate[a];
         ptok[sl] = &h[(size_t)(a / keep) * D];
       }
-      segs.clear();
+      segs.assign(1, Seg{ly.sup, sh, T, std::max(sh, dh), ph.data(), shid.data()});
       size_t es = (size_t)2 * eh * D * (q8 ? 1 : 2);
       for (int e = 0; e < E; e++)
         if (cnt[e]) {
           Mat A{(const char*)ly.up + e * es, q8 ? ly.ups + (size_t)e * 2 * eh : nullptr, q8};
-          segs.push_back(Seg{A, eh, cnt[e], eh, &ptok[start[e]], &hid[(size_t)start[e] * eh], 0, 0});
+          segs.push_back(Seg{A, eh, cnt[e], eh, &ptok[start[e]], &hid[(size_t)start[e] * eh]});
         }
-      segs.push_back(Seg{ly.sup, sh, T, std::max(sh, dh), ph.data(), shid.data(), 0, 0});
     }
   }
-  if (t == 0) {
-    double total = 0;
-    for (auto& s : segs) s.cost0 = total, s.cost = (double)s.pairs * (2 + s.ntok), total += s.cost;
-    segcost = total;
+  if (t == 0) {  // 32 pairs (64 rows) a chunk, the shared expert's (most tokens) first
+    upch.clear();
+    for (int j = 0; j < (int)segs.size(); j++)
+      for (int p = 0; p < segs[j].pairs; p += 32) upch.push_back(Chunk{j, p, std::min(32, segs[j].pairs - p)});
   }
   sync(t, B_GROUP);
-  // up (gate and value halves), SwiGLU: each thread an equal share of the cost
-  double c0 = segcost * t / nt, c1 = segcost * (t + 1) / nt;
+  // up (gate and value halves), SwiGLU
   float* ta = scratch[t].data();
-  for (const auto& s : segs) {
-    if (s.cost0 + s.cost <= c0 || s.cost0 >= c1) continue;
-    double per = s.cost / s.pairs;
-    auto at = [&](double c) { return std::min(s.pairs, std::max(0, ((int)((c - s.cost0) / per + 0.5) + 3) / 4 * 4)); };
-    int p0 = s.cost0 >= c0 ? 0 : at(c0), p1 = s.cost0 + s.cost <= c1 ? s.pairs : at(c1);
-    for (int p = p0; p < p1; p += 64) {
-      int n = std::min(64, p1 - p);
-      float *a = ta, *b = ta + (size_t)s.ntok * n;
-      mm(s.A, D, p, n, s.x, s.ntok, a, n);
-      mm(s.A, D, s.pairs + p, n, s.x, s.ntok, b, n);
-      for (int m = 0; m < s.ntok; m++) silu_mul(a + (size_t)m * n, b + (size_t)m * n, s.out + (size_t)m * s.ldo + p, n);
-    }
-  }
+  chunks(t, (int)upch.size(), [&](int c) {
+    const Chunk& u = upch[c];
+    const Seg& s = segs[u.seg];
+    float *a = ta, *b = ta + (size_t)s.ntok * u.n;
+    mm(s.A, D, u.p0, u.n, s.x, s.ntok, a, u.n);
+    mm(s.A, D, s.pairs + u.p0, u.n, s.x, s.ntok, b, u.n);
+    for (int m = 0; m < s.ntok; m++)
+      silu_mul(a + (size_t)m * u.n, b + (size_t)m * u.n, s.out + (size_t)m * s.ldo + u.p0, u.n);
+  });
   sync(t, B_UP);
-  // down: each thread a slice of the output features, summed over its tokens' experts
-  split(D, t, nt, 4, lo, hi);
-  int n = hi - lo;
+  // down: 16 output features a chunk, summed over the tokens' experts
   float* tb = scratch[t].data();
-  if (n > 0) {
+  chunks(t, (D + 15) / 16, [&](int c) {
+    int lo = 16 * c, n = std::min(16, D - lo);
     if (dense) {
       mm(ly.proj, dh, lo, n, pshid.data(), T, tb, n);
       for (int k = 0; k < T; k++) add_rb(&x[(size_t)k * D + lo], &tb[(size_t)k * n], n);
@@ -887,7 +895,7 @@ void Engine::ffn(int t, int nt, int dense, int i) {
       if (ly.skin >= 0) memcpy(&skip[ly.skin][a], &x[a], n * sizeof(float));
       if (i == backout_layer) memcpy(&bko[a], &x[a], n * sizeof(float));
     }
-  }
+  });
   sync(t, B_DOWN);
 }
 
@@ -900,23 +908,24 @@ void Engine::head(int t, int nt) {
     norm(xs, xs, D);
   }
   sync(t, H_NORM);
-  int lo, hi;
-  split(V, t, nt, 4, lo, hi);
-  Mat A{lm_head, nullptr, 0};
-  mm(A, D, lo, hi - lo, pxf.data(), S, &z[lo], V);
-  for (int s = 0; s < S; s++)
-    for (int v = lo; v < hi; v++) out[(size_t)s * V + v] = 23.f * sigm((z[(size_t)s * V + v] + 5.f) / 7.5f);
+  chunks(t, (V + 63) / 64, [&](int c) {
+    int lo = 64 * c, hi = std::min(V, lo + 64);
+    mm(Mat{lm_head, nullptr, 0}, D, lo, hi - lo, pxf.data(), S, &z[lo], V);
+    for (int s = 0; s < S; s++)
+      for (int v = lo; v < hi; v++) out[(size_t)s * V + v] = 23.f * sigm((z[(size_t)s * V + v] + 5.f) / 7.5f);
+  });
   sync(t, H_HEAD);
 }
 
 extern "C" {
 
-// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads pin, then per layer
+// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads (pin), then per layer
 // G ve skip_in skip_out. glob: embed embed2 lm_head feat_embed smear_gate scalars x0_lambdas cos sin
 // board.first board.residual.0 board.residual.1 board.squeeze board.meta board.output
 // skip_gate.0-2 value_embed.*. per layer (20): qkv qkv_s o o_s gates fc fc_s proj proj_s router
 // moe_bias mu up up_s down down_s shared_up shared_up_s shared_down shared_down_s
-void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* const* lay, double spin) {
+void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* const* lay, const int32_t* cpus,
+                double spin) {
   Engine* m = new Engine();
   m->L = cfg[0], m->D = cfg[1], m->H = cfg[2], m->hd = cfg[3], m->V = cfg[4], m->nve = cfg[5], m->E = cfg[6];
   m->topk = cfg[7], m->keep = cfg[8], m->eh = cfg[9], m->sh = cfg[10], m->dh = cfg[11], m->q8 = cfg[12];
@@ -954,7 +963,7 @@ void* allie_new(const int64_t* cfg, const double* fl, void* const* glob, void* c
     ly.G = c[0], ly.ve = c[1], ly.skin = c[2], ly.skout = c[3];
     m->layers.push_back(ly);
   }
-  m->pool = new Pool(cfg[15], cfg[16], spin);
+  m->pool = new Pool(cfg[15], cpus, spin);
   return m;
 }
 
@@ -1020,6 +1029,8 @@ void allie_step(void* h, int T, int S, const int64_t* ids, const float* feats, c
   for (auto& s : m.scratch)
     if (s.size() < need) s.resize(need);
   if (m.prof) m.plast = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  m.phase.assign(nt, Engine::Count{0});
+  m.ctr[0].store(0), m.ctr[1].store(0);
   m.pool->run(trampoline, &m);
 }
 
@@ -1033,8 +1044,8 @@ int allie_profile(void* h, double* out, int on) {
 
 // best read bandwidth (GB/s) of `threads` threads streaming a buffer of `bytes` (first touched
 // by the thread that reads it), over `reps` passes
-double allie_bandwidth(int threads, int64_t bytes, int reps, int pin) {
-  Pool pool(threads, pin, 0.01);
+double allie_bandwidth(int threads, int64_t bytes, int reps, const int32_t* cpus) {
+  Pool pool(threads, cpus, 0.01);
   size_t n = bytes / sizeof(float) / threads / 64 * 64;
   std::vector<float*> parts(threads);
   struct Arg { std::vector<float*>* parts; size_t n; int init; std::vector<float> sums; } arg{&parts, n, 1, std::vector<float>(threads)};
@@ -1066,6 +1077,25 @@ double allie_bandwidth(int threads, int64_t bytes, int reps, int pin) {
   }
   for (auto p : parts) free(p);
   return best;
+}
+
+// moves the pages of n ranges to NUMA nodes[0] (nn == 1) or interleaves them over nn nodes; returns
+// the number of ranges the kernel refused
+int allie_place(void* const* ptrs, const int64_t* bytes, int n, const int32_t* nodes, int nn) {
+#if defined(__linux__) && defined(SYS_mbind)
+  unsigned long mask[16] = {0};
+  for (int j = 0; j < nn; j++)
+    if (nodes[j] >= 0 && nodes[j] < 1024) mask[nodes[j] / 64] |= 1ul << (nodes[j] % 64);
+  long page = sysconf(_SC_PAGESIZE), bad = 0;
+  for (int i = 0; i < n; i++) {
+    uintptr_t a = (uintptr_t)ptrs[i] / page * page, b = ((uintptr_t)ptrs[i] + bytes[i] + page - 1) / page * page;
+    // MPOL_BIND = 2, MPOL_INTERLEAVE = 3, MPOL_MF_MOVE = 2
+    if (b > a && syscall(SYS_mbind, a, b - a, nn == 1 ? 2 : 3, mask, 1025, 2) != 0) bad++;
+  }
+  return (int)bad;
+#else
+  return n;
+#endif
 }
 
 const char* allie_isa() {
@@ -1135,12 +1165,13 @@ def library():
             tmp.unlink(missing_ok=True)
     lib = ctypes.CDLL(str(path))
     P, I, D = ctypes.c_void_p, ctypes.c_int, ctypes.c_double
-    lib.allie_new.restype, lib.allie_new.argtypes = P, [P, P, P, P, D]
+    lib.allie_new.restype, lib.allie_new.argtypes = P, [P, P, P, P, P, D]
     lib.allie_free.argtypes = [P]
     lib.allie_threads.restype, lib.allie_threads.argtypes = I, [P]
     lib.allie_step.argtypes = [P, I, I, P, P, P, P, P, P]
     lib.allie_bandwidth.restype = D
-    lib.allie_bandwidth.argtypes = [I, ctypes.c_int64, I, I]
+    lib.allie_bandwidth.argtypes = [I, ctypes.c_int64, I, P]
+    lib.allie_place.restype, lib.allie_place.argtypes = I, [P, P, I, P, I]
     lib.allie_isa.restype = ctypes.c_char_p
     lib.allie_profile.restype, lib.allie_profile.argtypes = I, [P, P, I]
     return lib
@@ -1148,6 +1179,37 @@ def library():
 
 def threads_default():
     return max(1, min(torch.get_num_threads(), len(os.sched_getaffinity(0))))
+
+
+def _sys(path, default=0):
+    try:
+        return int(Path(path).read_text().split(",")[0].split("-")[0])
+    except (OSError, ValueError):
+        return default
+
+
+def cpu_order(n):
+    """n CPUs of this process to pin threads to: within one NUMA node when they fit, spread over
+    the node's L3 caches, one thread per core before the cores' second hardware threads."""
+    cpus = sorted(os.sched_getaffinity(0))
+    if len(cpus) < n:
+        return None
+    sys = "/sys/devices/system/cpu/cpu{}/"
+    node = {c: next((int(d.name[4:]) for d in Path(sys.format(c)).glob("node[0-9]*")), 0) for c in cpus}
+    l3 = {c: _sys(sys.format(c) + "cache/index3/id") for c in cpus}
+    first = {c: _sys(sys.format(c) + "topology/thread_siblings_list", c) == c for c in cpus}
+    nodes = sorted(set(node.values()), key=lambda k: -sum(node[c] == k for c in cpus))
+    big = [c for c in cpus if node[c] == nodes[0]]
+    out = []
+    for k in nodes[:1] if len(big) >= n else nodes:
+        for primary in (True, False):
+            groups = {}
+            for c in cpus:
+                if node[c] == k and first[c] == primary:
+                    groups.setdefault(l3[c], []).append(c)
+            lists = list(groups.values())
+            out += [g[j] for j in range(max(map(len, lists), default=0)) for g in lists if j < len(g)]
+    return out[:n], [node[c] for c in out[:n]]
 
 
 PHASES = ("board cnn", "embedding rows", "smear", "norm", "qkv", "rotary", "attention", "o",
@@ -1160,7 +1222,7 @@ SCALED = ("qkv", "o", "fc", "proj", "up", "down", "shared_up", "shared_down")
 class Fast:
     """model.py's step() for a CPU Model with BF16 activations (int8 or BF16 matrices)."""
 
-    def __init__(self, model, threads=None, pin=True, spin=0.002):
+    def __init__(self, model, threads=None, pin=True, spin=0.002, place=True):
         assert model.device.type == "cpu" and model.dtype == torch.bfloat16
         c, w, n = model.config, model.w, model.layers
         assert model.head_dim % 16 == 0 and model.head_dim <= 256 and model.topk <= 64
@@ -1219,9 +1281,19 @@ class Fast:
                     lay.append(0 if s is None else s.data_ptr())
                     self.tensors.append(s)
         arr = lambda ty, xs: (ty * len(xs))(*xs)
+        order = cpu_order(self.threads) if pin else None
+        self.cpus, nodes = order or (None, None)
+        if place and nodes and Path("/sys/devices/system/node/node1").exists():
+            # weights on the NUMA node of the threads (bound), or spread over theirs (interleaved)
+            ts = [t for t in self.tensors if t is not None]
+            nodes = sorted(set(nodes))
+            self.lib.allie_place(arr(ctypes.c_void_p, [t.data_ptr() for t in ts]),
+                                 arr(ctypes.c_int64, [t.numel() * t.element_size() for t in ts]),
+                                 len(ts), arr(ctypes.c_int32, nodes), len(nodes))  # fmt: skip
         self.handle = self.lib.allie_new(
             arr(ctypes.c_int64, cfg), arr(ctypes.c_double, [model.scale, model.floor]),
-            arr(ctypes.c_void_p, ptrs), arr(ctypes.c_void_p, lay), spin,
+            arr(ctypes.c_void_p, ptrs), arr(ctypes.c_void_p, lay),
+            arr(ctypes.c_int32, self.cpus) if self.cpus else None, spin,
         )  # fmt: skip
 
     def __del__(self):
@@ -1260,6 +1332,9 @@ class Fast:
 
 
 def bandwidth(threads=None, gigabytes=2.0, reps=5, pin=True):
-    """This machine's best streaming read bandwidth in GB/s with `threads` pinned threads."""
+    """This machine's best streaming read bandwidth in GB/s with `threads` threads, pinned as
+    Fast pins them, each reading memory it first touched."""
     threads = threads or threads_default()
-    return library().allie_bandwidth(threads, int(gigabytes * 2**30), reps, int(pin))
+    order = cpu_order(threads) if pin else None
+    cpus = (ctypes.c_int32 * threads)(*order[0]) if order else None
+    return library().allie_bandwidth(threads, int(gigabytes * 2**30), reps, cpus)
