@@ -1,4 +1,4 @@
-"""Search gain of Allie-v3.0 (MoE 0.69B active / 5.6B total) per budget and Elo band, next to the sweep ladder.
+"""Search gain of Allie 2.0 (MoE 0.69B active / 5.6B total) per budget and Elo band, next to the sweep ladder.
 
 usage: bigrun.py <tag> [step]   (<tag>/<budget> from run.py and fit.py's devcal-*.npz; prefix every point finished)
 Gain = the oracle's own raw (legal) CE minus the searched CE on the same positions, 95% game bootstrap.

@@ -23,7 +23,7 @@ whose bias balances the selection (the audit's example, both scores): about 0 fr
 counts, the raw top-k formula's (DeepSeek-V3 Eq. 18) with moe_seq_raw.
 
     inhold.sh tests/checks/moe_nongemm.py [layer|kernels|topk|counts|seqraw ...] [--base COMMIT]
-    Allie-v3.0's h192: layer --experts 256 --topk 16 --arch moe_shared_frac=0.25 --arch moe_round=16
+    Allie 2.0's h192: layer --experts 256 --topk 16 --arch moe_shared_frac=0.25 --arch moe_round=16
     .venv/bin/python tests/checks/moe_nongemm.py    # CPU: reruns itself under TRITON_INTERPRET=1
 """
 

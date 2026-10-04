@@ -1,9 +1,9 @@
 """distill-v2 tables and Pareto plot: Maia-bench CE / top-1 (all 80K positions, macro over the four blitz bands),
-paired differences with game-bootstrap 95% intervals against each run's control, Maia-3 23M / 79M and Allie-v3.0,
+paired differences with game-bootstrap 95% intervals against each run's control, Maia-3 23M / 79M and Allie 2.0,
 golden (strat-eval-v1) macro / expert / per format, and cost in GFLOPs per move.
 
 Runs: every scores/NAME.npz under $G/distill-v2 (eval.maia3.score_moe). Controls: kd-sW-aA-tS... -> kd-sW-a0-tS; ann-* ->
-Allie-v3.0's final checkpoint. Writes tables.md, report.json, pareto.png next to this file."""
+Allie 2.0's final checkpoint. Writes tables.md, report.json, pareto.png next to this file."""
 
 import json
 import re
@@ -169,7 +169,7 @@ def main():
 
 
 def plot(out):
-    """Cost vs Maia-bench CE and vs top-1, one panel each: Maia-3, Allie-v3.0 (raw / annealed), students."""
+    """Cost vs Maia-bench CE and vs top-1, one panel each: Maia-3, Allie 2.0 (raw / annealed), students."""
     import matplotlib
 
     matplotlib.use("Agg")

@@ -1,4 +1,4 @@
-"""allie.lichess's model against the reference scores of Allie-v3.0 on the Maia-3 blitz benchmark.
+"""allie.lichess's model against the reference scores of Allie 2.0 on the Maia-3 blitz benchmark.
 
 The reference is allie.eval.maia3.score_moe on the training forward (compiled, GPU, BF16): the
 per-position legal CE and top-1 in <maia3-bench>/bigrun-v2/step-00143051/scores.npz. This runs

@@ -32,7 +32,7 @@ MODEL = {
     "bigrun132k": ("big run step 132K", 24, 1536),
     "bigrun": ("big run", 24, 1536),
 }
-# Allie-v3.0 (MoE 0.69B active / 5.6B total): 2 x active matmul parameters (report_sweep1e18.sweep_flops with
+# Allie 2.0 (MoE 0.69B active / 5.6B total): 2 x active matmul parameters (report_sweep1e18.sweep_flops with
 # its source's extra_flops); its raw reference is the Maia-3 watcher's eval.maia3.score_moe output of the same checkpoint
 FLOPS |= {t: dict(flops_per_move=1389084288) for t in ("bigrun132k", "bigrun")}
 RAW = {

@@ -503,7 +503,7 @@
  "provenance": {
   "base": "src/allie/search/calibration.json",
   "refit": "budget_policies only; adaptive router, backup, cpuct and old_parameters (fixed 64/1000, projection) frozen",
-  "model": "allie-v3.0 (step 143,051)",
+  "model": "allie-2.0 (step 143,051)",
   "fit": "analysis/search-bench/fit.py",
   "dev": "data/dev.jsonl + data/dev_expert.jsonl (July 2026 blitz, disjoint from strat-eval-v1), 3000 positions per mover band, dev-positions.npz",
   "results": {

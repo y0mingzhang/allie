@@ -1,7 +1,7 @@
-# allie-bot: Allie-v3.0 on Lichess. The API token comes from LICHESS_TOKEN, never this file.
+# allie-bot: Allie 2.0 on Lichess. The API token comes from LICHESS_TOKEN, never this file.
 # Override any key on the command line: allie-bot play --config this.toml --set play.rating=1800
 
-model = "exports/allie-v3.0"  # allie-bot export output: model.safetensors + config.json
+model = "exports/allie-2.0"  # allie-bot export output: model.safetensors + config.json
 device = "cpu"                # or "cuda"
 dtype = "bfloat16"            # or "float32" (twice the memory, no faster on most CPUs)
 threads = 0                   # torch CPU threads, 0 = all cores

@@ -31,11 +31,12 @@ REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
 # pre-package checkpoints that this package, as tested, scores as their frozen source does (main evaluation and
 # MoE search bitwise on the same GPU; the Maia-3 benchmark scorer is not repeat-deterministic in either layout and
 # differs across layouts as much as between repeats): digest of the recorded source_sha256 -> (name, digest of the
-# tested package's source_hashes())
+# tested package's source_hashes(); renaming the model in comments of model/arch.py, model/moe.py, data/mix.py
+# and data/vocab.py since moved it from 66dfb5cf..., with their code unchanged)
 EQUIVALENT = {
     "3efce06d87e5e5fb22e2d6e79bbc52ab7386b5a3af9923a4eafcbbc42995b944": (
-        "Allie-v3.0",
-        "66dfb5cf2e0ba58dd22ee569d218e01e29ec56780beb99bec8bb6ce1b60b2402",
+        "Allie 2.0",
+        "2ccea333ff4e074f161554e6008eab466f376ef2fab97b514991fe5d5a53608a",
     ),
 }
 

@@ -8,11 +8,11 @@ CE is in nats. Intervals are 95%, from 2,000 bootstrap draws over whole games. D
 
 ## Blitz benchmark
 
-Allie-v3.0 is the final training checkpoint. Allie-v3.0 (annealed) continues it with a second anneal (see [Training](#training)).
+Allie 2.0 is the final training checkpoint. Allie 2.0 (annealed) continues it with a second anneal (see [Training](#training)).
 
 Differences on the same 80,000 positions:
 
-| Allie model minus | Allie-v3.0: CE | top-1 (pp) | Allie-v3.0 (annealed): CE | top-1 (pp) |
+| Allie model minus | Allie 2.0: CE | top-1 (pp) | Allie 2.0 (annealed): CE | top-1 (pp) |
 |---|---:|---:|---:|---:|
 | Maia-3 5M | −0.0899 [−0.0938, −0.0863] | +2.31 [+2.07, +2.54] | −0.0925 [−0.0964, −0.0887] | +2.33 [+2.10, +2.59] |
 | Maia-3 23M | −0.0419 [−0.0454, −0.0387] | +0.92 [+0.71, +1.14] | −0.0444 [−0.0480, −0.0412] | +0.95 [+0.75, +1.17] |
@@ -24,15 +24,14 @@ The original Allie ([ICLR 2025](https://arxiv.org/abs/2410.03893)) is scored fro
 
 - **Checkpoint.** `medium/best.pt` from [yimingzhang/allie-models](https://huggingface.co/datasets/yimingzhang/allie-models): a GPT-2-medium shape with 305M parameters, trained on 2022 Lichess blitz. It is a retrain of the paper's recipe, not the exact model behind the paper's stored outputs: it reproduces its training run's validation loss (1.3535) and the paper's test accuracy (55.73% against 55.7% reported).
 - **Benchmark.** CE 1.2848 [1.2748, 1.2941], top-1 57.06% [56.70, 57.42]. By rating band, CE 1.4256, 1.2947, 1.2320 and 1.1870 from <1400 to ≥2400. On Maia-3's protocol (ply > 20, at least 30 s left): 1.2778 and 57.36%.
-- **Main evaluation.** 1.3526, against Allie-v3.0's 1.2533. Only blitz is in its training distribution: bullet, rapid and classical time controls map to its unknown token.
+- **Main evaluation.** 1.3526, against Allie 2.0's 1.2533. Only blitz is in its training distribution: bullet, rapid and classical time controls map to its unknown token.
 - **Compute.** 0.61 GFLOPs per move with a key-value cache, counted as for the other models. Its released decoder has no cache and re-reads the game, about 28 GFLOPs per move at the benchmark's mean ply; its time-adaptive search averages 50 such passes per move.
 - **Mapping.** 3 of 6,191 benchmark games (35 positions) have a time control outside its 24 blitz tokens and get the unknown token. The model clamps ratings to 500-3000.
 
-Our previous model, Allie v2 (a dense 1.42B Qwen3 on the same token format, without clock inputs), scores 1.2343 [1.2247, 1.2439] and 58.43% [58.06, 58.79] on the benchmark at 2.85 GFLOPs per move.
 
 ## Where the differences come from
 
-Allie-v3.0 minus Maia-3 79M, on slices of the benchmark. Bullet, rapid and classical use 5,000 positions per rating band; the other rows are blitz.
+Allie 2.0 minus Maia-3 79M, on slices of the benchmark. Bullet, rapid and classical use 5,000 positions per rating band; the other rows are blitz.
 
 | Slice | positions | CE difference | top-1 difference (pp) |
 |---|---:|---:|---:|
@@ -46,7 +45,7 @@ Allie-v3.0 minus Maia-3 79M, on slices of the benchmark. Bullet, rapid and class
 
 The rating plot uses every scored blitz move of the main evaluation: 402,108 positions in 6,247 games. They are reweighted to the natural player mix and binned by game rating, in 100-point bins.
 
-Allie-v3.0's CE interval is below Maia-3 79M's in 19 of 23 bins. The exceptions are 600-700, 700-800, 1000-1100 and 2800-2900 (7 games); only the last has a higher point estimate.
+Allie 2.0's CE interval is below Maia-3 79M's in 19 of 23 bins. The exceptions are 600-700, 700-800, 1000-1100 and 2800-2900 (7 games); only the last has a higher point estimate.
 
 Its accuracy is lower in only two bins, both within noise: 800-900 (−0.12 pp) and 2800-2900 (−0.33 pp).
 
@@ -54,7 +53,7 @@ Its accuracy is lower in only two bins, both within noise: 800-900 (−0.12 pp) 
 
 The search runs over the model's own move, outcome and thinking-time predictions. It used 20,000 benchmark positions, 5,000 per rating band. Each budget's output is calibrated on separate July 2026 games, disjoint from the benchmark.
 
-| Allie-v3.0 | GFLOPs/move | CE | CE gain | top-1 gain (pp) |
+| Allie 2.0 | GFLOPs/move | CE | CE gain | top-1 gain (pp) |
 |---|---:|---:|---:|---:|
 | raw policy | 1.40 | 1.2216 | | |
 | 5 simulations | 8.30 | 1.2189 | +0.0026 [+0.0014, +0.0039] | +0.15 [−0.08, +0.37] |
@@ -64,7 +63,7 @@ On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395.
 
 The gain comes from strong players. With 128 simulations it is −0.0001 below 1400, +0.0014 at 1400-2000, +0.0062 at 2000-2400 and +0.0143 at 2400 and above.
 
-Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 nats on the scaling sweep's best MoE models at its three budgets, and 0.0055 on Allie-v3.0.
+Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 nats on the scaling sweep's best MoE models at its three budgets, and 0.0055 on Allie 2.0.
 
 ## Evaluation
 
@@ -120,9 +119,9 @@ Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 na
 - Median 131K tokens/s, about 19% of peak BF16 throughput.
 - 159 hours, in 2-day jobs that resume from checkpoints saved every 1,024 steps.
 
-**Second anneal (Allie-v3.0 annealed).**
+**Second anneal (Allie 2.0 annealed).**
 
-- Starts from Allie-v3.0 with a fresh optimizer.
+- Starts from Allie 2.0 with a fresh optimizer.
 - 1B tokens of January 2024 to June 2026, plus August 2026.
 - Peak learning rate 0.05 (the main schedule's value at 99%), decaying over the last 30%. A peak of 0.2 gained nothing.
 - Main eval −0.0028, with every format better. Benchmark −0.0026 [−0.0033, −0.0019].
@@ -141,9 +140,13 @@ We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embe
 - The MoE's compute multiplier over dense is 2.17x [1.99, 2.33], 2.31x [2.06, 2.62] and 2.50x [1.99, 3.32] at the three budgets.
 - The compute-optimal size grows as C^0.66.
 - B and β are correlated at 0.98 in the fit.
-- Allie-v3.0 (N = 0.69B, D = 75B, 109 tokens per parameter) was forecast at 1.2856 and scored 1.2533.
+- Allie 2.0 (N = 0.69B, D = 75B, 109 tokens per parameter) was forecast at 1.2856 and scored 1.2533.
 
-**Recipe re-run.** We re-ran Allie-v3.0's recipe at the sweep's sizes and compared it with the sweep recipe at the same size. On the main eval and its ≥2400 cells:
+![Compute-optimal active parameters against training compute, with Allie 2.0's size against the law's extrapolated optimum](figures/optimal.png)
+
+*Compute-optimal active parameters from the isoflop minima (points, 90% intervals) and from each family's law (lines, dashed beyond the sweep). At Allie 2.0's compute, 51 times the sweep's largest budget, the extrapolated MoE optimum is 1.8B active parameters on 28B tokens, 3.9 times the largest size the law was fitted on. Training FLOPs per parameter and token are held at the largest swept size's value beyond it. Treat the optimum as a direction, not a validated allocation: Allie 2.0 itself landed below the law's floor.*
+
+**Recipe re-run.** We re-ran Allie 2.0's recipe at the sweep's sizes and compared it with the sweep recipe at the same size. On the main eval and its ≥2400 cells:
 
 | Budget | Shape | Main eval | ≥2400 cells |
 |---|---|---:|---:|
@@ -151,13 +154,37 @@ We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embe
 | 6.2e18 FLOPs | 18 blocks × 896 | +0.0058 | +0.0086 |
 | 6.2e18 FLOPs | 20 blocks × 1024 | +0.0042 | +0.0074 |
 
-The offset shrinks by about 0.003 per decade of compute. It extrapolates to about −0.002 at Allie-v3.0's 3.1e20 FLOPs. So the 0.032 below the forecast comes from the law's form (its floor), not from the recipe.
+The offset shrinks by about 0.003 per decade of compute. It extrapolates to about −0.002 at Allie 2.0's 3.1e20 FLOPs. So the 0.032 below the forecast comes from the law's form (its floor), not from the recipe.
+
+## Design findings
+
+Small-model results behind the choices in the README. CE differences are on the main evaluation, negative is better; "2400+" is the macro of the four 2400+ cells.
+
+**Inputs.**
+
+- Replacing both ratings in the header with the median rating: +0.067, and +0.111 on 2400+. Repeating both ratings at every move: +0.0004 to +0.0019. Also repeating the time control: +0.0012 to +0.0055.
+- Dropping the clock features: +0.007 overall, +0.022 from ply 80 of blitz games on. Continuous Fourier clock features against bucketed ones: −0.0039.
+- Removing the time-control tokens: +0.0028 (see [Ablations](#ablations)).
+
+**Mixture of experts.**
+
+- 256 experts with 12 active against 128 with 6: the MoE's advantage, as a compute multiplier, grows from 1.04× to 1.34× across the sweep's budgets. 512 experts with 24 active: −0.0019, but about 20% slower. 64 experts lose.
+- A shared expert at a quarter of the block width: 1.13-1.15× compute. Without one: 0.89-1.06×.
+- Quantile balancing of the routing biases: no change in loss, but starved experts fell to zero, so it was kept for router health.
+
+**Data.**
+
+- The Elo ramp against the previous sampling rule: 2400+ cells −0.017 to −0.024 (bullet −0.024, blitz −0.022, rapid −0.020, classical −0.017); under-1400 cells +0.012 to +0.043; better in 10 of 16 cells. No sign of memorization, although 62% of the 2800+ games seen were repeats. A use cap of 16 instead of 8 overfit: +0.033.
+- Over-the-board games upweighted 4×: a tie. Engine games upweighted 4×: no gain; removed: +0.0023, so they stay at under 1% of tokens.
+- Recent months upweighted 2× or 4×: no consistent gain (−0.0012 to +0.0022), so the mix stays uniform over time. The second anneal on 2024-2026 months did help the final model: −0.0028 on the main evaluation, −0.0031 on 2024+ validation games and +0.0020 on games before 2023.
+
+**Scale.** At Allie 2.0's compute, the law's optimum is 1.8B active parameters on 28B tokens. The optimum is flat: half that size costs +0.0013. The largest shape that trained on the 8-GPU L40S node was 24 blocks of width 1536.
 
 ## Ablations
 
 One change at a time to an MoE with 39M active parameters, trained on 2.5B tokens with the same seed and data order. Each row is the change in main-eval CE against the unchanged run (1.3754); negative is better. One seed-to-seed standard deviation is 0.0029, so read directions, not sizes.
 
-| Change | Main-eval CE | In Allie-v3.0 |
+| Change | Main-eval CE | In Allie 2.0 |
 |---|---:|:---:|
 | Decay the learning rate to 0.1% of peak, not 5% | −0.0019 | yes |
 | No multi-token prediction | −0.0011 | yes |
@@ -167,7 +194,7 @@ One change at a time to an MoE with 39M active parameters, trained on 2.5B token
 | Adam on every step, not every other | +0.0043 | yes |
 | Router-input centring | +0.0056 | yes |
 
-The two router changes cost a little at this scale, where routers stay healthy. Allie-v3.0 keeps them because at width 1536 they prevent router collapse.
+The two router changes cost a little at this scale, where routers stay healthy. Allie 2.0 keeps them because at width 1536 they prevent router collapse.
 
 ## Training stability
 
@@ -200,12 +227,12 @@ The two router changes cost a little at this scale, where routers stay healthy. 
 | `allie.search` | Tree-search engine; `moe_oracle` serves MoE checkpoints to it |
 | `allie.experiments.modelexp`, `isoflop`, `dmix`, `readout` | Frozen studies on Slurm, scaling-law fits, the sweep readout |
 | `allie.cli` | `allie-train` (a config file to a torchrun of the trainer) and `allie-eval` |
-| `configs/` | `allie-v3.0.json` (the trainer's arguments for Allie-v3.0), `recipes/` (its sampling table), `allie-v3.0/` (the run's record: study plan, round file, launchers, data pin, game counts) |
-| `tests/` | `test_checks.py` runs each check in `tests/checks/` as its own program; `test_equivalent.py` guards how Allie-v3.0 loads; `tests/search/` tests the engine |
+| `configs/` | `allie-2.0.json` (the trainer's arguments for Allie 2.0), `recipes/` (its sampling table), `allie-2.0/` (the run's record: study plan, round file, launchers, data pin, game counts) |
+| `tests/` | `test_checks.py` runs each check in `tests/checks/` as its own program; `test_equivalent.py` guards how Allie 2.0 loads; `tests/search/` tests the engine |
 | `analysis/` | The analysis scripts behind the search and frontier results, as run |
 
 **Experiments.** A round file declares runs. `allie-exp plan ROUND WAVE` freezes the package (`source/allie/`), recipe tables, data pin and history counts into a study directory, with their hashes. `allie-exp submit` and `task` then run it on Slurm: the trainer under torchrun, resumed across jobs, then the evaluator. The trainer refuses to resume a run whose source or settings changed.
 
-**Checkpoints from before the package layout** record flat source file names (`modded_medium.py`, ...). The evaluator, the Maia-3 scorer and the MoE search oracle load them from their run's frozen flat source (`--source`). Allie-v3.0 is the exception: it loads with the package, because this version of the package was checked to score it as its frozen source does: bitwise on the main evaluation and in search (`allie.eval.score.EQUIVALENT`). A checkpoint trained with the package loads with the package, checked against `allie.train.provenance`.
+**Checkpoints from before the package layout** record flat source file names (`modded_medium.py`, ...). The evaluator, the Maia-3 scorer and the MoE search oracle load them from their run's frozen flat source (`--source`). Allie 2.0 is the exception: it loads with the package, because this version of the package was checked to score it as its frozen source does: bitwise on the main evaluation and in search (`allie.eval.score.EQUIVALENT`). A checkpoint trained with the package loads with the package, checked against `allie.train.provenance`.
 
 **Not in git.** Training data, checkpoints and per-run results (scores, logs, reports) live on group storage under `ALLIE_DATA` and `results/`.

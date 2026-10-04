@@ -17,7 +17,7 @@ evaluator and MoE search give identical scores (details in the commit message).
   `model/network.py` keeping lab's `moe_dense_first` assert, plus README and DETAILS. Lab-only callers of moved
   modules stay in `scripts/` and need their imports or paths updated: `bigrun.py`, `health.py`, `replay.py`,
   `runindex.py` (and `runindex_loop.sh`), `pass_tokens.py`, `isoflop_strat.py`, `test_memsnap_oom.py`, the
-  `chessdata*.sbatch` and `extdata.sbatch` launchers, `codex-controller.sbatch` and `archive/qwen/`.
+  `chessdata*.sbatch` and `extdata.sbatch` launchers, `codex-controller.sbatch` and `archive/`.
 
 ## Paths
 
@@ -66,8 +66,8 @@ evaluator and MoE search give identical scores (details in the commit message).
 | `bench/distill-v2/report.py` | `analysis/frontier_report.py` |
 | `scripts/test_X.py` | `tests/checks/X.py`, run by `tests/test_checks.py` (`test_chessmix_recent` is `mix_recent`, `test_modded_zero` is `zero_masters`) |
 | `search/tests/` | `tests/search/` |
-| `runs/bigrun/` | `configs/allie-v3.0/` (`recipes/` → `configs/recipes/`), plus `configs/allie-v3.0.json` |
-| `runs/distill-v2/ann.sbatch` | `configs/allie-v3.0/anneal.sbatch` (`kd.sbatch` dropped) |
+| `runs/bigrun/` | `configs/allie-2.0/` (`recipes/` → `configs/recipes/`), plus `configs/allie-2.0.json` |
+| `runs/distill-v2/ann.sbatch` | `configs/allie-2.0/anneal.sbatch` (`kd.sbatch` dropped) |
 
 ## Imports
 

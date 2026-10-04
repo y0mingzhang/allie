@@ -16,7 +16,7 @@ STUDY = (
     Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
     / "results/recipe10x/isoflop-v1"
 )
-RECIPES = ("ours", "qwen")
+RECIPES = ("ours", "ref")  # this recipe and the reference it is compared with
 
 
 def load(metric):
@@ -28,7 +28,7 @@ def load(metric):
             [
                 (x["n_nonembed"], x["tokens"], x["budget"], x["ce"][metric])
                 for x in rows
-                if x["recipe"] == r
+                if (x["recipe"] == "ours") == (r == "ours")
             ]
         )
         for r in RECIPES
@@ -81,8 +81,8 @@ def predict(p, n, d):
 
 def unpack(theta, shared):
     if shared:
-        return dict(ours=theta[:5], qwen=np.r_[theta[0], theta[5:]])
-    return dict(ours=theta[:5], qwen=theta[5:])
+        return dict(ours=theta[:5], ref=np.r_[theta[0], theta[5:]])
+    return dict(ours=theta[:5], ref=theta[5:])
 
 
 def objective(theta, data, shared, delta=1e-3):
@@ -151,7 +151,7 @@ def best_loss(p, c):
 def multiplier(theta, shared, c):
     ps = unpack(theta, shared)
     target = best_loss(ps["ours"], c)
-    g = lambda lc: best_loss(ps["qwen"], np.exp(lc)) - target
+    g = lambda lc: best_loss(ps["ref"], np.exp(lc)) - target
     lo, hi = np.log(c) - 12, np.log(c) + 12
     return float(np.exp(brentq(g, lo, hi)) / c) if g(lo) > 0 > g(hi) else None
 

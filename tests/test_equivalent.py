@@ -1,4 +1,4 @@
-"""eval.score.training_code loads Allie-v3.0 (a pre-package checkpoint) through this package only while the
+"""eval.score.training_code loads Allie 2.0 (a pre-package checkpoint) through this package only while the
 package is the version its equivalence was tested on; anything else needs the checkpoint's frozen source."""
 
 import json
@@ -8,11 +8,11 @@ import pytest
 
 from allie.eval import score
 
-PLAN = Path(__file__).resolve().parents[1] / "configs/allie-v3.0/plan.json"
+PLAN = Path(__file__).resolve().parents[1] / "configs/allie-2.0/plan.json"
 
 
 def allie_v3():
-    """The source_sha256 Allie-v3.0's checkpoint records: its frozen source's Python files."""
+    """The source_sha256 Allie 2.0's checkpoint records: its frozen source's Python files."""
     hashes = json.loads(PLAN.read_text())["hashes"]
     src = {
         k.removeprefix("source-ours/"): v

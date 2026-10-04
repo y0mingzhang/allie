@@ -112,7 +112,7 @@ per-Elo/per-budget calibrated sweep. See the [Allie review](ALLIE_REVIEW.md).
 
 The retained model port supports the two evaluated **dense ship-recipe** models:
 board CNN, SwiGLU, no key offset, three continuous clock features. It rejects
-unsupported checkpoint configurations. MoE checkpoints (Allie-v3.0 included) run
+unsupported checkpoint configurations. MoE checkpoints (Allie 2.0 included) run
 through [moe_oracle.py](moe_oracle.py) instead, which builds the model from its
 own training code ([MOE_ORACLE.md](MOE_ORACLE.md)). The tree/calibration layer is
 backend-independent.

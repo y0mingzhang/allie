@@ -1,6 +1,6 @@
 """Model-track architecture switches carried in Config.arch (torch-free: modelexp imports it too).
 
-The recipe is Allie-v3.0's: SwiGLU MLPs, the board CNN input, QK norm, gates, x0 and a second
+The recipe is Allie 2.0's: SwiGLU MLPs, the board CNN input, QK norm, gates, x0 and a second
 embedding, softcapped logits, NorMuon with cautious weight decay. What stays switchable is the MoE.
 """
 

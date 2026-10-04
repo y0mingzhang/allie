@@ -5,7 +5,7 @@ description = "Human chess move prediction: a mixture-of-experts transformer ove
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-# Allie-v3.0 trained with torch 2.10.0+cu128 and triton 3.6.0 on Linux x86-64.
+# Allie 2.0 trained with torch 2.10.0+cu128 and triton 3.6.0 on Linux x86-64.
 dependencies = [
     "torch==2.10.*",
     "numpy>=1.26,<3",

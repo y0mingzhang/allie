@@ -1,4 +1,4 @@
-"""Head-to-head tables for Allie-v3.0 (MoE 0.69B active / 5.6B total) against Maia-3 5M / 23M / 79M and
+"""Head-to-head tables for Allie 2.0 (MoE 0.69B active / 5.6B total) against Maia-3 5M / 23M / 79M and
 the best 1e18 sweep MoE, on the benchmark's 80,000 blitz positions (eval.maia3.aggregate's views and game
 bootstrap) and on the by-format companion sample (eval.maia3.formats: 5,000 per bullet / rapid / classical
 cell). Slices: Elo band, 200-Elo bin of the mover, blitz time control, game format, mover's clock, ply.
@@ -163,7 +163,7 @@ def sliced(
     lines,
     note="Pooled over the four blitz bands.",
 ):
-    """groups: [(label, mask, games)]; per group each model's acc / CE and Allie-v3.0's paired deltas."""
+    """groups: [(label, mask, games)]; per group each model's acc / CE and Allie 2.0's paired deltas."""
     rows = out["slices"][name] = {}
     lines += [
         f"### {title}",

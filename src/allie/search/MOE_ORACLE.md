@@ -1,7 +1,7 @@
 # MoE search oracle
 
 `allie.search` ships a model port for the dense ship recipe only. `moe_oracle.py` lets the unchanged
-search run MoE checkpoints, such as Allie-v3.0 or the sweep MoE 1e18 s42
+search run MoE checkpoints, such as Allie 2.0 or the sweep MoE 1e18 s42
 (`results/pretrain/sw-1e18-s16-18x896-c8s200f0v4-s42`).
 
 - The model is the checkpoint's own training code (`allie.eval.score.training_code`): this package,

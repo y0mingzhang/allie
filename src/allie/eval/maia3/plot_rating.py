@@ -1,6 +1,6 @@
 """acc-by-game-rating-final.png / .md: top-1 move-matching accuracy and legal-move CE against game rating
 (mean of both players' ratings, 100-point bins), as on Maia-3's homepage, for Maia-3 3M / 5M / 23M / 79M,
-the best 1e18 sweep MoE and Allie-v3.0, on every scored blitz move of the golden eval
+the best 1e18 sweep MoE and Allie 2.0, on every scored blitz move of the golden eval
 (maia3-bench/rating: 402,108 positions in 6,247 games, eval.maia3.rating_sample).
 
 The golden eval samples each mover-Elo band at its own rate, so every position is weighted by its

@@ -111,7 +111,7 @@
     "repo": "yimingzhang/lichess_tokens_v2",
     "revision": "20a899ddf344ccaea74e273509a60e5a511125f8",
     "local_path": "/scratch/yimingz3/allie/lichess_tokens_v2",
-    "description": "Original chess-v2 packed train and validation data; no filtering or retokenization"
+    "description": "Original packed train and validation data; no filtering or retokenization"
   },
   "train_rows": 7884154771,
   "train_shards": 233346,

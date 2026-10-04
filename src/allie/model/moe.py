@@ -240,14 +240,14 @@ class MoE(nn.Module):
         self.remat = True  # moe_kernels.routed's: False where a checkpoint recomputes the layer
         self.pos = None  # expert_shard.SHARDED position once its experts are sharded
         # center: EMA decay of the mean router input mu, subtracted before the router (0: off). A shared
-        # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores (Allie-v3.0
+        # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores (Allie 2.0
         # layer 0: 77% of the input energy in mu, routing nearly token-independent). mu averages past
         # steps' global batch means, so a token's routing never sees other tokens
         assert 0 <= center < 1
         self.center = center
         # floor of the sums of sigmoid scores that renormalise a token's gates (its k selected scores) and its
         # balance-loss affinities (all e); 0: off, the plain sums. Below a sum of ~1e-19 the compiled division's
-        # backward overflows (k**0.5 / sum**2 in FP32), below ~1e-38 its forward: Allie-v3.0's step 60081 went
+        # backward overflows (k**0.5 / sum**2 in FP32), below ~1e-38 its forward: Allie 2.0's step 60081 went
         # nonfinite on one token whose 16 selected layer-1 scores summed to 5.7e-20. Floored, such a token's gates
         # sum to k**0.5 * sum / floor: its routed output is suppressed, the router's degeneration is not repaired
         assert 0 <= gate_floor < float("inf")

@@ -1,6 +1,6 @@
 # Allie on Lichess
 
-`allie.lichess` runs Allie-v3.0 as a [Lichess bot](https://lichess.org/api#tag/Bot). It needs no GPU: one CPU
+`allie.lichess` runs Allie 2.0 as a [Lichess bot](https://lichess.org/api#tag/Bot). It needs no GPU: one CPU
 process holds the model once and plays several games at a time.
 
 - **Model.** A plain-PyTorch port of the trained network (`model.py`): no Triton kernels and no training code.
@@ -16,7 +16,7 @@ process holds the model once and plays several games at a time.
 1. **Install.** `uv sync --extra bot` (the extra is only for exporting weights). Add `--extra search` for the `strongest` mode's search.
 2. **Export the weights** from a training checkpoint, once:
    ```sh
-   allie-bot export results/pretrain/allie-v3.0/last.pt exports/allie-v3.0
+   allie-bot export results/pretrain/allie-2.0/last.pt exports/allie-2.0
    ```
    This writes `model.safetensors` (11 GB, BF16) and `config.json`. The bot needs only this directory.
 3. **Create a bot account.** Bot accounts must be new accounts that have never played a game. Create one on
@@ -40,7 +40,7 @@ process holds the model once and plays several games at a time.
 | `play.mode` | What it does |
 |---|---|
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
-| `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie-v3.0's own output calibration and plays its most likely move. |
+| `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
 
 - **Think time.** With `play.think_time`, the bot waits for a think time drawn from the model's own think-time
   prediction, which depends on the position, the clock and the ratings. It never waits longer than
@@ -95,5 +95,5 @@ training.
   server. `--opponent random` plays a random mover instead. Every move goes through the full protocol, and the
   server checks it.
 - `allie-bot bench --config my-bot.toml` measures the time per move.
-- `python analysis/lichess/parity.py --model exports/allie-v3.0` scores the bot's model on the Maia-3 benchmark
+- `python analysis/lichess/parity.py --model exports/allie-2.0` scores the bot's model on the Maia-3 benchmark
   positions against the training forward's scores (needs `ALLIE_DATA`).

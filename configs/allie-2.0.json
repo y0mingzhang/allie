@@ -1,6 +1,6 @@
 {
- "name": "allie-v3.0",
- "about": "Allie-v3.0: MoE 0.69B active / 5.6B total (24 blocks, width 1536, 256 experts top-16 + a shared expert), 75B tokens. Trained on 8 x NVIDIA L40S (48 GB) in 2-day chunks (max_seconds per chunk), 159 hours at 131K tokens/s. Paths: data, mix_stores and mix_months are relative to ALLIE_DATA; mix_history to this file's directory; the mix table is configs/recipes/<name>.json. The run added moe_gate_floor (1e-12) when it resumed at step 59,392 (a numerical guard for one overflowing token at step 60,081); this config sets it from the start. The run's own record (study plan, round file, launcher, data pin) is configs/allie-v3.0/.",
+ "name": "allie-2.0",
+ "about": "Allie 2.0: MoE 0.69B active / 5.6B total (24 blocks, width 1536, 256 experts top-16 + a shared expert), 75B tokens. Trained on 8 x NVIDIA L40S (48 GB) in 2-day chunks (max_seconds per chunk), 159 hours at 131K tokens/s. Paths: data, mix_stores and mix_months are relative to ALLIE_DATA; mix_history to this file's directory; the mix table is configs/recipes/<name>.json. The run added moe_gate_floor (1e-12) when it resumed at step 59,392 (a numerical guard for one overflowing token at step 60,081); this config sets it from the start. The run's own record (study plan, round file, launcher, data pin) is configs/allie-2.0/.",
  "trainer": {
   "width": 1536,
   "layers": 24,
@@ -184,6 +184,6 @@
    "ext-v1/engine/20xx-ccrl4040",
    "ext-v1/engine/20xx-tcec"
   ],
-  "mix_history": "allie-v3.0/history-counts.json"
+  "mix_history": "allie-2.0/history-counts.json"
  }
 }

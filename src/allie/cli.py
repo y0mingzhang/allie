@@ -10,7 +10,7 @@ from pathlib import Path
 
 from allie import paths
 
-# the environment modelexp runs the trainer and evaluator in (Allie-v3.0 included); the caller's values win
+# the environment modelexp runs the trainer and evaluator in (Allie 2.0 included); the caller's values win
 ENV = dict(
     OMP_NUM_THREADS="4",
     TORCHINDUCTOR_COMPILE_THREADS="4",
@@ -59,7 +59,7 @@ def train():
     p = argparse.ArgumentParser(
         description="Train from a config file; resumes the run's last checkpoint."
     )
-    p.add_argument("config", help="e.g. configs/allie-v3.0.json")
+    p.add_argument("config", help="e.g. configs/allie-2.0.json")
     p.add_argument("--name", help="run name (default: the config's)")
     p.add_argument("--nproc", type=int, default=8, help="GPUs on this node")
     a, extra = p.parse_known_args()

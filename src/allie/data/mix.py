@@ -69,7 +69,7 @@ def clock_bucket(seconds):
     return np.where(s < 16, 1 + s, log).astype(np.int16)
 
 
-# chess-v2 process_hf keep ratios by (format, 100-point average-Elo bucket); missing buckets keep 1.
+# the original data pipeline's keep ratios by (format, 100-point average-Elo bucket); missing buckets keep 1.
 KEEP_TABLE = {
     1: (
         400,

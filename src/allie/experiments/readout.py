@@ -207,7 +207,7 @@ def logc_at(L, Ls, lcs):
 
 
 def fitlaw(d, shared=False, start=None):
-    """experiments.isoflop.additive (its 32 starts, or a warm start) on {"ours": a} or, shared E, {"ours": a, "qwen": b},
+    """experiments.isoflop.additive (its 32 starts, or a warm start) on {"ours": a} or, shared E, {"ours": a, "ref": b},
     polished on its objective x1e6 at tight tolerances: the raw objective is ~1e-5, under L-BFGS-B's default
     gradient tolerance, so a warm start stops near where it began and bootstrap spreads come out 5-15x too narrow
     along the E-alpha / B-beta ridges. Returns {key: theta}."""
@@ -452,8 +452,8 @@ class Readout:
 
     def pair(self, f, ref, data=None, start=None):
         d = data or self.data
-        t = fitlaw({"ours": d[f], "qwen": d[ref]}, True, start)
-        return t["ours"], t["qwen"], t["theta"]
+        t = fitlaw({"ours": d[f], "ref": d[ref]}, True, start)
+        return t["ours"], t["ref"], t["theta"]
 
     def multipliers(self):
         a, ref, kap, out, th = self.a, self.a.ref, self.kap, self.out, self.th

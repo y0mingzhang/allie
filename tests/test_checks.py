@@ -51,7 +51,7 @@ TRITON36 = [
     )
 ]
 NOCOMPILE = {"TORCH_COMPILE_DISABLE": "1"}
-CONFIG = ROOT / "configs/allie-v3.0/resume-config.json"
+CONFIG = ROOT / "configs/allie-2.0/resume-config.json"
 
 
 def check(name, *args, torchrun=0, env=None, marks=(), id=None):
@@ -76,7 +76,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
         check("fused_blend", marks=DATA),
         check("game_blocks", env=NOCOMPILE, marks=DATA),
         check("moe_shard", env=NOCOMPILE, marks=DATA),
-        # Allie-v3.0's months, stores and history, with its recipe table
+        # Allie 2.0's months, stores and history, with its recipe table
         check(
             "mix_recent",
             CONFIG,

@@ -1,4 +1,4 @@
-"""Allie-v3.0 in plain PyTorch, CPU or GPU: no Triton kernels, flex attention or training code.
+"""Allie 2.0 in plain PyTorch, CPU or GPU: no Triton kernels, flex attention or training code.
 
 The forward restates the training GPT.forward (allie.model.nanogpt, eval path) over flat tokens,
 with each game's keys and values in a Cache. It matches the trained model up to floating-point

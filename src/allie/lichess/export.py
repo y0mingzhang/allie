@@ -104,7 +104,7 @@ def convert(state):
     return w, config
 
 
-def main(checkpoint, out, name="allie-v3.0"):
+def main(checkpoint, out, name="allie-2.0"):
     state, path = load(checkpoint)
     w, config = convert(state)
     out = Path(out)

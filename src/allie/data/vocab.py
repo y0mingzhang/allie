@@ -1,4 +1,4 @@
-"""Token vocabulary of lichess_tokens_v2 (ported verbatim from chess-v2 src/data/tokens.py)."""
+"""Token vocabulary of lichess_tokens_v2."""
 
 SECONDS = ["0", "15", "30", "45", "60", "90", *(str(m * 60) for m in range(2, 181)), "*"]
 INCREMENTS = [*(str(i) for i in range(181)), "*"]
