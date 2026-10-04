@@ -154,14 +154,19 @@ by Claude (`claude-sonnet-5-5`, effort low, thinking off) from Allie's own numbe
   - **Chat lines:** verbatim.
   - **The position:** clocks, the opening (Lichess's names), phase, material, FEN, Allie's prediction for
     the side to move.
-- **When it calls the model.** Every chat message does (the model may still stay silent), during the
-  game and for `linger` seconds after it. Other moments call it with a set probability:
-  - `p_moment` for a surprising move or a swing in the win/draw/loss, at least `every` plies after the
-    last call;
-  - `p_draw` once a draw offer is answered;
-  - `p_end` at the end.
+- **When it calls the model.** Every chat message does (the model may still stay silent, as a
+  human opponent often would), during the game and for `linger` seconds after it. Other moments
+  call it by chance, decided in code before any call, at least `every` plies after the last call:
+  - while the opponent chats: `p_moment` at a surprising move or a swing in the win/draw/loss,
+    `p_draw` once their draw offer is answered, `remarks` such calls a game, and `p_end` at the
+    end of a game of `min_plies` or more;
+  - until they write, or once `unanswered` of the bot's lines in a row get no reply:
+    `quiet_p_moment` at a moment, `quiet_remarks` a game, no call at the end, and a fixed `gg`
+    (no call) if they say gg after the game.
 
   Otherwise the update waits in the next turn.
+- **Voice.** Lowercase, short and plain, like a regular online player ("gl", "nice move", "gg
+  wp"); no jokes or flourishes. Move names keep their case.
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's numbers when asked.
   In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
   message naming a move not yet played is dropped. After the game it reviews from Allie's numbers when
@@ -178,6 +183,7 @@ by Claude (`claude-sonnet-5-5`, effort low, thinking off) from Allie's own numbe
   (Sonnet 5.5, $ per million tokens: 2 input, 2.50 / 4 cache write for 5 min / 1 h, 0.20 cache read,
   10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over. A spend
   limit on the key in the Anthropic Console is the backstop.
+- **Logs.** Every chat line, theirs and the bot's, as `game ID chat (room) NAME: text`.
 - **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`
   (`chmod 600`) or `ANTHROPIC_API_KEY`. Each call is logged with its tokens (new, cached, written,
   output), cost, time to the first token and latency; the key is never logged.

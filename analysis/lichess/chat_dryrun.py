@@ -2,10 +2,12 @@
 
 Each game's moves and clocks go to a real Chatter (the bot's model, the chat's model) as the
 game stream would send them, with a script of opponent messages, a draw offer and a
-resignation. Prints each transcript, every reply's latency and cost, and the spend.
+resignation. Prints each transcript (with the model's silences), every reply's latency
+and cost, and the spend.
 
 usage: python analysis/lichess/chat_dryrun.py --config bot.toml [--llm claude|mock]
-           [--ledger PATH] [--seed N] [--prompts] GAME.pgn:casual|rated:PLIES...
+           [--ledger PATH] [--seed N] [--prompts]
+           GAME.pgn:casual|rated:PLIES[:chatty|quiet|silent]...
 """
 
 import argparse
@@ -18,15 +20,17 @@ from allie.lichess import chat
 from allie.lichess.chat import Chatter
 
 BOT = "AllieTheChessBot"
-# (fraction of the game, opponent message); "draw" offers a draw there
-SCRIPT = [
-    (0.0, "hi! gl"),
-    (0.25, "wdyt about my next move?"),
-    (0.45, "blunder?"),
-    (0.6, "draw"),
-    (0.8, "you play like a human lol"),
-]
-AFTER = ["gg, how did I play?", "what was the turning point?"]
+# the opponent's messages: (fraction of the game, message; "draw" offers a draw there),
+# then the ones after the game
+SCRIPTS = {
+    "chatty": (
+        [(0.0, "hi! gl"), (0.25, "wdyt about my next move?"), (0.45, "blunder?"),
+         (0.6, "draw"), (0.8, "you play like a human lol")],
+        ["gg, how did I play?", "what was the turning point?"],
+    ),
+    "quiet": ([(0.6, "draw")], ["gg"]),  # never chats; gg after the game
+    "silent": ([], []),
+}  # fmt: skip
 
 
 def read(path, plies):
@@ -40,7 +44,7 @@ def read(path, plies):
     return h, moves, clocks, base, inc
 
 
-def replay(c, posts, path, rated, plies):
+def replay(c, posts, path, rated, plies, script):
     h, moves, clocks, base, inc = read(path, plies)
     white = h["White"] == BOT
     opp = h["Black" if white else "White"]
@@ -55,7 +59,8 @@ def replay(c, posts, path, rated, plies):
             "white": player(h["White"], h["WhiteElo"]),
             "black": player(h["Black"], h["BlackElo"]), "initialFen": "startpos",
             "state": state(0)}  # fmt: skip
-    script = {round(f * len(moves)): text for f, text in SCRIPT}
+    during, after = SCRIPTS[script]
+    script = {round(f * len(moves)): text for f, text in during}
     feed = lambda *es: [c.put(e) for e in es] and c.q.join()
     say = lambda k, text: (posts.append((k, opp, text)),
                            feed({"type": "chatLine", "room": "player", "username": opp,
@@ -78,7 +83,7 @@ def replay(c, posts, path, rated, plies):
     winner = "white" if white else "black"
     posts.append((len(moves), opp, "(resigns)"))
     feed(state(len(moves), status="resign", winner=winner), chat.END)
-    for text in AFTER:
+    for text in after:
         say(len(moves) + 1, text)
     c.done = True
     return h, moves, opp
@@ -106,24 +111,28 @@ def main():
     engine = Engine(model(config))
     llm = chat.model(config.chat)
     for i, spec in enumerate(a.games):
-        path, kind, plies = spec.split(":")
+        path, kind, plies, script = (spec.split(":") + ["chatty"])[:4]
         posts, turns = [], []
         ref = {}
-        post = lambda gid, text, room, posts=posts, ref=ref: posts.append(
-            (len(ref["c"].sans) + bool(ref["c"].status), BOT, text)
+        at = lambda ref=ref: len(ref["c"].sans) + bool(ref["c"].status)
+        post = lambda gid, text, room, posts=posts, at=at, **kw: posts.append(
+            (at(), BOT, text)
         )
-        client = SimpleNamespace(chat_lines=lambda gid: [], chat=post)
+        client = SimpleNamespace(chat_lines=lambda gid, **kw: [], chat=post)
         bot = SimpleNamespace(
             me=BOT.lower(), config=config, client=client, engine=engine
         )
         match = SimpleNamespace(bot=bot, gid=f"dry{i}", over=False)
 
-        def logged(system, messages, turns=turns):
+        def logged(system, messages, turns=turns, posts=posts, at=at):
             turns.append(messages[-1]["content"])
-            return llm(system, messages)
+            r = llm(system, messages)
+            if r is not None and not r.speak:
+                posts.append((at(), BOT, "(stays silent)"))
+            return r
 
         c = ref["c"] = Chatter(match, logged, a.seed + i)
-        h, moves, opp = replay(c, posts, path, kind == "rated", int(plies))
+        h, moves, opp = replay(c, posts, path, kind == "rated", int(plies), script)
         b = chess.Board()
         sans = []
         for u in moves:

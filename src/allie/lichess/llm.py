@@ -217,10 +217,9 @@ class Claude:
             log.warning("chat model rate limited; pausing a minute")
             self.until = start + 60
         except Exception as e:  # noqa: BLE001 - timeouts, the deadline, connection, server
+            took = time.monotonic() - start
             log.warning(
-                "chat model: %s after %.1f s",
-                e or type(e).__name__,
-                time.monotonic() - start,
+                "chat model: %s (%.1f s), message dropped", e or type(e).__name__, took
             )
         if (
             r is None

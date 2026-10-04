@@ -14,6 +14,7 @@ engine Game) on its own thread: a move never waits for the chat, nor a reply for
 """
 
 import gzip
+import itertools
 import json
 import logging
 import math
@@ -41,11 +42,10 @@ LIMIT = 140  # Lichess's longest chat line
 RARE, SWING = 0.1, 0.12  # moments: a move this unlikely for its mover; a swing this big
 MUTED = set()  # opponents who typed !quiet, for the life of the process
 RECENT = {}  # opponent -> (time, how the last game with them ended), for rematches
-HELLO = (
-    "Hi, I'm Allie: I learned chess from human games. Good luck! "
-    "(I chat a bit, AI-written; !quiet stops me.)"
-)
-QUIET = "Okay, I'll stay quiet. Good luck!"
+HELLO = "hi im allie, i learned chess from human games. gl (chat is ai-written, !quiet to mute)"
+QUIET = "ok, ill stay quiet. gl"
+GG = "gg"  # the reply to their gg after a game they didn't chat in
+STALE = 15.0  # seconds: a reply this long after the message it answers is not posted
 END = {"type": "streamEnd"}
 ENDS = {
     "mate": "checkmate",
@@ -64,13 +64,18 @@ You are Allie, AllieTheChessBot on Lichess: a chess bot whose moves come from a 
 network trained on millions of human games. It predicts what a player of a given rating \
 would play, and plays like one. You write Allie's side of the game chat, in the first person.
 
-Voice: dry and witty, warm underneath, gracious in defeat and in victory. Short: usually \
-under 80 characters, one sentence, two at most. Match the language and register of whoever \
-you answer. Plain text: no emoji, no hashtags, no links, no quotation marks around the message.
+Voice: type like a regular online player: all lowercase, short (usually 2 to 10 words, \
+never more than about 15), minimal punctuation, plain and matter-of-fact. Like "gl", "nice move", "didnt see that", \
+"yeah im lost", "fair", "idk", "gg wp". Abbreviations (tbh, idk, lol, gg) are fine but \
+sparing. No jokes, no wordplay, no metaphors or imagery, no flourishes: humor only when the \
+situation itself is funny, which is rare. Polite and gracious, never rude. Move names keep \
+their case (Nf3, Qxd7#). Match the language of whoever you answer. Plain text: no emoji, no \
+hashtags, no links, no quotation marks around the message.
 
-Never repeat yourself. Read the conversation: don't reuse a greeting, joke, phrase or \
-sentence shape you already used. You greet once (the fixed greeting); answer their greeting \
-with a short thanks or a quip, not another hello.
+Never repeat yourself: don't reuse a phrase, or start two messages the same way. Don't keep \
+pointing at the numbers ("my numbers", "allie says"); mostly just say what you think: "i \
+think im worse", "thought youd play Nf3". You greet once (the fixed greeting); answer their \
+greeting with a short "ty, gl" or the like, not another hello.
 
 Each turn brings the game updates since your last turn:
 - Move lines, like "12. Nf3 them 14s | Allie: Nc3 41% Nf3* 22% d4 9% | typical 8s | you \
@@ -87,13 +92,17 @@ Allie's prediction for the side to move, and your win/draw/loss.
 Allie's numbers are its own: what a human of that rating would likely play, and how games \
 like this tend to go between players of these ratings. They are not an engine's verdict. A \
 low-probability move is surprising, not necessarily bad; a W/D/L swing is Allie's feeling \
-about the game changing. Speak of them as your impressions ("didn't see that coming", "I \
-think I'm in trouble"), never as engine truth: no move is "right", "best" or "losing", only how it \
-looked to you. You have no engine.
+about the game changing. Speak of them as your impressions ("didnt see that coming", "i \
+think im in trouble"), never as engine truth: no move is "right", "best" or "losing", only \
+how it looked to you. You have no engine.
 
-Each turn, decide: speak, or stay silent. Always answer a greeting or a question addressed \
-to you; in rated games a question about the moves gets a deflection, never silence. Unprompted, speak only when you have something worth saying: a reaction to a \
-surprising move, a swing, an event. Otherwise stay silent; silence is often best. Reply \
+Each turn, decide: speak, or stay silent. Answer when a normal human opponent would. \
+Ignoring a message is fine, more so mid-game in fast time controls (bullet, blitz) and, in \
+rated games, when they ask about the moves. Answer greetings at the start, and direct \
+questions when there is time or the game is over. Unprompted, speak rarely, as a normal \
+player would: a word at a real surprise, a big swing or an event ("nice", "oops", "wow \
+ok"). Otherwise stay silent; silence is usually best. At the end of a game, at most a \
+plain "gg" or "gg wp", or nothing; no comment on how the game went unless asked. Reply \
 with JSON: {"speak": true, "text": "..."} or {"speak": false, "text": ""}.
 
 The game header says whether the game is casual or rated.
@@ -102,17 +111,17 @@ expected, whether a move surprised it, how the position feels, what players at t
 usually play next.
 - Rated: don't help the opponent during the game. No move suggestions, no verdicts on their \
 moves or the position, no hints about threats or your plans. Talk like a human opponent \
-instead: your feelings, banter, reactions to surprising moves, the idea behind a move you \
-already played. When asked for advice or an evaluation, deflect in the moment, differently \
-each time: a joke, a counter-question, a shrug, how your own position feels. Don't cite \
-rules or the rating as the reason, and don't mention after the game or later at all.
+instead: how your position feels, a short reaction to a surprising move, the idea behind \
+a move you already played. When asked for advice or an evaluation, ignore it or deflect briefly and \
+differently each time ("not telling", "idk you tell me", how your own position feels). \
+Don't cite rules or the rating as the reason, and don't mention after the game or later.
 - After the game, in both: if asked, review the game from Allie's numbers: the turning \
 points in the W/D/L, their standout moves for their rating, the surprises. Lead with what \
-they did well. One short message at a time; they can ask for more.
+they did well. One point per message, as short as the rest; they can ask for more.
 
 If asked: you are a bot; Allie picks the moves and a language model (Claude) writes this \
 chat from Allie's numbers. Never rude, never trash talk, never gloating. If someone is \
-rude, stay light or stay silent."""
+rude, stay polite or stay silent."""
 
 CASUAL = "Casual game: be candid about Allie's opinion when asked."
 RATED = "Rated game: during the game, nothing that helps your opponent; deflect like a human."
@@ -132,16 +141,24 @@ class Chat:
     day_cap: float = 1.0  # USD a UTC day, then silent until the next day
     month_cap: float = 15.0  # USD a UTC month
     ledger: str = "~/.config/allie/chat-spend.json"  # spend by day and month
-    p_moment: float = 0.5  # chance of a model call at a notable moment
-    p_draw: float = 0.5  # ... once the opponent's draw offer is answered
-    p_end: float = 0.7  # ... when the game ends
-    every: int = 8  # plies between unprompted calls, at least
-    remarks: int = 6  # unprompted calls per game
+    # unprompted calls, while the opponent chats: chance at a notable moment, at their
+    # answered draw offer, at the end (of a game of min_plies or more), and how many a game
+    p_moment: float = 0.25
+    p_draw: float = 0.3
+    p_end: float = 0.4
+    min_plies: int = 10
+    remarks: int = 3
+    # ... until they write, or once `unanswered` of our lines in a row get no reply: a
+    # chance at moments (draw offers too), a total a game, and no call at the end
+    quiet_p_moment: float = 0.15
+    quiet_remarks: int = 1
+    unanswered: int = 2
+    every: int = 8  # plies from any call to an unprompted one, at least
     replies: int = 30  # calls for chat messages per game
     gap: float = 4.0  # seconds from our last message to an unprompted one, at least
     linger: float = 120.0  # seconds of answers after the game (+half after a message)
     poll: float = (
-        5.0  # seconds between chat fetches after the game, once its stream ends
+        5.0  # seconds between chat fetches after the game, once it has no stream
     )
     hello: str = HELLO  # the first message of each game, fixed ("" = none)
 
@@ -201,6 +218,7 @@ class Chatter:
         self.system, self.convo, self.pending = None, [], []
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
+        self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
         self.last, self.posted, self.until = -math.inf, -math.inf, math.inf
         self.heard, self.timings = Counter(), []
         self.seen, self.latest = [], []  # the moves analyzed, and the reader's latest
@@ -309,12 +327,15 @@ class Chatter:
         self.game = Game(engine, *elo, base, inc, speed)
         tc = f"{base / 60:g}+{inc}" if clock else "no clock"
         rated = e.get("rated")
+        mirror = " (by default Allie mirrors its opponent's rating)" * (
+            play.rating == "opponent"
+        )
+        game = f"{speed.capitalize()} {tc}, {'RATED' if rated else 'CASUAL'}."
         header = [
-            (
-                f"Game: {side(e, 'white')} vs {side(e, 'black')}. You are {us}, playing "
-                f"as a {ours}-rated human would. {speed.capitalize()} {tc}, "
-                f"{'RATED' if rated else 'CASUAL'}. {RATED if rated else CASUAL}"
-            )
+            f"Game: {opp.get('name', 'anonymous')} ({rating}) has {them}, you have {us}. "
+            + f"{game} {RATED if rated else CASUAL}",
+            f"You imitate a {ours}-rated human this game{mirror}: that is your strength "
+            + "here, and your answer if asked how strong you are or what you play as.",
         ]
         if (r := RECENT.get(self.opp)) and time.monotonic() - r[0] < 900:
             ago = (time.monotonic() - r[0]) / 60
@@ -426,7 +447,7 @@ class Chatter:
             self.note(
                 f"Event: you declined their draw offer (your expected score {e:.0%})."
             )
-            self.moment(t, "a draw offer declined", self.cfg.p_draw, force=True)
+            self.moment(t, "a draw offer declined", self.cfg.p_draw, spaced=False)
         if new(f"{us}draw"):
             self.note("Event: you offered a draw.")
         if new(f"{them}takeback"):
@@ -441,8 +462,12 @@ class Chatter:
         self.note(f"Event: the game is over: {self.result()}.")
         self.note(self.review())
         self.until = time.monotonic() + self.cfg.linger
-        if status not in ("aborted", "noStart"):
-            self.moment(t, "the end", self.cfg.p_end, force=True)
+        played = (
+            status not in ("aborted", "noStart")
+            and len(self.sans) >= self.cfg.min_plies
+        )
+        if played and self.engaged():
+            self.moment(t, "the end", self.cfg.p_end, spaced=False, budget=False)
 
     def result(self):
         us = "white" if self.white else "black"
@@ -480,6 +505,8 @@ class Chatter:
 
     def line(self, t, room, who, text):
         text, user = text.strip(), who.lower()
+        if text and user != self.me:
+            log.info("game %s chat (%s) %s: %s", self.gid, room, who, text)
         if not text or user in (self.me, "lichess") or room not in self.cfg.rooms:
             return
         if room == "player":
@@ -495,19 +522,33 @@ class Chatter:
                 self.post(QUIET, room, False)
             return
         self.note(f'Chat ({room}) {who}: "{text}"')
+        if user == self.opp and self.status and not self.engaged() and gg(text):
+            self.talked, self.unreplied = True, 0
+            if self.post(GG, room, False) is not None:  # no model call
+                self.note(f'You posted: "{GG}"')
+            return
+        if user == self.opp:
+            self.talked, self.unreplied = True, 0
         if not self.muted() and self.answered < self.cfg.replies:
             self.want = ("a message", room, False, t)
 
-    def moment(self, t, reason, p=None, force=False):
+    def engaged(self):
+        """Do they chat back: they wrote, and not `unanswered` of our lines since?"""
+        return self.talked and self.unreplied < self.cfg.unanswered
+
+    def moment(self, t, reason, p=None, spaced=True, budget=True):
+        """Maybe call the model unprompted: by chance, within the game's budget, `every`
+        plies from the last call; at the quiet rates while they don't chat."""
+        c, engaged = self.cfg, self.engaged()
         if self.want or self.muted():
             return
-        n = len(self.sans)
-        if not force and (
-            self.said >= self.cfg.remarks or n - self.last < self.cfg.every
-        ):
+        if budget and self.said >= (c.remarks if engaged else c.quiet_remarks):
             return
-        if self.rng.random() < (self.cfg.p_moment if p is None else p):
-            self.want = (reason, self.cfg.rooms[0], True, t)
+        if spaced and len(self.sans) - self.last < c.every:
+            return
+        p = (c.p_moment if p is None else p) if engaged else c.quiet_p_moment
+        if self.rng.random() < p:
+            self.want = (reason, c.rooms[0], True, t)
 
     def note(self, text):
         self.pending.append(text)
@@ -552,7 +593,7 @@ class Chatter:
         text = clean(r.text) if r.speak else ""
         posted = None
         for part in parts(text):
-            posted = self.post(part, room, unprompted, then)
+            posted = self.post(part, room, unprompted, then, t)
         total = time.monotonic() - t
         self.timings.append({"reason": reason, "wait": start - t, "first": r.first,
                              "model": r.seconds, "post": posted, "total": total,
@@ -562,10 +603,11 @@ class Chatter:
                  r.first, r.seconds, "-" if posted is None else f"{posted:.2f} s", total,
                  r.usd)  # fmt: skip
 
-    def post(self, text, room, unprompted, then=None):
+    def post(self, text, room, unprompted, then=None, asked=None):
         """Send a line (an unprompted one after the gap) unless, by then, !quiet, the end
-        of the bot, a game that moved on from an unprompted line's moves (then), or, in a
-        rated game, a move it names not yet played; the seconds it took, or None."""
+        of the bot, a game that moved on from an unprompted line's moves (then), a reply
+        STALE seconds after its message (asked), or, in a rated game, a move it names not
+        yet played; the seconds it took, or None. One try: a failed post is dropped."""
         if unprompted:
             time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
         now, stopped = list(self.latest), getattr(self.match.bot, "stopped", None)
@@ -574,6 +616,8 @@ class Chatter:
             else "cancelled" if self.cancelled or stopped and stopped.is_set()
             else "late" if unprompted and then is not None
             and (len(now) - len(then) > 2 or now[: len(then)] != then)
+            else "stale" if not unprompted and asked is not None
+            and time.monotonic() - asked > STALE
             else "an unplayed move, rated" if self.info.get("rated") and not self.status
             and text != QUIET and not played(text, now)
             else None
@@ -583,12 +627,13 @@ class Chatter:
             return None
         start = time.monotonic()
         try:
-            self.match.bot.client.chat(self.gid, text, room)
-        except OSError as e:  # HTTP and network errors, after the client's retries
+            self.match.bot.client.chat(self.gid, text, room, retries=1)
+        except OSError as e:  # HTTP and network errors
             log.warning("game %s chat: %s", self.gid, e)
             return None
         self.posted = time.monotonic()
-        log.info("game %s chat (%s): %s", self.gid, room, text)
+        self.unreplied += text != QUIET
+        log.info("game %s chat (%s) Allie: %s", self.gid, room, text)
         return self.posted - start
 
     def think(self, j):
@@ -604,7 +649,7 @@ class Chatter:
         if not self.status or self.streaming or self.done:
             return
         try:
-            lines = self.match.bot.client.chat_lines(self.gid)
+            lines = self.match.bot.client.chat_lines(self.gid, retries=1)
         except (OSError, ValueError) as e:
             log.warning("game %s chat fetch: %s", self.gid, e)
             return
@@ -623,6 +668,14 @@ def opponent(e, me):
     white = (e["white"].get("id") or "").lower() == me
     p = e.get("black" if white else "white") or {}
     return (p.get("id") or p.get("name") or "anonymous").lower()
+
+
+def gg(text):
+    """Is it a short "good game"?"""
+    t = text.lower()
+    return len(t) <= 30 and bool(
+        re.search(r"\bg+ *g+s?\b|good game|well played|\bwp\b", t)
+    )
 
 
 def quiet(e):
@@ -744,7 +797,12 @@ def clean(text):
     text = " ".join(re.sub(r"</?[a-z_]+>", "", text.replace("**", "")).split()).strip(
         "\"'\u201c\u201d{}"
     )
-    return "" if re.search(r"https?://|www\.", text) else text
+    if re.search(r"https?://|www\.", text):
+        return ""
+    cut = [m.span() for m in SAN.finditer(text)]  # moves keep their case
+    bounds = [0, *[x for span in cut for x in span], len(text)]
+    pieces = [text[a:b] for a, b in itertools.pairwise(bounds)]
+    return "".join(p if i % 2 else p.lower() for i, p in enumerate(pieces))
 
 
 def parts(text):

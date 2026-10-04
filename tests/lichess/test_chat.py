@@ -58,8 +58,8 @@ class Game:
     def __init__(self, engine, opp="opp", white=False, rated=False, **cfg):
         self.posts, self.lines = [], []
         client = SimpleNamespace(
-            chat=lambda gid, text, room: self.posts.append((room, text)),
-            chat_lines=lambda gid: self.lines,
+            chat=lambda gid, text, room, **kw: self.posts.append((room, text)),
+            chat_lines=lambda gid, **kw: self.lines,
         )
         cfg = Chat(enabled=True, gap=0, poll=0.05, **cfg)
         config = SimpleNamespace(chat=cfg, play=Play())
@@ -95,8 +95,10 @@ def state(moves, status="started", **kw):
 
 
 def test_clean_and_played():
-    assert clean('"Good game!"') == "Good game!" and clean("see https://x.org") == ""
-    assert clean("May the best pawn win.</text>") == "May the best pawn win."
+    assert clean('"Good game!"') == "good game!" and clean("see https://x.org") == ""
+    assert clean("May the best pawn win.</text>") == "may the best pawn win."
+    assert clean("Nice, Qxd7# and O-O. Bxe4 WOW") == "nice, Qxd7# and O-O. Bxe4 wow"
+    assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
     long = "First sentence here, quite long. " * 3 + "x" * 50
     a, b = chat.parts(long)
     assert a.endswith("long.") and len(a) <= 140 and len(b) <= 140
@@ -112,13 +114,13 @@ def test_clean_and_played():
 def test_conversation(engine):
     """The hello, an answer per message with Allie's annotations and the position, an
     append-only conversation, and the system prompt cached for an hour."""
-    m = Model("Hi! Enjoy the game.")
+    m = Model("hi! enjoy the game.")
     g = Game(engine, p_moment=0)
     c = g.chatter(m)
     g.feed(g.full())
     assert g.posts == [("player", chat.HELLO)]
     g.feed(state("e2e4"), state("e2e4 e7e5"), g.say("hi gl"))
-    assert len(m.calls) == 1 and g.posts[-1] == ("player", "Hi! Enjoy the game.")
+    assert len(m.calls) == 1 and g.posts[-1] == ("player", "hi! enjoy the game.")
     system, messages = m.calls[0]
     assert system[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert "CASUAL" in system[1]["text"] and "Opp (1500)" in system[1]["text"]
@@ -132,38 +134,98 @@ def test_conversation(engine):
     second = m.calls[1][1]
     assert second[0] == messages[0] and second[1]["role"] == "assistant"
     assert "2. Nf3 them" in m.turn() and "1. e4" not in m.turn()  # only what is new
-    assert len(c.timings) == 2 and c.timings[0]["text"] == "Hi! Enjoy the game."
+    assert len(c.timings) == 2 and c.timings[0]["text"] == "hi! enjoy the game."
 
 
 def test_moments_draw_resign(engine):
     """Unprompted calls at moments by probability; a declined draw offer; the end, with
     Allie's review; then answers after the game, by fetching the chat once its stream ends."""
     m = Model("")
-    g = Game(engine, p_moment=0, p_draw=1, p_end=1, every=0, linger=5)
+    g = Game(engine, p_moment=0, quiet_p_moment=0, p_draw=1, p_end=1, every=0, linger=5,
+             min_plies=0)  # fmt: skip
     g.chatter(m)
     moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()
     g.feed(g.full(), *[state(" ".join(moves[: k + 1])) for k in range(len(moves))])
     assert m.calls == []  # p_moment 0: the updates wait
+    g.feed(g.say("hi"))  # they chat: the chatty rates
     them = "wdraw"
     g.feed(state(" ".join(moves), **{them: True}), state(" ".join(moves)))
-    assert len(m.calls) == 1
+    assert len(m.calls) == 2
     turn = m.turn()
     assert (
         "Event: they offer a draw." in turn and "you declined their draw offer" in turn
     )
-    assert "1. e4 them" in turn  # the waiting updates
+    assert "1. e4 them" in m.turn(0)  # the waiting updates
     g.feed(state(" ".join(moves + ["d2d3"]), status="resign", winner="black"))
-    assert len(m.calls) == 2
+    assert len(m.calls) == 3
     assert "you won by resignation, they resigned after 7 plies" in m.turn()
     assert "Review by Allie" in m.turn()
-    m.text = "Sure: 4. d3 was the quiet turn."
+    m.text = "sure: 4. d3 was the quiet turn."
     g.lines = [{"user": "Opp", "text": "how did I play?"}]
     g.feed(chat.END)
-    wait(lambda: len(m.calls) == 3)
-    wait(lambda: g.posts[-1] == ("player", "Sure: 4. d3 was the quiet turn."))
+    wait(lambda: len(m.calls) == 4)
+    wait(lambda: g.posts[-1] == ("player", "sure: 4. d3 was the quiet turn."))
     assert 'Chat (player) Opp: "how did I play?"' in m.turn()
     time.sleep(0.3)
-    assert len(m.calls) == 3  # each line once
+    assert len(m.calls) == 4  # each line once
+
+
+def test_reciprocity(engine, caplog):
+    """While they don't chat: one unprompted call at most, none at the end, and their gg
+    after the game gets a gg from code. Once they chat, the chatty rates; after two of our
+    lines without a reply, the quiet ones again. Their lines are logged."""
+    caplog.set_level("INFO", logger="allie.lichess.chat")
+    m = Model("ok")
+    g = Game(engine, opp="shy", hello="", p_moment=1, quiet_p_moment=1, every=0, p_end=1,
+             min_plies=0, linger=5)  # fmt: skip
+    c = g.chatter(m)
+    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5".split()
+    g.feed(g.full())
+    for k in range(1, len(moves)):
+        g.feed(state(" ".join(moves[:k])))  # the chat thread is idle after each
+        c.moment(time.monotonic(), "a test")  # as a surprise or a swing would
+        if c.want:
+            c.respond()
+    assert len(m.calls) == 1 and c.said == 1  # quiet_remarks
+    g.feed(state(" ".join(moves), status="resign", winner="black"))
+    assert len(m.calls) == 1  # quiet: no call at the end
+    g.feed(g.say("gg wp"))
+    assert g.posts[-1] == ("player", chat.GG) and len(m.calls) == 1
+    assert "game g1 chat (player) Shy: gg wp" in caplog.text
+    assert "game g1 chat (player) Allie: gg" in caplog.text
+    g.feed(g.say("how did i play?"))
+    assert len(m.calls) == 2  # they chat now: the model answers
+    d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=0, every=0)
+    c = d.chatter(Model("hey"))
+    d.feed(d.full(), d.say("hi"))
+    assert c.engaged()
+    c.moment(time.monotonic(), "a test")
+    c.respond()
+    assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
+    c.moment(time.monotonic(), "a test")
+    assert c.want is None  # quiet_p_moment 0
+
+
+def test_header_and_stale(engine, monkeypatch):
+    """The header gives the rating Allie imitates, not the account's; a reply that comes
+    STALE seconds after its message is not posted."""
+    m = Model("ok", gated=True)
+    g = Game(engine, opp="newcomer", hello="")
+    g.match.bot.config.play = Play(rating="opponent")
+    c = g.chatter(m)
+    full = g.full()
+    full["black"]["rating"] = 1335  # the bot account's own rating
+    full["white"]["rating"] = 759
+    g.feed(full)
+    header = c.system[1]["text"]
+    assert "You imitate a 759-rated human" in header and "1335" not in header
+    monkeypatch.setattr(chat, "STALE", 0.1)
+    c.put(g.say("hi"))
+    wait(lambda: m.calls)
+    time.sleep(0.2)
+    m.gate.set()
+    c.q.join()
+    assert g.posts == []
 
 
 def test_quiet_rated_and_close(engine):
@@ -257,7 +319,7 @@ def test_split():
 
 def test_through_the_bot(engine, monkeypatch):
     """The bot on the mock server: the hello, an answer, the game's moves unchanged."""
-    m = Model("Thanks, you too!")
+    m = Model("thanks, you too!")
     monkeypatch.setattr(chat, "model", lambda cfg: m)
     mock = MockLichess({"tok": "allie"}, house_delay=0.1, max_plies=16)
     cfg = Chat(enabled=True, gap=0, p_moment=0, p_end=0, linger=1, poll=0.1)
@@ -272,7 +334,7 @@ def test_through_the_bot(engine, monkeypatch):
         g.say("x", "hi, have fun")
         wait(lambda: sum(e["username"] == "allie" for e in g.chat) >= 2)
         ours = [e["text"] for e in g.chat if e["username"] == "allie"]
-        assert ours[:2] == [chat.HELLO, "Thanks, you too!"]
+        assert ours[:2] == [chat.HELLO, "thanks, you too!"]
         wait(lambda: g.status != "started")
         g.say("x", "gg")  # after the game: fetched
         wait(lambda: sum(e["username"] == "allie" for e in g.chat) >= 3)
