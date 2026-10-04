@@ -23,6 +23,7 @@ import triton
 from allie.model import arch as model_arch
 from allie.model import network
 from allie.model import moe_kernels
+from allie.model import shard as expert_shard
 from allie.train.state import restore_rng, rng_state
 from allie.data.packed import Packed
 from allie.model.arch import extra_flops
@@ -407,6 +408,31 @@ def main():
         "tiles instead of cuBLAS (the same k16 chain: bitwise where cuBLAS runs one, as on sm_89)",
     )
     p.add_argument(
+        "--shard-late-prefetch",
+        action="store_true",
+        help="moe_shard: the backward gathers the next layer's experts after this layer's expert grads, not "
+        "before (one gathered layer less at the peak; less overlap)",
+    )
+    p.add_argument(
+        "--shard-prefetch",
+        type=int,
+        default=1,
+        help="moe_shard: the forward gathers this many layers ahead (bitwise; one gathered layer, 0.8 gb at width "
+        "2048, per extra layer)",
+    )
+    p.add_argument(
+        "--shard-early",
+        action="store_true",
+        help="moe_shard: the next forward's first gathers start right after the optimizer step and the backward's "
+        "first one before the backward (bitwise)",
+    )
+    p.add_argument(
+        "--shard-hold",
+        action="store_true",
+        help="moe_shard: blocks past --ckpt-frac keep their forward's gathered experts for their backward instead of "
+        "gathering again (bitwise; 0.8 gb per block at width 2048)",
+    )
+    p.add_argument(
         "--optimizers-reversed",
         action="store_true",
         help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
@@ -480,6 +506,9 @@ def main():
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
     moe_kernels.TUNED, moe_kernels.FUSED_DGATES = a.smoe_tuned, a.smoe_fused_dgates
     moe_kernels.DENSE_TRITON = a.dense_triton
+    expert_shard.LATE = a.shard_late_prefetch
+    expert_shard.DEPTH, expert_shard.HOLD = a.shard_prefetch, a.shard_hold
+    assert a.shard_prefetch >= 1
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0
@@ -541,7 +570,9 @@ def main():
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    vrows = val.rows(val_idx) if rank == 0 else None
+    # sharded experts make every forward a collective: all ranks evaluate, rank 0 records
+    sharded = any(m.pos is not None for m in manager.moe)
+    vrows = val.rows(val_idx) if rank == 0 or sharded else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
     runtime = dict(
         torch=torch.__version__,
@@ -671,7 +702,10 @@ def main():
         args=vars(a),
         config=config_dict(cfg),
         world_size=world,
-        parameters=sum(p.numel() for p in model.parameters()),
+        parameters=sum(
+            p.numel() * (world if getattr(p, "local", False) else 1)
+            for p in model.parameters()
+        ),
         source_sha256=sources,
         runtime=runtime,
         dataset=json.loads((ROOT / "results/original-data.json").read_text()),
@@ -725,6 +759,7 @@ def main():
         if not weights_only:
             saver.add(rank_state, directory / f"rank{rank}.pt")
         sync_params()
+        weights = expert_shard.state_dict(model, saver.snapshot)
         if rank == 0:
             inference = dict(
                 split_embed=model.split_embed,
@@ -739,7 +774,7 @@ def main():
             )
             saver.add(
                 dict(
-                    model=saver.snapshot(model.state_dict()),
+                    model=weights,
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=sources,
@@ -865,11 +900,15 @@ def main():
             # Upstream uses fixed grad_accum_steps=8/world_size while growing
             # the physical microbatch. We grow the number of microbatches to
             # bound activation memory, but must retain its gradient scaling.
+            if a.shard_early and sharded:
+                expert_shard.backward_start(manager.moe)
             (loss * (world / 8)).backward()
             primary_sum += primary.detach()
             count_sum += count
             window_tokens += rows.shape[0] * world * a.row_tokens
         manager.step_optimizers(index)
+        if a.shard_early and sharded:
+            expert_shard.start(manager.moe)
         step = index + 1
         saver.poll()
         if a.profile and step == a.profile:
@@ -970,6 +1009,8 @@ def main():
         ):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
+            if sharded and rank:
+                evaluate(net, manager, vrows, a.micro_batch * a.row_tokens // 1024)
             if rank == 0:
                 metrics = evaluate(
                     net, manager, vrows, a.micro_batch * a.row_tokens // 1024
@@ -1007,6 +1048,7 @@ def main():
             )
             break
     saver.flush()
+    expert_shard.reset()  # no gather left in flight
     if rank == 0:
         log.close()
         (out / "done.json").write_text(

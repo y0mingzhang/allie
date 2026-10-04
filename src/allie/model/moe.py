@@ -17,6 +17,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from allie.model import moe_kernels
+from allie.model import shard as expert_shard
 
 # MoE.stats, per layer over the last step (train.trainer logs them as moe_<name>); dropped is always
 # 0 (dropless), kept so logs and the load buffer keep their layout
@@ -227,6 +228,7 @@ class MoE(nn.Module):
         hist = torch.zeros(experts, moe_kernels.QB_BINS, dtype=torch.int32)
         self.register_buffer("hist", hist, persistent=False)
         self.remat = True  # moe_kernels.routed's: False where a checkpoint recomputes the layer
+        self.pos = None  # expert_shard.SHARDED position once its experts are sharded
         # center: EMA decay of the mean router input mu, subtracted before the router (0: off). A shared
         # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores. mu
         # averages past steps' global batch means, so a token's routing never sees other tokens
@@ -267,8 +269,11 @@ class MoE(nn.Module):
         order = (flat.to(torch.uint8) if moe_kernels.TUNED and e <= 256 else flat).argsort(stable=True)
         count = counts(flat[order], e)
         route = idx.shape[1], flat[order], order, count.cumsum(0), w.type_as(h), self.remat
-        up, down = self.up.type_as(h), self.down.type_as(h)
-        out = moe_kernels.routed(h, up.transpose(1, 2), down, *route)
+        if self.pos is None:
+            up, down = self.up.type_as(h), self.down.type_as(h)
+            out = moe_kernels.routed(h, up.transpose(1, 2), down, *route)
+        else:
+            out = expert_shard.routed(h, self.up, self.down, *route, self.pos)
         if self.training:
             with torch.no_grad():
                 val, top = stats or stats_topk(s, k + 1)

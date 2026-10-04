@@ -27,6 +27,8 @@ DEFAULTS = dict(
     # them): the same function as the renormalised sigmoids, finite in forward and backward at any score
     moe_log_gates=False,
     moe_dense_first=1,  # blocks 0 .. n-1 keep the dense MLP, MoE after (DeepSeek-V3: 3)
+    # routed experts sharded over the ranks, whole experts, gathered per layer (model.shard); model.pt keeps them whole
+    moe_shard=False,
 )
 # switches a --resume-new-source resume may change: numerical guards, not a different model
 RESUMABLE = ("moe_gate_floor", "moe_log_gates")
@@ -65,7 +67,6 @@ SHIPPED = dict(
     tc_header=True,
     wd_scale=1.0,
     moe_keep=0,
-    moe_shard=False,
 )
 
 
