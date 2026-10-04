@@ -1,7 +1,6 @@
-"""Frozen ship-model board CNN and causal board/clock feature transitions.
+"""Board encoding and the causal board and clock transitions of search nodes.
 
-The native board encoder and move vocabulary remain hash-checked. No trainer
-imports, labels or observed future clocks enter these functions.
+The encoder is allie.model's board_encode.cpp and move table, hash-checked and built on first use.
 """
 
 import ctypes
@@ -13,12 +12,8 @@ from pathlib import Path
 
 import numpy as np
 from scipy.special import softmax
-import torch
-BOARD_IN = 864
-from torch import nn
-from torch.nn import functional as F
 
-SOURCE = Path(__file__).resolve().parent / "native"
+SOURCE = Path(__file__).resolve().parents[1] / "model"
 CPP_SHA = "2c5b1a2432f93ecd057000d1aaf5acd789ff848519657c026c3243d22c7b5589"
 TABLE_SHA = "d51d604209cc7afb0437906a3bb046aa50bb855608a414abbadbbd545f12e1c5"
 _encoder = None
@@ -85,53 +80,6 @@ def encode(inputs):
     return out
 
 
-def meta(states):
-    """Side to move, castling rights and en-passant file, one-hot, padded to 32 columns."""
-    side = F.one_hot(states[:, 64].long(), 2)
-    rights = F.one_hot(states[:, 65].long(), 16)
-    ep = F.one_hot(states[:, 66].long(), 9)
-    return F.pad(torch.cat((side, rights, ep), -1), (0, 5))
-
-
-
-
-
-
-class BoardConv(nn.Module):
-    """Codex's BoardConv: 13 planes -> 3x3 conv 32 -> 2 residual 3x3 convs -> 1x1 squeeze 8 ->
-    concat side / castling / en-passant embedding -> layer norm -> zero-init linear."""
-
-    def __init__(self, width):
-        super().__init__()
-        self.first = nn.Parameter(torch.empty(32, 13, 3, 3))
-        self.residual = nn.ParameterList(
-            nn.Parameter(torch.empty(32, 32, 3, 3)) for _ in range(2)
-        )
-        self.squeeze = nn.Parameter(torch.empty(8, 32, 1, 1))
-        for w in (self.first, *self.residual, self.squeeze):
-            nn.init.kaiming_uniform_(w, a=5**0.5)  # nn.Conv2d's default init
-        self.meta = nn.Parameter(
-            torch.randn(32, 32) * 0.02
-        )  # side, castling, ep one-hot rows, padded to 32
-        self.output = nn.Parameter(torch.zeros(544, width))
-
-    def forward(self, states, dtype):
-        x = (
-            F.one_hot(states[:, :64].long(), 13)
-            .to(dtype)
-            .reshape(-1, 8, 8, 13)
-            .permute(0, 3, 1, 2)
-        )
-        x = F.gelu(F.conv2d(x, self.first.type(dtype), padding=1), approximate="tanh")
-        for w in self.residual:
-            x = x + F.gelu(F.conv2d(x, w.type(dtype), padding=1), approximate="tanh")
-        x = F.conv2d(x, self.squeeze.type(dtype)).flatten(1)
-        m = meta(states).to(dtype) @ self.meta.type(dtype)
-        x = F.layer_norm(torch.cat((x, m), -1), (544,))
-        return (x @ self.output.type(dtype)) * states[:, 67:68].to(dtype)
-
-
-
 def advance_boards(parent,tokens):
     _,table=_load();b=np.asarray(parent,np.uint8).copy();n=len(b);ix=np.arange(n)
     tokens=np.asarray(tokens);assert ((tokens>=378)&(tokens<2346)).all()
@@ -159,7 +107,7 @@ def advance_clocks(parent,other_previous,lengths,increments,elapsed):
     """Third channel is this mover's PREVIOUS OWN think time, not last ply's time.
 
     Parent predicts move index length-11 (zero based). Each player's first move
-    does not tick the clock, matching the frozen training sampler.
+    does not tick the clock, matching the training sampler.
     """
     parent=np.asarray(parent);ply=np.asarray(lengths)-11;inc=np.asarray(increments)
     valid=(parent[:,0]>=0)&(parent[:,1]>=0)&(inc>=0)

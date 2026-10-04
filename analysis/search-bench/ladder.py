@@ -5,7 +5,6 @@ Raw is the search oracle's own legal policy; parity is against the training-forw
 """
 
 import json
-from pathlib import Path
 
 import matplotlib
 
@@ -51,7 +50,7 @@ def main():
     rows, out = [], {}
     for family, rungs in LADDER.items():
         for flops, tag, run in rungs:
-            if not (D / tag / f"devcal-128.npz").exists():
+            if not (D / tag / "devcal-128.npz").exists():
                 continue
             raw, frozen = arrays(D / tag / "legal"), arrays(D / tag / "128")
             cal = dict(np.load(D / tag / "devcal-128.npz"))

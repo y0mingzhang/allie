@@ -58,7 +58,7 @@ struct Backup {
  }
 };
 
-// Corrected soft backup with a configurable count normalization.
+// Soft value backup at temperature exp(a + b*log1p((subtree count - 1)/scale)).
 struct ScaledCount : Backup {
  ScaledCount(py::dict d,int budget,double scale):Backup(d,budget){
   if(!(scale>0)||!std::isfinite(scale))throw std::invalid_argument("positive scale required");
@@ -67,8 +67,7 @@ struct ScaledCount : Backup {
  }
 };
 
-// Exact Gaussian factor-tree mean; then the existing count-soft backup.
-
+// Critic projection: exact Gaussian factor-tree posterior of node values, then the soft backup.
 struct Projection : Backup {
  std::vector<double> original, rest;
  std::vector<int> active;
@@ -93,7 +92,7 @@ struct Projection : Backup {
    for(int c=first[i];c>=0;c=next[c]){
     double p=prior[c]/mass[i];child_mean+=p*mean[c];child_var+=p*p*var[c];
    }
-   // Unseen aggregate value has prior mean y_i and variance1.
+   // Unseen aggregate value has prior mean y_i and variance 1.
    total[i]=1./strength+rest[i]*rest[i]+child_var;
    residual[i]=child_mean-rest[i]*original[i];
    var[i]=total[i]/(1.+total[i]);

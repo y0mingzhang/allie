@@ -1,4 +1,4 @@
-"""Portable full-prefix backend. Correctness/hosting fallback, not a speed claim."""
+"""Search oracle on the dense port: every node reruns its whole prefix. A CPU reference, not fast."""
 import numpy as np
 import torch
 from .model import DenseBackend, load_checkpoint

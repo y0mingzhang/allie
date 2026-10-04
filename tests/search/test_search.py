@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 from scipy.special import logsumexp
 from allie.search import Search
-from allie.search.native import load, from_prefix, MOVES, MOVE_ID
+from allie.search.native import load, MOVES, MOVE_ID
 
 FIXTURE = Path(__file__).with_name("migration.json")
 

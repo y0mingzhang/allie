@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import unittest
 import numpy as np
-from allie.search.board import encode, advance_boards, advance_clocks, root_other_previous
+from allie.search.board import encode, advance_boards, advance_clocks
 
 
 class ContextTests(unittest.TestCase):
@@ -32,8 +32,7 @@ class ContextTests(unittest.TestCase):
         torch.manual_seed(425)
         cfg = dict(width=32, layers=8, head_dim=8, vocab_size=2432, scalars_size=32,
                    rotary_length=1025, split_embed=True, ws_short=11, ws_long=23,
-                   attn_scale=.125, feats=3, mlp="swiglu", mlp_hidden=64,
-                   key_offset=False, clock=False, elo=False, norm_eps=torch.finfo(torch.float32).eps)
+                   attn_scale=.125, feats=3, mlp_hidden=64, norm_eps=torch.finfo(torch.float32).eps)
         model = ChessLM(cfg).float()
         with torch.no_grad():
             for p in model.parameters():

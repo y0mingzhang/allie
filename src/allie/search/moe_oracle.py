@@ -1,13 +1,10 @@
-"""Tree KV-cache oracle that lets the search engine run MoE checkpoints.
+"""Search oracle for MoE checkpoints (Allie 2.0), with a tree key-value cache.
 
-The checkpoint's own training source builds the model (hash-checked modules, weights, MoE kernels): this
-package, or for a checkpoint trained before the package layout its run's frozen flat source;
-only attention changes: roots prefill once into a slot pool, and every search node appends one
-token that attends to its path (root prefix + ancestors). Same interface as
-allie.search.runtime.ShipOracle: reset(), handles(prefixes, features, clock_rule), new_tokens.
+The model is built by the checkpoint's own training code (allie.eval.score.training_code: this package, or with
+source= a pre-package checkpoint's frozen source). Only attention differs from training: roots prefill once into
+a slot pool, and each search node appends one token that attends to its path (root prefix and ancestors).
 """
 
-import hashlib
 import os
 import socket
 from pathlib import Path
@@ -29,18 +26,13 @@ from allie.eval.score import training_code
 CONTEXT = 1025
 
 
-def sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
 def network(state, source=None):
-    """The model module that trained this checkpoint (eval.score.training_code; source: a pre-package
-    checkpoint's frozen flat source)."""
+    """The model module that trained this checkpoint."""
     return training_code(state, source)[1]
 
 
 def load_model(checkpoint, source=None):
-    """The trained model in eval mode on cuda:0, built by its own hash-checked training source."""
+    """(model in eval mode on cuda:0, resolved checkpoint path)."""
     checkpoint = Path(checkpoint)
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     if "directory" in state:
@@ -49,7 +41,7 @@ def load_model(checkpoint, source=None):
             checkpoint, map_location="cpu", weights_only=False, mmap=True
         )
     mm = network(state, source)
-    torch.backends.cuda.matmul.allow_tf32 = True  # as the trainer and eval.maia3.score_moe
+    torch.backends.cuda.matmul.allow_tf32 = True  # as in training
 
     if not dist.is_initialized():
         with socket.socket() as s:
@@ -79,7 +71,7 @@ def load_model(checkpoint, source=None):
             if hasattr(p, key):
                 delattr(p, key)
     model.eval().requires_grad_(False)
-    return model, checkpoint, state["step"]
+    return model, checkpoint
 
 
 def norm(x):
@@ -165,7 +157,7 @@ class MoEOracle:
     def __init__(
         self, checkpoint, source=None, slots=1 << 18, rows=1 << 17, gather=1 << 18
     ):
-        self.model, self.checkpoint, self.step = load_model(checkpoint, source)
+        self.model, self.checkpoint = load_model(checkpoint, source)
         m = self.model
         a = m.blocks[0].attn
         self.heads, self.head_dim, self.width = a.num_heads, a.head_dim, a.dim
@@ -182,7 +174,7 @@ class MoEOracle:
 
     def reset(self):
         self.next_slot = self.next_row = 0
-        self.new_tokens = self.calls = 0
+        self.new_tokens = 0
 
     def handles(self, prefixes, features, clock_rule="predicted"):
         return MoEHandles(self, prefixes, features, clock_rule)
@@ -197,7 +189,7 @@ class MoEOracle:
 
     def prefill(self, prefixes, features, budget=16384, origins=None):
         """Last-position logits of each root prefix; returns (logits [R, V], path rows [R]).
-        origins: per-root rotary offsets (tests only; search uses 0)."""
+        origins: per-root rotary offsets (moe_parity only; search uses 0)."""
         origins = np.zeros(len(prefixes), np.int64) if origins is None else np.asarray(origins)
         out, rows = [], []
         lo = 0
@@ -264,7 +256,6 @@ class MoEOracle:
         last = torch.as_tensor(starts + np.array(lengths) - 1, device=dev)
         z, _ = forward(self.model, ids, pos, feats, boards, previous, attend, last)
         self.new_tokens += total
-        self.calls += 1
         return z, list(range(row, row + count))
 
     def extend(self, parents, tokens, lengths, feats, boards):
@@ -315,13 +306,12 @@ class MoEOracle:
         feats = torch.as_tensor(feats, device=dev, dtype=torch.float32)
         boards = torch.as_tensor(boards, device=dev)
         z, _ = forward(self.model, ids, pos, feats, boards, previous, attend)
-        self.calls += 1
         self.new_tokens += n
         return z.float().cpu().numpy(), np.arange(row, row + n)
 
 
 class MoEHandles:
-    """search/ bridge: ShipHandles' causal board/clock bookkeeping over MoEOracle.extend."""
+    """Evaluates search nodes: each node's causal board and clock features, then MoEOracle.extend."""
 
     def __init__(self, base, prefixes, features, clock_rule="predicted"):
         assert clock_rule in ("predicted", "zero")

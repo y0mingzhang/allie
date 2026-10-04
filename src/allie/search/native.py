@@ -1,8 +1,8 @@
-"""Content-addressed native rules/search builds; no writes to results or vendor."""
+"""Chess rules and search trees (native/tree.cpp) and value backups (native/value.cpp), compiled on first use
+into a cache keyed by their source, the chess-library header, Python and pybind11."""
 import fcntl
 import hashlib
 import importlib.util
-import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -10,9 +10,9 @@ import subprocess
 import sys
 import sysconfig
 
+from allie.data.vocab import MOVE_ID, MOVES  # noqa: F401
+
 SOURCE = Path(__file__).resolve().parent / "native"
-MOVES = json.loads((SOURCE / "move-table.json").read_text())
-MOVE_ID = {move: 378 + i for i, move in enumerate(MOVES)}
 
 
 @lru_cache(maxsize=2)

@@ -11,10 +11,10 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
 from allie import paths
 from allie.eval.maia3.aggregate import DATA, stats, views
 
+HERE = Path(__file__).resolve().parent
 G = paths.DATA
 ROOT = paths.ROOT / "results"
 SCORES = G / "distill-v2/scores"
@@ -69,7 +69,7 @@ def golden(name, info=None):
 
 
 def main():
-    s, masks = views()
+    s, _ = views()
     games = s[:, 0]
     rows = {}
     for m, g in MAIA.items():
@@ -91,7 +91,7 @@ def main():
             cost = gflops(STUDENT[m[1]])
         elif (ROOT / "pretrain" / n / "config.json").exists():
             cost = gflops(n)  # the run's own arch (moe_keep included)
-        else:  # the run stayed on a node's scratch (storage full): its name's K
+        else:  # no config.json: Allie 2.0 with the K experts in its name
             cost = big - (16 - int(k[1])) * per_expert if k else big
         rows[n] = dict(scores=load(p), gflops=cost, golden=golden(n, info))
     for p in sorted((G / "distill-v2/scores-topk").glob("*-k*.npz")):

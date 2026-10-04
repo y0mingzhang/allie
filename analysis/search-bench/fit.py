@@ -1,4 +1,4 @@
-"""Refit search/policy.py's output calibration on the dev split and apply it to the benchmark.
+"""Refit allie.search's output calibration (policy.py) on the dev split and apply it to the benchmark.
 
 Same functional form as the frozen policy (per-band alpha/beta mixture over five beta scales,
 feature-gated, then the fitted temperature): all 21 coefficients refit jointly by maximum
@@ -9,7 +9,7 @@ are fit on the dev positions routed to them. "temperature" refits only per-band 
 policy (beta = 0), the no-search control for what recalibration alone buys.
 
 Writes <tag>/devcal-<point>.npz (per-position CE, top-1 on the bench) and calibration-<tag>.json
-next to this file: search/calibration.json with budget_policies replaced by the refits (5/8/25/460
+next to this file: allie.search's calibration.json with budget_policies replaced by the refits (5/8/25/460
 are extra keys, reachable only through adapter.Bench); router, backup and old_parameters frozen.
 
 usage: fit.py <tag> [budgets,...]   (needs <tag>/<budget> for the bench and <tag>-dev/<budget> for dev)
@@ -23,6 +23,7 @@ import numpy as np
 import torch
 
 import adapter
+from allie.search.algorithm import CALIBRATION
 
 torch.set_default_dtype(torch.float64)
 D = adapter.DATA / "search"
@@ -152,7 +153,7 @@ def main():
     bench, dev = adapter.positions(), adapter.dev_positions()
     only = sys.argv[2].split(",") if len(sys.argv) > 2 else None
     have = lambda b: (only is None or b in only) and (D / f"{tag}-dev" / b).exists() and (D / tag / b).exists()
-    cal = json.loads((adapter.REPO / "search/calibration.json").read_text())
+    cal = json.loads(CALIBRATION.read_text())
     fits, out = {}, {}
 
     def emit(key, ce, top1, bd, dev_ce):

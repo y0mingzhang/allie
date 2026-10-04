@@ -1,17 +1,19 @@
-"""Parity of MoEOracle with the training forward, in separable checks (TF32 on, as the trainer).
+"""Parity of MoEOracle with the training forward on golden-eval rows, in separable checks (TF32 on, as in training).
 
 A. Restatement: oracle.forward() driven by the training's own flex attention, row positions,
    boards and smear mask on packed golden rows, against the eager training forward (bitwise?).
 B. Tree cache: nodes reached one token at a time (16-move chains batched across games, plus a
    sibling branch per root) against a fresh prefill of the same prefixes.
 C. Matched positions: oracle prefill + chains with each game's original row offset as rotary
-   origin, against the compiled training forward (what eval.maia3.score_moe and evaluate() run). Only the
-   attention kernel (SDPA over gathered keys vs flex) and compiler fusion differ.
+   origin, against the compiled training forward (what the evaluators run). Only the attention kernel (SDPA over
+   gathered keys vs flex) and compiler fusion differ.
 D. Search positions: the same with in-game rotary positions (origin 0), as search runs it. For
    scale: the compiled forward with every game packed SHIFT tokens later, and the eager forward.
 Each comparison gives the raw logits, KL(ref || other) over the move softmax, the signed mean
 difference of the played move's log-probability, and the W/D/L probabilities and predicted
 think seconds that steer the tree.
+
+usage: python -m allie.search.moe_parity --checkpoint CKPT [--out report.json]
 """
 
 import argparse
@@ -23,11 +25,12 @@ import numpy as np
 import torch
 from scipy.special import softmax
 
+from allie import paths
 from allie.search.board import encode, predicted_seconds
 from allie.search.moe_oracle import MoEOracle, forward, network
 from allie.search.native import from_prefix
 
-G = Path("/data/group_data/dei-group/yimingz3/allie/strat-eval-v1")
+G = paths.DATA / "strat-eval-v1"
 SHIFT = 37
 
 

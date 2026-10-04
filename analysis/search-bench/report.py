@@ -22,7 +22,7 @@ from allie.eval.maia3.aggregate import boot
 
 DATA = paths.DATA / "maia3-bench"
 HERE = Path(__file__).resolve().parent
-FLOPS = json.loads((HERE.parent / "aggregate-sweep1e18.json").read_text())["flops"]
+FLOPS = json.loads((paths.ROOT / "results/recipe10x/maia3-bench/aggregate-sweep1e18.json").read_text())["flops"]
 BUDGETS = ["5", "8", "25", "128", "460", "adaptive"]
 BANDS = {4: "<1400", 5: "1400-2000", 6: "2000-2400", 7: ">=2400"}
 MAIA = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
@@ -32,8 +32,7 @@ MODEL = {
     "bigrun132k": ("big run step 132K", 24, 1536),
     "bigrun": ("big run", 24, 1536),
 }
-# Allie 2.0 (MoE 0.69B active / 5.6B total): 2 x active matmul parameters (report_sweep1e18.sweep_flops with
-# its source's extra_flops); its raw reference is the Maia-3 watcher's eval.maia3.score_moe output of the same checkpoint
+# Allie 2.0: 2 x active matmul parameters per move; its raw reference is eval.maia3.score_moe on the same checkpoint
 FLOPS |= {t: dict(flops_per_move=1389084288) for t in ("bigrun132k", "bigrun")}
 RAW = {
     "bigrun132k": DATA / "bigrun-v2/step-00132096/scores.npz",

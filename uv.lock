@@ -30,7 +30,6 @@ figures = [
 ]
 search = [
     { name = "pybind11" },
-    { name = "safetensors" },
 ]
 test = [
     { name = "pytest" },
@@ -48,7 +47,6 @@ requires-dist = [
     { name = "pybind11", marker = "extra == 'search'", specifier = ">=3.0,<4" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "safetensors", marker = "extra == 'bot'", specifier = ">=0.4" },
-    { name = "safetensors", marker = "extra == 'search'", specifier = ">=0.4" },
     { name = "scipy", specifier = ">=1.11" },
     { name = "torch", specifier = "==2.10.*", index = "https://download.pytorch.org/whl/cu128" },
     { name = "vl-convert-python", marker = "extra == 'figures'", specifier = ">=1.7" },

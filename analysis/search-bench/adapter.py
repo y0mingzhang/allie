@@ -1,21 +1,9 @@
-"""Run the frozen search (allie.search) on the Maia-3 benchmark positions.
-
-allie.search is imported, never modified. Two adapters:
-- load(): allie.search.model.load_checkpoint with one extra arch key allowed, fp32_small_masters, which
-  only moves optimizer masters (model.network.create_model keeps the model weights BF16).
-- Bench.predict(): Search._batch at any fixed budget; 5/8/25 use the frozen 128-simulation policy,
-  460 the frozen 512 one (calibration.json has no others).
+"""Maia-3 benchmark and dev positions as search queries, and Bench: Search at any fixed budget, where 5/8/25
+use the 128-simulation output policy and 460 the 512 one unless the calibration has its own.
 """
 
-import hashlib
-import json
-import shutil
-from pathlib import Path
-
 import numpy as np
-import torch
 
-import allie.search.model as sm
 from allie import paths
 from allie.search import Search
 from allie.search.native import from_prefix
@@ -25,56 +13,8 @@ DATA = paths.DATA / "maia3-bench"
 POLICY = {5: "128", 8: "128", 25: "128", 128: "128", 460: "512"}
 
 
-def load(path, device="cpu"):
-    """The sweep source also dropped the clock/Elo token tables, unused at feats=3 (the port
-    reads them only under config clock/elo): zero tables fill their slots."""
-    real = torch.load
-
-    def patched(*a, **k):
-        state = real(*a, **k)
-        if "model" in state:
-            state["config"]["arch"].pop("fp32_small_masters", None)
-            assert not state["config"].get("clock") and not state["config"].get("elo")
-            w = state["model"]["embed.weight"]
-            for key in ("clock_embed.weight", "elo_embed.weight"):
-                state["model"].setdefault(key, w.new_zeros(64, w.shape[1]))
-        return state
-
-    sm.torch.load = patched
-    try:
-        return sm.load_checkpoint(path, device)
-    finally:
-        sm.torch.load = real
-
-
-def export(checkpoint, out):
-    """allie.search.export with load() in place of load_checkpoint."""
-    from safetensors.torch import save_file
-
-    out = Path(out)
-    out.mkdir(parents=True, exist_ok=False)
-    model, source = load(checkpoint)
-    config = dict(
-        model_type="allie_chess",
-        allie=vars(model.config),
-        auto_map={"AutoConfig": "configuration_allie.AllieConfig"},
-        architectures=["AllieShipForCausalLM"],
-        torch_dtype="bfloat16",
-    )
-    (out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
-    shutil.copy(Path(sm.__file__).with_name("configuration_allie.py"), out / "configuration_allie.py")
-    save_file(
-        {k: v.contiguous() for k, v in model.state_dict().items()},
-        str(out / "model.safetensors"),
-    )
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    (out / "provenance.json").write_text(
-        json.dumps(dict(checkpoint=str(source), sha256=digest), indent=2) + "\n"
-    )
-
-
 def positions():
-    """Benchmark positions: prefix tokens, causal features, cell, target token, game, band."""
+    """Benchmark positions: prefix tokens, causal features, cell, target token, game."""
     with np.load(G / "strat.npz") as z:
         rows = z["rows"].astype(np.int64)
     with np.load(G / "feats.npz") as z:
@@ -105,21 +45,6 @@ def dev_positions():
     o, tokens, feats = z["offsets"], z["tokens"], z["feats"]
     return [dict(prefix=tokens[a:b].tolist(), features=feats[a:b].copy(), cell=int(c), target=int(t), game=int(g))
             for a, b, c, t, g in zip(o[:-1], o[1:], z["cell"], z["target"], z["game"])]
-
-
-def subsample(n_per_band, seed=20260924):
-    """Stratified: n_per_band positions per blitz band, indices into the 80K sample (sorted)."""
-    with np.load(DATA / "games.npz") as z:
-        cell = z["sel"][z["keep"]][:, 2]
-    rng = np.random.default_rng(seed)
-    return np.sort(
-        np.concatenate(
-            [
-                rng.choice(np.flatnonzero(cell == c), n_per_band, replace=False)
-                for c in (4, 5, 6, 7)
-            ]
-        )
-    )
 
 
 class Bench(Search):

@@ -1,13 +1,12 @@
-"""Inference-only form of the frozen modded-medium chess transformer.
-
-No distributed training, Triton, or SGLang import. Attention/cache storage is a
-backend callback; all embedding, gate, rotary, residual and head math is shared.
-Derived from the project's MIT-licensed model.nanogpt implementation.
+"""Inference-only port of the dense transformer (board CNN, SwiGLU, three clock features), used for FLOP
+counts and as a CPU reference backend. Attention is a backend callback. Derived from the project's MIT-licensed
+model.nanogpt implementation.
 """
 from types import SimpleNamespace
 import torch
 from torch import nn
 from torch.nn import functional as F
+from allie.model.board import BoardConv
 
 
 def linear(x,w):return F.linear(x,w.to(x.dtype))
@@ -22,10 +21,10 @@ class AttentionWeights(nn.Module):
 
 
 class BlockWeights(nn.Module):
-    def __init__(self,width,heads,value_gate,hidden,kind):
+    def __init__(self,width,heads,value_gate,hidden):
         super().__init__();self.attn=AttentionWeights(width,heads,value_gate)
         self.mlp=nn.Module()
-        self.mlp.register_parameter('c_fc',nn.Parameter(torch.empty(hidden*(2 if kind=='swiglu' else 1),width,dtype=torch.float32)))
+        self.mlp.register_parameter('c_fc',nn.Parameter(torch.empty(2*hidden,width,dtype=torch.float32)))
         self.mlp.register_parameter('c_proj',nn.Parameter(torch.empty(hidden,width,dtype=torch.float32)))
 
 
@@ -37,14 +36,13 @@ class ChessLM(nn.Module):
         self.skip_gates=nn.ModuleList([nn.Linear(16,1,bias=False,dtype=torch.bfloat16) for _ in range(3)])
         ne=min(5,l//2)
         self.value_embeds=nn.ModuleList([nn.Embedding(v,w,dtype=torch.bfloat16) for _ in range(ne)])
-        self.blocks=nn.ModuleList([BlockWeights(w,h,i<ne or i>=l-ne,c.mlp_hidden,c.mlp) for i in range(l)])
+        self.blocks=nn.ModuleList([BlockWeights(w,h,i<ne or i>=l-ne,c.mlp_hidden) for i in range(l)])
         self.lm_head=nn.Linear(w,v,bias=False,dtype=torch.bfloat16)
         self.embed=nn.Embedding(v,w,dtype=torch.bfloat16)
         self.embed2=nn.Embedding(v,w,dtype=torch.bfloat16)
-        self.clock_embed=nn.Embedding(64,w,dtype=torch.bfloat16)
+        self.clock_embed=nn.Embedding(64,w,dtype=torch.bfloat16)  # in the checkpoints, unused at feats=3
         self.elo_embed=nn.Embedding(64,w,dtype=torch.bfloat16)
         self.feat_embed=nn.Embedding(64,w,dtype=torch.bfloat16)
-        from .board import BoardConv
         self.board=BoardConv(w)
         self.x0_lambdas=nn.Parameter(torch.empty(2*l,dtype=torch.float32))
         self.scalars=nn.Parameter(torch.empty(c.scalars_size,dtype=torch.float32))
@@ -55,8 +53,7 @@ class ChessLM(nn.Module):
         self.skip_out=[9*l//16+i for i in range(3)]
 
     def norm(self,x):
-        # Native PyTorch RMSNorm uses the accumulation dtype's epsilon (FP32 for
-        # BF16 inputs), verified against the pinned 2.10 source runtime.
+        # Native PyTorch RMSNorm uses the accumulation dtype's epsilon (FP32 for BF16 inputs).
         return F.rms_norm(x,(x.size(-1),),eps=self.config.norm_eps)
 
     def rotary(self,x,positions):
@@ -64,12 +61,9 @@ class ChessLM(nn.Module):
         a,b=x.chunk(2,-1)
         return torch.cat((a*cos+b*sin,a*(-sin)+b*cos),-1)
 
-    def forward_hidden(self,ids,positions,backend,clock=None,elo=None,feats=None,states=None):
+    def forward_hidden(self,ids,positions,backend,feats,states):
         c=self.config;w,l,hd=c.width,c.layers,c.head_dim;h=w//hd
         x=F.embedding(ids,self.embed.weight if c.split_embed else self.lm_head.weight)
-        if c.clock:x=x+F.embedding(torch.zeros_like(ids) if clock is None else clock,self.clock_embed.weight)
-        if c.elo:x=x+F.embedding(torch.zeros_like(ids) if elo is None else elo,self.elo_embed.weight)
-        assert feats is not None and states is not None, 'Ship model requires causal clock/board inputs'
         t=feats[:,:c.feats].float()
         v=torch.log1p(t.clamp(min=0))[...,None]/10
         freqs=torch.pi*2.0**torch.arange(8,device=t.device)
@@ -91,11 +85,9 @@ class ChessLM(nn.Module):
                 x=x+gate*skips.pop();skip_idx+=1
             if i==0:x=(self.scalars[0]+x0lam[0,0])*x+x0lam[0,1]*x02
             else:x=self.scalars[i]*x+x0lam[i,0]*x0+x0lam[i,1]*x02
-            if hasattr(backend,'trace'):backend.trace(f'input{i}',x)
             a=block.attn;an=self.norm(x)
             q,k,v=F.linear(an,sa[i,0]*a.qkvo_w[:3*w].to(an.dtype)).view(-1,3*h,hd).chunk(3,dim=-2)
             q=self.rotary(self.norm(q),positions);k=self.rotary(self.norm(k),positions)
-            if c.key_offset and i in self.long_layers:k=backend.shift_keys(k,positions,i)
             if values[i] is not None:
                 gate=2*torch.sigmoid(linear(an[...,:16],a.value_embed_gate.weight)).view(-1,h,1)
                 v=v+gate*values[i].view_as(v)
@@ -105,11 +97,8 @@ class ChessLM(nn.Module):
             y=y.reshape(-1,w)
             x=x+F.linear(y,sa[i,1]*a.qkvo_w[3*w:].to(y.dtype))
             mn=self.norm(x);m=linear(mn,block.mlp.c_fc)
-            if c.mlp=='swiglu':
-                ma,mb=m.chunk(2,-1);m=F.silu(ma)*mb
-            else:m=F.relu(m).square()
+            ma,mb=m.chunk(2,-1);m=F.silu(ma)*mb
             x=x+linear(m,block.mlp.c_proj.T)
-            if hasattr(backend,'trace'):backend.trace(f'output{i}',x)
             if i in self.skip_in:skips.append(x)
             if i==self.skip_out[-1]:backout=x
         return self.norm(x-self.scalars[3*l+1]*backout)
@@ -119,19 +108,13 @@ class ChessLM(nn.Module):
         return 23*torch.sigmoid((z+5)/7.5)
 
     def forward(self,ids,positions,backend,feats,states):
-        return self.logits(self.forward_hidden(ids,positions,backend,feats=feats,states=states))
+        return self.logits(self.forward_hidden(ids,positions,backend,feats,states))
 
 
 class DenseBackend:
-    """Single-document correctness backend; eager SDPA on either CPU or CUDA."""
+    """One game, full prefix: eager SDPA on CPU or CUDA."""
     def previous_embedding(self,x,positions):
         return torch.cat((torch.zeros_like(x[:1]),x[:-1]))
-
-    def shift_keys(self,k,positions,layer):
-        d=k.shape[-1];out=k.clone()
-        out[1:,:,d//4:d//2]=k[:-1,:,d//4:d//2]
-        out[1:,:,3*d//4:]=k[:-1,:,3*d//4:]
-        return out
 
     def attention(self,q,k,v,layer,window,scale):
         q,k,v=(x.transpose(0,1)[None] for x in (q,k,v));n=q.shape[-2]
@@ -155,8 +138,7 @@ def load_checkpoint(path,device='cpu'):
         vocab_size=weights['lm_head.weight'].shape[0],scalars_size=weights['scalars'].numel(),
         rotary_length=inf['yarn']['cos'].shape[0],split_embed=inf['split_embed'],
         ws_short=inf['ws_short'],ws_long=inf['ws_long'],attn_scale=inf['yarn']['attn_scale'],
-        feats=cfg['feats'],mlp=arch['mlp'],mlp_hidden=weights['blocks.0.mlp.c_proj'].shape[0],key_offset=arch['key_offset'],
-        clock=cfg.get('clock',False),elo=cfg.get('elo',False),norm_eps=torch.finfo(torch.float32).eps)
+        feats=cfg['feats'],mlp_hidden=weights['blocks.0.mlp.c_proj'].shape[0],norm_eps=torch.finfo(torch.float32).eps)
     model=ChessLM(config)
     model.load_state_dict(dict(weights)|dict(cos=inf['yarn']['cos'],sin=inf['yarn']['sin']))
     return model.to(device).eval(),path

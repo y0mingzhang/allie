@@ -1,8 +1,8 @@
-"""Production entry point for the frozen coverage search and repaired Allie.
+"""Search: root-coverage search with an Elo-routed budget and a calibrated output policy, and the original
+Allie's MCTS for comparison.
 
-The caller supplies past tokens and causal clock features, never a target move.
-Neural backends implement reset() and handles(prefixes, features, clock_rule).
-Search state and neural caches belong to one batch; no cross-game memory.
+An oracle implements reset(), new_tokens and handles(prefixes, features, clock_rule), which returns the root
+logits and a callable that evaluates search nodes. Every batch starts from a reset oracle.
 """
 import json
 from pathlib import Path
@@ -31,7 +31,7 @@ class Search:
         optional features (len(prefix),3): mover seconds, opponent seconds,
         mover's previous OWN think time. Unknown entries are -1.
         Fixed coverage budgets: 64/128/256/512/1000; legal uses no search.
-        Allie is a comparison method with an explicit fixed simulation budget.
+        allie: the original Allie's MCTS at a fixed simulation budget, for comparison.
         """
         if method not in ("coverage", "legal", "allie") or clock_rule not in ("predicted", "zero"):
             raise ValueError("unknown search method or clock rule")
@@ -98,7 +98,7 @@ class Search:
         if method == "coverage":
             if budget == "adaptive":
                 choices = [128, 256, 512, 1000]
-                allocated = np.array(choices)[route(cells, None, par["adaptive"], choices)]
+                allocated = np.array(choices)[route(cells, par["adaptive"], choices)]
             else:
                 allocated.fill(budget)
             allocated[forced] = 0
@@ -137,7 +137,7 @@ class Search:
                 # Native root edges use the same deterministic legal order.
                 np.testing.assert_array_equal(moves, ids[i, :mask[i].sum()])
                 q[i, :len(moves)] = values
-            probability = output(logits, q, mask, alpha, beta, "reverse")
+            probability = output(logits, q, mask, alpha, beta)
             nodes = np.asarray(bridge.per_root_queries)
         if int(nodes.sum()) != bridge.queries:
             raise RuntimeError("node accounting mismatch")

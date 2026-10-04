@@ -17,8 +17,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# allie.search: the native tree search build and model export
-search = ["pybind11>=3.0,<4", "safetensors>=0.4"]
+# allie.search: the native tree search build
+search = ["pybind11>=3.0,<4"]
 # allie.lichess: weights from the Hugging Face Hub, and exporting them from a training checkpoint
 bot = ["huggingface_hub>=0.20", "safetensors>=0.4"]
 # allie.lichess.chat: game chat written by Claude (off unless [chat] enabled)

@@ -1,4 +1,4 @@
-"""Main's frozen search over the Maia-3 benchmark positions, one resident SGLang model per job.
+"""Search with an MoE checkpoint on the Maia-3 benchmark positions (or the dev split), one model per job.
 
 Positions go in a stratified order (round-robin over the four blitz bands, random within each),
 so the first 4n are n per band and --limit only ever extends the set. Every chunk of 1024 is
@@ -25,12 +25,6 @@ def order(cell, seed=20260924):
     return np.stack([b[:n] for b in bands], 1).ravel()
 
 
-def ship_oracle(export):
-    from allie.search.runtime import ShipOracle
-
-    return ShipOracle(export)
-
-
 def moe_oracle(checkpoint, source=None, slots=1 << 18):
     from allie.search.moe_oracle import MoEOracle
 
@@ -54,9 +48,8 @@ class Capture:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--export", help="SGLang export of a dense ship-recipe checkpoint")
-    p.add_argument("--moe", help="MoE checkpoint, served by moe-oracle/oracle.py instead")
-    p.add_argument("--source", help="the MoE checkpoint's training source (default: the sweep's)")
+    p.add_argument("--moe", required=True, help="MoE checkpoint")
+    p.add_argument("--source", help="a pre-package checkpoint's frozen source")
     p.add_argument("--slots", type=int, default=1 << 18, help="MoE tree-cache key/value slots")
     p.add_argument("--out", required=True)
     p.add_argument("--budgets", default="legal,8,25,128,460,adaptive")
@@ -66,19 +59,19 @@ def main():
     a = p.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    if a.moe:  # chunks are skipped by path: bind the folder to one checkpoint, source and position set
-        st = Path(a.moe).resolve().stat()
-        want = dict(model=str(Path(a.moe).resolve()), inode=st.st_ino, size=st.st_size,
-                    mtime_ns=st.st_mtime_ns, source=a.source, set=a.set)  # fmt: skip
-        m = out / "manifest.json"
-        if m.exists():
-            assert json.loads(m.read_text()) == want, (m, want)
-        else:
-            m.write_text(json.dumps(want, indent=1) + "\n")
+    # chunks are skipped by path: bind the folder to one checkpoint, source and position set
+    st = Path(a.moe).resolve().stat()
+    want = dict(model=str(Path(a.moe).resolve()), inode=st.st_ino, size=st.st_size,
+                mtime_ns=st.st_mtime_ns, source=a.source, set=a.set)  # fmt: skip
+    m = out / "manifest.json"
+    if m.exists():
+        assert json.loads(m.read_text()) == want, (m, want)
+    else:
+        m.write_text(json.dumps(want, indent=1) + "\n")
     P = adapter.positions() if a.set == "bench" else adapter.dev_positions()
     ix = order(np.array([q["cell"] for q in P]))[: a.limit]
     t0 = time.monotonic()
-    oracle = Capture(moe_oracle(a.moe, a.source, a.slots) if a.moe else ship_oracle(a.export))
+    oracle = Capture(moe_oracle(a.moe, a.source, a.slots))
     print(f"startup {time.monotonic() - t0:.0f}s", flush=True)
     engine = adapter.Bench(
         oracle, batch_size=128, threads=min(8, len(os.sched_getaffinity(0)))

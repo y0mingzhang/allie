@@ -20,7 +20,7 @@ import report  # noqa: E402
 
 D = report.DATA / "search"
 BUDGETS = ["5", "8", "25", "128", "460"]
-# useful training FLOPs of the sweep's MoE optima (sweep-readout-c8s200f0v4-w4.json "c")
+# useful training FLOPs of the sweep's compute-optimal MoE runs
 LADDER = {
     "sw1e17-moe-s42": 6.296e17,
     "sw3e17-moe-s42": 1.850e18,
