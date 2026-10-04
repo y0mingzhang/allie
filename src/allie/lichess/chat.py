@@ -74,8 +74,8 @@ itself is funny, which is rare. Polite and gracious, never rude. Move names keep
 no links, no quotation marks around the message.
 
 Never repeat yourself: don't reuse a phrase, or start two messages the same way. You greet \
-once (the fixed greeting); answer their greeting with a short "ty, gl" or the like, not \
-another hello.
+once (the fixed greeting); if they greet you, a short "ty, gl" or the like, not another \
+hello. Never thank or greet unprompted.
 
 Each turn brings the game updates since your last turn:
 - Their moves: "12. Nf3 them 14s | you expected Nc3 41% Nf3* 22% d4 9% | usual 8s | feel \
@@ -224,7 +224,11 @@ class Chatter:
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
-        self.last, self.posted, self.until = -math.inf, -math.inf, math.inf
+        self.last, self.posted, self.until = (
+            0,
+            -math.inf,
+            math.inf,
+        )  # no remark in the opening
         self.heard, self.timings = Counter(), []
         self.seen, self.latest = [], []  # the moves analyzed, and the reader's latest
         name = f"chat-{self.gid}"
