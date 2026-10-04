@@ -120,8 +120,9 @@ code's is −0.0005 [−0.0014, +0.0004] nats with the C++ kernels on CPU in BF1
 with the CUDA graphs on GPU (plain PyTorch: −0.0003 [−0.0013, +0.0006] and −0.0006 [−0.0015, +0.0003]). The
 top move agrees with plain PyTorch's on 99.4% of positions on CPU and 99.6% on GPU.
 
-**int8, the CPU default,** costs +0.0021 [+0.0000, +0.0043] nats of CE against BF16 with the C++ kernels
-(plain PyTorch: +0.0016 ± 0.0011), for half the memory and about 1.6 times the speed. `int8=False` keeps BF16.
+**int8, the CPU default,** costs +0.0021 [+0.0001, +0.0042] nats of CE against BF16 with the C++ kernels
+(plain PyTorch: +0.0016, standard error 0.0011), for half the memory and about 1.6 times the speed.
+`int8=False` keeps BF16.
 
 ## Intended use and limitations
 
