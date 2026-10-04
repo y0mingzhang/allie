@@ -461,6 +461,8 @@ class Chatter:
         if live:
             return
         self.status, self.winner = status, s.get("winner")
+        if self.want and self.want[2]:  # a moment of the last moves: the end decides
+            self.want = None
         if self.offer and status == "draw":
             self.note("Event: you accepted their draw offer.")
         self.note(f"Event: the game is over: {self.result()}.")
@@ -675,12 +677,15 @@ def opponent(e, me):
     return (p.get("id") or p.get("name") or "anonymous").lower()
 
 
+GGS = re.compile(
+    r"((g+ ?g+s?|ggwp|wp|well played|good game|nice game|ty|thx|thanks) ?)+"
+)
+
+
 def gg(text):
-    """Is it a short "good game"?"""
-    t = text.lower()
-    return len(t) <= 30 and bool(
-        re.search(r"\bg+ *g+s?\b|good game|well played|\bwp\b", t)
-    )
+    """Is it only a "good game" (gg, gg wp, good game, ty gg, ...)?"""
+    t = " ".join(re.sub(r"[^\w ]", " ", text.lower()).split())
+    return bool(GGS.fullmatch(t)) and not re.fullmatch(r"(ty|thx|thanks) ?", t)
 
 
 def quiet(e):
@@ -817,9 +822,10 @@ def recase(text, board):
     for m in board.move_stack:
         sans.add(b.san(m))
         b.push(m)
-    known = {x.lower().rstrip("+#"): x.rstrip("+#") for x in sans if x[0] in "KQRBNO"}
+    exact = {x.rstrip("+#") for x in sans}  # a pawn's bxc4 stays when Bxc4 is legal too
+    known = {x.lower(): x for x in exact if x[0] in "KQRBNO"}
     return re.sub(r"\b[kqrbn][a-h]?[1-8]?x?[a-h][1-8]\b|\bo-o(?:-o)?\b",
-                  lambda m: known.get(m[0], m[0]), text)  # fmt: skip
+                  lambda m: m[0] if m[0] in exact else known.get(m[0], m[0]), text)  # fmt: skip
 
 
 def parts(text):

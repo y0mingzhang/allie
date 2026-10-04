@@ -100,6 +100,14 @@ def test_clean_and_played():
     assert clean("May the best pawn win.</text>") == "may the best pawn win."
     assert clean("Nice, Qxd7# and O-O. Bxe4 WOW") == "nice, Qxd7# and O-O. Bxe4 wow"
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
+    for t in ("why did you say gg?", "not a good game", "gg ez lol", "ty"):
+        assert not chat.gg(t)
+    b = chess.Board()
+    for u in "e2e4 e7e5 g1f3 b8c6".split():
+        b.push_uci(u)
+    assert chat.recase("nf3 then bc4 or bb5, be ok", b) == "Nf3 then Bc4 or Bb5, be ok"
+    b = chess.Board("7k/8/8/1B6/2p5/1P6/8/4K3 w - - 0 1")  # bxc4 and Bxc4 both legal
+    assert chat.recase("bxc4 or Bxc4", b) == "bxc4 or Bxc4"
     long = "First sentence here, quite long. " * 3 + "x" * 50
     a, b = chat.parts(long)
     assert a.endswith("long.") and len(a) <= 140 and len(b) <= 140
@@ -208,6 +216,18 @@ def test_reciprocity(engine, caplog):
     assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
     c.moment(time.monotonic(), "a test")
     assert c.want is None  # quiet_p_moment 0
+
+
+def test_short_game_ends_quietly(engine):
+    """A moment queued by the last moves doesn't outlive the end: a quiet opponent's game of
+    two plies ends without a call."""
+    m = Model("wow")
+    g = Game(engine, opp="brief", hello="", quiet_p_moment=1, p_end=0, every=0)
+    c = g.chatter(m)
+    g.feed(g.full())
+    c.ply = lambda t, j: c.moment(t, "a surprise")  # every move a moment
+    g.feed(state("e2e4 e7e5", status="resign", winner="black"))
+    assert m.calls == [] and g.posts == []
 
 
 def test_header_and_stale(engine, monkeypatch):
