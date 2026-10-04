@@ -1078,7 +1078,8 @@ def _signature():
 def library():
     """The compiled kernels (ctypes), building them for this CPU on first use."""
     cxx = os.environ.get("CXX", "c++")
-    key = hashlib.sha256(f"{SOURCE}\n{cxx}\n{_signature()}".encode()).hexdigest()[:16]
+    march = os.environ.get("ALLIE_MARCH")  # e.g. "-march=haswell": an AVX2 build anywhere
+    key = hashlib.sha256(f"{SOURCE}\n{cxx}\n{march}\n{_signature()}".encode()).hexdigest()[:16]
     cache = (
         Path(os.environ.get("ALLIE_CACHE", Path.home() / ".cache" / "allie"))
         / "kernels"
@@ -1103,7 +1104,7 @@ def library():
             str(tmp),
         ]
         try:
-            for arch in (["-march=native"], ["-mcpu=native"], []):
+            for arch in [march.split()] if march else (["-march=native"], ["-mcpu=native"], []):
                 r = subprocess.run(base + arch, capture_output=True, text=True)
                 if r.returncode == 0:
                     break
