@@ -19,6 +19,14 @@ def test_cells_bin_the_rating(monkeypatch):
     assert calibration.cell(2200, "blitz") is calibration.cell(2000, "bullet") is None
 
 
+def test_cells_are_on_their_ladders():
+    """Every searching cell's budget is a rung of its searcher's; beta None (the calibrated
+    distribution) only for coverage; bullet never searches."""
+    for (speed, b), (kind, budget, beta) in calibration.CELLS.items():
+        assert budget in calibration.LADDER[kind] and (beta is not None or kind == "coverage")
+        assert speed in ("blitz", "rapid", "classical") and b % 200 == 0 and 800 <= b <= 2600
+
+
 def test_the_clock_caps_the_budget():
     """The largest rung up to the cell's budget that fits a tenth of the clock above the reserve
     (review: a 0.2 s clock must not search); a search may run to a fifth before it stops."""
@@ -40,8 +48,9 @@ def test_tilt():
 
 
 class Search:
-    """Records budgets and deadlines; gives the legal moves, coverage's calibrated distribution with
-    the first move certain, and a flat prior with the last move valued 1 and the others -1."""
+    """Records budgets and deadlines; gives the legal moves in reverse board order, coverage's
+    calibrated distribution with the board's first move certain, and a flat prior with the board's
+    last move valued 1 and the others -1."""
 
     def __init__(self, kind):
         self.kind, self.budgets, self.deadlines, self.late = kind, [], [], False
@@ -51,10 +60,10 @@ class Search:
         self.deadlines.append(deadline)
         if self.late:
             return None
-        moves = [m.uci() for m in game.board.legal_moves]
-        last, prior = np.arange(len(moves)) == len(moves) - 1, np.full(len(moves), 1 / len(moves))
+        moves = [m.uci() for m in game.board.legal_moves][::-1]  # not the board's order: mapped by name
+        last, prior = np.arange(len(moves)) == 0, np.full(len(moves), 1 / len(moves))
         if self.kind == "coverage":
-            return moves, (np.arange(len(moves)) == 0).astype(float), prior, np.where(last, 1.0, -1.0)
+            return moves, (np.arange(len(moves)) == len(moves) - 1).astype(float), prior, np.where(last, 1.0, -1.0)
         return moves, prior, np.where(last, 1.0, -1.0)
 
 

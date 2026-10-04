@@ -228,7 +228,8 @@ def test_lookahead_values_every_move(tiny):
 )
 def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path):
     """On the fast backend lookahead runs on the games' threads through the engine's batches: the
-    same values as one at a time, up to BF16 batching noise; past its deadline it gives None."""
+    same values as one at a time, up to BF16 batching noise, with the engine held busy while the
+    requests queue so they must merge; past its deadline it gives None."""
     pytest.importorskip("pybind11")
     import threading
 
@@ -244,6 +245,9 @@ def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path):
         games.append(Game(engine, 2400, 2400, 1800, 20, "classical"))
         games[-1].update(random_game(s, 12 + 2 * s), 1700, 1690)
     alone, together = [search(g, 4) for g in games], [None] * len(games)
+    release = threading.Event()
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
 
     def go(i):
         together[i] = search(games[i], 4)
@@ -251,8 +255,11 @@ def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path):
     threads = [threading.Thread(target=go, args=(i,)) for i in range(len(games))]
     for t in threads:
         t.start()
-    for t in threads:
+    time.sleep(0.5)  # every first request is queued behind the blocker
+    release.set()
+    for t in [blocker, *threads]:
         t.join()
+    assert engine.widest > 8  # more than one game's nodes in a forward: requests merged
     for (m1, p1, q1), (m2, p2, q2) in zip(alone, together):
         assert m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 1e-2
     assert search(games[0], 4, deadline=time.monotonic() - 1) is None
