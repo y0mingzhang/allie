@@ -1563,8 +1563,8 @@ class Graphs:
             2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width
         )  # elements per slot
         size = per * torch.tensor([], dtype=m.dtype).element_size()
-        if slots is None:  # a third of the free memory, at most 32 games
-            slots = min(32, int(torch.cuda.mem_get_info(m.device)[0] / 3 // size))
+        if slots is None:  # a third of the free memory, at most 64 games
+            slots = min(64, int(torch.cuda.mem_get_info(m.device)[0] / 3 // size))
         if slots < 1:
             raise RuntimeError("no GPU memory for a cache pool")
         kw = dict(dtype=m.dtype, device=m.device)
