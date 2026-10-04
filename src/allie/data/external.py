@@ -29,7 +29,6 @@ import requests
 
 from allie import paths
 from allie.data import store as cd
-from allie.data.fetch import sha256
 from allie.data.vocab import BOS, SECONDS, TERM_NORMAL, TERM_OTHER
 from allie.data.mix import SHARD_GAMES as SHARD
 
@@ -159,6 +158,11 @@ def urls(src):
                     + re.search(rf'href="(CCRL-{l}\.\[\d+\]\.pgn\.7z)"', html)[1]
                 )
             return out
+
+
+def sha256(path):
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def fetch_tcec():
