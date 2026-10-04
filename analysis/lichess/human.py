@@ -378,7 +378,7 @@ def fit(a):
     n, loser, kind = outcomes(G)
     fit_half, check_half = 0, 1
     report = {"games": int(len(n)), "positions": int(len(P["k"])),
-              "split": "parameters fitted on even game ids, everything reported on odd ones"}  # fmt: skip
+              "split": "coefficients and thresholds fitted on even game ids; the odd ones validate, and informed the choice of the hazard's form, floor and acceptance percentile"}  # fmt: skip
     hold = np.arange(len(n)) % 2 == check_half
     report["endings (held-out human games)"] = {
         FORMATS[f]: {KINDS[i]: round(float(np.mean(kind[hold & (G["fmt"] == f)] == i)), 3) for i in range(6)}
@@ -452,11 +452,13 @@ def fit(a):
             loss_at_resign=q(R["wdl"][r, 2], (5, 25, 50)), ply_at_resign=q(R["k"][r], (25, 50, 75)),
         )  # fmt: skip
     by_loss = []
-    for lo, hi in zip((floor, 0.5, 0.7, 0.85, 0.95, 0.99, 0.999), (0.5, 0.7, 0.85, 0.95, 0.99, 0.999, 1.01)):
+    edges = [floor] + [k for k in KNOTS if k > floor] + [1.01]
+    for lo, hi in zip(edges[:-1], edges[1:]):
         for on in (1, 0):
             m = te & (R["wdl"][:, 2] >= lo) & (R["wdl"][:, 2] < hi) & (R["on"] == on)
-            by_loss.append(dict(loss=[lo, hi], on_turn=on, n=int(m.sum()), observed=round(float(y[m].mean()), 4),
-                                predicted=round(float(h[m].mean()), 4)))  # fmt: skip
+            if m.any():
+                by_loss.append(dict(loss=[lo, hi], on_turn=on, n=int(m.sum()), observed=round(float(y[m].mean()), 4),
+                                    predicted=round(float(h[m].mean()), 4)))  # fmt: skip
     report["resign"] = dict(floor=floor, coef=coef.round(4).tolist(), calibration=calibration,
                             calibration_by_loss=by_loss, players=out)  # fmt: skip
 

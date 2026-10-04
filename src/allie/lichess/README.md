@@ -92,7 +92,9 @@ trust_remote_code=True)`, see the model card).
 ## Human-likeness
 
 Measured on the main evaluation's July 2026 games between two humans with every clock known, 12,159 games.
-Parameters come from the even-numbered half; every number below is from the odd half.
+Coefficients and thresholds come from the even-numbered half; every number below is from the odd half,
+which also guided the choice of the hazard's form, the floor and the acceptance percentile, so it is a
+validation set rather than an untouched holdout.
 
 **Think time.** Seconds per move, from the think-time head's draws at the human positions, against the
 humans' own times there. The model draws as humans spend.
@@ -129,9 +131,9 @@ compute) plus 0.1 s of lag. Endings, bot (human):
 
 - **Resignation** happens about as often as in human games, and 7-22% of the bot's resignations come right
   after its own move, against 13% for humans.
-- **Flags** are much rarer than between humans: the bot does not fall into time trouble as humans do, and
-  the guard stops it from flagging. In 9 of the 100 bullet games, a bot flagged while the model did not
-  count it as losing.
+- **Flags** are much rarer than between humans: the bot falls into time trouble less often, and the guard
+  limits how long it thinks with little time left. It still flags: in 9 of the 100 bullet games, a bot
+  flagged while the model did not count it as losing.
 - **Draws** include repetition, stalemate and insufficient material. The bot agrees to draws in 2-3% of
   blitz to classical games, as humans do.
 
