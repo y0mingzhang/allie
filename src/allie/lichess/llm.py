@@ -192,28 +192,43 @@ class Claude:
         a, start = self.sdk, time.monotonic()
         if start < self.until or not self.ledger.allows():
             return None
-        first = None
+        first = seen = r = None
         try:
             with self.client.beta.messages.stream(
                 system=system, messages=messages, **self.params
             ) as s:
-                for ev in s:
-                    if first is None and ev.type == "content_block_delta":
-                        first = time.monotonic() - start
-                    if time.monotonic() - start > self.cfg.timeout:
-                        raise TimeoutError(f"no reply in {self.cfg.timeout} s")
-                r = s.get_final_message()
+                deadline = threading.Timer(
+                    self.cfg.timeout, s.close
+                )  # a total deadline
+                deadline.start()
+                try:
+                    for ev in s:
+                        if ev.type == "message_start":
+                            seen = ev.message.usage
+                        elif first is None and ev.type == "content_block_delta":
+                            first = time.monotonic() - start
+                    r = s.get_final_message()
+                finally:
+                    deadline.cancel()
         except (a.AuthenticationError, a.PermissionDeniedError, a.NotFoundError,
                 a.BadRequestError) as e:  # fmt: skip
             log.error("chat model off: %s", e)
             self.until = math.inf
-            return None
         except a.RateLimitError:
             log.warning("chat model rate limited; pausing a minute")
             self.until = start + 60
-            return None
-        except (a.APIError, TimeoutError) as e:  # timeouts, connection, server errors
-            log.warning("chat model: %s", e)
+        except Exception as e:  # noqa: BLE001 - timeouts, the deadline, connection, server
+            log.warning(
+                "chat model: %s after %.1f s",
+                e or type(e).__name__,
+                time.monotonic() - start,
+            )
+        if (
+            r is None
+        ):  # a stream that started is billed: what it read, all it could write
+            if seen is not None:
+                worst = self.cfg.max_tokens * PRICES[self.cfg.model][4] / 1e6
+                self.ledger.add(cost(self.cfg.model, seen) + worst)
             return None
         u, t = r.usage, time.monotonic() - start
         usd = cost(r.model if r.model in PRICES else self.cfg.model, u)

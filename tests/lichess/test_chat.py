@@ -181,6 +181,12 @@ def test_quiet_rated_and_close(engine):
     assert g.posts[-1] == ("player", chat.QUIET) and len(g.posts) == 2
     g.feed(state("e2e4 e7e5"), g.say("hello?"))
     assert len(m.calls) == 2
+    g4 = Game(engine, opp="early")
+    g4.chatter(Model("x"))
+    g4.c.put(g4.full())
+    g4.c.put(g4.say("!quiet"))  # before the chat thread reads the game
+    g4.c.q.join()
+    assert g4.posts == [("player", chat.QUIET)]
     g2 = Game(engine, opp="quiet")
     g2.chatter(m)
     g2.feed(g2.full())
@@ -306,9 +312,12 @@ class FakeAPI:
                     ({k.lower(): v for k, v in self.headers.items()}, body)
                 )
                 step = api.script.pop(0)
-                if isinstance(step, tuple):
+                stall = 0
+                if isinstance(step, tuple) and step[0] == "sleep":
                     time.sleep(step[1])
                     step = {"speak": False, "text": ""}
+                elif isinstance(step, tuple):  # ("stall", s): stall after message_start
+                    stall, step = step[1], {"speak": False, "text": ""}
                 if isinstance(step, int):
                     data = json.dumps(
                         {"type": "error", "error": {"type": "x", "message": "no"}}
@@ -344,6 +353,7 @@ class FakeAPI:
                         f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode()
                     )
                     self.wfile.flush()
+                    time.sleep(stall)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -355,7 +365,7 @@ def test_claude(monkeypatch, tmp_path):
     thinking, fallback, caching), the key file, cost into the ledger, timeouts, a bad key."""
     pytest.importorskip("anthropic")
     say = {"speak": True, "text": "Nice move!"}
-    api = FakeAPI([say, ("sleep", 1.5), 401, say])
+    api = FakeAPI([say, ("sleep", 1.5), ("stall", 3), 401, say])
     monkeypatch.setenv("ANTHROPIC_BASE_URL", api.url)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     key, ledger = tmp_path / "key", tmp_path / "spend.json"
@@ -383,10 +393,18 @@ def test_claude(monkeypatch, tmp_path):
     start = time.monotonic()
     assert m(system, [{"role": "user", "content": "u"}]) is None  # timeout
     assert time.monotonic() - start < 1.4
-    assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
+    start = time.monotonic()
     assert (
-        m(system, [{"role": "user", "content": "u"}]) is None and len(api.requests) == 3
-    )
+        m(system, [{"role": "user", "content": "u"}]) is None
+    )  # stalled after starting
+    assert time.monotonic() - start < 1.4  # the total deadline
+    partial = (
+        300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + 300) * 10
+    ) / 1e6  # + all it could write
+    assert json.loads(ledger.read_text())[day] == pytest.approx(usd + partial)
+    assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
+    assert m(system, [{"role": "user", "content": "u"}]) is None
+    assert len(api.requests) == 4
     key.unlink()
     assert llm.make(cfg)(system, []) is None  # no key
 

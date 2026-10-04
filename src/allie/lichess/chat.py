@@ -208,6 +208,8 @@ class Chatter:
 
     def put(self, event):
         """From the reader thread: note what can't wait, queue the event."""
+        if event and event.get("type") == "gameFull" and self.opp is None:
+            self.opp = opponent(event, self.me)
         if quiet(event) and (event.get("username") or "").lower() == self.opp:
             MUTED.add(self.opp)  # at once: a reply being written is not posted
         if event and event.get("type") in ("gameFull", "gameState"):
@@ -244,7 +246,9 @@ class Chatter:
                     self.fetch()
                 if self.want and not self.done:
                     self.respond()
-                if self.status and (time.monotonic() > self.until or self.muted()):
+                over = time.monotonic() > self.until or self.muted()
+                stopped = getattr(self.match.bot, "stopped", None)
+                if self.status and over or stopped and stopped.is_set():
                     self.stop()
             except Exception:
                 log.exception("game %s chat", self.gid)
@@ -292,7 +296,7 @@ class Chatter:
         self.white = (e["white"].get("id") or "").lower() == self.me
         us, them = ("white", "black") if self.white else ("black", "white")
         opp, play = e.get(them) or {}, self.match.bot.config.play
-        self.opp = (opp.get("id") or opp.get("name") or "anonymous").lower()
+        self.opp = opponent(e, self.me)
         rating = opp.get("rating")
         ours = rating if play.rating == "opponent" else play.rating
         rating, ours = rating or ours or 1500, ours or rating or 1500
@@ -610,6 +614,13 @@ class Chatter:
                 self.line(
                     time.monotonic(), "player", x.get("user", ""), x.get("text", "")
                 )
+
+
+def opponent(e, me):
+    """The opponent's user id in a gameFull event, in lower case."""
+    white = (e["white"].get("id") or "").lower() == me
+    p = e.get("black" if white else "white") or {}
+    return (p.get("id") or p.get("name") or "anonymous").lower()
 
 
 def quiet(e):
