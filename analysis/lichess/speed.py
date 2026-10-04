@@ -56,7 +56,7 @@ def main():
         torch.set_num_threads(a.threads)
     t0 = time.perf_counter()
     m = Model(a.model, a.device, torch.bfloat16, a.active_experts, a.int8, a.backend, a.threads)
-    backend = "fast" if m.fast else "torch"
+    backend = "fast" if m.fast or m.graphs else "torch"
     threads = m.fast.threads if m.fast else torch.get_num_threads()
     out = dict(device=str(m.device), backend=backend, int8=a.int8, experts=m.keep, threads=threads,
                load_seconds=round(time.perf_counter() - t0, 1))  # fmt: skip
