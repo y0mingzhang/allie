@@ -207,3 +207,16 @@ def test_a_search_past_its_deadline_stops(tiny_path, monkeypatch):
     moves, p = search(game, 32)
     assert len(calls) > 3
     assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves) and abs(p.sum() - 1) < 1e-9
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_lookahead_values_every_move(tiny):
+    pytest.importorskip("pybind11")
+    game = Game(Engine(tiny), 2400, 2500, 1800, 10)
+    game.update(random_game(7, 14), 1700, 1690)
+    moves, prior, q = tree.Lookahead(m=4, k=2)(game, 3)
+    assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
+    assert abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all() and (np.abs(q) <= 1).all()

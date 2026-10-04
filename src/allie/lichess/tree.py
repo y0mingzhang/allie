@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from allie.search import Search
+from allie.search import Search, lookahead
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
 from allie.search.native import from_prefix, load
 
@@ -254,3 +254,23 @@ class Coverage:
         except Late:
             return None
         return [MOVES[t - MOVE_START] for t in out["tokens"]], out["probabilities"]
+
+
+class Lookahead:
+    """search(game, calls) -> (legal moves, their prior, their searched values for the mover):
+    allie.search.lookahead on the game's cache, m root moves grown by k children a call after the first."""
+
+    def __init__(self, m=8, k=2, beta=4.0):
+        self.m, self.k, self.beta = m, k, beta
+
+    def __call__(self, game, calls):
+        z = game.sync()
+        feats = np.array(game.features(), np.float32)
+
+        def run():
+            tree = Tree(game, z, capacity=256 + calls * self.m * self.k)
+            bridge = tree.handles([game.tokens], [feats])
+            return lookahead.search(bridge, game.tokens, calls, self.m, self.k, self.beta)
+
+        moves, prior, q = game.engine.run(run)
+        return [MOVES[t - MOVE_START] for t in moves], prior, q
