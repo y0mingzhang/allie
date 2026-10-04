@@ -6,8 +6,6 @@ those of the same per-block compiled graphs run without them.
 resume: 8 steps crossing the multi-token switch (4) and the embed split (5), saved after 3 steps
 (model state and rank_state_dict, in memory), rebuilt, restored and continued: losses and every
 model and optimizer tensor equal the uninterrupted run's. Not covered: world-size resharding.
-ARCH='{"moe_shard": true}' (JSON, merged into the arch): the same with the experts sharded (the
-model state with whole experts, as model.pt keeps them).
 
     torchrun --standalone --nproc_per_node=2 tests/checks/checkpoint_resume.py
 """
@@ -22,7 +20,6 @@ import torch
 import torch.distributed as dist
 
 from allie import paths
-from allie.model import shard as expert_shard
 from allie.data.packed import Packed
 from allie.model.network import (
     Config,
@@ -38,14 +35,13 @@ from allie.train.schedule import Schedule
 DATA = str(paths.DATA / "lichess_tokens_v2")
 SCHEDULE = Schedule(warmup_steps=2, mtp_steps=4, split_step=5, batch_rows=2)
 ORIGINAL = core._eager_block
-ARCH = json.loads(os.environ.get("ARCH", "{}"))
 
 
 def build():
     torch.manual_seed(701)
     cfg = Config(
         width=128, head_dim=64, layers=8, max_tokens=1024, scheduled_steps=8, ckpt="eager",
-        arch=dict(moe=[16, 2], moe_seq=0.001) | ARCH,
+        arch=dict(moe=[16, 2], moe_seq=0.001, moe_update="quantile"),
     )  # fmt: skip
     m = create_model(cfg, device=torch.device("cuda", int(os.environ["LOCAL_RANK"])))
     with torch.no_grad():  # nonzero expert outputs: every expert grad carries signal
@@ -71,7 +67,7 @@ def advance(val, m, mgr, net, step):
             mgr.activate_hooks(step)
         x, y = batch(val, step, micro)
         ctx = make_context(x, mgr.ws_short * 128, mgr.ws_long * 128)
-        logits = net(x.flatten(), y.flatten(), ctx, mgr.get_forward_args())
+        logits = net(x.flatten(), ctx, mgr.get_forward_args())
         loss, move, count = move_losses(logits, x, y, ctx, mgr.mtp_weights)
         (loss * (dist.get_world_size() / 8)).backward()
         primary.append(float(move.detach() / count))
@@ -80,12 +76,9 @@ def advance(val, m, mgr, net, step):
 
 
 def snapshot(m, mgr):
-    """Every rank's copy of the model state (whole experts) and its own rank state, once the owners'
-    updates of the last step have arrived."""
+    """The model state and this rank's state, once the owners' updates of the last step have arrived."""
     core.sync_params()
-    whole = [expert_shard.state_dict(m, cpu_copy)]
-    dist.broadcast_object_list(whole, 0)
-    return dict(model=whole[0], manager=mgr.rank_state_dict())
+    return dict(model=cpu_copy(m.state_dict()), manager=mgr.rank_state_dict())
 
 
 def equal(a, b, path="root"):
@@ -119,16 +112,14 @@ def recompute(val, checkpointed):
             p.grad, p.fresh = None, True
         x, y = batch(val, 0, 0)
         ctx = make_context(x, mgr.ws_short * 128, mgr.ws_long * 128)
-        z = net(x.flatten(), y.flatten(), ctx, mgr.get_forward_args())
+        z = net(x.flatten(), ctx, mgr.get_forward_args())
         z.float().square().mean().backward()
     proof = {"output": z.detach().cpu()}
     for name, p in m.named_parameters():
-        grads = (p.grad, getattr(p, "main_grad", None), getattr(p, "part", None))
+        grads = (p.grad, getattr(p, "main_grad", None))
         grad = next((g for g in grads if g is not None), None)
         if grad is not None:
             proof[name] = grad.detach().cpu().clone()
-    shards = {n for n, p in m.named_parameters() if getattr(p, "local", False)}
-    assert shards <= proof.keys(), shards - proof.keys()
     core._eager_block = ORIGINAL
     del m, mgr, net
     gc.collect()

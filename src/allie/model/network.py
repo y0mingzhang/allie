@@ -23,7 +23,6 @@ from torch.nn.attention.flex_attention import (
 from allie.model import arch as model_arch
 from allie.model import attention as attn_kernels
 from allie.model import board as board_cnn
-from allie.model import shard as expert_shard
 from allie.model import nanogpt as core
 from allie.train.runtime import prime_source_key
 from allie.train.schedule import Schedule
@@ -196,30 +195,10 @@ def configure(cfg, device):
     core.DEFER = cfg.ckpt == "eager"
 
 
-def build(cfg, shard):
-    """The seeded FP32 init on the host, every rank the same; shard: this rank keeps its experts' slice."""
-    model = core.GPT(
-        VOCAB,
-        cfg.layers,
-        cfg.width // cfg.head_dim,
-        cfg.head_dim,
-        cfg.width,
-        cfg.max_tokens,
-        moe=moe_layers(cfg),
-    )
-    if shard:
-        expert_shard.shard([m for m in model.modules() if isinstance(m, core.MoE)])
-    return model
-
-
 def moe_layers(cfg):
     """Per block: its MoE constructor arguments (model_arch.moe_dims), None for a dense MLP."""
-    dense = model_arch.resolve(cfg.arch)["moe_dense_first"]
-    if not model_arch.moe_dims(cfg.width, cfg.arch):
-        return [None] * cfg.layers
-    return [None] * dense + [
-        model_arch.moe_dims(cfg.width, cfg.arch, j) for j in range(cfg.layers - dense)
-    ]
+    dims = model_arch.moe_dims(cfg.width, cfg.arch)
+    return [None] * cfg.layers if not dims else [None] + [dims] * (cfg.layers - 1)
 
 
 def create_model(cfg, device="cuda"):
@@ -228,39 +207,28 @@ def create_model(cfg, device="cuda"):
         # upstream initializes autograd on the device before the model and collectives; here, not at
         # import, so the module imports without a GPU
         torch.empty(1, device=device, requires_grad=True).backward()
-    world = dist.get_world_size()
-    shard = model_arch.resolve(cfg.arch)["moe_shard"] and world > 1
-    # sharded, two ranks at a time: the node holds two whole FP32 inits (~40-53 GB each at width 2048), not eight
-    turns = world // 2 if shard else 1
-    for turn in range(turns):
-        if dist.get_rank() * turns // world == turn:
-            model = build(cfg, shard).to(device)
-        if turns > 1:
-            dist.barrier()
+    # the seeded FP32 init on the host, every rank the same
+    model = core.GPT(
+        VOCAB,
+        cfg.layers,
+        cfg.width // cfg.head_dim,
+        cfg.head_dim,
+        cfg.width,
+        cfg.max_tokens,
+        moe=moe_layers(cfg),
+    ).to(device)
     for i, block in enumerate(model.blocks):
         for p in block.parameters():
             p.block = i
     model.use_feats = cfg.feats
-    model.use_x0 = model_arch.resolve(cfg.arch)["x0"]
     model.feat_embed.weight.lr_mul = cfg.input_lr_mul
     model.board = board_cnn.build(cfg.width).to(device)
-    arch = model_arch.resolve(cfg.arch)
-    model.header_feats = arch["header_feats"]
-    model.tc_header = arch["tc_header"]
-    if model.header_feats:  # zero init, no RNG draw: every other init is unchanged
-        w = torch.zeros(128, cfg.width, device=device)
-        model.header_embed = torch.nn.Embedding(128, cfg.width, _weight=w)
-        w = model.header_embed.weight
-        lr = arch["header_lr_mul"]
-        w.label, w.wd_mul = "embed2", 5.0
-        w.lr_mul = cfg.input_lr_mul if lr is None else lr
     # Follow upstream: BF16 embeddings/gates/head; the board stays FP32
     for m in model.modules():
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)):
             m.weight.data = m.weight.data.bfloat16()
     for p in model.parameters():
-        if not getattr(p, "local", False):
-            dist.broadcast(p.detach(), 0)
+        dist.broadcast(p.detach(), 0)
     small = model_arch.resolve(cfg.arch)["fp32_small_masters"]
     masters = MASTER_LABELS + ("attn_gate", "value_embed_gate") * small
     for p in model.parameters():
@@ -365,8 +333,6 @@ class TrainingManager(core.TrainingManager):
                     group["lr"] *= 0.5
                     group["weight_decay"] *= 2
                     group["betas"] = tuple(b**0.5 for b in group["betas"])
-                if arch["wd_scale"] != 1:
-                    group["weight_decay"] *= arch["wd_scale"]
 
     def advance_schedule(self, step):
         super().advance_schedule(step)

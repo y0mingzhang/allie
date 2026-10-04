@@ -38,8 +38,16 @@ def worker(mode, tmp, rank):
     import torch.distributed as dist
 
     from allie.train import checkpoints as mc
-    from allie.train.state import atomic_save, rng_state
+    from allie.train.state import rng_state
     from allie.model.network import cpu_copy
+
+    def atomic_save(state, path):  # the synchronous twin's writer
+        partial = path.with_suffix(path.suffix + ".partial")
+        with partial.open("wb") as f:
+            torch.save(state, f)
+            f.flush()
+            os.fsync(f.fileno())
+        partial.replace(path)
 
     torch.set_num_threads(1)
     dist.init_process_group(

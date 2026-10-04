@@ -27,17 +27,22 @@ STUDENT = {"896": "sw-1e18-s16-18x896-c8s200f0v4-s42", "1024": "sw-1e18-s16-20x1
 
 
 def gflops(run):
-    from allie.model.arch import extra_flops
+    from allie.model.arch import extra_flops, moe_dims
 
     c = json.loads((ROOT / "pretrain" / run / "config.json").read_text())["config"]
     d, L, heads = c["width"], c["layers"], c["width"] // c["head_dim"]
+    arch = dict(c["arch"])
+    keep = arch.pop("moe_keep", 0)  # routed through the best keep of its top-k experts
     gates = L + 2 * min(5, L // 2)
     f = (
         24 * L * d * d
         + 2 * d * 2432
         + 2 * (gates * heads * 16 + 64)
-        + extra_flops(c["arch"], d, L)
+        + extra_flops(arch, d, L)
     )
+    if keep:
+        _, k, routed, *_ = moe_dims(d, arch)
+        f -= 6 * (L - 1) * d * routed * (k - keep)
     return f / 1e9
 
 

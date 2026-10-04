@@ -6,9 +6,7 @@ import hashlib
 import json
 import os
 import random
-import shutil
 import signal
-import threading
 import time
 import uuid
 from dataclasses import asdict
@@ -22,7 +20,6 @@ import triton
 
 from allie.model import arch as model_arch
 from allie.model import network
-from allie.model import shard as expert_shard
 from allie.model import moe_kernels
 from allie.train.state import restore_rng, rng_state
 from allie.data.packed import Packed
@@ -30,8 +27,6 @@ from allie.model.arch import extra_flops
 from allie.train.checkpoints import AsyncSaver, RowLog, publish
 from allie.train.checkpoints import prune as prune_checkpoints
 from allie.model.network import (
-    MOVE_END,
-    MOVE_START,
     RUNTIME_SOURCE_KEY,
     Config,
     TrainingManager,
@@ -57,16 +52,11 @@ SAME = (
 # later SAME arguments, with the value a checkpoint that predates them ran with
 SAME_SINCE = dict(
     init_from=None,
-    kd_teacher=None,
-    kd_alpha=0.0,
-    kd_temp=1.0,
     moe_remat=False,
     moe_chunks=1,
 )
 # Config fields --init-from may change: they leave the function the parent computes unchanged
 INIT_FREE = ("scheduled_steps", "input_lr_mul", "ckpt", "ckpt_frac")
-# arch switches it may change: the parent's weights, computed otherwise
-INIT_FREE_ARCH = ("moe_keep",)
 
 
 def read_model(path):
@@ -102,10 +92,7 @@ def init_from(model, cfg, path):
     p.fp32, so they are reset to the loaded BF16 weights. Returns its provenance."""
     state, path = read_model(path)
     old, new = asdict(Config(**state["config"])), asdict(cfg)
-    free = lambda arch: {
-        k: v for k, v in model_arch.resolve(arch).items() if k not in INIT_FREE_ARCH
-    }
-    old["arch"], new["arch"] = free(old["arch"]), free(new["arch"])
+    old["arch"], new["arch"] = model_arch.resolve(old["arch"]), model_arch.resolve(new["arch"])
     for key in old:
         assert key in INIT_FREE or old[key] == new[key], f"init changes {key}"
     restore(model, state)
@@ -125,47 +112,6 @@ def init_from(model, cfg, path):
     )
 
 
-def load_teacher(path, cfg):
-    """A frozen eval-mode model of a checkpoint's own config, built before the student so that
-    network.configure's globals stay the student's. Returns (model, its config, its windows, provenance)."""
-    state, path = read_model(path)
-    tcfg = Config(**dict(state["config"], ckpt="none", ckpt_frac=1.0))
-    assert tcfg.feats == cfg.feats, "teacher reads other clock features"
-    model = create_model(tcfg)
-    for p in model.parameters():
-        p.requires_grad_(False)
-        for key in ("fp32", "master", "main_grad"):
-            p.__dict__.pop(key, None)
-    restore(model, state)
-    model.eval()
-    with path.open("rb") as f:
-        digest = hashlib.file_digest(f, "sha256").hexdigest()
-    windows = (state["inference"]["ws_short"], state["inference"]["ws_long"])
-    info = dict(
-        model=str(path),
-        model_sha256=digest,
-        step=state["step"],
-        config=state["config"],
-        source_sha256=state["source_sha256"],
-    )
-    return model, tcfg, windows, info
-
-
-def kd_losses(logits, teacher, targets, mask, temp):
-    """Summed cross-entropy of the teacher's move softmax at temperature temp against the student's,
-    times temp^2, and the summed KL, on the positions move_losses scores."""
-    lo, hi = MOVE_START, MOVE_END
-    s = logits.reshape(-1, logits.size(-1))[:, lo:hi].float() / temp
-    t = teacher.reshape(-1, teacher.size(-1))[:, lo:hi].float() / temp
-    y = targets.flatten()
-    valid = (y >= lo) & (y < hi) & mask.flatten()
-    p, logp = t.softmax(-1), t.log_softmax(-1)
-    logq = s.log_softmax(-1)
-    ce = -(p * logq).sum(-1)
-    kl = (p * (logp - logq)).sum(-1)
-    return temp * temp * (ce * valid).sum(), (kl * valid).sum().detach()
-
-
 @torch.inference_mode()
 def evaluate(model, manager, rows, batch):
     model.eval()
@@ -175,7 +121,7 @@ def evaluate(model, manager, rows, batch):
         ids = torch.as_tensor(data, device="cuda")
         x, y = ids[:, :-1], ids[:, 1:]
         context = make_context(x, manager.ws_short * 128, manager.ws_long * 128)
-        logits = model(x.flatten(), y.flatten(), context, manager.get_forward_args())
+        logits = model(x.flatten(), context, manager.get_forward_args())
         values = logits.flatten(0, 1)[:, 378:2346].float()
         targets = y.flatten()
         losses = (
@@ -284,41 +230,6 @@ def migratable(key, old, new):
     return False
 
 
-def keep_model(src, kept, away=None):
-    """Hard-link src into kept/ (instant; prune cannot free it); away: then move it there from a thread, durably,
-    dropping the link only once the copy is synced (a failed or cut copy leaves the link)."""
-    if kept.exists() or (away and away.exists()):
-        return  # kept before an interruption
-    kept.parent.mkdir(exist_ok=True)
-    os.link(src, kept)
-    if away is None:
-        return
-
-    def move():
-        away.parent.mkdir(parents=True, exist_ok=True)
-        tmp = away.with_suffix(".partial")
-        with kept.open("rb") as f, tmp.open("wb") as g:
-            shutil.copyfileobj(f, g, 64 << 20)
-            g.flush()
-            os.fsync(g.fileno())
-        tmp.replace(away)
-        d = os.open(away.parent, os.O_RDONLY)
-        try:
-            os.fsync(d)  # the rename itself, before the link goes
-        finally:
-            os.close(d)
-        kept.unlink()
-
-    threading.Thread(target=move, daemon=True).start()
-
-
-def last_checkpoint(out):
-    """The step of the run's last committed checkpoint before this one (0: none)."""
-    f = out / "checkpoints.jsonl"
-    rows = f.read_text().splitlines() if f.exists() else []
-    return max((json.loads(x)["step"] for x in rows if x.endswith("}")), default=0)
-
-
 def init_triton_signals():
     """Let LLVM register its handlers before installing the trainer's callbacks.
 
@@ -359,15 +270,6 @@ def main():
         type=int,
         default=0,
         help="0 keeps all; otherwise retain the latest N plus best (a save of nonfinite weights is refused)",
-    )
-    p.add_argument(
-        "--keep-model-every",
-        type=int,
-        default=0,
-        help="hard-link the first model.pt at or after each multiple of this step into kept/ (never pruned)",
-    )
-    p.add_argument(
-        "--keep-model-dir", help="move the kept copies to DIR/NAME (another filesystem)"
     )
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
@@ -430,13 +332,7 @@ def main():
         "down output, the gates' grad, a batched matmul per chunk, may round otherwise on GPU)",
     )
     p.add_argument(
-        "--shard-late-prefetch",
-        action="store_true",
-        help="moe_shard: the backward gathers the next layer's experts after this layer's expert grads, not "
-        "before (one gathered layer less at the peak; less overlap)",
-    )
-    p.add_argument(
-        "--arch", default="{}", help="model-track switches, JSON (model.arch.DEFAULTS)"
+        "--arch", default="{}", help="architecture switches, JSON (model.arch.DEFAULTS)"
     )
     p.add_argument(
         "--clock-feats",
@@ -464,25 +360,12 @@ def main():
         help="start from this checkpoint's weights (pointer or directory) with a fresh optimizer",
     )
     p.add_argument(
-        "--kd-teacher",
-        help="checkpoint (pointer or directory) whose move softmax is a training target",
-    )
-    p.add_argument(
-        "--kd-alpha",
-        type=float,
-        default=0.0,
-        help="move objective: (1 - alpha) * played-move NLL + alpha * teacher CE",
-    )
-    p.add_argument("--kd-temp", type=float, default=1.0, help="KD softmax temperature")
-    p.add_argument(
         "--final-model-only",
         action="store_true",
         help="the last scheduled step's checkpoint holds model.pt only, published as final.pt (last.pt "
         "stays at the previous, resumable checkpoint)",
     )
     a = p.parse_args()
-    assert 0 <= a.kd_alpha <= 1 and 0 < a.kd_temp < float("inf")
-    assert a.kd_teacher or (a.kd_alpha == 0 and a.kd_temp == 1)
     schedule = Schedule(**json.loads(a.wsd_schedule))
     schedule.validate()
     assert a.initial_batch_rows == schedule.batch_rows
@@ -514,7 +397,6 @@ def main():
     torch.utils.deterministic.fill_uninitialized_memory = False
     network.ATTENTION = "triton" if a.attn_kernel else "flex"
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
-    expert_shard.LATE = a.shard_late_prefetch
     torch.backends.cuda.matmul.allow_tf32 = True
     assert a.initial_batch_rows * 1024 % (a.micro_batch * world * a.row_tokens) == 0
     assert a.micro_batch * a.row_tokens % 1024 == 0
@@ -539,10 +421,6 @@ def main():
         arch=json.loads(a.arch),
     )
     aux = bool(a.aux_time or a.aux_wdl)
-    teacher = None
-    if a.kd_teacher:
-        teacher, tcfg, windows, teacher_info = load_teacher(a.kd_teacher, cfg)
-        tnet = torch.compile(teacher, dynamic=False, fullgraph=True)
     torch.manual_seed(a.seed)
     model = create_model(cfg)
     load_path = a.resume or a.wsd_fork_from or a.wsd_continue_from
@@ -551,11 +429,6 @@ def main():
         if rank == 0:
             (out / "ft-init.json").write_text(json.dumps(init, indent=1) + "\n")
     manager = TrainingManager(model, cfg, schedule, a.wsd_decay_start, a.wsd_end_step)
-    if teacher is not None:
-        assert windows == (manager.ws_short, manager.ws_long), (
-            "teacher attends otherwise"
-        )
-        tschedule = network.core.ForwardScheduleConfig(None, *windows)
     net = torch.compile(model, dynamic=False, fullgraph=a.ckpt != "eager")
     from allie.data.mix import (
         ROW,
@@ -583,11 +456,8 @@ def main():
     val_idx = np.random.default_rng(20260910).choice(
         int(val.ends[-1]), min(a.val_rows, int(val.ends[-1])), replace=False
     )
-    # sharded experts make every forward a collective: all ranks evaluate, rank 0 records
-    sharded = any(m.pos is not None for m in manager.moe)
-    vrows = val.rows(val_idx) if rank == 0 or sharded else None
+    vrows = val.rows(val_idx) if rank == 0 else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
-    teacher_flops = 0  # the teacher's forward FLOPs, not in useful_training_flops
     runtime = dict(
         torch=torch.__version__,
         triton=triton.__version__,
@@ -676,11 +546,6 @@ def main():
             shared["elapsed_seconds"],
             local["useful_training_flops"],
         )
-        if teacher is not None:
-            assert (shared.get("kd_teacher") or {}).get("model_sha256") == teacher_info[
-                "model_sha256"
-            ], "Resume changes the teacher"
-            teacher_flops = local["teacher_forward_flops"]
         if a.wsd_fork_from or a.wsd_continue_from:
             # Endpoint model compute includes prefix; branch allocation time does not.
             elapsed_prior, best = 0.0, float("inf")
@@ -707,10 +572,7 @@ def main():
         args=vars(a),
         config=config_dict(cfg),
         world_size=world,
-        parameters=sum(
-            p.numel() * (world if getattr(p, "local", False) else 1)
-            for p in model.parameters()
-        ),
+        parameters=sum(p.numel() for p in model.parameters()),
         source_sha256=sources,
         runtime=runtime,
         dataset=json.loads((ROOT / "results/original-data.json").read_text()),
@@ -723,7 +585,6 @@ def main():
         continuation_provenance=continuation_provenance,
         source_changes=source_changes,
         job_id=os.environ.get("SLURM_JOB_ID"),
-        **(dict(kd_teacher=teacher_info) if teacher is not None else {}),
         compute_accounting="Useful model matmul FLOPs; excludes optimizer, elementwise and padded attention kernel work",
         gradient_normalization="Global summed objective /8, matching upstream fixed grad_accum_steps=8/world_size; physical microbatch accumulation does not change normalization",
     )
@@ -761,12 +622,10 @@ def main():
             rng=rng_state(),
             data=train.state_dict(),
             useful_training_flops=flops_local,
-            **({"teacher_forward_flops": teacher_flops} if teacher is not None else {}),
         )
         if not weights_only:
             saver.add(rank_state, directory / f"rank{rank}.pt")
         sync_params()
-        weights = expert_shard.state_dict(model, saver.snapshot)
         if rank == 0:
             inference = dict(
                 split_embed=model.split_embed,
@@ -781,7 +640,7 @@ def main():
             )
             saver.add(
                 dict(
-                    model=weights,
+                    model=saver.snapshot(model.state_dict()),
                     config=asdict(cfg),
                     args=vars(a),
                     source_sha256=sources,
@@ -795,7 +654,6 @@ def main():
                     continuation_provenance=continuation_provenance,
                     source_changes=source_changes,
                     elapsed_seconds=elapsed_prior + time.monotonic() - start,
-                    **({"kd_teacher": teacher_info} if teacher is not None else {}),
                 ),
                 directory / "model.pt",
             )
@@ -812,11 +670,6 @@ def main():
 
         def commit():
             publish(out, directory, step, world, names)
-            n = a.keep_model_every  # the first checkpoint at or after each multiple
-            if n and step // n > last_checkpoint(out) // n:
-                name = f"model-{step:08d}.pt"
-                away = a.keep_model_dir and Path(a.keep_model_dir) / a.name / name
-                keep_model(directory / "model.pt", out / "kept" / name, away)
             removed = prune_checkpoints(out, a.keep_checkpoints, directory)
             row = {
                 "step": step,
@@ -841,7 +694,6 @@ def main():
     primary_sum = torch.zeros((), device="cuda")
     count_sum = torch.zeros((), device="cuda")
     aux_sum = torch.zeros(4, device="cuda")  # time NLL, count, wdl NLL, count
-    kd_sum = torch.zeros((), device="cuda")  # KL(teacher || student)
     stop_reason = "steps"
     step = first
     # MEMSNAP: dump the allocator history before the third step and exit (memsnap dumps earlier OOMs)
@@ -874,13 +726,6 @@ def main():
             flops_local += useful_flops(
                 rows, cfg, manager.ws_short * 128, manager.ws_long * 128
             )
-            if teacher is not None:
-                teacher_flops += (
-                    useful_flops(
-                        rows, tcfg, manager.ws_short * 128, manager.ws_long * 128
-                    )
-                    // 3
-                )
             data = to_gpu(rows)
             x, y = data[:, :-1], data[:, 1:]
             context = make_context(
@@ -897,7 +742,6 @@ def main():
                 feat = to_gpu(feat[:, :-1].astype(np.int64)).flatten(0, 1)
             logits = net(
                 x.flatten(),
-                y.flatten(),
                 context,
                 manager.get_forward_args(),
                 feat_seq=feat,
@@ -906,15 +750,6 @@ def main():
             loss, primary, count = move_losses(
                 logits, x, y, context, manager.mtp_weights, mask
             )
-            if teacher is not None:
-                with torch.no_grad():
-                    target = tnet(
-                        x.flatten(), y.flatten(), context, tschedule, feat_seq=feat
-                    )
-                kd, kl = kd_losses(logits, target, y, mask, a.kd_temp)
-                del target
-                loss = (1 - a.kd_alpha) * loss + a.kd_alpha * kd
-                kd_sum += kl
             if aux:
                 t, w = (
                     to_gpu(train.last[k][:, :-1].astype(np.int64)).flatten()
@@ -961,8 +796,6 @@ def main():
                     count_sum.double()[None],
                     torch.tensor([flops_local], device="cuda", dtype=torch.float64),
                     aux_sum.double(),
-                    kd_sum.double()[None],
-                    torch.tensor([teacher_flops], device="cuda", dtype=torch.float64),
                 )
             )
             dist.all_reduce(stats)
@@ -1000,21 +833,12 @@ def main():
                         if aux
                         else {}
                     ),
-                    **(
-                        dict(
-                            kd_kl=(stats[7] / stats[1]).item(),
-                            teacher_forward_flops=stats[8].item(),
-                        )
-                        if teacher is not None
-                        else {}
-                    ),
                 ),
             )
             window_start, window_tokens, wait0 = time.monotonic(), 0, train.waited
             primary_sum.zero_()
             count_sum.zero_()
             aux_sum.zero_()
-            kd_sum.zero_()
         stop_code = 0
         if (
             step % 5 == 0
@@ -1042,8 +866,6 @@ def main():
         ):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
-            if sharded and rank:
-                evaluate(net, manager, vrows, a.micro_batch * a.row_tokens // 1024)
             if rank == 0:
                 metrics = evaluate(
                     net, manager, vrows, a.micro_batch * a.row_tokens // 1024
@@ -1073,7 +895,6 @@ def main():
             primary_sum.zero_()
             count_sum.zero_()
             aux_sum.zero_()
-            kd_sum.zero_()
         if stop_code:
             stop_reason = (
                 "signal"

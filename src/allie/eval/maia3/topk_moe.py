@@ -10,7 +10,7 @@ counts = routed = None
 
 def forward(self, x):
     k, mode = self.eval_topk
-    assert not self.training and self.score == "sigmoid"
+    assert not self.training and getattr(self, "score", "sigmoid") == "sigmoid"
     assert not getattr(self, "log_gates", False) and getattr(self, "pos", None) is None
     shape, d = x.shape, x.shape[-1]
     h = x.reshape(-1, d)

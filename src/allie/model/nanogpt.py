@@ -15,8 +15,6 @@ import triton
 import triton.language as tl
 from torch import Tensor, nn
 
-from allie.data.vocab import INCREMENTS_ID, SECONDS_ID
-from allie.model import shard as expert_shard
 from allie.model.arch import swiglu_hidden
 from allie.model.moe import MoE, replay_context
 
@@ -471,19 +469,14 @@ class NorMuon(torch.optim.Optimizer):
 
     One param group per label, its stacked params split into chunk_size rows per rank. BF16 weights
     (p.master) keep this rank's rows as an FP32 master, their grads arrive reduced into FP32 rows
-    (reduce_to_owner) and their BF16 params are rows of one buffer the owners publish into. local: this
-    rank's own params (expert shards, model.shard), all owned here, their grads reduced into their rows by
-    model.shard, updates published in place.
+    (reduce_to_owner) and their BF16 params are rows of one buffer the owners publish into.
     """
 
-    def __init__(
-        self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.95, local=False
-    ):
+    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, beta2=0.95):
         defaults = dict(
             lr=lr, weight_decay=weight_decay, momentum=momentum, beta2=beta2
         )
-        self.local = local
-        self.world_size = 1 if local else dist.get_world_size()
+        self.world_size = dist.get_world_size()
         # params whose broadcast from their owner waits for launch(), after the step's collectives
         self._deferred = [] if DEFER and self.world_size > 1 else None
         groups = defaultdict(list)
@@ -496,7 +489,7 @@ class NorMuon(torch.optim.Optimizer):
             ],
             defaults,
         )
-        rank = 0 if local else dist.get_rank()
+        rank = dist.get_rank()
         self._flat, self._pflat = {}, {}
         for i, group in enumerate(self.param_groups):
             ps, n = group["params"], group["chunk_size"]
@@ -507,10 +500,9 @@ class NorMuon(torch.optim.Optimizer):
                 group["master"] = torch.stack([p.fp32 for p in ps[lo : lo + n]]).to(
                     ps[0].device
                 )
-            if not local:  # local rows are built at the step (step())
-                self._flat[i] = torch.zeros(
-                    (n, *ps[0].shape), dtype=torch.float32, device=ps[0].device
-                )
+            self._flat[i] = torch.zeros(
+                (n, *ps[0].shape), dtype=torch.float32, device=ps[0].device
+            )
             self._pflat[i] = torch.zeros(
                 (n * self.world_size, *ps[0].shape),
                 dtype=ps[0].dtype,
@@ -519,11 +511,10 @@ class NorMuon(torch.optim.Optimizer):
             for k, p in enumerate(ps):
                 self._pflat[i][k].copy_(p.detach())
                 p.data, p.fresh, p.owner = self._pflat[i][k], True, k // n
-                owned = lo <= k < lo + n and not local
+                owned = lo <= k < lo + n
                 p.main_grad = self._flat[i][k - lo] if owned else None
                 del p.fp32
-                if not local:
-                    p.register_post_accumulate_grad_hook(reduce_to_owner)
+                p.register_post_accumulate_grad_hook(reduce_to_owner)
         # by index: load_state_dict replaces the group dicts
         self._group_of = {
             p: i for i, g in enumerate(self.param_groups) for p in g["params"]
@@ -546,15 +537,7 @@ class NorMuon(torch.optim.Optimizer):
             self._deferred is not None
         ):  # the last step's broadcasts, if a block has not run
             sync_params()
-        if self.local:  # the shards' grads (expert_shard.finish: BF16, FP32 once a second micro-batch adds) as FP32 rows
-            expert_shard.reset()
-            for i, g in enumerate(self.param_groups):
-                ps = g["params"]
-                self._flat[i] = ps[0].new_empty((len(ps), *ps[0].shape), dtype=torch.float32)
-                for k, p in enumerate(ps):
-                    self._flat[i][k].copy_(p.part)
-                    p.part = None
-        rank = 0 if self.local else dist.get_rank()
+        rank = dist.get_rank()
         group_infos = []
         for group in self.param_groups:
             params: list[Tensor] = group["params"]
@@ -697,7 +680,7 @@ class NorMuon(torch.optim.Optimizer):
 
             # # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             flat = self._pflat.get(self._group_of[params[0]])
-            direct_publish = owned and (self._deferred is not None or self.local)
+            direct_publish = owned and self._deferred is not None
             updated_params = (
                 flat[start_idx : start_idx + chunk_size]
                 if direct_publish else torch.empty_like(grad_chunk, dtype=params[0].dtype)
@@ -732,8 +715,7 @@ class NorMuon(torch.optim.Optimizer):
             if (
                 direct_publish
             ):  # owners broadcast in launch(); padding rows stay untouched
-                if not self.local:
-                    self._deferred += params
+                self._deferred += params
                 continue
             stacked_params = (
                 torch.empty(
@@ -768,8 +750,6 @@ class NorMuon(torch.optim.Optimizer):
             unstacked_params = torch.unbind(stacked_params)
             for i, p in enumerate(orig_params):
                 p.copy_(unstacked_params[i], non_blocking=True)
-        if self.local:
-            self._flat.clear()
 
 
 class DistAdam(torch.optim.Optimizer):
@@ -907,8 +887,6 @@ class DistAdam(torch.optim.Optimizer):
                 mask = (update * w) > 0
                 update.addcmul_(w, mask, value=eff_weight_decay * lr)
 
-                if getattr(param, "decoupled_wd", 0.0):  # AdamW: w -= lr * wd * w
-                    w.mul_(1 - lr * param.decoupled_wd)
                 w.add_(other=update, alpha=-1.0)
                 if master is not None:
                     p_slice.copy_(master)
@@ -1204,44 +1182,6 @@ class ForwardScheduleConfig:
     ws_long: int
 
 
-def header_features(tokens: Tensor, same_previous: Tensor, n: int):
-    """Per-token features of each game's header, on the positions predicting its moves (from
-    the header's last token on; zeros elsewhere and where the header is not a game's): mover's
-    and opponent's Elo (linear, Elo / 4000), with n = 2 also the base time and increment (raw
-    seconds, log like the clock features); each value as 8 sin, 8 cos, itself and a presence
-    flag, padded to 128 columns."""
-    t = tokens.numel()
-    pos = torch.arange(t, device=tokens.device)
-    start = torch.where(same_previous, 0, pos).cummax(0).values
-    h = start[:, None] + torch.arange(11, device=tokens.device)
-    h = tokens[h.clamp(max=t - 1)]
-    game = (h[:, 0] == 2348) & (pos >= start + 10)
-    d = h[:, 3:11].view(t, 2, 4)
-    place = torch.tensor([1000, 100, 10, 1], device=tokens.device)
-    elo = (d * place).sum(-1).masked_fill((d > 9).any(-1), 0)
-    white = (pos - start) % 2 == 0
-    cols = [elo[:, 0].where(white, elo[:, 1]), elo[:, 1].where(white, elo[:, 0])]
-    v = [c / 4000 for c in cols]
-    ok = [game & (c > 0) for c in cols]
-    if n == 2:
-        i, inc = h[:, 1] - 192, h[:, 2] - 10
-        base = torch.where(i < 5, 15 * i, torch.where(i == 5, 90, (i - 4) * 60))
-        v += [torch.log1p(base.clamp(min=0)) / 10, torch.log1p(inc.clamp(min=0)) / 10]
-        ok += [game & (i >= 0) & (i < 185), game & (inc >= 0) & (inc < 181)]
-    v, ok = torch.stack(v, 1).float()[..., None], torch.stack(ok, 1)[..., None]
-    w = torch.pi * 2.0 ** torch.arange(8, device=tokens.device)
-    f = torch.cat((torch.sin(v * w), torch.cos(v * w), v, torch.ones_like(v)), -1)
-    return F.pad((f * ok).flatten(1), (0, 128 - 18 * v.shape[1]))
-
-
-def mask_tc_header(tokens: Tensor):
-    """The tokens with every base-time and increment token (ids 10..377, used only by game headers)
-    replaced by the unknown base time and unknown increment tokens."""
-    inc, base = INCREMENTS_ID["*"], SECONDS_ID["*"]
-    tc = (tokens >= INCREMENTS_ID["0"]) & (tokens <= base)
-    return torch.where(tc, torch.where(tokens <= inc, inc, base), tokens)
-
-
 class GPT(nn.Module):
     def __init__(
         self,
@@ -1251,8 +1191,7 @@ class GPT(nn.Module):
         head_dim: int,
         model_dim: int,
         max_seq_len: int,
-        moe: tuple | None = None,
-        dense_first: int = 1,
+        moe: list,
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -1281,10 +1220,9 @@ class GPT(nn.Module):
             nn.init.zeros_(embed.weight)
         for ve in self.value_embeds:
             ve.weight.label = "value_embed"
-        # MoE (model.arch.moe_dims) after dense_first dense blocks, as in DeepSeek-V3
-        moes = moe if isinstance(moe, list) else [moe if i >= dense_first else None for i in range(num_layers)]
+        # per block: its MoE constructor arguments (model.arch.moe_dims), None for a dense MLP
         self.blocks = nn.ModuleList(
-            [Block(model_dim, head_dim, num_heads, i, m) for i, m in enumerate(moes)]
+            [Block(model_dim, head_dim, num_heads, i, m) for i, m in enumerate(moe)]
         )
         self.yarn = Yarn(head_dim, max_seq_len)
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
@@ -1304,7 +1242,6 @@ class GPT(nn.Module):
         self.x0_lambdas.label = "x0_lambdas"
         self.x0_lambdas.lr_mul = 5.0
         self.x0_lambdas.wd_mul = 0.0
-        self.use_x0 = True
 
         pad = (
             -num_layers * 3 - 5
@@ -1357,8 +1294,6 @@ class GPT(nn.Module):
         self.feat_embed.weight.lr_mul = 75.0
         self.feat_embed.weight.wd_mul = 5.0
         self.board = None  # model.board branch, added at every position
-        self.header_feats = 0  # header_features on every move position (header_embed)
-        self.tc_header = True  # False: mask_tc_header on every input
 
     def train(
         self, mode=True
@@ -1369,7 +1304,6 @@ class GPT(nn.Module):
     def forward(
         self,
         input_seq: Tensor,
-        target_seq: Tensor,
         seqlens: Tensor,
         schedule_cfg: ForwardScheduleConfig,
         feat_seq: Tensor | None = None,
@@ -1387,8 +1321,6 @@ class GPT(nn.Module):
         # set lambdas
         resid_lambdas = self.scalars[: 1 * self.num_layers]
         x0_lambdas = self.x0_lambdas.view(-1, 2)
-        if not self.use_x0:  # drop x0 re-injection; keep the x02 column
-            x0_lambdas = torch.stack((x0_lambdas[:, 0] * 0, x0_lambdas[:, 1]), 1)
         sa_lambdas = self.scalars[1 * self.num_layers : 3 * self.num_layers].view(-1, 2)
         smear_lambda = self.scalars[3 * self.num_layers]
         backout_lambda = self.scalars[3 * self.num_layers + 1]
@@ -1401,8 +1333,6 @@ class GPT(nn.Module):
             for i in range(self.num_layers)
         ]
 
-        if not self.tc_header:
-            input_seq = mask_tc_header(input_seq)
         # weight-tied: use lm_head.weight for embedding lookup (or separate embed after split)
         if self.split_embed:
             x = self.embed(input_seq)
@@ -1418,9 +1348,6 @@ class GPT(nn.Module):
             f = (f * (t >= 0)[..., None]).flatten(1)  # absent values (-1) give zeros
             f = F.pad(f, (0, 64 - f.shape[1]))
             x = x + f.type_as(x) @ self.feat_embed.weight.type_as(x)
-        if self.header_feats:
-            f = header_features(input_seq, seqlens.same_previous, self.header_feats)
-            x = x + f.type_as(x) @ self.header_embed.weight.type_as(x)
         x = x + self.board(seqlens.board, x.dtype)
         ve = [value_embed(input_seq) for value_embed in self.value_embeds]
         # 012 ... 012 structure on token value embeddings by @YouJiacheng, improved on @leloykun's U-net structure
@@ -1543,8 +1470,7 @@ class TrainingManager:
         ]
         muon_params = [
             p for p in model.parameters() if getattr(p, "label", None) in muon_labels
-            and not getattr(p, "local", False)
-        ]  # fmt: skip
+        ]
         assert set(getattr(p, "label", None) for p in model.parameters()) <= set(
             adam_labels + scalar_labels + muon_labels
         ), "All params must have label"
@@ -1565,12 +1491,10 @@ class TrainingManager:
             eps=1e-8,
             weight_decay=0.005,
         )
-        muon = dict(lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2)
-        self.muon_opt = NorMuon(muon_params, **muon)
+        self.muon_opt = NorMuon(
+            muon_params, lr=0.015, momentum=0.95, beta2=0.95, weight_decay=1.2
+        )
         self.optimizers = [self.adam_opt, self.scalar_opt, self.muon_opt]
-        local = [p for p in model.parameters() if getattr(p, "local", False)]
-        if local:  # expert shards: the same NorMuon, rank-local
-            self.optimizers.append(NorMuon(local, **muon, local=True))
         for opt in self.optimizers:
             for group in opt.param_groups:
                 group["initial_lr"] = group["lr"]
@@ -1605,13 +1529,8 @@ class TrainingManager:
                 opt.zero_grad(set_to_none=True)
         self.adam_opt.should_sync = self.scalar_opt.should_sync = False
 
-        # prop bias rule: full speed for the first 80% of training, then linearly to 0 at the end
-        # (DeepSeek-V3 stops bias updates in its final phase)
-        if self.moe:
-            n = args.num_iterations
-            scale = min(1.0, max(0.0, (n - step) / (0.2 * n)))
-            for m in self.moe:
-                m.rebalance(scale)
+        for m in self.moe:
+            m.rebalance()
 
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()

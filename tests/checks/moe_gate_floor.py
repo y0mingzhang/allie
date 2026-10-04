@@ -45,7 +45,7 @@ def saturated(gen):
 def build(router, floor):
     """A fresh MoE with this router and random (not zero-init) routed and shared down projections."""
     torch.manual_seed(1)
-    m = mm.MoE(D, E, K, H, H, update="quantile", seq=1e-3, gate_floor=floor)
+    m = mm.MoE(D, E, K, H, H, seq=1e-3, gate_floor=floor)
     m = m.to(DEV).train()
     g = torch.Generator().manual_seed(2)
     with torch.no_grad():
@@ -82,9 +82,9 @@ def main():
     ok = True
 
     ref = reference(rev)
-    kw = dict(update="quantile", seq=1e-3, center=0.9)
+    kw = dict(seq=1e-3, center=0.9)
     torch.manual_seed(1)
-    old = ref.MoE(D, E, K, H, H, **kw).to(DEV).train()
+    old = ref.MoE(D, E, K, H, H, update="quantile", **kw).to(DEV).train()
     torch.manual_seed(1)
     new = mm.MoE(D, E, K, H, H, **kw).to(DEV).train()
     got = [step(m, x, dy) for m in (old, new) for x, dy in zip(xs, dys)]
@@ -93,7 +93,7 @@ def main():
     print(
         f"floor off: bitwise {rev}'s MoE over 3 steps (outputs, grads, buffers, state dict): {off}"
     )
-    arch = dict(moe=[E, K], moe_gate_floor=FLOOR)
+    arch = dict(moe=[E, K], moe_update="quantile", moe_gate_floor=FLOOR)
     carried = mm.MoE(D, *model_arch.moe_dims(1536, arch)).gate_floor == FLOOR
     try:
         model_arch.resolve(dict(moe_gate_floor=float("inf")))

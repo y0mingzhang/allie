@@ -141,9 +141,9 @@ def gpt_case(mm, core, blend, rows):
     for step in range(2):
         model.zero_grad(set_to_none=True)
         gen = torch.Generator().manual_seed(step)
-        x, y = rows[step : step + 1, :-1], rows[step : step + 1, 1:]
+        x = rows[step : step + 1, :-1]
         ctx = mm.make_context(x, 128, 384, backend="dense")
-        z = net(x.flatten(), y.flatten(), ctx, sched)
+        z = net(x.flatten(), ctx, sched)
         (z.float() * torch.randn(z.shape, generator=gen)).sum().backward()
     grads = {n: p.grad for n, p in model.named_parameters() if p.grad is not None}
     return z.detach(), grads

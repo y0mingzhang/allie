@@ -3,11 +3,10 @@ CPU: under TRITON_INTERPRET=1, whose BF16 dots run in FP32 and which has no libd
 runs check indexing, masking, rounding points and autograd wiring, not MMA order.
 
 layer: one MoE layer as --ckpt eager runs it (x + moe(norm(x)) compiled whole and checkpointed with
-replay_context, deterministic; CPU: eager, d64 E16 top-4, 2048 tokens), 2 steps x 3 micro-batches
-plus a no-grad training forward, the bias nonzero and one step per update rule, against a base
-commit's layer (--base, with its shipped flags --set) bit for bit: outputs, input and parameter
-gradients, the load buffer after every micro-batch, the rebalanced bias and the logged stats. Each
-implementation runs in its own process.
+replay_context, deterministic; CPU: eager, d64 E16 top-4, 2048 tokens), 3 micro-batches plus a
+no-grad training forward with the bias nonzero, against a base commit's layer (--base, with its
+shipped flags --set) bit for bit: outputs, input and parameter gradients and the load buffer after
+every micro-batch. Each implementation runs in its own process.
 
 kernels: moe_kernels.routed (output, input, weight and gate grads, and the no-grad path) against an
 FP32 torch reference on ragged shapes with empty experts; its grads with expanded recomputed equal
@@ -18,11 +17,7 @@ on live, tie-heavy and special (+-0, +-inf, NaN, subnormal) scores.
 
 counts: moe_layer.counts against the scatter_add_ histogram, eager and compiled.
 
-seqraw: the sequence balance loss's router gradient on a row whose raw top-1 is always expert 0 but
-whose bias balances the selection (both scores): about 0 from the biased
-counts, the raw top-k formula's (DeepSeek-V3 Eq. 18) with moe_seq_raw.
-
-    <runtime python> tests/checks/moe_nongemm.py [layer|kernels|topk|counts|seqraw ...] [--base COMMIT]
+    <runtime python> tests/checks/moe_nongemm.py [layer|kernels|topk|counts ...] [--base COMMIT]
     Allie 2.0's h192: layer --experts 256 --topk 16 --arch moe_shared_frac=0.25 --arch moe_round=16
     .venv/bin/python tests/checks/moe_nongemm.py    # CPU: reruns itself under TRITON_INTERPRET=1
 """
@@ -132,10 +127,11 @@ def run(a):
     torch.manual_seed(0)
     (e, d, t) = (96, 1536, 65536) if DEV == "cuda" else (16, 64, 2048)
     e = a.experts or e
+    # the base commit predates Quantile Balancing; the bias update rule never runs here
     arch = dict(
         mlp="swiglu", moe=[e, a.topk], moe_kernel="scatter-dualgather", moe_init=0.006,
-        moe_router_lr_mul=0.1, moe_gamma=1e-3, moe_seq=0.001, moe_update="sign",
-        moe_score="sigmoid",
+        moe_router_lr_mul=0.1, moe_gamma=1e-2, moe_seq=0.001,
+        moe_update="sign" if a.impl else "quantile", moe_score="sigmoid",
     )  # fmt: skip
     arch |= {k: ast.literal_eval(v) for k, _, v in (s.partition("=") for s in a.arch)}
     m = MoE(d, *moe_dims(d, arch)).to(DEV).train()
@@ -163,21 +159,16 @@ def run(a):
         return torch.randn(t, d, device=DEV, generator=gen).bfloat16()
 
     rec = {}
-    for i, rule in enumerate(("sign", "prop")):
-        m.update = rule
-        for j in range(3):
-            x, dy = rand().requires_grad_(), rand()
-            y = forward(x)
-            y.backward(dy)
-            rec[f"y{i}{j}"], rec[f"dx{i}{j}"] = y.detach(), x.grad
-            rec[f"load{i}{j}"] = m.load.clone()
-        with torch.no_grad():
-            rec[f"y{i}-nograd"] = forward(rand())
-            rec[f"load{i}-nograd"] = m.load.clone()
-        rec |= {f"{n}.grad{i}": p.grad.clone() for n, p in m.named_parameters()}
-        m.zero_grad(set_to_none=True)
-        m.rebalance(0.7)
-        rec[f"bias{i}"], rec[f"stats{i}"] = m.bias.clone(), m.stats.clone()
+    for j in range(3):
+        x, dy = rand().requires_grad_(), rand()
+        y = forward(x)
+        y.backward(dy)
+        rec[f"y{j}"], rec[f"dx{j}"] = y.detach(), x.grad
+        rec[f"load{j}"] = m.load.clone()
+    with torch.no_grad():
+        rec["y-nograd"] = forward(rand())
+        rec["load-nograd"] = m.load.clone()
+    rec |= {f"{n}.grad": p.grad.clone() for n, p in m.named_parameters()}
     torch.save({k: v.cpu() for k, v in rec.items()}, a.dump)
     dist.destroy_process_group()
 
@@ -399,50 +390,6 @@ def counts(a):
     return ok
 
 
-def seqraw(a):
-    from allie.model.moe import MoE
-
-    if not dist.is_initialized():
-        store = f"file://{tempfile.mkdtemp()}/store"
-        dist.init_process_group("gloo", init_method=store, rank=0, world_size=1)
-    t, e, d = 1024, 4, 64
-    want = torch.tensor([0.9, 0.2, 0.2, 0.2]).repeat(t, 1)
-    want[torch.arange(t), torch.arange(t) % e] += 0.01
-    inverse = dict(sigmoid=torch.logit, sqrtsoftplus=lambda p: p.square().expm1().log())
-    ok = True
-    for score, inv in inverse.items():
-        h = F.pad(inv(want.double()), (0, d - e)).bfloat16().to(DEV)
-        norms = []
-        for raw in (False, True):
-            m = MoE(d, e, 1, 64, 0, seq=1.0, score=score, seq_raw=raw).to(DEV).train()
-            with torch.no_grad():
-                m.router.zero_()[:, :e] = torch.eye(e)
-                m.bias.copy_(torch.tensor([-0.7, 0, 0, 0]))
-            for n, p in m.named_parameters():
-                if n != "router":
-                    p.data = p.data.bfloat16()
-            m(h).backward(torch.zeros(t, d, dtype=h.dtype, device=DEV))
-            r = m.router.detach().clone().requires_grad_()
-            z = F.linear(h.float(), r)
-            s = z.sigmoid() if score == "sigmoid" else F.softplus(z).sqrt()
-            top = s.topk(1).indices if raw else (s + m.bias).topk(1).indices
-            sel = torch.zeros_like(s).scatter_(1, top, 1.0).mean(0)
-            loss = t / 8 * (sel * e * (s / s.sum(-1, keepdim=True)).mean(0)).sum()
-            ref = torch.autograd.grad(loss, r)[0]
-            loads = m.load[:e].tolist(), (sel * t).tolist()
-            ok &= loads[0] == [t / e] * e and loads[1] == (
-                [t, 0, 0, 0] if raw else loads[0]
-            )
-            ok &= torch.allclose(m.router.grad, ref, rtol=1e-4, atol=1e-9)
-            norms.append(m.router.grad.norm().item())
-        ok &= norms[0] < 1e-6 * norms[1]
-        print(f"  {score}: router grad norm biased {norms[0]:.3g}, raw {norms[1]:.3g}")
-    print(
-        f"{'PASS' if ok else 'FAIL'} sequence balance loss from the raw top-k ({DEV})"
-    )
-    return ok
-
-
 def main():
     if (
         DEV == "cpu" and os.environ.get("TRITON_INTERPRET") != "1"
@@ -452,7 +399,7 @@ def main():
     if DEV == "cpu":
         interpret()
     p = argparse.ArgumentParser()
-    tests = dict(layer=layer, kernels=kernels, topk=topk, counts=counts, seqraw=seqraw)
+    tests = dict(layer=layer, kernels=kernels, topk=topk, counts=counts)
     p.add_argument("cmd", nargs="*", choices=(*tests, "run"))
     p.add_argument("--impl")
     p.add_argument("--dump", help="layer: keep the two records in this directory")

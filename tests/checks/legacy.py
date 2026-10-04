@@ -8,7 +8,6 @@ import sys
 FLAT = {
     "modded_arch": "allie.model.arch",
     "modded_smoe": "allie.model.moe_kernels",
-    "modded_shard": "allie.model.shard",
     "chess_vocab": "allie.data.vocab",
 }
 

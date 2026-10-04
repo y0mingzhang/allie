@@ -103,7 +103,7 @@ def forward(m, ids, pos, feats, boards, previous, attend, last=None):
     skip_out = [9 * n // 16 + i for i in range(3)]
     lam, sa = s[:n], s[n : 3 * n].view(-1, 2)
     x0l = m.x0_lambdas.view(-1, 2)
-    if not m.use_x0:
+    if not getattr(m, "use_x0", True):
         x0l = torch.stack((x0l[:, 0] * 0, x0l[:, 1]), 1)
     cos, sin = m.yarn.cos[pos][:, None], m.yarn.sin[pos][:, None]
 

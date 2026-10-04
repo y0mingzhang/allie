@@ -96,15 +96,6 @@ def ensure():
     return target
 
 
-def reexec_local():
-    if not MANIFEST.exists():
-        return  # no runtime archive built yet
-    target = ensure()
-    if Path(sys.prefix).resolve() != target.resolve():
-        python = str(target/'bin/python')
-        os.execv(python, [python, *sys.argv])
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', action='store_true')

@@ -62,7 +62,6 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
     "name, args, torchrun, env",
     [
         check("async_checkpoint"),
-        check("center_first"),
         check("modelexp_run", marks=STUDY),
         check("moe_quantile"),
         check("prune_final"),
@@ -70,12 +69,9 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
         check("zero_masters"),
         check("moe_center", marks=HIST),
         check("moe_gate_floor", marks=HIST),
-        check("moe_keep", marks=HIST),
-        check("moe_log_gates", marks=HIST),
         check("moe_nongemm", marks=HIST),
         check("fused_blend", marks=DATA),
         check("game_blocks", env=NOCOMPILE, marks=DATA),
-        check("moe_shard", env=NOCOMPILE, marks=DATA),
         # Allie 2.0's months, stores and history, with its recipe table
         check(
             "mix_recent",
@@ -93,14 +89,12 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
             marks=GPU + TWO + DATA,
             id="checkpoint_resume-2",
         ),
-        check("header_feats", torchrun=1, marks=GPU + DATA),
         check("nanogpt_knobs", torchrun=1, marks=GPU + DATA),
         check(
             "moe_nongemm",
             "kernels",
             "topk",
             "counts",
-            "seqraw",
             marks=GPU,
             id="moe_nongemm-cuda",
         ),

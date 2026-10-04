@@ -13,6 +13,7 @@ source does (EQUIVALENT). The final test splits are not exposed.
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import sys
@@ -32,7 +33,7 @@ REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
 EQUIVALENT = {
     "3efce06d87e5e5fb22e2d6e79bbc52ab7386b5a3af9923a4eafcbbc42995b944": (
         "Allie 2.0",
-        "333a8a0d02c88df8cfbca4ba5d62e86fbac15c70027733009be7556ca3de882b",
+        "e7562ed1dd6c1f4c4bdfd521d431a42606d0edaa085e9fb38ae05763c97df276",
     ),
 }
 
@@ -46,6 +47,11 @@ def read_hashed(path):
         sha = hashlib.file_digest(f, "sha256").hexdigest()
         f.seek(0)
         return torch.load(f, map_location="cpu", weights_only=False), sha
+
+
+def tokens(model, x):
+    """forward()'s token arguments: frozen sources from before this package also take an unused target."""
+    return (x, x) if "target_seq" in inspect.signature(model.forward).parameters else (x,)
 
 
 def sha(path):
@@ -175,7 +181,7 @@ def main():
                 feat = torch.cat((feat, pad))
             kw["feat_seq"] = feat.flatten(0, 1)
         context = make_context(x, schedule.ws_short * 128, schedule.ws_long * 128)
-        logits = net(x.flatten(), x.flatten(), context, schedule, **kw)
+        logits = net(*tokens(model, x.flatten()), context, schedule, **kw)
         scores = logits.reshape(*x.shape, -1)[:count, :, 378:2346].float()
         truth = scores.gather(-1, (y - 378).clamp(0, 1967)[..., None]).squeeze(-1)
         return scores.logsumexp(-1) - truth, y

@@ -1,10 +1,9 @@
 """DeepSeek-style fine-grained mixture of experts.
 
 One shared expert plus E routed experts, top-k by sigmoid affinity; selection adds a per-expert bias
-that is nudged toward balanced load after every optimizer step (auxiliary-loss-free balancing,
-DeepSeek-V3), or set outright to the balancing quantile of the step's router margins (Kimi K3's
-Quantile Balancing, update="quantile"); gate weights are the selected affinities renormalised to sum
-to sqrt(k) (V3 uses 2.5 at k = 8, Kimi K2 2.83). Experts are SwiGLU MLPs like the dense one, run
+(auxiliary-loss-free balancing, DeepSeek-V3) set after every optimizer step to the balancing quantile of
+the step's router margins (Kimi K3's Quantile Balancing); gate weights are the selected affinities
+renormalised to sum to sqrt(k) (V3 uses 2.5 at k = 8, Kimi K2 2.83). Experts are SwiGLU MLPs like the dense one, run
 dropless by model.moe_kernels's fused kernels. Nominal active FLOPs match the dense MLP
 (shared_hidden + k * expert_hidden = swiglu_hidden).
 """
@@ -17,7 +16,6 @@ import torch.distributed as dist
 from torch import nn
 from torch.nn import functional as F
 
-from allie.model import shard as expert_shard
 from allie.model import moe_kernels
 
 # MoE.stats, per layer over the last step (train.trainer logs them as moe_<name>); dropped is always
@@ -186,21 +184,13 @@ def qb_book(
 
 class MoE(nn.Module):
     def __init__(
-        self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1,
-        gamma=1e-3, seq=0.0, update="sign", score="sigmoid", seq_raw=False, router_wd=0.0, center=0.0,
-        gate_floor=0.0, log_gates=False, keep=0,
+        self, dim, experts, topk, expert_hidden, shared_hidden, init=0.02, router_lr_mul=0.1, seq=0.0,
+        center=0.0, gate_floor=0.0,
     ):  # fmt: skip
         super().__init__()
-        assert update in ("sign", "prop", "quantile")
-        assert score in ("sigmoid", "sqrtsoftplus")
-        assert update != "quantile" or score == "sigmoid"  # the QB bins end at |x| = 16
         assert topk < experts
-        self.experts, self.topk, self.score = experts, topk, score
-        # bias update speed and rule (sign: gamma * sign(mean - load), DeepSeek-V3; prop: gamma *
-        # clamp((mean - load) / mean, -1, 1) x the rebalance() scale, which settles instead of
-        # cycling at +-gamma once balanced; quantile: qb_shift, no gamma), sequence-wise balance loss
-        # weight, its counts from the raw top-k of the scores instead of the bias-adjusted selection
-        self.gamma, self.update, self.seq, self.seq_raw = gamma, update, seq, seq_raw
+        self.experts, self.topk = experts, topk
+        self.seq = seq  # sequence-wise balance loss weight
         bound = 3**0.5 * 0.5 * dim**-0.5  # the dense MLP's c_fc init
         self.router = nn.Parameter(torch.randn(experts, dim) * init)
         # one 3D tensor per layer for all experts (per-expert tensors cost a kernel each per step);
@@ -221,7 +211,6 @@ class MoE(nn.Module):
             router_lr_mul,
             0.0,
         )
-        self.router.decoupled_wd = router_wd
         # NorMuon stacks a label's params and orthogonalizes each expert matrix
         self.up.label, self.down.label, self.down.lr_mul = "moe_up", "moe", 2.0
         self.register_buffer(
@@ -233,11 +222,10 @@ class MoE(nn.Module):
         self.register_buffer(
             "stats", torch.tensor([1.0, 1, 0, 0, 0, 0, 0]), persistent=False
         )
-        if update == "quantile":  # qb_counts over a step's micro-batches
-            hist = torch.zeros(experts, moe_kernels.QB_BINS, dtype=torch.int32)
-            self.register_buffer("hist", hist, persistent=False)
+        # qb_counts over a step's micro-batches
+        hist = torch.zeros(experts, moe_kernels.QB_BINS, dtype=torch.int32)
+        self.register_buffer("hist", hist, persistent=False)
         self.remat = True  # moe_kernels.routed's: False where a checkpoint recomputes the layer
-        self.pos = None  # expert_shard.SHARDED position once its experts are sharded
         # center: EMA decay of the mean router input mu, subtracted before the router (0: off). A shared
         # input direction makes W_j . mu a per-expert constant that saturates the sigmoid scores. mu
         # averages past steps' global batch means, so a token's routing never sees other tokens
@@ -249,14 +237,6 @@ class MoE(nn.Module):
         # sum to k**0.5 * sum / floor: its routed output is suppressed, the router's degeneration is not repaired
         assert 0 <= gate_floor < float("inf")
         self.gate_floor = gate_floor
-        # log_gates: the same gates (and balance-loss affinities) as softmaxes of log-sigmoid scores, which never divide
-        assert not log_gates or score == "sigmoid"
-        self.log_gates = log_gates
-        # keep: route each token through only the best keep (by score + bias; ties in top-k order) of its top-k experts,
-        # with the gates they have in the top-k; selection, balance loss, bias updates and their stats (moe_* in
-        # train.jsonl: the top-k candidates, not the executed routes) stay the top-k's (0: off)
-        assert 0 <= keep < topk
-        self.keep = keep
         if center:
             self.register_buffer("mu", torch.zeros(dim))
             self.register_buffer("mu_steps", torch.zeros(()))
@@ -269,33 +249,19 @@ class MoE(nn.Module):
         t, e, k = h.shape[0], self.experts, self.topk
         g = torch.promote_types(h.dtype, torch.float32)  # FP32 gate, as DeepSeek-V3
         z = F.linear(h.to(g) - self.mu if self.center else h.to(g), self.router.to(g))
-        s = (
-            torch.sigmoid(z)
-            if self.score == "sigmoid"
-            else F.softplus(z).clamp_min(1e-12).sqrt()
-        )
+        s = torch.sigmoid(z)
         if e <= 128:  # the kernel holds a row of experts in registers
             idx, *stats = route_topk(s.detach(), self.bias, k, self.training)
         else:  # torch.topk here, the stats top-k below
             idx, stats = torch.topk(s + self.bias, k, dim=-1).indices, None
-        if self.log_gates:
-            w = k**0.5 * torch.softmax(F.logsigmoid(z.gather(1, idx)), -1)
-        else:
-            w = s.gather(1, idx)
-            w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
-        ridx = idx
-        if self.keep:
-            best = torch.sort((s.detach() + self.bias).gather(1, idx), dim=-1, descending=True, stable=True).indices[:, : self.keep]
-            ridx, w = idx.gather(1, best), w.gather(1, best)
-        flat = ridx.flatten()
+        w = s.gather(1, idx)
+        w = w * (k**0.5 / self.floored(w.sum(-1, keepdim=True)))
+        flat = idx.flatten()
         order = flat.argsort(stable=True)
         count = counts(flat[order], e)
-        route = ridx.shape[1], flat[order], order, count.cumsum(0), w.type_as(h), self.remat
-        if self.pos is None:
-            up, down = self.up.type_as(h), self.down.type_as(h)
-            out = moe_kernels.routed(h, up.transpose(1, 2), down, *route)
-        else:
-            out = expert_shard.routed(h, self.up, self.down, *route, self.pos)
+        route = idx.shape[1], flat[order], order, count.cumsum(0), w.type_as(h), self.remat
+        up, down = self.up.type_as(h), self.down.type_as(h)
+        out = moe_kernels.routed(h, up.transpose(1, 2), down, *route)
         if self.training:
             with torch.no_grad():
                 val, top = stats or stats_topk(s, k + 1)
@@ -308,14 +274,11 @@ class MoE(nn.Module):
                     torch.full_like(moved, t),
                     margin,
                 ]
-                if self.keep:
-                    count = counts(idx.flatten().sort().values, e)
                 book(
                     self.load,
                     torch.cat((count.float(), torch.stack([v.float() for v in extra]))),
                 )
-                if self.update == "quantile":
-                    qb_book(self.hist, s.detach(), self.bias, idx)
+                qb_book(self.hist, s.detach(), self.bias, idx)
                 if self.center:
                     book_once(self.mu_sum, torch.cat((h.float().sum(0), h.new_full((1,), t, dtype=torch.float32))))
         if self.shared:
@@ -330,13 +293,8 @@ class MoE(nn.Module):
             # token, scored or not; masking only changes which tokens carry the CE): the total is
             # additive over rows, hence independent of how rows are split into micro-batches
             assert t % 1024 == 0
-            top = torch.topk(s.detach(), k, dim=-1).indices if self.seq_raw else idx
-            sel = torch.zeros_like(s).scatter_(1, top, 1.0).view(-1, 1024, e).mean(1)
-            prob = (
-                torch.softmax(F.logsigmoid(z), -1)
-                if self.log_gates
-                else s / self.floored(s.sum(-1, keepdim=True))
-            )
+            sel = torch.zeros_like(s).scatter_(1, idx, 1.0).view(-1, 1024, e).mean(1)
+            prob = s / self.floored(s.sum(-1, keepdim=True))
             prob = prob.view(-1, 1024, e).mean(1)
             loss = (
                 self.seq
@@ -356,24 +314,17 @@ class MoE(nn.Module):
         return F.silu(a) * b
 
     @torch.no_grad()
-    def rebalance(self, scale=1.0):
-        """After an optimizer step: raise the bias of under-loaded experts, lower over-loaded ones.
-        scale: the prop rule's decay (1 for the first 80% of training, then linearly to 0); quantile
-        solves for the balancing bias instead of stepping toward it, and ignores it."""
+    def rebalance(self):
+        """After an optimizer step: set the bias that balances the step's routes (qb_shift)."""
         dist.all_reduce(self.load)
         e = self.experts
         load = self.load[:e]
         dropped, moved, tokens, margin = self.load[e:]
         mean = load.sum().clamp(min=1) / e
-        if self.update == "quantile":
-            dist.all_reduce(self.hist)
-            b = self.bias + qb_shift(self.hist, self.topk)
-            self.bias.copy_(b - b.mean())
-            self.hist.zero_()
-        elif self.update == "sign":
-            self.bias += self.gamma * torch.sign(load.mean() - load)
-        else:
-            self.bias += self.gamma * scale * ((mean - load) / mean).clamp(-1, 1)
+        dist.all_reduce(self.hist)
+        b = self.bias + qb_shift(self.hist, self.topk)
+        self.bias.copy_(b - b.mean())
+        self.hist.zero_()
         tokens = tokens.clamp(min=1)
         if self.center:  # the first step takes its mean outright
             dist.all_reduce(self.mu_sum)

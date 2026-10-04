@@ -228,18 +228,6 @@ class Games:
         if aux:
             self.result = get("result")
 
-    def clock(self, i, size, drop=True):
-        """Time left on the next mover's clock before each move, at the position predicting it:
-        the base time for each side's first move, else that side's clock after its previous move.
-        0 on other positions and for games without clocks (or dropped)."""
-        out = np.zeros(size, np.int16)
-        moves = self.off[i + 1] - self.off[i]
-        c = self.cval[self.coff[i] : self.coff[i + 1]].astype(np.int64)
-        if len(c) == moves and self.base[i] >= 0 and not (drop and self.dropped[i]):
-            before = np.concatenate([[self.base[i], self.base[i]], c])[:moves]
-            out[10 : 10 + moves] = clock_bucket(before)
-        return out
-
     def aux(self, i, size):
         """Targets at the position predicting each move, -1 elsewhere: the mover's think time as
         clock bucket - 1 (from the third ply, games with clocks) and the result for the mover
@@ -345,7 +333,7 @@ def dated(before, k):
 
 
 def cooldown(policy, start, before=control):
-    """before until training progress start, then policy (list its name in PHASES)."""
+    """before until training progress start, then policy."""
     return lambda g, p: before(g, p) if p < start else policy(g, p)
 
 
@@ -373,10 +361,6 @@ POLICIES = dict(
     **{f"no{n}": sources(s, 0) for n, s in EXT},
     pre2108_d2=dated("2021-08", 0.5),
 )
-# policy -> the training progress marks where its weights change (cooldown policies)
-PHASES = {}
-
-
 def recipe(name):
     """Recipe NAME.json, whose name ends in the first 12 hex digits of its sha256
     (data.inventory recipe writes them): from recipes/ beside the source tree if there, else RECIPES."""
@@ -438,7 +422,7 @@ def resolve(name):
 
 def marks(name):
     c = cool(name) or recent(name)
-    return (0.0, c[0]) if c else PHASES.get(name, (0.0,))
+    return (0.0, c[0]) if c else (0.0,)
 
 
 def phase(policy, p):

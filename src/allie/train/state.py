@@ -1,5 +1,4 @@
-"""Every RNG's state, for exact resume, and a plain atomic save."""
-import os
+"""Every RNG's state, for exact resume."""
 import random
 import numpy as np
 import torch
@@ -13,9 +12,3 @@ def restore_rng(s):
     torch.set_rng_state(s['torch']);random.setstate(s['python'])
     ns=s['numpy'];np.random.set_state((ns[0],np.array(ns[1],dtype=np.uint32),*ns[2:]))
     if s['cuda']:torch.cuda.set_rng_state_all(s['cuda'])
-
-def atomic_save(state,path):
-    temporary=path.with_suffix(path.suffix+'.partial')
-    with temporary.open('wb') as f:
-        torch.save(state,f);f.flush();os.fsync(f.fileno())
-    temporary.replace(path)

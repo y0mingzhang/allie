@@ -26,6 +26,7 @@ import torch
 from scipy.special import softmax
 
 from allie import paths
+from allie.eval.score import tokens
 from allie.search.board import encode, predicted_seconds
 from allie.search.moe_oracle import MoEOracle, forward, network
 from allie.search.native import from_prefix
@@ -97,7 +98,7 @@ def main():
         x = torch.as_tensor(rows[:, :-1], device="cuda")
         f = torch.as_tensor(feats, device="cuda").flatten(0, 1)
         context = mm.make_context(x, *ws)
-        z = model(x.flatten(), x.flatten(), context, schedule, feat_seq=f)
+        z = model(*tokens(m, x.flatten()), context, schedule, feat_seq=f)
         return z.float().view(*x.shape, -1).cpu().numpy(), x, f, context
 
     eager, x, f, context = train_forward(m, rows, feats)

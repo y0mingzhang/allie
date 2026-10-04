@@ -76,7 +76,7 @@ FRAC = dict(warmup=32 / 2274, mtp=64 / 2274, split=65 / 2274, decay=32 / 2274)
 POS = 45.7
 SHIP = dict(board="conv", mlp="swiglu", key_offset=False)
 ROUTER = dict(moe_seq=1e-3, moe_init=0.006, moe_router_lr_mul=0.1, moe_gamma=1e-2)
-ROUTER |= dict(moe_update="prop", moe_kernel="scatter-dualgather")
+ROUTER |= dict(moe_update="quantile", moe_kernel="scatter-dualgather")
 MOE = lambda e, k, **kw: dict(arch=dict(moe=[e, k]) | ROUTER | kw)
 # fast GPU types, as sinfo names them
 FAST = "RTX_PRO_6000|H200|H100|A100_80GB|A100_80G|L40S|6000Ada"

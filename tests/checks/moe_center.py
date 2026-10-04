@@ -56,7 +56,7 @@ def step(m, x, dy):
     x = x.clone().requires_grad_()
     y = m(x)
     y.backward(dy)
-    m.rebalance(1.0)
+    m.rebalance(*() if isinstance(m, mm.MoE) else (1.0,))
     grads = {n: p.grad.clone() for n, p in m.named_parameters()}
     return y.detach(), x.grad, grads, {n: b.clone() for n, b in m.named_buffers()}
 
@@ -86,9 +86,9 @@ def main():
 
     moe_kernels.routed = routed_ref
     ref = reference(rev)
-    kw = dict(update="quantile", seq=1e-3)
+    kw = dict(seq=1e-3)
     torch.manual_seed(1)
-    old = ref.MoE(D, E, K, H, H, **kw).to(DEV).train()
+    old = ref.MoE(D, E, K, H, H, update="quantile", **kw).to(DEV).train()
     torch.manual_seed(1)
     new = mm.MoE(D, E, K, H, H, **kw).to(DEV).train()
     got = [step(m, x, dy) for m in (old, new) for x, dy in zip(xs, dys)]
@@ -139,8 +139,8 @@ def main():
                 twice(x)
             with mm._reps(0, True):
                 twice(x)
-    once.rebalance(1.0)
-    twice.rebalance(1.0)
+    once.rebalance()
+    twice.rebalance()
     replay = torch.equal(once.mu, twice.mu)
     print(
         f"replay_context over 3 micro-batches (doubled forward, skipped recompute): mu bitwise equal {replay}"

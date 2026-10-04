@@ -16,7 +16,7 @@ import torch
 import torch.distributed as dist
 
 from allie import paths
-from allie.eval.score import read_hashed, training_code
+from allie.eval.score import read_hashed, tokens, training_code
 
 G = paths.DATA / "strat-eval-v1"
 DATA = paths.DATA / "maia3-bench"
@@ -109,7 +109,7 @@ def main():
                 f = torch.cat((f, f.new_full((batch - count, *f.shape[1:]), -1)))
             kw["feat_seq"] = f.flatten(0, 1)
         context = make_context(x, schedule.ws_short * 128, schedule.ws_long * 128)
-        logits = net(x.flatten(), x.flatten(), context, schedule, **kw)
+        logits = net(*tokens(model, x.flatten()), context, schedule, **kw)
         scores = logits.reshape(*x.shape, -1)[:count, :, 378:2346].float()
         truth = scores.gather(-1, (y - 378).clamp(0, 1967)[..., None]).squeeze(-1)
         loss = scores.logsumexp(-1) - truth
