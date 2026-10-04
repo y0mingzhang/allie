@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from allie.lichess.engine import Engine, Game, Play
-from allie.lichess.model import Cache, step
+from allie.lichess.model import Cache, Model, step
 from allie.lichess.tokens import MOVE_ID
 
 from .test_tokens import random_game
@@ -72,3 +72,48 @@ def test_ragged_paths_ignore_unwritten_slots(tiny):
     nodes([[1, 0, tok(first), n + 1]])
     z = nodes([[2, 1, tok(reply), n + 2], [3, 0, tok(second), n + 1]])  # depths 2 and 1
     assert np.isfinite(z).all()
+
+
+def node_logits(model):
+    """Logits of two depth-1 nodes and their depth-2 children, and each node's full sequence:
+    (z [4, 2432], [(ids, feats, boards)])."""
+    game = Game(Engine(model), 1500, 1600, 180, 2)
+    game.update(random_game(4, 21), 170, 165)
+    feats = np.array(game.features(), np.float32)
+    nodes = tree.Tree(game, game.sync(), 16).handles([game.tokens], [feats])
+    n, tok = len(game.tokens), lambda m: MOVE_ID[m.uci()]
+    first = list(game.board.legal_moves)[:2]
+    replies = []
+    for m in first:
+        b = game.board.copy()
+        b.push(m)
+        replies.append(next(iter(b.legal_moves)))
+    z1 = nodes([[1, 0, tok(first[0]), n + 1], [2, 0, tok(first[1]), n + 1]])
+    z2 = nodes([[3, 1, tok(replies[0]), n + 2], [4, 2, tok(replies[1]), n + 2]])
+    seqs = []
+    for path in ([1], [2], [1, 3], [2, 4]):
+        ids = torch.tensor(game.tokens + [int(nodes.token[i]) for i in path])
+        f = torch.tensor(game.features() + [nodes.feats[i].tolist() for i in path]).float()
+        b = b"".join(game.boards + [nodes.board[i] for i in path])
+        seqs.append((ids, f, torch.tensor(np.frombuffer(b, np.uint8).reshape(-1, 68))))
+    return torch.tensor(np.concatenate([z1, z2])), seqs
+
+
+def test_fast_nodes_match_reference(tiny_path, tiny):
+    """The fast backend's nodes (the game's cache copied, the path appended) differ from the
+    reference tree's by BF16 rounding only: no further from an FP32 prefill than the reference."""
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)
+    assert model.fast is not None
+    got, seqs = node_logits(model)
+    ref, _ = node_logits(Model(tiny_path, dtype=torch.bfloat16, backend="torch"))
+    hi = torch.cat([step(tiny, [(Cache(tiny), *s)]) for s in seqs])
+    assert (got - hi).abs().mean() < 1.25 * (ref - hi).abs().mean() + 1e-3
+    assert (got - hi).abs().max() < 2 * (ref - hi).abs().max() + 0.02
+    p, q = (torch.softmax(z[:, 378:2346].float(), -1) for z in (got, ref))
+    assert (p - q).abs().max() < 1e-3

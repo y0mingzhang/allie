@@ -17,6 +17,7 @@ from allie.search import Search
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
 from allie.search.native import from_prefix
 
+from .model import Cache
 from .tokens import CONTEXT, MOVE_START, MOVES, advance
 
 CALIBRATION = Path(__file__).with_name("calibration-allie-2.0.json")
@@ -40,6 +41,17 @@ class Tree:
 
     def reset(self):
         self.new_tokens = 0
+
+    def pool(self, n):
+        """n caches holding the game's prefix (the fast backend's leaves), copied once per tree."""
+        caches = self.__dict__.setdefault("caches", [])
+        g, n0 = self.cache, self.cache.n
+        while len(caches) < n:
+            c = Cache(self.model, n0 + 8)
+            c.k[:, :, :n0], c.v[:, :, :n0], c.e[:n0] = g.k[:, :, :n0], g.v[:, :, :n0], g.e[:n0]
+            c.n = n0
+            caches.append(c)
+        return caches[:n]
 
     def handles(self, prefixes, feats, clock_rule="predicted"):
         assert len(prefixes) == 1 and list(prefixes[0]) == self.game.tokens
@@ -94,6 +106,8 @@ class Nodes:
         return z
 
     def forward(self, ids, tokens, lengths):
+        if self.tree.model.fast is not None:
+            return self.fast(ids)
         t, m = self.tree, self.tree.model
         dev, dt = m.device, m.dtype
         cache, n0 = t.cache, t.cache.n
@@ -150,6 +164,41 @@ class Nodes:
         tok = torch.as_tensor(tokens, device=dev)
         z = m.forward(tok, pos, feats, boards, previous, attend)
         return z.double().cpu().numpy()
+
+
+    def path(self, i):
+        """The node's ancestors below the root, then itself."""
+        p, j = [], int(i)
+        while j:
+            p.append(j)
+            j = int(self.parent[j])
+        return p[::-1]
+
+    def fast(self, ids, chunk=16):
+        """The nodes' logits from the fast backend. Each node runs on a copy of the game's cache
+        (pooled: the kernel writes only past the root, so the copied prefix stays) holding its
+        ancestors' keys, values and embeddings at their own positions (kept in the tree's slots when
+        they ran); only the node's own token is new. Up to `chunk` nodes run in one step."""
+        t, m = self.tree, self.tree.model
+        n0 = t.cache.n
+        out = []
+        for lo in range(0, len(ids), chunk):
+            batch, items = ids[lo : lo + chunk], []
+            caches = t.pool(len(batch))
+            for c, i in zip(caches, batch):
+                p = self.path(i)
+                c.truncate(n0)
+                c.reserve(n0 + len(p))
+                for d, j in enumerate(p[:-1]):
+                    c.k[:, :, n0 + d], c.v[:, :, n0 + d], c.e[n0 + d] = t.k[:, :, j], t.v[:, :, j], t.e[j]
+                c.n = n0 + len(p) - 1
+                items.append((c, torch.as_tensor(self.token[[i]]), torch.as_tensor(self.feats[[i]], dtype=torch.float32),
+                              torch.as_tensor(np.frombuffer(self.board[i], np.uint8).reshape(1, 68).copy())))  # fmt: skip
+            out.append(m.fast.step(items).double().numpy())
+            for c, i in zip(caches, batch):
+                r = c.n - 1
+                t.k[:, :, i], t.v[:, :, i], t.e[i] = c.k[:, :, r], c.v[:, :, r], c.e[r]
+        return np.concatenate(out)
 
 
 class Coverage:
