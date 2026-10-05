@@ -241,6 +241,165 @@ def kl_search(g, tokens, root, feats, inc, budget, cpp):
     )
 
 
+def golden_outputs(f, tag, name):
+    parts = ("moves", "prior", "q") + (("probabilities",) if name == "coverage" else ())
+    return {k: f[f"{tag}/{k}"] for k in parts}
+
+
+def outputs_of(res, name):
+    """A searcher's result as the golden stores it."""
+    from allie.lichess.tokens import MOVE_ID
+
+    out = dict(moves=np.array([MOVE_ID[mv] for mv in res[0]], np.int32))
+    out.update(
+        zip(
+            ("probabilities", "prior", "q") if name == "coverage" else ("prior", "q"),
+            (np.asarray(x, np.float64) for x in res[1:]),
+        )
+    )
+    return out
+
+
+def compare(got, want):
+    """(identical, same move list, the largest absolute difference over the arrays)."""
+    same = np.array_equal(got["moves"], want["moves"])
+    diffs = [
+        float(np.abs(got[k] - want[k]).max())
+        if got[k].shape == want[k].shape
+        else np.inf
+        for k in want
+        if k != "moves"
+    ]
+    return same and max(diffs) == 0.0, same, max(diffs) if same else np.inf
+
+
+def native(a, f, keys, pgns):
+    """The all-Rust searches on the golden positions: see the module docstring."""
+    import torch
+
+    from allie.lichess import treers
+    from allie.lichess.engine import Engine
+    from allie.lichess.model import Model
+    from search_golden import load_game
+
+    torch.set_num_threads(1)
+    m = Model(a.model, "cpu", torch.bfloat16, None, True, "rust", a.threads)
+    engine, srv = Engine(m), m.fast.server
+    searchers = dict(coverage=treers.Coverage(), kl=treers.KL())
+    budgets = [int(b) for b in a.budgets.split(",")]
+    modes = [("chunk8", 8)] + ([("whole", 0)] if a.whole else [])
+    rows = {}
+    for name in a.searchers.split(","):
+        for b in budgets:
+            for mode, _ in modes:
+                rows[f"{name}/{b}/{mode}"] = dict(
+                    searches=0,
+                    identical=0,
+                    same_moves=0,
+                    max_abs=0.0,
+                    leaves=0,
+                    seconds=0.0,
+                    first=[],
+                )
+    roots, t0 = dict(positions=0, differing=0), time.perf_counter()
+    for key in keys:
+        stem, ply = key.split("@")
+        game = load_game(engine, read_pgn(pgns[stem], int(ply)))
+        assert game.tokens == f[key + "/tokens"].tolist(), key
+        roots["positions"] += 1
+        roots["differing"] += not np.array_equal(
+            game.sync().double().numpy(), f[key + "/root_logits"]
+        )
+        for name in a.searchers.split(","):
+            for b in budgets:
+                want = golden_outputs(f, f"{key}/{name}/{b}", name)
+                for mode, chunk in modes:
+                    srv.chunk = chunk
+                    t1 = time.perf_counter()
+                    res = searchers[name](game, b)
+                    r = rows[f"{name}/{b}/{mode}"]
+                    r["seconds"] += time.perf_counter() - t1
+                    r["leaves"] += game.last_search["evaluated"]
+                    identical, same, mx = compare(outputs_of(res, name), want)
+                    r["searches"] += 1
+                    r["identical"] += identical
+                    r["same_moves"] += same
+                    r["max_abs"] = max(r["max_abs"], mx)
+                    if not identical and len(r["first"]) < 4:
+                        r["first"].append(
+                            dict(key=key, max_abs=mx, same_moves=bool(same))
+                        )
+        if roots["positions"] % 20 == 0:
+            print(
+                json.dumps(
+                    dict(
+                        done=roots["positions"],
+                        seconds=round(time.perf_counter() - t0, 1),
+                        identical={
+                            k: f"{r['identical']}/{r['searches']}"
+                            for k, r in rows.items()
+                        },
+                    )
+                ),
+                flush=True,
+            )
+    for r in rows.values():
+        r["us_per_leaf"] = round(1e6 * r.pop("seconds") / max(r["leaves"], 1), 1)
+    srv.chunk = 0
+    views = ("true", "r2800")
+    vrows = dict(
+        positions=0,
+        identical=0,
+        same_moves=0,
+        max_abs=0.0,
+        merged_identical=0,
+        merged_max_abs=0.0,
+    )
+    for key in keys[: a.views_positions]:
+        stem, ply = key.split("@")
+        game = load_game(engine, read_pgn(pgns[stem], int(ply)))
+        want = outputs_of(tree.Coverage(views=views)(game, 128), "coverage")
+        identical, same, mx = compare(
+            outputs_of(
+                treers.Coverage(views=views, merged=False)(game, 128), "coverage"
+            ),
+            want,
+        )
+        vrows["positions"] += 1
+        vrows["identical"] += identical
+        vrows["same_moves"] += same
+        vrows["max_abs"] = max(vrows["max_abs"], mx)
+        identical, same, mx = compare(
+            outputs_of(treers.Coverage(views=views)(game, 128), "coverage"), want
+        )
+        vrows["merged_identical"] += identical
+        vrows["merged_max_abs"] = max(vrows["merged_max_abs"], mx)
+    out = dict(
+        model=a.model,
+        threads=m.fast.threads,
+        isa=m.fast.isa,
+        roots=roots,
+        searches=rows,
+        views=vrows,
+        server=srv.stats(),
+        seconds=round(time.perf_counter() - t0, 1),
+    )
+    print(json.dumps(out), flush=True)
+    if a.out:
+        with open(a.out, "a") as fh:
+            fh.write(json.dumps(out) + "\n")
+    engine.close()
+    bad = (
+        any(
+            r["identical"] != r["searches"]
+            for k, r in rows.items()
+            if k.endswith("chunk8")
+        )
+        or vrows["identical"] != vrows["positions"]
+    )
+    return int(bad or roots["differing"])
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--golden", default=R)
@@ -253,10 +412,26 @@ def main():
         action="store_true",
         help="also drive today's chain: its arrays compared, per-leaf timing",
     )
+    p.add_argument(
+        "--native",
+        action="store_true",
+        help="the all-Rust searches with the real model (a CPU job)",
+    )
+    p.add_argument("--model")
+    p.add_argument("--threads", type=int, default=16)
+    p.add_argument(
+        "--whole",
+        action="store_true",
+        help="--native: also one step per call (the loop's own batching)",
+    )
+    p.add_argument("--views-positions", type=int, default=20)
+    p.add_argument("--out")
     a = p.parse_args()
     f = np.load(a.golden)
     keys = sorted({k.split("/")[0] for k in f.files})[: a.positions]
     pgns = {s.split("/")[-1][:-4]: s for s in glob.glob(a.pgns)}
+    if a.native:
+        return native(a, f, keys, pgns)
     cpp = None
     if a.cpp:
         from allie.search.native import load

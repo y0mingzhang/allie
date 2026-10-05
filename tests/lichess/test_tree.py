@@ -52,7 +52,12 @@ def test_nodes_match_prefill(tiny):
         np.testing.assert_allclose(z, ref.double().numpy(), atol=3e-5)
 
 
-native = Path(os.environ.get("ALLIE_CHESS_INCLUDE", str(Path(tree.__file__).parents[1] / "search/native/chess-library")))
+native = Path(
+    os.environ.get(
+        "ALLIE_CHESS_INCLUDE",
+        str(Path(tree.__file__).parents[1] / "search/native/chess-library"),
+    )
+)
 
 
 @pytest.mark.skipif(
@@ -107,7 +112,9 @@ def node_logits(model):
     seqs = []
     for path in ([1], [2], [1, 3], [2, 4]):
         ids = torch.tensor(game.tokens + [int(nodes.token[i]) for i in path])
-        f = torch.tensor(game.features() + [nodes.feats[i].tolist() for i in path]).float()
+        f = torch.tensor(
+            game.features() + [nodes.feats[i].tolist() for i in path]
+        ).float()
         b = b"".join(game.boards + [nodes.board[i] for i in path])
         seqs.append((ids, f, torch.tensor(np.frombuffer(b, np.uint8).reshape(-1, 68))))
     return torch.tensor(np.concatenate([z1, z2])), seqs
@@ -139,7 +146,9 @@ def test_rust_leaves_match_copied_nodes(tiny_path):
     a, b = (t.handles([game.tokens], [feats]) for t in trees)
     b.fast = lambda ids, chunk=8: b.copied(ids, len(ids))  # today's way, the same batch
     boards, calls, next_id, frontier = {0: game.board.copy()}, [], 1, [0]
-    for depth in range(1, 6):  # every frontier node's first two legal moves, one call a depth
+    for depth in range(
+        1, 6
+    ):  # every frontier node's first two legal moves, one call a depth
         handles, grown = [], []
         for p in frontier:
             for mv in list(boards[p].legal_moves)[:2]:
@@ -155,8 +164,17 @@ def test_rust_leaves_match_copied_nodes(tiny_path):
         assert np.array_equal(za, zb) and np.isfinite(za).all(), f"depth {h[0][3] - n}"
     s = slice(1, next_id)
     x, y = trees
-    assert torch.equal(x.k[:, :, s], y.k[:, :, s]) and torch.equal(x.v[:, :, s], y.v[:, :, s]) and torch.equal(x.e[s], y.e[s])
-    assert game.cache.n == n and next_id > 20 and not x.caches and len(y.caches) == max(map(len, calls))
+    assert (
+        torch.equal(x.k[:, :, s], y.k[:, :, s])
+        and torch.equal(x.v[:, :, s], y.v[:, :, s])
+        and torch.equal(x.e[s], y.e[s])
+    )
+    assert (
+        game.cache.n == n
+        and next_id > 20
+        and not x.caches
+        and len(y.caches) == max(map(len, calls))
+    )
 
 
 @pytest.mark.skipif(
@@ -221,21 +239,37 @@ def test_a_search_past_its_deadline_stops(tiny_path, backend, monkeypatch):
     searches again after."""
     pytest.importorskip("pybind11")
     model = fast_model(tiny_path, backend, 2)
-    game, search = Game(Engine(model), 2400, 2400, 1800, 20, "classical"), tree.Coverage()
+    game, search = (
+        Game(Engine(model), 2400, 2400, 1800, 20, "classical"),
+        tree.Coverage(),
+    )
     game.update(random_game(5, 14), 1700, 1690)
     calls, inner = [], tree.Nodes.__call__
-    monkeypatch.setattr(tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h))
+    monkeypatch.setattr(
+        tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h)
+    )
     assert search(game, 32, deadline=time.monotonic() - 1) is None
     assert len(calls) == 1
     steps, clock = [], iter(range(10**6))
-    monkeypatch.setattr(game.engine, "steps", lambda items, f=game.engine.steps: steps.append(1) or f(items))
-    monkeypatch.setattr(tree, "monotonic", lambda: next(clock))  # nodes 0, their chunks 1, 2, ...
+    monkeypatch.setattr(
+        game.engine,
+        "steps",
+        lambda items, f=game.engine.steps: steps.append(1) or f(items),
+    )
+    monkeypatch.setattr(
+        tree, "monotonic", lambda: next(clock)
+    )  # nodes 0, their chunks 1, 2, ...
     assert search(game, 32, deadline=1.5) is None
-    assert calls[1] > 8 and len(steps) == 1  # stopped within the first nodes, after one chunk
+    assert (
+        calls[1] > 8 and len(steps) == 1
+    )  # stopped within the first nodes, after one chunk
     monkeypatch.setattr(tree, "monotonic", time.monotonic)
     moves, p = search(game, 32)[:2]
     assert len(calls) > 3
-    assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves) and abs(p.sum() - 1) < 1e-9
+    assert (
+        sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
+        and abs(p.sum() - 1) < 1e-9
+    )
 
 
 @pytest.mark.skipif(
@@ -248,7 +282,9 @@ def test_lookahead_values_every_move(tiny):
     game.update(random_game(7, 14), 1700, 1690)
     moves, prior, q = tree.Lookahead(m=4, k=2)(game, 3)
     assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
-    assert abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all() and (np.abs(q) <= 1).all()
+    assert (
+        abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all() and (np.abs(q) <= 1).all()
+    )
 
 
 @pytest.mark.skipif(
@@ -285,7 +321,9 @@ def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path, backend):
         t.join()
     assert engine.widest > 8  # more than one game's nodes in a forward: requests merged
     for (m1, p1, q1), (m2, p2, q2) in zip(alone, together):
-        assert m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 1e-2
+        assert (
+            m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 1e-2
+        )
     assert search(games[0], 4, deadline=time.monotonic() - 1) is None
 
 
@@ -293,22 +331,46 @@ def test_mixed_averages_wdl():
     rng = np.random.default_rng(0)
     zs = [rng.normal(0, 3, (5, 2432)) for _ in range(3)]
     z = tree.mixed(zs)
-    soft = lambda x: np.exp(x - x.max(-1, keepdims=True)) / np.exp(x - x.max(-1, keepdims=True)).sum(-1, keepdims=True)
-    np.testing.assert_allclose(soft(z[:, tree.WDL]), np.mean([soft(x[:, tree.WDL]) for x in zs], 0), atol=1e-12)
-    np.testing.assert_array_equal(np.delete(z, np.r_[tree.WDL], 1), np.delete(zs[0], np.r_[tree.WDL], 1))
+    soft = lambda x: (
+        np.exp(x - x.max(-1, keepdims=True))
+        / np.exp(x - x.max(-1, keepdims=True)).sum(-1, keepdims=True)
+    )
+    np.testing.assert_allclose(
+        soft(z[:, tree.WDL]), np.mean([soft(x[:, tree.WDL]) for x in zs], 0), atol=1e-12
+    )
+    np.testing.assert_array_equal(
+        np.delete(z, np.r_[tree.WDL], 1), np.delete(zs[0], np.r_[tree.WDL], 1)
+    )
 
 
 def test_view_follows_a_takeback(tiny):
-    game, moves, clock = Game(Engine(tiny), 2400, 2500, 180, 2), random_game(5, 12), [180, 180]
-    for k in range(1, len(moves) + 1):  # every move's clock known: a takeback keeps the earlier features
+    game, moves, clock = (
+        Game(Engine(tiny), 2400, 2500, 180, 2),
+        random_game(5, 12),
+        [180, 180],
+    )
+    for k in range(
+        1, len(moves) + 1
+    ):  # every move's clock known: a takeback keeps the earlier features
         clock[(k - 1) % 2] -= 3
         game.update(moves[:k], *clock)
     view = tree.View(game, "r2800")
     view.sync()
     game.update(moves[:-2], *clock)
     fresh = tree.View(game, "r2800")
-    assert view.tokens == fresh.tokens and fresh.tokens[3:11] == [2, 8, 0, 0, 2, 8, 0, 0]
-    np.testing.assert_allclose(view.sync(), fresh.sync(), atol=1e-4)  # incremental vs one prefill
+    assert view.tokens == fresh.tokens and fresh.tokens[3:11] == [
+        2,
+        8,
+        0,
+        0,
+        2,
+        8,
+        0,
+        0,
+    ]
+    np.testing.assert_allclose(
+        view.sync(), fresh.sync(), atol=1e-4
+    )  # incremental vs one prefill
     assert view.cache.n == len(game.tokens)
 
 
@@ -321,11 +383,21 @@ def test_coverage_views_play_legal_moves(tiny):
     game = Game(Engine(tiny), 2400, 2500, 1800, 10)
     game.update(random_game(8, 14), 1700, 1690)
     alone = tree.Coverage()(game, 8)
-    for views in (("true", "r2800"), ("noclock", "swap/noclock", "r3000"), ("r3000/noclock", "tc180+2/swap/noclock")):
+    for views in (
+        ("true", "r2800"),
+        ("noclock", "swap/noclock", "r3000"),
+        ("r3000/noclock", "tc180+2/swap/noclock"),
+    ):
         moves, p, prior, q = tree.Coverage(views=views)(game, 8)
         assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
-        assert abs(p.sum() - 1) < 1e-9 and abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all()
-        assert alone[0] == moves and np.allclose(alone[2], prior)  # the game's own prior: only the values mix
+        assert (
+            abs(p.sum() - 1) < 1e-9
+            and abs(prior.sum() - 1) < 1e-9
+            and np.isfinite(q).all()
+        )
+        assert alone[0] == moves and np.allclose(
+            alone[2], prior
+        )  # the game's own prior: only the values mix
     assert {"r2800", "noclock", "swap/noclock", "r3000"} <= set(game.views)
 
 
@@ -339,8 +411,15 @@ def test_view_specs(tiny):
     assert all(f == [-1] * 3 for f in tree.View(game, "swap/noclock").features())
     assert any(f != [-1] * 3 for f in game.features())
     blitz = tree.View(game, "tc180+2/swap/noclock").tokens
-    assert blitz[1:3] == header(180, 2, 0, 0)[1:3] and blitz[3:11] == own[4:] + own[:4] and blitz[11:] == game.tokens[11:]
-    assert tree.View(game, "tc180+2/noclock").inc == 2 and tree.View(game, "swap").inc == game.inc == 10
+    assert (
+        blitz[1:3] == header(180, 2, 0, 0)[1:3]
+        and blitz[3:11] == own[4:] + own[:4]
+        and blitz[11:] == game.tokens[11:]
+    )
+    assert (
+        tree.View(game, "tc180+2/noclock").inc == 2
+        and tree.View(game, "swap").inc == game.inc == 10
+    )
     with pytest.raises(ValueError):
         tree.View(game, "tc180")
 
@@ -348,7 +427,10 @@ def test_view_specs(tiny):
 def test_coverage_views_respect_the_deadline_in_sync(tiny):
     game = Game(Engine(tiny), 2400, 2500, 1800, 10)
     game.update(random_game(8, 14), 1700, 1690)
-    assert tree.Coverage(views=("true", "r2800"))(game, 8, deadline=time.monotonic() - 1) is None
+    assert (
+        tree.Coverage(views=("true", "r2800"))(game, 8, deadline=time.monotonic() - 1)
+        is None
+    )
 
 
 @pytest.mark.skipif(
@@ -364,12 +446,20 @@ def test_kl_values_searched_moves(tiny, monkeypatch):
     game = Game(Engine(tiny), 2400, 2500, 1800, 10)
     game.update(random_game(7, 14), 1700, 1690)
     grown, grow = [], kl.grow
-    monkeypatch.setattr(kl, "grow", lambda F, *a, **k: grown.append(F) or grow(F, *a, **k))
+    monkeypatch.setattr(
+        kl, "grow", lambda F, *a, **k: grown.append(F) or grow(F, *a, **k)
+    )
     search = tree.KL()
     moves, prior, q = search(game, 24)
     F = grown[0]
-    assert F.spent[0] == 24 and sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
-    assert abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all() and (np.abs(q) <= np.arctanh(0.95)).all()
+    assert F.spent[0] == 24 and sorted(moves) == sorted(
+        m.uci() for m in game.board.legal_moves
+    )
+    assert (
+        abs(prior.sum() - 1) < 1e-9
+        and np.isfinite(q).all()
+        and (np.abs(q) <= np.arctanh(0.95)).all()
+    )
     kid = F.ekid[F.start[0] : F.start[0] + F.count[0]]
     V = kl.backup(F.view(), **search.read)[0]
     assert np.allclose(q[kid >= 0], -V[kid[kid >= 0]])
@@ -389,30 +479,55 @@ def test_kl_views_read_every_node_under_them(tiny, monkeypatch):
     game, played = Game(Engine(tiny), 2400, 2500, 1800, 10), random_game(9, 14)
     game.update(played, 1700, 1690)
     grown, grow = [], kl.grow
-    monkeypatch.setattr(kl, "grow", lambda F, *a, **k: grown.append(F) or grow(F, *a, **k))
+    monkeypatch.setattr(
+        kl, "grow", lambda F, *a, **k: grown.append(F) or grow(F, *a, **k)
+    )
     alone = tree.KL()(game, 16)
     twice = tree.KL(views=("true", "true"))(game, 16)
-    assert alone[0] == twice[0] and np.allclose(alone[1], twice[1]) and np.allclose(alone[2], twice[2], atol=1e-9)
+    assert (
+        alone[0] == twice[0]
+        and np.allclose(alone[1], twice[1])
+        and np.allclose(alone[2], twice[2], atol=1e-9)
+    )
     soft = lambda x: np.exp(x - x.max()) / np.exp(x - x.max()).sum()
     for views in (("r3000/noclock",), ("r3000/tc1800+20/noclock", "true")):
         moves, prior, q = tree.KL(views=views)(game, 16)
         F = grown[-1]
-        assert F.spent[0] == 16 and sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
-        assert alone[0] == moves and np.allclose(alone[1], prior) and np.isfinite(q).all()
+        assert F.spent[0] == 16 and sorted(moves) == sorted(
+            m.uci() for m in game.board.legal_moves
+        )
+        assert (
+            alone[0] == moves and np.allclose(alone[1], prior) and np.isfinite(q).all()
+        )
         view = game.views[views[0]].sync().double().numpy()
         np.testing.assert_allclose(F.wdlv[0, 0], soft(view[tree.WDL]), atol=1e-12)
-        assert not np.allclose(F.wdlv[0, 0], soft(game.sync().double().numpy()[tree.WDL]))
+        assert not np.allclose(
+            F.wdlv[0, 0], soft(game.sync().double().numpy()[tree.WDL])
+        )
     tree.KL(views=("r3000/noclock", "true"))(game, 16)
     F = grown[-1]
     live = ~F.terminal[: F.size]
-    np.testing.assert_allclose(F.wdl[: F.size][live], F.wdlv[: F.size][live].mean(1), atol=1e-12)
-    for c in np.flatnonzero((F.parent[: F.size] == 0) & live)[:4]:  # below the root, each node read as the view reads it
+    np.testing.assert_allclose(
+        F.wdl[: F.size][live], F.wdlv[: F.size][live].mean(1), atol=1e-12
+    )
+    for c in np.flatnonzero((F.parent[: F.size] == 0) & live)[
+        :4
+    ]:  # below the root, each node read as the view reads it
         g = Game(game.engine, 2400, 2500, 1800, 10)
         g.update(played + [tree.MOVES[int(F.token[c]) - tree.MOVE_START]], 1700, 1690)
-        np.testing.assert_allclose(F.wdlv[c, 0], soft(tree.View(g, "r3000/noclock").sync().double().numpy()[tree.WDL]), atol=1e-4)
+        np.testing.assert_allclose(
+            F.wdlv[c, 0],
+            soft(tree.View(g, "r3000/noclock").sync().double().numpy()[tree.WDL]),
+            atol=1e-4,
+        )
     calls, inner = [], tree.Nodes.__call__
-    monkeypatch.setattr(tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h))
-    assert tree.KL(views=("r2800",))(game, 8, deadline=time.monotonic() - 1) is None and not calls
+    monkeypatch.setattr(
+        tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h)
+    )
+    assert (
+        tree.KL(views=("r2800",))(game, 8, deadline=time.monotonic() - 1) is None
+        and not calls
+    )
 
 
 @pytest.mark.skipif(
@@ -449,5 +564,78 @@ def test_fast_kl_runs_concurrently_and_stops_late(tiny_path, backend, views):
         t.join()
     assert engine.widest > 8
     for (m1, p1, q1), (m2, p2, q2) in zip(alone, together):
-        assert m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 5e-2
+        assert (
+            m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 5e-2
+        )
     assert search(games[0], 16, deadline=time.monotonic() - 1) is None
+
+
+def test_rust_engine_delegates_to_the_server(tiny_path):
+    """On the Rust backend the Engine hands every call to the model's Server: extend / steps run on the caller's
+    thread and merge with other threads' requests, run() pauses the server so what arrives meanwhile merges into one
+    step, and forwards / tokens / widest are the server's counts."""
+    import threading
+
+    model = fast_model(tiny_path, "rust", 2)
+    engine = Engine(model)
+    srv = engine.server
+    assert srv is not None and srv is model.fast.server and srv.dims() == (6, 4, 16, 64)
+    game = Game(engine, 1500, 1600, 180, 2)
+    game.update(random_game(4, 21), 170, 165)
+    before = (engine.forwards, engine.tokens)
+    game.sync()
+    assert engine.forwards == before[0] + 1 and engine.tokens == before[1] + len(
+        game.tokens
+    )
+    others = [Game(engine, 1500, 1600, 180, 2) for _ in range(6)]
+    for i, g in enumerate(others):
+        g.update(random_game(10 + i, 8 + i), 170, 165)
+    release, steps = threading.Event(), engine.forwards
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(5),))
+    blocker.start()
+    threads = [threading.Thread(target=g.sync) for g in others]
+    for t in threads:
+        t.start()
+    time.sleep(0.3)
+    assert srv.stats()["queued"] == len(others) and engine.forwards == steps
+    release.set()
+    for t in [blocker, *threads]:
+        t.join()
+    assert engine.forwards == steps + 1 and engine.widest >= len(others)
+    s = srv.stats()
+    assert {
+        "steps",
+        "items",
+        "tokens",
+        "requests",
+        "widest",
+        "waited",
+        "wait_s",
+        "joined",
+        "queued",
+    } <= set(s)
+    sizes = srv.sizes()
+    assert sizes[-1] == len(others) and srv.sizes() == []
+    for g, ref in zip(others, [Game(engine, 1500, 1600, 180, 2) for _ in others]):
+        ref.update(g.moves, 170, 165)
+        p, q = (torch.softmax(z[378:2346].float(), -1) for z in (g.sync(), ref.sync()))
+        assert (
+            p - q
+        ).abs().max() < 1e-3  # merged with five others vs alone: batching noise only
+    srv.chunk, steps = 2, engine.forwards
+    engine.steps([(Cache(model), *inputs_of(random_game(20 + i, 9))) for i in range(5)])
+    assert engine.forwards == steps + 3  # 5 items in chunks of 2
+    srv.chunk = 0
+    assert (srv.max_items, srv.min_items, srv.chunk) == (
+        128,
+        48,
+        0,
+    ) and 0 < srv.gather < 0.01
+    srv.max_items = 64
+    assert srv.max_items == 64
+
+
+def inputs_of(moves):
+    from .test_model import inputs
+
+    return inputs(moves)

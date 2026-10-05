@@ -3,6 +3,12 @@ same weights and caches, bit for bit the C++ kernels' logits on the same ISA. `R
 constructor, attributes and methods; the cfg and pointer lists it hands the engine are built as
 `Fast.__init__` builds them. The engine reads the tensors in place through raw pointers, so they are
 kept alive here. Threads are pinned and the weights' pages placed on their NUMA node as in fast.py.
+
+The engine lives in an `allie_fast.Server`: its own thread runs the steps, merging what every caller (games'
+moves, searches on their threads, the Rust searchers' native loops) has queued into one step of up to
+max_items items, with a gather window of `gather` seconds after a step's first request for the other
+requests of the last step. step() blocks for its reply with the GIL released; the caller's tensors stay
+alive until then.
 """
 
 import os
@@ -34,7 +40,7 @@ class Leaf(NamedTuple):
 class RustFast:
     """model.py's step() for a CPU Model with BF16 activations (int8 or BF16 matrices), in Rust."""
 
-    def __init__(self, model, threads=None, pin=True, spin=0.002, place=True):
+    def __init__(self, model, threads=None, pin=True, spin=0.002, place=True, max_items=128, min_items=48, gather=3e-4):
         import allie_fast
 
         assert model.device.type == "cpu" and model.dtype == torch.bfloat16
@@ -112,7 +118,8 @@ class RustFast:
             groups,
             spin,
         )
-        self.handle, self.stale = self.lib.Engine(*self.args), False
+        self.serve = dict(max_items=max_items, min_items=min_items, gather=gather)
+        self.handle, self.stale = self.lib.Server(*self.args, **self.serve), False
         if hasattr(os, "register_at_fork"):
             ref = weakref.ref(self)
             os.register_at_fork(
@@ -124,14 +131,16 @@ class RustFast:
         return self.handle.isa
 
     def forked(self):
-        """In a fork's child, before its threads run: the parent's pool threads are gone and its lock
-        may have been held. A fresh lock; the engine is rebuilt under it on first use."""
+        """In a fork's child, before its threads run: the parent's server and pool threads are gone and its
+        lock may have been held. A fresh lock; the server is rebuilt on first use."""
         self.lock, self.stale = threading.Lock(), True
 
     def native(self):
         if self.stale:
-            self.handle, self.stale = self.lib.Engine(*self.args), False
+            self.handle, self.stale = self.lib.Server(*self.args, **self.serve), False
         return self.handle
+
+    server = property(native)
 
     def profile(self, on=True):
         """Seconds spent in each phase of step() since the last call; on: keep counting."""
@@ -141,11 +150,8 @@ class RustFast:
         return dict(zip(PHASES, out))
 
     def step(self, items):
-        with (
-            self.lock
-        ):  # one step at a time: the engine's buffers and threads are shared
-            self.native()
-            return self._step(items)
+        self.native()
+        return self._step(items)  # the server serializes the steps and merges concurrent callers'
 
     def check(self, cache, ids, feats, boards, *leaf):
         """An item's shapes, and the cache grown for a plain one; its tensors (and a Leaf's tree's) are
@@ -188,7 +194,6 @@ class RustFast:
                 raise ValueError("a cache whose tensors are not the model's layout")
 
     def _step(self, items):
-        self.handle.wake()  # workers wake while the inputs are gathered
         meta, paths, lo, seen = [], [], 0, set()
         for item in items:
             self.check(*item)

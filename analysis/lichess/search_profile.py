@@ -4,8 +4,9 @@ step (fast.Fast.step, with its per-phase profile), against plain steps of 1, 8 a
 forward's own cost per token at those batch sizes) and the weight bytes a step streams.
 
 usage: search_profile.py --model DIR --pgn FILE [--ply 40] [--threads 4] [--searchers coverage,kl]
-       [--budgets 32,128,1024] [--views true] [--cprofile] [--out FILE]
-One JSON line per (searcher, budget) with ms per leaf, its parts and the phases; --out appends them.
+       [--budgets 32,128,1024] [--views true] [--backend fast|rust] [--native] [--cprofile] [--out FILE]
+One JSON line per (searcher, budget) with ms per leaf, its parts and the phases; --out appends them. --native: the
+all-Rust loop (treers.Coverage / KL through the model's Server; Rust backend), the steps counted by the Server.
 """
 
 import argparse
@@ -20,7 +21,7 @@ import chess.pgn
 import numpy as np
 import torch
 
-from allie.lichess import tree
+from allie.lichess import tree, treers
 from allie.lichess.engine import Engine, Game
 from allie.lichess.model import Cache, Model, step
 
@@ -187,8 +188,22 @@ def main():
     p.add_argument("--pgn", required=True)
     p.add_argument("--ply", type=int, default=40)
     p.add_argument("--threads", type=int, default=4)
-    p.add_argument("--backend", default="fast", choices=("fast", "rust"), help="the C++ kernels or the Rust engine")
-    p.add_argument("--torch-threads", type=int, help="torch's own threads (default: --threads, as the bot sets them)")
+    p.add_argument(
+        "--backend",
+        default="fast",
+        choices=("fast", "rust"),
+        help="the C++ kernels or the Rust engine",
+    )
+    p.add_argument(
+        "--torch-threads",
+        type=int,
+        help="torch's own threads (default: --threads, as the bot sets them)",
+    )
+    p.add_argument(
+        "--native",
+        action="store_true",
+        help="the all-Rust search loop (treers; the Rust backend)",
+    )
     p.add_argument("--searchers", default="coverage,kl")
     p.add_argument("--budgets", default="32,128,1024")
     p.add_argument("--views", default="true")
@@ -229,17 +244,20 @@ def main():
         weight_mb=dict(dense=dense >> 20, experts=experts >> 20),
     )
     base["plain_step_ms"] = plain_steps(m, game, tuple(map(int, a.batches.split(","))))
+    srv = getattr(m.fast, "server", None)
+    assert not a.native or srv is not None, "--native needs the Rust backend"
+    base["native"] = a.native
     print(json.dumps(base), flush=True)
     views = tuple(a.views.split(","))
     rows = []
     for name in a.searchers.split(","):
         for budget in map(int, a.budgets.split(",")):
+            mod = treers if a.native else tree
             searcher = (
-                tree.Coverage(views=views)
-                if name == "coverage"
-                else tree.KL(views=views)
+                mod.Coverage(views=views) if name == "coverage" else mod.KL(views=views)
             )
             meter = Meter(m)
+            before = srv.stats() if srv else None
             m.fast.profile(True)  # resets the phase clocks
             prof = cProfile.Profile() if a.cprofile else None
             t1 = time.perf_counter()
@@ -251,6 +269,18 @@ def main():
             wall = time.perf_counter() - t1
             phases = m.fast.profile(False)
             meter.close()
+            if srv:  # every step runs on the server: its counts (the native loop makes no Python calls)
+                after = srv.stats()
+                d = {
+                    k: after[k] - before[k]
+                    for k in ("steps", "items", "waited", "wait_s", "joined")
+                }
+                meter.n["steps"], meter.n["items"] = d["steps"], d["items"]
+                if a.native:
+                    meter.n["leaves"], meter.n["calls"] = (
+                        game.last_search["evaluated"],
+                        d["steps"] // len(views),
+                    )
             leaves = max(meter.n["leaves"], 1)
             ms = lambda s: round(1000 * s / leaves, 3)  # noqa: E731
             row = dict(
@@ -262,6 +292,7 @@ def main():
                 steps=meter.n["steps"],
                 items_per_step=round(meter.n["items"] / max(meter.n["steps"], 1), 1),
                 leaves_per_call=round(meter.n["leaves"] / max(meter.n["calls"], 1), 1),
+                gather=d if srv else None,
                 wall_ms=round(1000 * wall, 1),
                 ms_per_leaf=ms(wall),
                 oracle_ms_per_leaf=ms(meter.t["oracle"]),

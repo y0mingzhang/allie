@@ -1,11 +1,22 @@
 //! tree.cpp's `GrowForest` for one root, the coverage search's tree: the root's branches pulled in turn by
 //! sqrt(p (1 - p)) / (1 + pulls), PUCT below, expansion from the logits, terminal and depth-limited backups,
 //! `compact` for value.cpp's backup (`reduce`), `grow` for a larger budget; with tree.py `Nodes`' per-node
-//! board states and clocks. Python sees it as `allie_fast.Coverage`, driven as the C++ one: `select` gives
-//! the pending nodes' handles (id, parent, token, prefix length), `update` takes their logits.
+//! board states and clocks. Python sees it as `allie_fast.Coverage`, driven as the C++ one (`select` gives
+//! the pending nodes' handles (id, parent, token, prefix length), `update` takes their logits) or natively:
+//! `run(server, caches, deadline)` evaluates every call's leaves itself through the `Server` as path items on
+//! the game's cache and the tree's own slot buffers, with no Python per leaf.
 //!
 //! Values are f64 wherever the C++ and numpy use double; logits pass through f32 as the C++ bindings'
-//! forcecast rounds them. Node ids are creation order from the root's 0, so they index the Python side's slots.
+//! forcecast rounds them. Node ids are creation order from the root's 0, so they index the Python side's slots;
+//! the native loop's slots are the tree's own (`Node::slot`, equal to the id until a re-root frees some).
+//!
+//! Tree reuse (`reroot`): after the two plies since the search (the bot's move, the reply) the grandchild's
+//! subtree becomes the next search's start: its nodes, visits, bootstrap values and slot rows are kept (slot
+//! positions are absolute: the two plies' rows are now the cache's), the pull schedule is rebuilt with the
+//! kept visits as pulls already made, and the root is re-expanded from the game's real logits. The kept
+//! leaves were evaluated under the clocks the search predicted for those two plies while the cache rows now
+//! carry the real clocks: an approximation inherent to reuse (the calibration refits for it); KL's "zero"
+//! clock rule has no such gap.
 
 use numpy::{PyArray1, PyArray2, PyArray3, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -14,7 +25,9 @@ use pyo3::types::PyDict;
 
 use super::backup::{Backup, Compact};
 use super::clocks::{predicted_seconds, Clocks};
+use super::native::{mixed, monotonic, Batch, CacheRef, Slots, NONE};
 use crate::chess::{self, Position, HEADER, MOVE_START};
+use crate::server::{Inner, PyServer};
 
 pub const CONTEXT: usize = 1025;
 pub const VOCAB: usize = 2432;
@@ -45,6 +58,8 @@ struct Node {
     board: [u8; 68],
     /// the think time predicted for the node's mover (0 under the "zero" clock rule)
     elapsed: f64,
+    /// the native loop's slot for the node's keys, values and embedding (NONE: the root)
+    slot: u32,
 }
 
 struct Branch {
@@ -61,13 +76,17 @@ struct Stats {
     prefix_tokens: i64,
     requests: i64,
     max_depth: i32,
+    /// re-root: the evaluated leaves kept and the pulls they stand for
+    reused: i64,
+    kept_pulls: i32,
 }
 
-/// Pull k (1..=budget) goes to the branch of largest weight / (1 + its pulls so far), the lowest on ties.
-fn schedule(weights: &[f64], budget: i32) -> Vec<Vec<i32>> {
+/// Pull k (from + 1..=budget) goes to the branch of largest weight / (1 + its pulls so far), the lowest on
+/// ties; `counts`: pulls already made per branch (a re-rooted tree's kept visits).
+fn schedule(weights: &[f64], counts: &[i32], from: i32, budget: i32) -> Vec<Vec<i32>> {
     let mut pulls = vec![Vec::new(); weights.len()];
-    let mut counts = vec![0i32; weights.len()];
-    for pull in 1..=budget {
+    let mut counts = counts.to_vec();
+    for pull in from + 1..=budget {
         let (mut best, mut best_u) = (0, f64::NEG_INFINITY);
         for (j, &w) in weights.iter().enumerate() {
             let u = w / (1 + counts[j]) as f64;
@@ -104,6 +123,11 @@ pub struct Coverage {
     rounds: i32,
     evals: i64,
     stats: Stats,
+    /// the native loop's slot buffers, one per view, allocated at its first run
+    slots: Vec<Slots>,
+    /// slots freed by a re-root, and the slots ever allocated
+    free: Vec<u32>,
+    top: u32,
 }
 
 impl Coverage {
@@ -130,7 +154,7 @@ impl Coverage {
         let boards = chess::encode(prefix)?;
         let board: [u8; 68] = boards[boards.len() - 68..].try_into().unwrap();
         let z = rounded(root.iter());
-        let root = Node { parent: -1, token: -1, depth: 0, born: 0, n: 0, w: 0., prior: 0., boot: 0., children: Vec::new(), pos, terminal: -1., board, elapsed: 0. };
+        let root = Node { parent: -1, token: -1, depth: 0, born: 0, n: 0, w: 0., prior: 0., boot: 0., children: Vec::new(), pos, terminal: -1., board, elapsed: 0., slot: NONE };
         let mut cov = Coverage {
             nodes: vec![root],
             branches: Vec::new(),
@@ -144,11 +168,34 @@ impl Coverage {
             rounds: 0,
             evals: 0,
             stats: Stats::default(),
+            slots: Vec::new(),
+            free: Vec::new(),
+            top: 1,
         };
         cov.expand(0, &z)?;
         cov.nodes[0].elapsed = if predicted { predicted_seconds(&z) } else { 0. };
-        cov.branches = schedule(&cov.weights(), budget).into_iter().enumerate().map(|(edge, pulls)| Branch { edge, next: 0, pulls }).collect();
+        let counts = vec![0; cov.nodes[0].children.len()];
+        cov.branches = schedule(&cov.weights(), &counts, 0, budget).into_iter().enumerate().map(|(edge, pulls)| Branch { edge, next: 0, pulls }).collect();
         Ok(cov)
+    }
+
+    fn alloc_slot(&mut self) -> u32 {
+        self.free.pop().unwrap_or_else(|| {
+            self.top += 1;
+            self.top - 1
+        })
+    }
+
+    /// The node's ancestors' slots below the root, in order.
+    fn path_slots(&self, id: usize) -> Vec<u32> {
+        let mut p = Vec::new();
+        let mut j = self.nodes[id].parent;
+        while j > 0 {
+            p.push(self.nodes[j as usize].slot);
+            j = self.nodes[j as usize].parent;
+        }
+        p.reverse();
+        p
     }
 
     fn weights(&self) -> Vec<f64> {
@@ -208,7 +255,8 @@ impl Coverage {
                 c.push(parent, length, elapsed);
             }
             let terminal = pos.outcome();
-            self.nodes.push(Node { parent: parent as i32, token, depth, born: birth, n: 0, w: 0., prior, boot: 0., children: Vec::new(), pos, terminal, board, elapsed: 0. });
+            let slot = self.alloc_slot();
+            self.nodes.push(Node { parent: parent as i32, token, depth, born: birth, n: 0, w: 0., prior, boot: 0., children: Vec::new(), pos, terminal, board, elapsed: 0., slot });
             self.nodes[parent].children[edge].child = id as i32;
         }
         self.nodes[parent].children[edge].child as usize
@@ -324,6 +372,9 @@ impl Coverage {
 
     /// Continue the finished search to a larger budget: the schedule's first `budget` pulls are unchanged.
     pub fn extend(&mut self, budget: i32) -> Result<(), &'static str> {
+        if self.stats.kept_pulls > 0 {
+            return Err("cannot grow a re-rooted tree");
+        }
         if !self.is_done() {
             return Err("finish current phase before grow");
         }
@@ -333,7 +384,8 @@ impl Coverage {
         if self.branches.iter().any(|b| b.next != b.pulls.len()) {
             return Err("unfinished branch");
         }
-        let pulls = schedule(&self.weights(), budget);
+        let counts = vec![0; self.branches.len()];
+        let pulls = schedule(&self.weights(), &counts, 0, budget);
         for (branch, pulls) in self.branches.iter_mut().zip(pulls) {
             if !pulls.iter().filter(|&&p| p <= self.budget).eq(branch.pulls.iter()) {
                 return Err("quota prefix changed");
@@ -343,6 +395,153 @@ impl Coverage {
         }
         self.budget = budget;
         Ok(())
+    }
+
+    /// The native loop: every call's pending leaves evaluated through the server (all views' items in one
+    /// request when `merged`, else one request per view), their logits applied, until done. false: the
+    /// deadline (time.monotonic seconds) passed before a call.
+    pub fn native(&mut self, server: &Inner, caches: &[CacheRef], deadline: f64, merged: bool) -> Result<bool, String> {
+        if caches.len() != self.clocks.len() {
+            return Err("one cache per view".into());
+        }
+        if server.dims[4] != VOCAB {
+            return Err("the engine's vocabulary".into());
+        }
+        if self.slots.is_empty() {
+            let cap = (self.top as usize).max(self.budget as usize + 2);
+            self.slots = caches.iter().map(|_| Slots::new(server.dims, cap)).collect();
+        }
+        while !self.is_done() {
+            if monotonic() > deadline {
+                return Ok(false);
+            }
+            let pending = self.next()?.to_vec();
+            if pending.is_empty() {
+                continue;
+            }
+            let z = self.evaluate(server, caches, &pending, merged)?;
+            self.apply(&z)?;
+        }
+        Ok(true)
+    }
+
+    /// The pending nodes' logits under every view, mixed (tree.py `mixed`) and rounded through f32 as
+    /// `update` takes them: f64 rows in `pending`'s order.
+    fn evaluate(&mut self, server: &Inner, caches: &[CacheRef], pending: &[usize], merged: bool) -> Result<Vec<f64>, String> {
+        let (views, n, top) = (caches.len(), pending.len(), self.top as usize);
+        for s in &mut self.slots {
+            s.ensure(top);
+        }
+        let mut batches: Vec<Batch> = (0..if merged { 1 } else { views }).map(|_| Batch::new(VOCAB)).collect();
+        for v in 0..views {
+            for &id in pending {
+                let (node, path) = (&self.nodes[id], self.path_slots(id));
+                let feats = self.clocks[v].feats[id].map(|x| x as f32);
+                batches[if merged { 0 } else { v }].leaf(&caches[v], &self.slots[v], &path, node.slot, node.token, feats, &node.board);
+            }
+        }
+        let outs = batches.into_iter().map(|b| b.submit(server)).collect::<Result<Vec<_>, _>>()?;
+        let row = |v: usize, k: usize| -> &[f32] {
+            let (o, i) = if merged { (&outs[0], v * n + k) } else { (&outs[v], k) };
+            &o[i * VOCAB..(i + 1) * VOCAB]
+        };
+        let mut z = Vec::with_capacity(n * VOCAB);
+        for k in 0..n {
+            if views == 1 {
+                z.extend(row(0, k).iter().map(|&x| x as f64));
+            } else {
+                let rows: Vec<&[f32]> = (0..views).map(|v| row(v, k)).collect();
+                z.extend(rounded(mixed(&rows).iter()));
+            }
+        }
+        Ok(z)
+    }
+
+    /// Re-root at the grandchild reached by `moves` (the two plies played since the search), if it was
+    /// evaluated: its subtree kept (ids remapped in order, depths less two, born reset), the root re-expanded
+    /// from the game's logits `root` (rounded through f32) with the kept children's visits, every view's
+    /// clocks restarted from `features` (the game's, now two plies longer) for the root, the pull schedule
+    /// rebuilt toward `budget` after the kept visits. Returns the kept nodes' old ids (new id i was old id
+    /// kept[i]), or None when nothing can be kept: the caller starts fresh.
+    pub fn rebase(&mut self, moves: &[i64], root: &[f64], features: &[Vec<[f32; 3]>], budget: i32) -> Result<Option<Vec<usize>>, &'static str> {
+        if !self.is_done() {
+            return Err("unfinished search");
+        }
+        if root.len() != VOCAB || moves.len() != 2 || budget < 0 {
+            return Err("two moves, root logits [2432], a nonnegative budget");
+        }
+        if features.len() != self.clocks.len() || features.iter().any(|f| f.len() != self.root_len + 2) {
+            return Err("features must cover the new prefix under every view");
+        }
+        let find = |nodes: &[Node], id: usize, t: i64| nodes[id].children.iter().find(|e| e.token == t && e.child >= 0).map(|e| e.child as usize);
+        let Some(c1) = find(&self.nodes, 0, moves[0]) else { return Ok(None) };
+        let Some(g) = find(&self.nodes, c1, moves[1]) else { return Ok(None) };
+        if self.nodes[g].children.is_empty() || self.nodes[g].terminal >= 0. {
+            return Ok(None);
+        }
+        let n = self.nodes.len();
+        let (mut map, mut kept) = (vec![-1i32; n], Vec::new());
+        for i in 0..n {
+            let p = self.nodes[i].parent;
+            if i == g || (p >= 0 && map[p as usize] >= 0) {
+                map[i] = kept.len() as i32;
+                kept.push(i);
+            }
+        }
+        let mut used = vec![false; self.top as usize];
+        let old = std::mem::take(&mut self.nodes);
+        for (i, mut x) in old.into_iter().enumerate() {
+            if map[i] < 0 {
+                continue;
+            }
+            x.parent = if i == g { -1 } else { map[x.parent as usize] };
+            x.depth -= 2;
+            x.born = 0;
+            for e in &mut x.children {
+                if e.child >= 0 {
+                    e.child = map[e.child as usize];
+                }
+            }
+            if i == g {
+                x.slot = NONE;
+                x.token = -1;
+            } else {
+                used[x.slot as usize] = true;
+            }
+            self.nodes.push(x);
+        }
+        self.free = (1..self.top).rev().filter(|&s| !used[s as usize]).collect();
+        let saved: Vec<(i64, i32)> = self.nodes[0].children.iter().map(|e| (e.token, e.child)).collect();
+        self.expand(0, root)?;
+        for e in &mut self.nodes[0].children {
+            e.child = saved.iter().find(|s| s.0 == e.token).map_or(-1, |s| s.1);
+        }
+        let edges: Vec<Edge> = self.nodes[0].children.clone();
+        let mut counts = Vec::with_capacity(edges.len());
+        for e in &edges {
+            counts.push(if e.child >= 0 {
+                self.nodes[e.child as usize].prior = e.prior;
+                self.nodes[e.child as usize].n
+            } else {
+                0
+            });
+        }
+        let kept_pulls: i32 = counts.iter().sum();
+        let r = &mut self.nodes[0];
+        r.n = kept_pulls;
+        r.w = 0.;
+        r.elapsed = if self.predicted { predicted_seconds(root) } else { 0. };
+        for (c, f) in self.clocks.iter_mut().zip(features) {
+            c.rebase(f, &kept);
+        }
+        self.root_len += 2;
+        self.budget = budget;
+        self.remaining = (budget - kept_pulls).max(0);
+        self.branches = schedule(&self.weights(), &counts, kept_pulls, budget).into_iter().enumerate().map(|(edge, pulls)| Branch { edge, next: 0, pulls }).collect();
+        self.rounds = 0;
+        self.evals = 0;
+        self.stats = Stats { reused: self.nodes[1..].iter().filter(|x| !x.children.is_empty()).count() as i64, kept_pulls, ..Stats::default() };
+        Ok(Some(kept))
     }
 }
 
@@ -395,6 +594,32 @@ impl Coverage {
 
     fn grow(&mut self, budget: i32) -> PyResult<()> {
         self.extend(budget).map_err(invalid)
+    }
+
+    /// The whole search natively through `server`: caches, one per view, as (k, v, e pointers, capacity,
+    /// rows) of the game's (its views') cache, kept alive and untouched by the caller until this returns;
+    /// deadline: time.monotonic() seconds past which the search stops before its next call, giving False;
+    /// merged: all views' items of a call in one request (else one per view). The GIL is released.
+    #[pyo3(signature = (server, caches, deadline=f64::INFINITY, merged=true))]
+    fn run(&mut self, py: Python<'_>, server: PyRef<'_, PyServer>, caches: Vec<(usize, usize, usize, usize, usize)>, deadline: f64, merged: bool) -> PyResult<bool> {
+        let inner = server.inner.clone();
+        let caches: Vec<CacheRef> = caches.into_iter().map(CacheRef::from).collect();
+        py.allow_threads(move || self.native(&inner, &caches, deadline, merged)).map_err(PyRuntimeError::new_err)
+    }
+
+    /// Tree reuse: re-root at the grandchild reached by `moves` (two move tokens) for a search of `budget`
+    /// from the game's new logits `root` [2432] and clock features `features` (one [n, 3] per view, n the
+    /// new prefix length); the kept nodes' old ids, or None when the grandchild was not evaluated (start
+    /// fresh). The native loop's slots stay valid.
+    fn reroot(&mut self, moves: Vec<i64>, root: PyReadonlyArray1<f64>, features: Vec<PyReadonlyArray2<f32>>, budget: i32) -> PyResult<Option<Vec<usize>>> {
+        let feats = features.iter().map(rows3).collect::<PyResult<Vec<_>>>()?;
+        let root = rounded(root.as_array().iter());
+        self.rebase(&moves, &root, &feats, budget).map_err(invalid)
+    }
+
+    /// Every node's visit count, by id.
+    fn visits(&self) -> Vec<i32> {
+        self.nodes.iter().map(|x| x.n).collect()
     }
 
     #[getter]
@@ -477,6 +702,8 @@ impl Coverage {
         }
         d.set_item("nodes", self.nodes.len())?;
         d.set_item("rounds", self.rounds)?;
+        d.set_item("reused_leaves", self.stats.reused)?;
+        d.set_item("kept_pulls", self.stats.kept_pulls)?;
         Ok(d)
     }
 }
@@ -537,9 +764,11 @@ mod tests {
 
     #[test]
     fn pull_schedule() {
-        assert_eq!(schedule(&[0.5, 0.5, 0.1], 5), [vec![1, 3, 5], vec![2, 4], vec![]]);
-        assert_eq!(schedule(&[0., 0.], 2), [vec![1, 2], vec![]]);
-        assert!(schedule(&[0.3], 0)[0].is_empty());
+        assert_eq!(schedule(&[0.5, 0.5, 0.1], &[0; 3], 0, 5), [vec![1, 3, 5], vec![2, 4], vec![]]);
+        assert_eq!(schedule(&[0., 0.], &[0; 2], 0, 2), [vec![1, 2], vec![]]);
+        assert!(schedule(&[0.3], &[0], 0, 0)[0].is_empty());
+        // pulls already made: the second branch is behind, so it takes the next pulls until even
+        assert_eq!(schedule(&[0.5, 0.5], &[3, 0], 3, 7), [vec![7], vec![4, 5, 6]]);
     }
 
     #[test]
@@ -593,6 +822,51 @@ mod tests {
         assert_eq!(q(&ca), q(&cb));
         assert_eq!(a.extend(60), Err("cannot shrink"));
         assert_eq!(b.next(), Err("already finished"));
+    }
+
+    #[test]
+    fn reroots_at_the_played_grandchild() {
+        let p = prefix(&["e2e4", "e7e5", "g1f3"]);
+        let feats: Vec<[f32; 3]> = (0..p.len()).map(|i| if i < 11 { [-1.; 3] } else { [180. - i as f32, 181. - i as f32, -1.] }).collect();
+        let mut a = Coverage::build(&p, &fake(&p), &feats, 2, 48, 2.5, true).unwrap();
+        run(&mut a, &p);
+        // the most visited root child, then its most visited expanded child
+        let kid = |a: &Coverage, id: usize| a.nodes[id].children.iter().filter(|e| e.child >= 0 && !a.nodes[e.child as usize].children.is_empty()).max_by_key(|e| a.nodes[e.child as usize].n).map(|e| e.child as usize).unwrap();
+        let (c1, g) = (kid(&a, 0), kid(&a, kid(&a, 0)));
+        let moves = [a.nodes[c1].token, a.nodes[g].token];
+        let kept: Vec<usize> = (0..a.nodes.len()).filter(|&i| { let mut j = i as i32; while j >= 0 && j != g as i32 { j = a.nodes[j as usize].parent; } j == g as i32 }).collect();
+        let (old_n, old_boot, old_slot): (Vec<i32>, Vec<f64>, Vec<u32>) = (kept.iter().map(|&i| a.nodes[i].n).collect(), kept.iter().map(|&i| a.nodes[i].boot).collect(), kept.iter().map(|&i| a.nodes[i].slot).collect());
+        let q = [p.clone(), moves.to_vec()].concat();
+        let longer: Vec<[f32; 3]> = feats.iter().copied().chain([[170., 160., 3.], [150., 160., 8.]]).collect();
+        assert_eq!(a.rebase(&moves, &fake(&q), &[longer.clone()], 48), Ok(Some(kept.clone())));
+        assert_eq!((a.nodes.len(), a.root_len, a.nodes[0].parent, a.nodes[0].slot, a.nodes[0].depth), (kept.len(), p.len() + 2, -1, NONE, 0));
+        assert!(a.nodes[1..].iter().all(|x| x.parent >= 0 && x.born == 0 && x.depth >= 1));
+        assert_eq!(a.nodes.iter().map(|x| x.n).collect::<Vec<_>>()[1..], old_n[1..]);
+        assert_eq!(a.nodes.iter().map(|x| x.boot).collect::<Vec<_>>()[1..], old_boot[1..]);
+        assert_eq!(a.nodes.iter().map(|x| x.slot).collect::<Vec<_>>()[1..], old_slot[1..]);
+        let kept_pulls: i32 = a.nodes[0].children.iter().map(|e| if e.child >= 0 { a.nodes[e.child as usize].n } else { 0 }).sum();
+        assert_eq!((a.nodes[0].n, a.stats.kept_pulls, a.remaining), (kept_pulls, kept_pulls, 48 - kept_pulls));
+        assert_eq!(a.stats.reused, kept.len() as i64 - 1 - a.nodes[1..].iter().filter(|x| x.children.is_empty()).count() as i64);
+        assert_eq!(a.clocks[0].feats[0], [150., 160., 8.]);
+        assert!(a.free.contains(&old_slot[0]) && a.free.iter().all(|&s| !old_slot[1..].contains(&s)) && a.free.len() + old_slot.len() - 1 == a.top as usize - 1);
+        assert_eq!(a.extend(64), Err("cannot grow a re-rooted tree"));
+        // the kept visits are pulls already made: the schedule continues from them to the budget
+        let pulls: Vec<i32> = a.branches.iter().flat_map(|b| b.pulls.iter().copied()).collect();
+        assert_eq!(pulls.len() as i32, 48 - kept_pulls);
+        assert!(pulls.iter().all(|&k| k > kept_pulls && k <= 48));
+        run(&mut a, &q);
+        assert!(a.is_done() && a.nodes[0].n == 48);
+        let c = a.compact_arrays();
+        assert!(Backup::new(&c, 48, 24.).unwrap().reduce(0., 0., &[a.nodes[0].children[0].token - MOVE_START], 1).unwrap()[0].is_finite());
+        // a reply missing from the tree: nothing kept; a feature length off: an error
+        let miss = a.nodes[0].children.iter().find(|e| e.child < 0).map(|e| e.token);
+        if let Some(t) = miss {
+            let mut b = Coverage::build(&q, &fake(&q), &longer, 2, 8, 2.5, true).unwrap();
+            run(&mut b, &q);
+            let lon: Vec<[f32; 3]> = longer.iter().copied().chain([[1.; 3], [1.; 3]]).collect();
+            assert_eq!(b.rebase(&[t, t], &fake(&q), &[lon], 8), Ok(None));
+            assert_eq!(b.rebase(&[t, t], &fake(&q), &[longer.clone()], 8), Err("features must cover the new prefix under every view"));
+        }
     }
 
     #[test]

@@ -63,6 +63,16 @@ impl Clocks {
         self.feats.push(if valid { [p[1], after, previous] } else { [-1.; 3] });
         self.other.push(if valid && ply >= 2 { spent } else { -1. });
     }
+
+    /// A re-rooted tree's clocks: the root's from `features` (the game's, two plies longer) as `new`
+    /// computes them, then the kept nodes' (kept[1..], old ids in new id order) as they were.
+    pub fn rebase(&mut self, features: &[[f32; 3]], kept: &[usize]) {
+        let fresh = Clocks::new(features, self.inc);
+        let feats = std::iter::once(fresh.feats[0]).chain(kept[1..].iter().map(|&i| self.feats[i])).collect();
+        let other = std::iter::once(fresh.other[0]).chain(kept[1..].iter().map(|&i| self.other[i])).collect();
+        self.feats = feats;
+        self.other = other;
+    }
 }
 
 #[cfg(test)]
@@ -98,5 +108,12 @@ mod tests {
         let mut none = Clocks::new(&game, -1);
         none.push(0, 16, 4.);
         assert_eq!((none.feats[1], none.other[1]), ([-1.; 3], -1.));
+        // re-rooted at node 2 (kept with node 3): the root's clocks from the longer game, the rest as they were
+        let (f2, f3, o3) = (c.feats[2], c.feats[3], c.other[3]);
+        let longer: Vec<_> = game.iter().copied().chain([f(170., 158., 5.), f(150., 160., 8.)]).collect();
+        c.rebase(&longer, &[2, 3]);
+        assert_eq!((c.feats.len(), c.feats[0], c.other[0]), (2, [150., 160., 8.], 160. - 150. + 2.));
+        assert_eq!((c.feats[1], c.other[1]), (f3, o3));
+        assert_ne!(c.feats[0], f2);
     }
 }

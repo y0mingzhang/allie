@@ -9,6 +9,7 @@ pub mod model;
 pub mod pool;
 pub mod py;
 pub mod search;
+pub mod server;
 pub mod simd;
 
 #[pyfunction]
@@ -22,5 +23,6 @@ fn allie_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     chess::register(m)?;
     py::register(m)?;
     search::register(m)?;
+    server::register(m)?;
     Ok(())
 }

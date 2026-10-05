@@ -57,12 +57,15 @@ def main():
     p.add_argument("--searchers", default="coverage,kl")
     p.add_argument("--threads", type=int, default=8)
     p.add_argument("--compare")
+    p.add_argument("--chunk", type=int, help="C++ path: leaves per step (today 8); the kernels' sums depend on the step's size")
     a = p.parse_args()
     torch.set_num_threads(1)
     m = Model(a.model, "cpu", torch.bfloat16, None, True, "fast", a.threads)
     assert m.fast is not None
     engine = Engine(m)
     searchers = {"coverage": tree.Coverage(), "kl": tree.KL()}
+    if a.chunk:
+        tree.Nodes.fast = lambda self, ids, chunk=a.chunk: tree.Nodes.copied(self, ids, chunk)
     leaf_logits, handles_seen, inner = [], [], tree.Nodes.__call__
 
     def recorded(self_, handles):
@@ -134,10 +137,14 @@ def main():
             or out[k].shape != ref[k].shape
             or not np.array_equal(out[k], ref[k])
         ]
-        print(
-            json.dumps(dict(compared=len(out), differing=len(bad), first=bad[:10])),
-            flush=True,
-        )
+        by = {}
+        for k in bad:
+            by[k.split("/")[-1]] = by.get(k.split("/")[-1], 0) + 1
+        searches = {k.rsplit("/", 1)[0] for k in out if k.endswith("/moves")}
+        differing = {k.rsplit("/", 1)[0] for k in bad if k.endswith(("/probabilities", "/q", "/prior", "/moves"))}
+        gaps = [np.abs(out[k] - ref[k]).max() for k in bad if k.endswith(("/probabilities", "/q")) and out[k].shape == ref[k].shape]
+        print(json.dumps(dict(compared=len(out), differing=len(bad), by_array=by, searches=len(searches), searches_differing=len(differing),
+                              moves_differing=sum(k.endswith("/moves") for k in bad), max_output_gap=float(max(gaps)) if gaps else 0.0, first=bad[:6])), flush=True)
     engine.close()
 
 

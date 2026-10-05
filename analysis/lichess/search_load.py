@@ -3,7 +3,10 @@ each searching mid-game positions of live PGNs with a fixed budget; the time per
 batch sizes.
 
 usage: search_load.py --model DIR --pgns 'GLOB' [--games 10] [--rounds 3] [--budget 128] [--searcher coverage|kl]
-       [--threads 4] [--torch-threads 1] [--ply 30] [--out FILE]
+       [--threads 4] [--torch-threads 1] [--ply 30] [--backend fast|rust] [--native] [--max-items N] [--min-items N]
+       [--gather SECONDS] [--out FILE]
+--native: the all-Rust loop (treers through the model's Server, Rust backend); --max-items / --min-items / --gather set
+the Server's merge policy; the Server's gather statistics are reported.
 """
 
 import argparse
@@ -16,7 +19,7 @@ import time
 import numpy as np
 import torch
 
-from allie.lichess import tree
+from allie.lichess import tree, treers
 from allie.lichess.engine import Engine, Game
 from allie.lichess.model import Model
 
@@ -44,17 +47,34 @@ def main():
     p.add_argument("--budget", type=int, default=128)
     p.add_argument("--searcher", default="coverage")
     p.add_argument("--threads", type=int, default=4)
-    p.add_argument("--backend", default="fast", choices=("fast", "rust"), help="the C++ kernels or the Rust engine")
+    p.add_argument(
+        "--backend",
+        default="fast",
+        choices=("fast", "rust"),
+        help="the C++ kernels or the Rust engine",
+    )
     p.add_argument("--torch-threads", type=int, default=1)
     p.add_argument("--ply", type=int, default=30)
+    p.add_argument("--native", action="store_true")
+    p.add_argument("--max-items", type=int)
+    p.add_argument("--min-items", type=int)
+    p.add_argument("--gather", type=float)
     p.add_argument("--out")
     a = p.parse_args()
     torch.set_num_threads(a.torch_threads)
     m = Model(a.model, "cpu", torch.bfloat16, None, True, a.backend, a.threads)
     assert m.fast is not None
+    srv = getattr(m.fast, "server", None)
+    assert not a.native or srv is not None, "--native needs the Rust backend"
+    if srv:
+        for k in ("max_items", "min_items", "gather"):
+            if getattr(a, k) is not None:
+                setattr(srv, k, getattr(a, k))
     engine = Engine(m)
     files = sorted(glob.glob(a.pgns))
-    long = [f for f in files if len(read_pgn(f, 10**6)["moves"]) >= a.ply + 2 * a.rounds + 4]  # mid-game, not over
+    long = [
+        f for f in files if len(read_pgn(f, 10**6)["moves"]) >= a.ply + 2 * a.rounds + 4
+    ]  # mid-game, not over
     assert len(long) >= a.games, f"{len(long)} long enough PGNs for {a.games} games"
     games = []
     for f in long:  # a position with a choice to make (not over, not a forced move)
@@ -64,7 +84,8 @@ def main():
         if len(games) == a.games:
             break
     assert len(games) == a.games, f"{len(games)} usable positions"
-    searcher = tree.Coverage() if a.searcher == "coverage" else tree.KL()
+    mod = treers if a.native else tree
+    searcher = mod.Coverage() if a.searcher == "coverage" else mod.KL()
     leaves, inner = [], tree.Nodes.__call__
 
     def counted(self_, handles):
@@ -86,10 +107,15 @@ def main():
             t0 = time.perf_counter()
             res = searcher(game, a.budget)
             per_search.append((time.perf_counter() - t0, res is not None))
+            if a.native:
+                leaves.append(game.last_search["evaluated"])
 
     for g in games:  # warm every game's cache and the kernels
         searcher(g, 8)
     leaves.clear(), sizes.clear()
+    before = srv.stats() if srv else None
+    if srv:
+        srv.sizes()
     t0 = time.perf_counter()
     threads = [threading.Thread(target=run, args=(g,)) for g in games]
     for t in threads:
@@ -99,8 +125,19 @@ def main():
     wall = time.perf_counter() - t0
     n_leaves = sum(leaves)
     secs = np.array([s for s, _ in per_search])
-    row = dict(model=str(a.model), backend=a.backend, searcher=a.searcher, budget=a.budget, games=a.games, rounds=a.rounds,
-               threads=m.fast.threads, torch_threads=torch.get_num_threads(),
+    gather = None
+    if srv:  # every step runs on the server: its sizes and gather counts
+        after = srv.stats()
+        sizes = srv.sizes()
+        gather = {
+            k: after[k] - before[k]
+            for k in ("steps", "items", "requests", "waited", "wait_s", "joined")
+        }
+        gather.update(
+            max_items=srv.max_items, min_items=srv.min_items, gather_s=srv.gather
+        )
+    row = dict(model=str(a.model), backend=a.backend, native=a.native, searcher=a.searcher, budget=a.budget, games=a.games, rounds=a.rounds,
+               threads=m.fast.threads, torch_threads=torch.get_num_threads(), server=gather,
                cpu=open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].split(":")[1].strip(),
                searches=len(per_search), leaves=n_leaves, wall_s=round(wall, 2),
                ms_per_leaf_throughput=round(1000 * wall / n_leaves, 3),  # the node's cost per leaf under load

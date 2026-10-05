@@ -345,3 +345,288 @@ def test_kl_matches_python_fast_backend(tiny_path):
             20,
             300,
         ).select(8, root=1.0)
+
+
+# --- the native loop: the trees evaluating their leaves through the Server (allie_fast.Server) ---
+
+
+def rust_model(tiny_path, threads=3):
+    return Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=threads)
+
+
+def subtree(parent, root):
+    """The ids under `root` (itself first), in id order."""
+    inside, ids = np.zeros(len(parent), bool), []
+    for i in range(len(parent)):
+        if i == root or (parent[i] >= 0 and inside[parent[i]]):
+            inside[i], _ = True, ids.append(i)
+    return ids
+
+
+def grandchild(cov):
+    """The most visited root child and its most visited expanded child: (ids, their move tokens)."""
+    c, v = cov.compact(), np.array(cov.visits())
+    kids = np.flatnonzero(c["parent"] == 0)
+    k1 = kids[np.argmax(v[kids])]
+    gk = np.flatnonzero(c["parent"] == k1)
+    gk = gk[c["degree"][gk] > 0]
+    k2 = gk[np.argmax(v[gk])]
+    return (k1, k2), [int(c["move"][k1]) + 378, int(c["move"][k2]) + 378]
+
+
+@pytest.mark.parametrize("views", [("true",), ("true", "r2800")])
+def test_native_coverage_matches_handles(tiny_path, views):
+    """On the Rust backend treers.Coverage runs natively (no Python per leaf): with one step per call and view
+    (merged=False) its outputs are bitwise the handle-driven tree.Coverage's; with the views' leaves merged into one
+    step the kernels' sums round differently (same moves, close values)."""
+    engine = Engine(rust_model(tiny_path))
+    for seed, plies, budget in ((5, 14, 32), (6, 23, 128)):
+        game = setup(engine, seed, plies)
+        want = tree.Coverage(views=views)(game, budget)
+        before = engine.forwards
+        same(treers.Coverage(views=views, merged=False)(game, budget), want)
+        s = game.last_search
+        assert 0 < s["evaluated"] <= budget and not s["reused"] and not s["late"]
+        assert engine.forwards > before
+        got = treers.Coverage(views=views)(game, budget)
+        assert game.last_search["evaluated"] == s["evaluated"]
+        assert got[0] == want[0] and np.abs(got[1] - want[1]).max() < 5e-3
+
+
+@pytest.mark.parametrize("views", [("true",), ("r3000/noclock", "true")])
+def test_native_kl_matches_handles(tiny_path, views):
+    engine = Engine(rust_model(tiny_path))
+    for seed, plies, leaves in ((5, 14, 16), (6, 23, 48)):
+        game = setup(engine, seed, plies)
+        want = tree.KL(views=views)(game, leaves)
+        same(treers.KL(views=views, merged=False)(game, leaves), want)
+        assert game.last_search["evaluated"] == leaves
+        got = treers.KL(views=views)(game, leaves)
+        assert (
+            got[0] == want[0]
+            and np.array_equal(got[1], want[1])
+            and np.abs(got[2] - want[2]).max() < 5e-2
+        )
+
+
+@pytest.mark.parametrize("searcher", ["coverage", "kl"])
+def test_native_searches_merge_across_games(tiny_path, searcher):
+    """Concurrent native searches of several games share the Server's steps (the engine held while their first
+    requests queue, so they must merge: widest > 8) and give one-at-a-time's results up to batching noise."""
+    import threading
+
+    engine = Engine(rust_model(tiny_path))
+    search, budget = (
+        (treers.Coverage(), 32) if searcher == "coverage" else (treers.KL(), 16)
+    )
+    games = [setup(engine, s, 12 + 2 * s) for s in range(4)]
+    alone = [search(g, budget) for g in games]
+    release, together = threading.Event(), [None] * len(games)
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
+    before = engine.server.stats()
+    threads = [
+        threading.Thread(
+            target=lambda i=i: together.__setitem__(i, search(games[i], budget))
+        )
+        for i in range(len(games))
+    ]
+    for t in threads:
+        t.start()
+    time.sleep(0.5)
+    assert engine.server.stats()["queued"] == len(
+        games
+    )  # every first request waits for the blocker
+    release.set()
+    for t in [blocker, *threads]:
+        t.join()
+    after = engine.server.stats()
+    assert (
+        engine.widest > 8
+        and after["requests"] - before["requests"] > after["steps"] - before["steps"]
+    )
+    for a, b in zip(alone, together):
+        assert a[0] == b[0] and np.abs(np.asarray(a[1]) - np.asarray(b[1])).max() < 5e-3
+
+
+def test_native_deadline(tiny_path):
+    """Past its deadline the native search gives None before its next call: at once when the deadline has passed,
+    or after the call in flight when it passes during one (the Server held so the first reply comes late)."""
+    import threading
+
+    engine = Engine(rust_model(tiny_path))
+    game = setup(engine, 7, 14)
+    for search in (
+        treers.Coverage(),
+        treers.KL(),
+        treers.Coverage(views=("true", "r2800")),
+    ):
+        assert search(game, 32, deadline=time.monotonic() - 1) is None
+        assert game.last_search["late"] and game.last_search["evaluated"] == 0
+    out = [None]
+    release = threading.Event()
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
+    t = threading.Thread(
+        target=lambda: out.__setitem__(
+            0, treers.Coverage()(game, 128, deadline=time.monotonic() + 0.2)
+        )
+    )
+    t.start()
+    time.sleep(0.5)
+    release.set()
+    for x in (blocker, t):
+        x.join()
+    assert (
+        out[0] is None
+        and game.last_search["late"]
+        and 0 < game.last_search["evaluated"] < 128
+    )
+    out = treers.Coverage()(game, 32)
+    assert out is not None and sorted(out[0]) == sorted(
+        m.uci() for m in game.board.legal_moves
+    )
+
+
+def test_reroot_keeps_the_grandchilds_subtree(tiny_path):
+    """After the two plies of its most visited line, a finished coverage tree re-roots at the grandchild: the kept
+    nodes' arrays equal the old subtree's (ids remapped in order, depths less two, born reset, the root re-expanded
+    from the game's logits, depth-1 priors the new root's), visits kept, the pulls and leaves accounted; then the
+    search continues to the budget. A reply missing from the tree gives None (a fresh start)."""
+    engine = Engine(rust_model(tiny_path))
+    srv, par = engine.server, treers.Coverage().parameters
+    game = setup(engine, 3, 16)
+    feats = np.array(game.features(), np.float32)
+    cov = allie_fast.Coverage(
+        list(game.tokens),
+        game.sync().double().numpy(),
+        feats,
+        game.inc,
+        64,
+        par["cpuct"],
+    )
+    assert cov.run(srv, [treers.ref(game.cache)])
+    c, v = cov.compact(), np.array(cov.visits())
+    (k1, k2), moves = grandchild(cov)
+    kept_old = subtree(c["parent"], k2)
+    game.update(game.moves + [tree.MOVES[t - 378] for t in moves], 1690, 1680)
+    root2, feats2 = game.sync().double().numpy(), np.array(game.features(), np.float32)
+    with pytest.raises(ValueError):
+        cov.reroot(moves, root2, [feats], 64)  # the features of the old prefix
+    kept = cov.reroot(moves, root2, [feats2], 64)
+    assert kept == kept_old
+    new = {o: n for n, o in enumerate(kept)}
+    c2, v2 = cov.compact(), np.array(cov.visits())
+    assert c2["parent"][0] == -1 and all(
+        c2["parent"][n] == new[c["parent"][o]] for n, o in enumerate(kept) if n
+    )
+    np.testing.assert_array_equal(c2["depth"], c["depth"][kept] - 2)
+    assert (c2["born"] == 0).all() and (c2["move"][1:] == c["move"][kept][1:]).all()
+    for k in ("degree", "terminal"):
+        np.testing.assert_array_equal(c2[k], c[k][kept])
+    for k in ("boot", "mass"):
+        np.testing.assert_array_equal(c2[k][1:], c[k][kept][1:])
+    deeper = c2["depth"] >= 2
+    np.testing.assert_array_equal(c2["prior"][deeper], c["prior"][kept][deeper])
+    legal = allie_fast.Position.from_tokens(game.tokens).legal()
+    prior = np.exp(
+        root2[legal].astype(np.float32).astype(np.float64)
+        - root2[legal].astype(np.float32).max()
+    )
+    prior /= prior.sum()
+    for n in np.flatnonzero(c2["depth"] == 1):
+        want = prior[legal.index(int(c2["move"][n]) + 378)]
+        assert abs(c2["prior"][n] - want) <= 1e-15
+    np.testing.assert_array_equal(v2[1:], v[kept][1:])
+    s = cov.stats()
+    assert v2[0] == s["kept_pulls"] == v[k2] - 1 == v2[c2["parent"] == 0].sum()
+    assert (
+        s["reused_leaves"] == int((c["degree"][kept_old] > 0).sum()) - 1
+        and s["evaluated_leaves"] == 0
+    )
+    assert cov.run(srv, [treers.ref(game.cache)])
+    s = cov.stats()
+    assert (
+        s["evaluated_leaves"] + s["terminal_visits"] + s.get("depth_limited_visits", 0)
+        == 64 - s["kept_pulls"]
+    )
+    assert len(cov.compact()["parent"]) >= len(kept) + s["evaluated_leaves"]
+    q = cov.reduce(
+        np.log(par["backup"]["tau"]),
+        par["backup"]["exponent"],
+        par["backup"]["count_scale"],
+        64,
+        np.array([legal]) - 378,
+    )
+    assert np.isfinite(q).all()
+    with pytest.raises(ValueError):
+        cov.grow(128)  # the schedule cannot be extended after a re-root
+    # the bot's move in the tree, a reply that is not: nothing to keep
+    c3 = cov.compact()
+    k1 = np.flatnonzero(c3["parent"] == 0)[0]
+    other = setup(engine, 3, 16)
+    other.update(game.moves + [tree.MOVES[c3["move"][k1]]], 1680, 1680)
+    seen = set(c3["move"][c3["parent"] == k1])
+    reply = next(
+        t
+        for t in allie_fast.Position.from_tokens(other.tokens).legal()
+        if t - 378 not in seen
+    )
+    other.update(other.moves + [tree.MOVES[reply - 378]], 1680, 1670)
+    assert (
+        cov.reroot(
+            [int(c3["move"][k1]) + 378, reply],
+            other.sync().double().numpy(),
+            [np.array(other.features(), np.float32)],
+            64,
+        )
+        is None
+    )
+
+
+def test_reuse_through_the_searchers(tiny_path):
+    """treers.Coverage(reuse=True) / KL(reuse=True) keep a game's trees and re-root them when the game follows the
+    tree; a game off the tree (or a KL grandchild never expanded) starts fresh; reuse off keeps nothing."""
+    engine = Engine(rust_model(tiny_path))
+    search = treers.Coverage(reuse=True)
+    game = setup(engine, 4, 15)
+    out = search(game, 64)
+    assert out is not None and game.last_search["reused"] == 0
+    cov = game.trees[("coverage", ("true",))][0]
+    _, moves = grandchild(cov)
+    game.update(game.moves + [tree.MOVES[t - 378] for t in moves], 1690, 1680)
+    out = search(game, 64)
+    s = game.last_search
+    assert (
+        out is not None
+        and s["reused"] >= 1
+        and s["kept_pulls"] >= 1
+        and s["evaluated"] <= 64 - s["kept_pulls"]
+    )
+    assert (
+        sorted(out[0]) == sorted(m.uci() for m in game.board.legal_moves)
+        and abs(out[1].sum() - 1) < 1e-9
+    )
+    assert game.trees[("coverage", ("true",))][0] is cov  # the same tree, re-rooted
+    game.update(game.moves[:-1], 1690, 1680)  # a takeback: the prefix no longer matches
+    search(game, 64)
+    assert (
+        game.last_search["reused"] == 0
+        and game.trees[("coverage", ("true",))][0] is not cov
+    )
+    kl = treers.KL(reuse=True)
+    game = setup(engine, 6, 15)
+    kl(game, 64)
+    forest = game.trees[("kl", ("true",), "zero")][0]
+    tokens, _, _ = forest.root_q(**treers.KL.READ)
+    game.update(game.moves + [tree.MOVES[tokens[0] - 378]], 1690, 1680)
+    game.update(game.moves + [next(iter(game.board.legal_moves)).uci()], 1690, 1670)
+    out = kl(game, 64)
+    assert (
+        out is not None
+        and game.last_search["evaluated"] + game.last_search["reused"] == 64
+    )
+    plain = treers.Coverage()
+    game = setup(engine, 8, 15)
+    plain(game, 32)
+    assert "trees" not in game.__dict__ or ("coverage", ("true",)) not in game.trees

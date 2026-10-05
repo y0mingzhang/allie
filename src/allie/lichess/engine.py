@@ -33,31 +33,53 @@ class Play:
 
 class Engine:
     """Owns the model; game threads call extend(), steps() and run(), which the inference thread
-    serves, batching concurrent extend() and steps() calls into one forward of up to max_items."""
+    serves, batching concurrent extend() and steps() calls into one forward of up to max_items. On the
+    Rust backend the model's own Server does this (fastrs.py): every call goes straight to it from the
+    caller's thread, run() pauses it, and forwards / tokens / widest are its counts."""
 
     def __init__(self, model, max_batch=32, max_items=64):
         behaviour.check()
         self.model, self.max_batch, self.max_items = model, max_batch, max_items
-        self.requests = queue.SimpleQueue()
-        self.forwards = self.tokens = self.widest = 0  # widest: most items in one forward
-        self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
-        self.thread.start()
+        self.server = getattr(model.fast, "server", None)
+        self._forwards = self._tokens = self._widest = 0  # widest: most items in one forward
+        if self.server is None:
+            self.requests = queue.SimpleQueue()
+            self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
+            self.thread.start()
 
     def close(self):
-        self.requests.put(None)
-        self.thread.join()
+        if self.server is None:
+            self.requests.put(None)
+            self.thread.join()
+
+    def _count(self, key, own):
+        return self.server.stats()[key] if self.server is not None else own
+
+    forwards = property(lambda self: self._count("steps", self._forwards))
+    tokens = property(lambda self: self._count("tokens", self._tokens))
+    widest = property(lambda self: self._count("widest", self._widest))
 
     def extend(self, cache, ids, feats, boards):
         """Append tokens to a game's cache; logits at the last one."""
+        if self.server is not None:
+            return step(self.model, [(cache, ids, feats, boards)])[0]
         return self._call((cache, ids, feats, boards))
 
     def steps(self, items):
         """extend() for several caches at once (a search's nodes); logits [len(items), vocab]."""
+        if self.server is not None:
+            return step(self.model, list(items))
         return self._call(list(items))
 
     def run(self, fn):
-        """fn() on the inference thread, alone."""
-        return self._call(fn)
+        """fn() on the inference thread, alone (the Server paused: requests queue up meanwhile)."""
+        if self.server is None:
+            return self._call(fn)
+        self.server.pause(True)
+        try:
+            return fn()
+        finally:
+            self.server.pause(False)
 
     def _call(self, request):
         f = Future()
@@ -101,9 +123,9 @@ class Engine:
                 return
             groups[0][1].set_exception(e)
             return
-        self.forwards += 1
-        self.tokens += sum(len(it[1]) for it in flat)
-        self.widest = max(self.widest, len(flat))
+        self._forwards += 1
+        self._tokens += sum(len(it[1]) for it in flat)
+        self._widest = max(self._widest, len(flat))
         lo = 0
         for g, f, many in groups:
             f.set_result(logits[lo : lo + len(g)] if many else logits[lo])
