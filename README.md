@@ -30,6 +30,14 @@ The model reads the game as a sequence of moves, with both ratings and the time 
 
 Besides the next move, it predicts how long the player will think and how the game will end.
 
+## Explainer videos
+
+Three silent, captioned animations, about five minutes each. Each teaser links to its full 1080p MP4, which GitHub offers as a download.
+
+| [![How Allie Works: the router picks 16 of 256 experts for a move](docs/videos/how-allie-works.gif)](docs/videos/how-allie-works.mp4) | [![Fitting Allie's Scaling Law: the law's forecast for Allie 2.0 against the loss it reached](docs/videos/scaling-law.gif)](docs/videos/scaling-law.mp4) | [![How Allie Searches: coverage and lookahead search trees growing side by side](docs/videos/how-allie-searches.gif)](docs/videos/how-allie-searches.mp4) |
+|:---:|:---:|:---:|
+| **[How Allie Works](docs/videos/how-allie-works.mp4)** (4:36): from a game's tokens to 16 of 256 experts to three predictions | **[Fitting Allie's Scaling Law](docs/videos/scaling-law.mp4)** (4:57): the sweep, three ways to fit it, and why it missed Allie 2.0's big run | **[How Allie Searches](docs/videos/how-allie-searches.mp4)** (4:32): search that adds strength and still predicts human moves |
+
 ## How we built it
 
 ### Scaling laws
@@ -152,7 +160,7 @@ Set `ALLIE_DATA` to the folder for the game data and test sets. Runs and scores 
 3. **Build the test set.** `python -m allie.eval.build`
 4. **Train.** `allie-train configs/allie-2.0.json --nproc 8` needs eight 48 GB GPUs for about a week. It stops every two days; the same command resumes it. The second anneal starts a new run from its last checkpoint with `--init-from`; [configs/allie-2.0/anneal.sbatch](configs/allie-2.0/anneal.sbatch) has its settings.
 5. **Evaluate.** `allie-eval --checkpoint results/pretrain/allie-2.0/last.pt` scores the main test set. The blitz comparison has its own scripts in `allie.eval.maia3`.
-6. **Figures.** `uv run --extra figures python docs/make_figures.py` redraws every figure here.
+6. **Figures.** `uv run --extra figures python docs/make_figures.py` redraws every figure here. `docs/anim/render.sh how_allie_works` re-renders a video with [manim](https://www.manim.community) (it needs ffmpeg and the cairo and pango libraries); each video's numbers are in [docs/anim/data.json](docs/anim/data.json).
 
 Commands run inside the environment: prefix them with `uv run`, or activate `.venv`. Search has its own [guide](src/allie/search/README.md). More on the code is in [DETAILS](docs/DETAILS.md#reproducing).
 
