@@ -18,3 +18,6 @@ __pycache__/
 *.npz
 *.log
 docs/videos/preview/
+
+# the Rust engine's build directory (rust/allie-fast)
+rust/allie-fast/target/
