@@ -1,0 +1,72 @@
+"""A gpu_kl.py run as harness.py output under one KL backup, for scale_score.py: per chunk every root's moves,
+prior, heads and per budget its Q (nan unsearched) and leaves (network evaluations times views).
+
+python to_harness.py RUN OUT [--backup own:opp[:soft]] [--value-views 0,1] [--budgets 8,...,4096]
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path[:0] = [str(Path(__file__).resolve().parents[2] / "src/allie/search")]
+import kl  # noqa: E402
+from score_kl import parse  # noqa: E402
+from evaluate import soft_backup  # noqa: E402
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("run")
+    p.add_argument("out")
+    p.add_argument("--backup", default="4:0", help="kl.backup spec own:opp[:s][:kKAPPA], or cov (allie.search's soft backup)")
+    p.add_argument(
+        "--value-views",
+        default="",
+        help="the views whose W/D/L the backup reads (default the run's)",
+    )
+    p.add_argument("--budgets", default="8,16,32,64,128,256,512,1024,2048,4096")
+    a = p.parse_args()
+    budgets = [int(b) for b in a.budgets.split(",")]
+    run, out = Path(a.run), Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    views = len(json.loads((run / "args.json").read_text()).get("views", "0").split(","))
+    for f in sorted(run.glob("[0-9]*.npz")):
+        if ".partial" in f.name:
+            continue
+        z = dict(np.load(f))
+        if a.value_views:
+            z["wdl"] = z["wdlv"][:, [int(v) for v in a.value_views.split(",")]].mean(1)
+        roots, n = z["roots"], len(z["roots"])
+        off = np.r_[0, np.cumsum(z["root_len"])]
+        kid = np.full(off[-1], -1)
+        d1 = np.flatnonzero(z["depth"] == 1)
+        r = z["owner"][d1]
+        slot = {
+            (int(o), int(t)): off[o] + j
+            for o in range(n)
+            for j, t in enumerate(z["root_moves"][off[o] : off[o + 1]])
+        }
+        kid[[slot[int(o), int(t)] for o, t in zip(r, z["token"][d1])]] = d1
+        res = dict(index=z["index"], budgets=np.array(budgets), legal=z["root_moves"], prior=z["root_probs"],
+                   heads=z["heads"], offsets=off)  # fmt: skip
+        assert (roots == np.flatnonzero(z["parent"] < 0)).all()
+        for b in budgets:
+            keep = z["cost" if "cost" in z else "tag"] <= b
+            V = soft_backup(z, keep) if a.backup == "cov" else kl.backup(z, keep, **parse(a.backup))[0]
+            live = (kid >= 0) & keep[np.maximum(kid, 0)]
+            res[f"q{b}"] = np.where(live, -V[np.maximum(kid, 0)], np.nan).astype(
+                np.float32
+            )
+            leaves = np.bincount(
+                z["owner"][keep & ~z["terminal"] & (z["parent"] >= 0)], minlength=n
+            )
+            res[f"leaves{b}"] = (views * leaves).astype(np.int32)
+        np.savez(out / f.name, **res)
+    print(f"{out}: {len(list(out.glob('*.npz')))} chunks", flush=True)
+
+
+if __name__ == "__main__":
+    main()
