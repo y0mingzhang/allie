@@ -193,6 +193,31 @@ class RustFast:
             ):
                 raise ValueError("a cache whose tensors are not the model's layout")
 
+    @staticmethod
+    def disjoint(items):
+        """A step's writes must not alias its reads or each other (the engine checks the pointers too): a leaf's
+        slot is not in its path, nor another leaf's slot or path on the same tree; a tree is never a cache; a cache
+        is appended by one plain item at most (leaves read its rows below that item's first write)."""
+        plain, trees = {}, {}
+        for item in items:
+            if isinstance(item, Leaf):
+                if item.slot in item.path:
+                    raise ValueError("items alias: a leaf's slot in its own path")
+                for other in trees.setdefault(id(item.tree), []):
+                    if item.slot == other.slot or item.slot in other.path or other.slot in item.path:
+                        raise ValueError("items alias: two leaves of one tree write or read the same slot")
+                trees[id(item.tree)].append(item)
+            else:
+                if id(item[0]) in plain:
+                    raise ValueError("items alias: two plain items append one cache")
+                plain[id(item[0])] = item
+        for item in items:
+            c = item[0]
+            if id(c) in trees:
+                raise ValueError("items alias: a tree used as a cache")
+            if isinstance(item, Leaf) and id(c) in plain and c.n != plain[id(c)][0].n:
+                raise ValueError("items alias: a leaf reads rows a plain item writes")
+
     def _step(self, items):
         meta, paths, lo, seen = [], [], 0, set()
         for item in items:
@@ -206,6 +231,7 @@ class RustFast:
                 meta += [cache.n, len(ids), cache.capacity, lo, 0, 0, 0, 0]
             self.layout(cache, seen)
             lo += len(ids)
+        self.disjoint(items)
         caches = []  # after every reserve(): a grown cache's tensors are new
         for item in items:
             c, t = item[0], item.tree if isinstance(item, Leaf) else None
@@ -227,7 +253,8 @@ class RustFast:
                                meta, caches, paths, out.data_ptr())  # fmt: skip
         if err:
             raise ValueError(("token outside the vocabulary", "board state out of range",
-                              "tokens, paths or slots past the cache, the tree or the context")[err - 1])  # fmt: skip
+                              "tokens, paths or slots past the cache, the tree or the context",
+                              "items alias: a write overlaps a read or another write")[err - 1])  # fmt: skip
         for item in items:
             if not isinstance(item, Leaf):
                 item[0].n += len(item[1])

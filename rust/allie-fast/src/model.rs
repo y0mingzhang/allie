@@ -602,11 +602,69 @@ impl Engine {
         t
     }
 
+    /// A step's writes must not overlap its reads or each other (the threads run items concurrently): a leaf's
+    /// destination slot is not in its own path, nor another leaf's destination or path on the same slot buffer; a
+    /// slot buffer is never a cache; one cache is appended by at most one plain item, and a leaf reading it reads
+    /// only rows below that item's first write; distinct buffers do not overlap in memory. Read-only sharing (the
+    /// game's prefix under many leaves, a slot buffer under many leaves) stays.
+    fn aliases(&self, s: usize, meta: &[i64], caches: &[usize], paths: &[i64]) -> bool {
+        let kv = |cap: usize| cap * self.l * self.h * self.hd * 2;
+        let e = |cap: usize| cap * self.d * 2;
+        let item = |i: usize| (&meta[8 * i..8 * i + 8], &caches[6 * i..6 * i + 6]);
+        let path = |q: &[i64]| &paths[q[6] as usize..(q[6] + q[5]) as usize];
+        let mut bufs: Vec<(usize, usize, usize, usize, usize, usize)> = Vec::new(); // k v e start, k v e sizes
+        for i in 0..s {
+            let (q, c) = item(i);
+            let leaf = q[4] > 0;
+            if leaf && path(q).contains(&q[7]) {
+                return true;
+            }
+            bufs.push((c[0], c[1], c[2], kv(q[2] as usize), kv(q[2] as usize), e(q[2] as usize)));
+            if leaf {
+                bufs.push((c[3], c[4], c[5], kv(q[4] as usize), kv(q[4] as usize), e(q[4] as usize)));
+            }
+            for j in 0..i {
+                let (r, b) = item(j);
+                let other_leaf = r[4] > 0;
+                if c[0] == b[0] && !leaf && !other_leaf {
+                    return true; // two plain items appending the same cache
+                }
+                if c[0] == b[0] && leaf != other_leaf {
+                    let (lf, pl) = if leaf { (q, r) } else { (r, q) };
+                    if lf[0] > pl[0] {
+                        return true; // the leaf reads rows the plain item writes
+                    }
+                }
+                if leaf && other_leaf && c[3] == b[3] && (q[7] == r[7] || path(r).contains(&q[7]) || path(q).contains(&r[7])) {
+                    return true;
+                }
+                if leaf && c[3] == b[0] || other_leaf && b[3] == c[0] {
+                    return true; // a slot buffer used as a cache
+                }
+            }
+        }
+        bufs.sort();
+        bufs.dedup();
+        let overlap = |a0: usize, al: usize, b0: usize, bl: usize| a0 != b0 && a0 < b0 + bl && b0 < a0 + al;
+        for (i, a) in bufs.iter().enumerate() {
+            for b in &bufs[..i] {
+                for (x, xl) in [(a.0, a.3), (a.1, a.4), (a.2, a.5)] {
+                    for (y, yl) in [(b.0, b.3), (b.1, b.4), (b.2, b.5)] {
+                        if overlap(x, xl, y, yl) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// One step: T tokens of S items. meta: per item n0 len cap off scap plen poff dest (scap 0: a plain item,
     /// the rest ignored; else a path item: len 1, its slots paths[poff..poff + plen], all slots < scap);
     /// caches: per item the cache's k v e then the slot buffer's k v e (0 for a plain item), pointers as
     /// integers; out: S x V. Returns 0, or 1 for a token outside the vocabulary, 2 for a board state outside
-    /// its ranges, 3 for spans, paths or slots that do not fit.
+    /// its ranges, 3 for spans, paths or slots that do not fit, 4 for items whose writes alias reads or writes.
     pub fn step(&mut self, t: usize, s: usize, ids: *const i64, feats: *const f32, boards: *const u8, meta: &[i64], caches: &[usize], paths: &[i64], out: *mut f32) -> i32 {
         if meta.len() < 8 * s || caches.len() < 6 * s {
             return 3;
@@ -642,6 +700,9 @@ impl Engine {
         }
         if s > 0 && off != t as i64 || s == 0 && t != 0 {
             return 3;
+        }
+        if self.aliases(s, meta, caches, paths) {
+            return 4;
         }
         self.t = t;
         self.s = s;

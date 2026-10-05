@@ -368,3 +368,34 @@ def test_rust_after_fork(tiny_path):
         with multiprocessing.get_context("fork").Pool(1) as pool:
             got = pool.apply_async(_forked_step).get(timeout=120)
     assert torch.equal(got, want)
+
+
+def test_rust_rejects_aliasing_items(tiny_path):
+    """A step's writes never overlap its reads or each other: every rejection in Python and in the engine itself."""
+    m = Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2)
+    ids, feats, boards = inputs(random_game(5, 8))
+    c = Cache(m)
+    step(m, [(c, ids[:4], feats[:4], boards[:4])])
+    t, one = Slots(m, 8), (ids[4:5], feats[4:5], boards[4:5])
+    step(m, [Leaf(c, *one, t, (), 1)])
+    bad = {
+        "own path": [Leaf(c, *one, t, (1,), 1)],
+        "same slot": [Leaf(c, *one, t, (1,), 2), Leaf(c, *one, t, (1,), 2)],
+        "slot in another path": [Leaf(c, *one, t, (1,), 2), Leaf(c, *one, t, (1, 2), 3)],
+        "tree as cache": [Leaf(c, *one, c, (1,), 2)],
+        "two plain": [(c, *one), (c, *one)],
+    }
+    for name, items in bad.items():
+        with pytest.raises(ValueError, match="alias"):
+            step(m, items)
+        assert c.n == 4, name
+    # the engine's own check, bypassing the Python mirror: a leaf whose destination is in its path (error 4)
+    e = m.fast.native()
+    meta = [c.n, 1, c.capacity, 0, t.capacity, 1, 0, 1]
+    ptrs = [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr(), t.k.data_ptr(), t.v.data_ptr(), t.e.data_ptr()]
+    assert e.step(1, 1, ids[4:5].data_ptr(), feats[4:5].data_ptr(), boards[4:5].data_ptr(), meta, ptrs, [1],
+                  torch.empty(1, 2432).data_ptr()) == 4  # fmt: skip
+    # a leaf reading rows below a plain item's first write on the same cache is fine, and so are many leaves
+    # of one tree with distinct slots and shared paths
+    z = step(m, [(c, *one), Leaf(c, *one, t, (1,), 2), Leaf(c, *one, t, (1,), 3), Leaf(c, *one, t, (), 4)])
+    assert z.shape == (4, 2432) and c.n == 5
