@@ -3,7 +3,8 @@ the quality an R-rated human makes at the same time control, predicting human mo
 its policy does. Per time control and 200-point rating bin (CELLS), the move is sampled at
 temperature 1 from the policy; from allie.search coverage's calibrated human-move distribution after
 a fixed number of simulations; or from the policy tilted by the searched values, pi ~ prior
-exp(beta Q), after a fixed number of coverage simulations or lookahead calls.
+exp(beta Q) or, on their log-odds, prior exp(beta arctanh(0.99 Q)), after a fixed number of coverage
+simulations or lookahead calls.
 
 The move's think time is drawn first (behaviour.think) and caps the search with a tenth of the clock
 left above the reserve, at COST seconds a simulation or call: the largest of the cell's rungs that
@@ -57,7 +58,7 @@ COST = dict(coverage=0.015, lookahead=0.35)  # seconds a simulation or call (6-c
 
 
 def cell(rating, speed):
-    """(searcher, {rung: beta}) for a player of `rating` at `speed`, or None: the policy."""
+    """(searcher, {rung: beta}[, "atanh"]) for a player of `rating` at `speed`, or None: the policy."""
     return CELLS.get((speed, min(max(int(rating) // 200 * 200, 800), 2600)))
 
 

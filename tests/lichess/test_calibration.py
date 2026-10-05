@@ -55,6 +55,10 @@ def test_tilt():
     p = calibration.tilt(prior, np.array([-0.5, 0.0, 0.5]), 2.0, atanh=True)  # log-odds of 0.99 Q
     assert p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.495)))
     assert np.isfinite(calibration.tilt(prior, q, 2.0, atanh=True)).all()  # Q = +-1 stays finite
+    p = calibration.tilt(prior, np.array([-1.5, 0.0, 1.5]), 2.0, atanh=True)  # clipped to +-1
+    assert p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.99)))
+    p = calibration.tilt(np.array([0.9, 0.1]), np.array([0.9, 1.0]), 4.0)  # where the tilts disagree
+    assert p.argmax() == 0 and calibration.tilt(np.array([0.9, 0.1]), np.array([0.9, 1.0]), 4.0, atanh=True).argmax() == 1
 
 
 class Search:
@@ -101,9 +105,14 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # coverage's values: prior exp(40 Q)
     assert game.decide(play, search, 30).move == legal_of(game)[0]  # 30 s left: rung 32, with its own beta
     assert search["coverage"].budgets == [256, 256, 32]
+    tilts, tilt = [], calibration.tilt
+    monkeypatch.setattr(calibration, "tilt", lambda *a: tilts.append(a[3:]) or tilt(*a))
+    game.decide(play, search, 590)  # the Q tilt
     monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 4.0}, "atanh")})
-    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # log-odds tilt: Q = +-1 at 4 arctanh(0.99)
+    game.decide(play, search, 590)  # the log-odds tilt
+    assert tilts == [(False,), (True,)] and search["coverage"].budgets.pop() == 256
     search["coverage"].budgets.pop()
+    monkeypatch.setattr(calibration, "tilt", tilt)
     monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("lookahead", {8: 40.0})})
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # prior exp(40 Q)
     assert search["lookahead"].budgets == [8]
