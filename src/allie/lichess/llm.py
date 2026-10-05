@@ -7,6 +7,7 @@ import math
 import os
 import threading
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from typing import NamedTuple
 
@@ -93,35 +94,46 @@ def cost(model, u):
 
 class Writer:
     """Runs sync() on a daemon thread: at once, whenever kicked, and every `every` seconds;
-    a failed sync (OSError) is retried after `retry` seconds. The caller never waits."""
+    a failed sync is retried after `retry` seconds (a kick wakes it sooner). The caller
+    never waits; the thread never dies."""
 
     def __init__(self, sync, name, every=60.0, retry=30.0):
         self.sync, self.every, self.retry = sync, every, retry
-        self.kicked, self.done = threading.Event(), threading.Event()
+        self.cv, self.asked, self.synced = threading.Condition(), 0, 0
         threading.Thread(target=self.run, daemon=True, name=name).start()
 
     def kick(self):
-        self.done.clear()
-        self.kicked.set()
+        with self.cv:
+            self.asked += 1
+            self.cv.notify_all()
+            return self.asked
 
     def run(self):
-        wait = 0.0
+        seen, wait = -1, 0.0
         while True:
-            self.kicked.wait(wait)
-            self.kicked.clear()
+            with self.cv:
+                self.cv.wait_for(lambda seen=seen: self.asked > seen, wait)
+                seen = self.asked
             try:
                 self.sync()
-            except OSError:
+            except OSError:  # logged by sync
                 wait = self.retry
                 continue
+            except Exception:
+                log.exception("chat: %s failed", threading.current_thread().name)
+                wait = self.retry
+                continue
+            with self.cv:
+                self.synced = max(self.synced, seen)
+                self.cv.notify_all()
             wait = self.every
-            if not self.kicked.is_set():
-                self.done.set()
 
     def flush(self, timeout=10.0):
-        """Kick, and wait for a sync to finish (tests, shutdown); whether one did."""
-        self.kick()
-        return self.done.wait(timeout)
+        """Kick, and wait until a sync that started after the kick has finished (tests,
+        shutdown); whether one did."""
+        target = self.kick()
+        with self.cv:
+            return self.cv.wait_for(lambda: self.synced >= target, timeout)
 
 
 def locked(path, timeout=1.0):
@@ -147,15 +159,16 @@ class Ledger:
     charges to the file and reloads it (others' charges too), so no call waits on the
     filesystem. allows() is False from the call that reaches a cap until the window ends;
     until the file was read once (a missing file is a new ledger); and for good once it holds
-    something else than a ledger. A failed write is retried, the charges kept meanwhile."""
+    something else than a ledger. A failed write is retried, the charges kept meanwhile,
+    each in the window it was made in."""
 
-    def __init__(self, path, day_cap, month_cap, now=None, every=60.0, retry=30.0):
+    def __init__(self, path, day_cap, month_cap, now=None, every=15.0, retry=30.0):
         self.path, self.caps = os.path.expanduser(path), (day_cap, month_cap)
         self.now = now or (lambda: datetime.now(UTC))
         self.lock, self.warned = threading.Lock(), set()
         self.broken = self.failing = False
-        # the file's totals once read; charges not in it yet
-        self.file, self.owed = None, 0.0
+        # the file's totals once read; charges not in it yet, by window
+        self.file, self.owed = None, Counter()
         self.seeded = threading.Event()
         self.writer = Writer(self.sync, "chat-ledger", every, retry)
 
@@ -165,9 +178,11 @@ class Ledger:
 
     def totals(self):
         with self.lock:
-            return [(self.file or {}).get(w, 0.0) + self.owed for w in self.windows()]
+            return [
+                (self.file or {}).get(w, 0.0) + self.owed[w] for w in self.windows()
+            ]
 
-    def allows(self, wait=2.0):
+    def allows(self, wait=5.0):
         if not self.seeded.wait(wait) or self.broken:
             return False
         for w, spent, cap in zip(self.windows(), self.totals(), self.caps):
@@ -185,29 +200,38 @@ class Ledger:
     def add(self, usd):
         """Charge usd; the window totals, in memory (the file catches up)."""
         with self.lock:
-            self.owed += usd
+            for w in self.windows():
+                self.owed[w] += usd
         self.writer.kick()
         return self.totals()
 
+    def load(self):
+        try:
+            with open(self.path) as f:
+                spent = json.load(f)
+        except FileNotFoundError:
+            return {}
+        number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+        if not isinstance(spent, dict) or not all(map(number, spent.values())):
+            raise ValueError("not a ledger")
+        return spent
+
     def sync(self):
-        """On the writer thread: add the charges owed to the file, and reload it."""
+        """On the writer thread: add the charges owed to the file (locked), or just reload it
+        (no lock: writes are atomic replaces)."""
         if self.broken:
             return
         with self.lock:
-            owed = self.owed
+            owed = {w: x for w, x in self.owed.items() if x}
         try:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with locked(self.path):
-                try:
-                    with open(self.path) as f:
-                        spent = json.load(f)
-                except FileNotFoundError:
-                    spent = {}
-                if not isinstance(spent, dict):
-                    raise ValueError("not a JSON object")  # noqa: TRY004 - a corrupt file
-                if owed:
-                    for w in self.windows():
-                        spent[w] = spent.get(w, 0.0) + owed
+            if not owed:
+                spent = self.load()
+            else:
+                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+                with locked(self.path):
+                    spent = self.load()
+                    for w, x in owed.items():
+                        spent[w] = spent.get(w, 0.0) + x
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(spent, f, indent=0, sort_keys=True)
                     os.replace(self.path + ".tmp", self.path)
@@ -226,10 +250,12 @@ class Ledger:
             self.failing = True
             raise
         if self.failing:
-            log.info("chat: ledger %s written again ($%.4f caught up)", self.path, owed)
+            log.info("chat: ledger %s written again", self.path)
         self.failing = False
         with self.lock:
-            self.file, self.owed = spent, self.owed - owed
+            self.owed.subtract(owed)
+            self.owed = Counter({w: x for w, x in self.owed.items() if x > 1e-12})
+            self.file = spent
         self.seeded.set()
 
 

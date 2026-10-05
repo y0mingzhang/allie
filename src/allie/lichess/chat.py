@@ -308,6 +308,11 @@ class Chatter:
     # the chat thread
 
     def serve(self):
+        try:  # the model and its spend ledger, and the recent lines: loaded while the game starts
+            self.llm = self.llm or model(self.cfg)
+            recent(self.cfg)
+        except Exception:
+            log.exception("game %s chat: setup", self.gid)
         while not self.done:
             try:
                 batch = [self.q.get(timeout=self.cfg.poll if self.status else None)]
@@ -646,7 +651,9 @@ class Chatter:
             k = self.rng.choices(list(kinds), weights=list(kinds.values()))[0]
             order.append(k)
             del kinds[k]
-        k = self.rng.choices(range(1, len(self.cfg.mix) + 1), weights=self.cfg.mix)[0]
+        # a mix of no weight (a bad config) means one kind
+        mix = list(self.cfg.mix) if sum(self.cfg.mix or [0]) > 0 else [1]
+        k = self.rng.choices(range(1, len(mix) + 1), weights=mix)[0]
         return (order[:k], order[: k + 1]), self.rng.random() < self.cfg.p_end
 
     def moment(self, t, kind, p=None, spaced=True, budget=True):
@@ -973,15 +980,19 @@ def hanging(board, color, skip=None):
 class Recent:
     """The last n unprompted lines, across games and restarts. They live in memory, seeded
     from a JSON list in a file shared by processes; a writer thread merges new lines into
-    the file and reloads it, so the chat never waits on the filesystem. A failed write is
-    retried (logged once); a corrupt file is rewritten."""
+    the file and reloads it, so the chat never waits on the filesystem (but for read()'s
+    short wait for the first load). A failed write is retried (logged once); a corrupt file
+    is rewritten."""
 
     def __init__(self, path, n, every=300.0, retry=30.0):
         self.path, self.n, self.lock, self.failing = path, n, threading.Lock(), False
         self.lines, self.new = [], []  # all known; added here, not in the file yet
+        self.seeded = threading.Event()
         self.writer = Writer(self.sync, "chat-recent", every, retry) if n else None
 
-    def read(self):
+    def read(self, wait=2.0):
+        if self.n:
+            self.seeded.wait(wait)
         with self.lock:
             return list(self.lines)
 
@@ -990,26 +1001,32 @@ class Recent:
             return
         with self.lock:
             self.lines = [*(x for x in self.lines if x != text), text][-self.n :]
-            self.new.append(text)
+            self.new = [*(x for x in self.new if x != text), text]
         self.writer.kick()
 
+    def load(self):
+        try:
+            with open(self.path) as f:
+                lines = json.load(f)
+        except (FileNotFoundError, ValueError):
+            return []  # missing or corrupt: written afresh
+        return (
+            [x for x in lines if isinstance(x, str)] if isinstance(lines, list) else []
+        )
+
     def sync(self):
-        """On the writer thread: merge the new lines into the file, and reload it."""
+        """On the writer thread: merge the new lines into the file (locked), or just reload
+        it (no lock: writes are atomic replaces)."""
         with self.lock:
             new = list(self.new)
         try:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with locked(self.path):
-                try:
-                    with open(self.path) as f:
-                        lines = json.load(f)
-                except (FileNotFoundError, ValueError):
-                    lines = []  # missing or corrupt: written afresh
-                if not isinstance(lines, list):
-                    lines = []
-                lines = [x for x in lines if isinstance(x, str) and x not in new] + new
-                lines = lines[-self.n :]
-                if new:
+            if not new:
+                lines = self.load()[-self.n :]
+            else:
+                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+                with locked(self.path):
+                    lines = [x for x in self.load() if x not in new] + new
+                    lines = lines[-self.n :]
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(lines, f, indent=0)
                     os.replace(self.path + ".tmp", self.path)
@@ -1022,9 +1039,12 @@ class Recent:
             raise
         self.failing = False
         with self.lock:
-            self.new = self.new[len(new) :]
-            later = list(self.new)
+            later = [
+                x for x in self.new if x not in new or self.new.count(x) > new.count(x)
+            ]
+            self.new = later
             self.lines = [*(x for x in lines if x not in later), *later][-self.n :]
+        self.seeded.set()
 
 
 RECENTS, LOCK = {}, threading.Lock()

@@ -380,6 +380,26 @@ def test_long_goodbye_posts_whole(engine):
     assert len(g.posts) == 2 and " ".join(x for _, x in g.posts) == text.strip()
 
 
+def test_recent_dedupes_while_failing(tmp_path, monkeypatch):
+    path = tmp_path / "recent.json"
+    r = chat.Recent(str(path), 5, retry=0.2)
+    real = open
+
+    def full(file, *args, **kwargs):
+        if str(file).startswith(str(path)):
+            raise OSError(122, "Disk quota exceeded")
+        return real(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", full)
+    for x in ("Good game!", "Nice opening.", "Good game!"):
+        r.add(x)
+    time.sleep(0.3)
+    monkeypatch.setattr("builtins.open", real)
+    assert r.writer.flush(5)
+    assert json.loads(path.read_text()) == ["Nice opening.", "Good game!"]
+    assert r.read() == ["Nice opening.", "Good game!"]
+
+
 def test_recent_keeps_lines_when_a_read_fails(tmp_path, monkeypatch):
     path = tmp_path / "recent.json"
     r = chat.Recent(str(path), 5, retry=0.2)
@@ -785,6 +805,38 @@ def test_config(tmp_path):
     p.write_text("[chat]\nstockfish = 'x'\n")
     with pytest.raises(ValueError):
         load(p)
+
+
+def test_ledger_edges(tmp_path, caplog):
+    """A charge counts in the window it was made in, even if written after midnight; a
+    ledger with a non-number is corrupt (no paid calls, kept); the writer survives it."""
+    t = [llm.datetime(2026, 10, 4, 23, 59, tzinfo=llm.UTC)]
+    path = tmp_path / "spend.json"
+    a = llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0], retry=0.2)
+    assert a.allows()
+    with a.writer.cv:  # hold the writer while the charge waits
+        a.add(0.9)
+        t[0] = llm.datetime(2026, 10, 5, 0, 1, tzinfo=llm.UTC)
+    assert a.writer.flush()
+    spent = json.loads(path.read_text())
+    assert spent["2026-10-04"] == pytest.approx(0.9) and "2026-10-05" not in spent
+    assert a.totals() == pytest.approx([0.0, 0.9]) and a.allows()
+    path.write_text('{"2026-10": null}')
+    b = llm.Ledger(str(path), 1.0, 1.5, retry=0.2)
+    assert not b.allows() and b.broken and path.read_text() == '{"2026-10": null}'
+
+
+def test_writer_survives_any_error(caplog):
+    calls = []
+
+    def sync():
+        calls.append(1)
+        if len(calls) == 1:
+            raise TypeError("a bug")
+
+    w = llm.Writer(sync, "test-writer", every=60, retry=0.1)
+    assert w.flush(5) and len(calls) >= 2
+    assert any("test-writer failed" in r.message for r in caplog.records)
 
 
 def test_ledger_survives_an_outage(tmp_path, caplog, monkeypatch):
