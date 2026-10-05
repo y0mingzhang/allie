@@ -41,7 +41,7 @@ from allie.model.network import (
     ratings,
 )
 from allie.model.nanogpt import sync_params
-from allie.model.moe import STATS
+from allie.model.moe import STATS, MoE
 from allie.train.provenance import source_hashes
 from allie.train.schedule import Schedule
 
@@ -229,13 +229,26 @@ def continuation(shared, local, args, config, output, pointer):
 
 def migratable(key, old, new):
     """--resume-new-source: a byte-identical copy of the history counts, or an arch that differs only
-    in switches that guard numerics (model_arch.RESUMABLE)."""
+    in switches that guard numerics (model_arch.RESUMABLE) and in a moe_router_center_first that centres a
+    superset of the MoE layers at any depth (n -> n' >= n, or 0: all)."""
     if key == "mix_history":
         return bool(old and new) and Path(old).read_bytes() == Path(new).read_bytes()
     if key == "arch":
         o, n = (model_arch.resolve(json.loads(x)) for x in (old, new))
-        return all(o[k] == n[k] for k in o if k not in model_arch.RESUMABLE)
+        f, g = o["moe_router_center_first"], n["moe_router_center_first"]
+        free = model_arch.RESUMABLE + ("moe_router_center_first",) * (g == 0 or 0 < f <= g)
+        return all(o[k] == n[k] for k in o if k not in free)
     return False
+
+
+def centre_more(model, weights, first):
+    """A checkpoint's weights, whose arch centred the first `first` MoE layers, for a model that centres more
+    (migratable): the newly centred layers' fresh mu and mu_steps (0: their first step takes its mean outright)."""
+    state = model.state_dict()
+    new = [n for n, m in model.named_modules() if isinstance(m, MoE) and m.center][first:]
+    fresh = {k: state[k] for n in new for k in (f"{n}.mu", f"{n}.mu_steps")}
+    assert not fresh.keys() & weights.keys() and not any(v.any() for v in fresh.values())
+    return weights | fresh
 
 
 def keep_model(src, kept, away=None):
@@ -336,8 +349,9 @@ def main():
     p.add_argument(
         "--resume-new-source",
         action="store_true",
-        help="resume on another training source, arch switches in model.arch.RESUMABLE or another study's "
-        "copy of the history counts (recorded as source_changes)",
+        help="resume on another training source, arch switches in model.arch.RESUMABLE, a moe_router_center_first "
+        "centring more MoE layers (their mu fresh) or another study's copy of the history counts (recorded as "
+        "source_changes)",
     )
     p.add_argument(
         "--resume-retune",
@@ -644,12 +658,17 @@ def main():
                     parent_mix_history=shared["args"]["mix_history"],
                 ),
             ]
-            # the rank state is the parent's (whose arch differs from this run's only in RESUMABLE switches,
+            # the rank state is the parent's (whose arch differs from this run's only as migratable admits,
             # checked through args.arch above): take this run's arch, the rest stays asserted on load
             assert local["manager"]["config"] == shared["config"], (
                 "Rank/model configuration mismatch"
             )
             local["manager"]["config"] = dict(local["manager"]["config"], arch=cfg.arch)
+            first = [model_arch.resolve(x)["moe_router_center_first"] for x in (shared["config"]["arch"], cfg.arch)]
+            if first[0] != first[1]:
+                change = dict(step=shared["step"], changed="moe_router_center_first", parent=first[0], now=first[1])
+                source_changes = [*source_changes, change]
+                shared["model"] = centre_more(model, shared["model"], first[0])
         if shared["args"]["lr_scale"] != a.lr_scale:  # --resume-retune, admitted above
             manager.retune(local["manager"])
         assert shared["runtime"] == runtime, (

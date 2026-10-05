@@ -76,6 +76,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
         check("fused_blend", marks=DATA),
         check("game_blocks", env=NOCOMPILE, marks=DATA),
         check("moe_shard", env=NOCOMPILE, marks=DATA),
+        check("center_switch", env=NOCOMPILE, marks=DATA),
         check("resume_retune", env=NOCOMPILE, marks=DATA),
         check("moe_remat", env=NOCOMPILE, marks=DATA),
         # Allie 2.0's months, stores and history, with its recipe table
