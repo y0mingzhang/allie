@@ -7,7 +7,7 @@ import math
 import os
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 log = logging.getLogger(__name__)
@@ -91,93 +91,146 @@ def cost(model, u):
     return sum(a * b for a, b in zip(n, PRICES[model])) / 1e6
 
 
+class Writer:
+    """Runs sync() on a daemon thread: at once, whenever kicked, and every `every` seconds;
+    a failed sync (OSError) is retried after `retry` seconds. The caller never waits."""
+
+    def __init__(self, sync, name, every=60.0, retry=30.0):
+        self.sync, self.every, self.retry = sync, every, retry
+        self.kicked, self.done = threading.Event(), threading.Event()
+        threading.Thread(target=self.run, daemon=True, name=name).start()
+
+    def kick(self):
+        self.done.clear()
+        self.kicked.set()
+
+    def run(self):
+        wait = 0.0
+        while True:
+            self.kicked.wait(wait)
+            self.kicked.clear()
+            try:
+                self.sync()
+            except OSError:
+                wait = self.retry
+                continue
+            wait = self.every
+            if not self.kicked.is_set():
+                self.done.set()
+
+    def flush(self, timeout=10.0):
+        """Kick, and wait for a sync to finish (tests, shutdown); whether one did."""
+        self.kick()
+        return self.done.wait(timeout)
+
+
+def locked(path, timeout=1.0):
+    """An exclusive flock on path + ".lock", given up after timeout seconds (TimeoutError,
+    an OSError) so a stuck holder can't hang the writer forever."""
+    f = open(path + ".lock", "a")  # noqa: SIM115 - closed below or by the caller's with
+    try:
+        for _ in range(max(int(timeout / 0.1), 1)):
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return f
+            except BlockingIOError:
+                time.sleep(0.1)
+        raise TimeoutError(f"{path}.lock is held")
+    except BaseException:
+        f.close()
+        raise
+
+
 class Ledger:
-    """Spend in USD by UTC day and month ("2026-10-04", "2026-10"), in a JSON file shared by
-    processes (read before each check, locked to add). allows() is False from the call that
-    reaches a cap until the window ends; for good once the file holds something else than a
-    ledger; and for RETRY seconds after the file can't be read or written (a filesystem
-    outage), when charges not yet recorded are kept and written with the next one. A missing
-    file is a new ledger."""
+    """Spend in USD by UTC day and month ("2026-10-04", "2026-10"). The totals live in
+    memory, seeded from a JSON file shared by processes; a writer thread adds this process's
+    charges to the file and reloads it (others' charges too), so no call waits on the
+    filesystem. allows() is False from the call that reaches a cap until the window ends;
+    until the file was read once (a missing file is a new ledger); and for good once it holds
+    something else than a ledger. A failed write is retried, the charges kept meanwhile."""
 
-    RETRY = 300
-
-    def __init__(self, path, day_cap, month_cap, now=lambda: datetime.now(UTC)):
-        self.path, self.caps, self.now = (
-            os.path.expanduser(path),
-            (day_cap, month_cap),
-            now,
-        )
-        self.lock, self.warned, self.broken = threading.Lock(), set(), False
-        self.retry, self.unrecorded = None, 0.0  # when to try the file again; USD owed to it
-
-    def read(self):
-        try:
-            with open(self.path) as f:
-                spent = json.load(f)
-        except FileNotFoundError:
-            return {}
-        except OSError as e:
-            return self.fail(e, transient=True)
-        except ValueError as e:
-            return self.fail(e)
-        return spent if isinstance(spent, dict) else self.fail("not a JSON object")
-
-    def fail(self, e, transient=False):
-        if not self.broken and (self.retry is None or not transient):
-            until = "it can be written again" if transient else "this is fixed"
-            log.error("chat: ledger %s: %s; no paid calls until %s", self.path, e, until)
-        if transient:
-            self.retry = self.now() + timedelta(seconds=self.RETRY)
-        else:
-            self.broken = True
+    def __init__(self, path, day_cap, month_cap, now=None, every=60.0, retry=30.0):
+        self.path, self.caps = os.path.expanduser(path), (day_cap, month_cap)
+        self.now = now or (lambda: datetime.now(UTC))
+        self.lock, self.warned = threading.Lock(), set()
+        self.broken = self.failing = False
+        # the file's totals once read; charges not in it yet
+        self.file, self.owed = None, 0.0
+        self.seeded = threading.Event()
+        self.writer = Writer(self.sync, "chat-ledger", every, retry)
 
     def windows(self):
         t = self.now()
         return t.strftime("%Y-%m-%d"), t.strftime("%Y-%m")
 
-    def allows(self):
-        if self.broken:
+    def totals(self):
+        with self.lock:
+            return [(self.file or {}).get(w, 0.0) + self.owed for w in self.windows()]
+
+    def allows(self, wait=2.0):
+        if not self.seeded.wait(wait) or self.broken:
             return False
-        if (retry := self.retry) is not None:
-            if self.now() < retry or math.isinf(self.add(0.0)[0]):
-                return False
-        spent = self.read()
-        if spent is None or self.broken:
-            return False
-        for w, cap in zip(self.windows(), self.caps):
-            if spent.get(w, 0.0) >= cap:
+        for w, spent, cap in zip(self.windows(), self.totals(), self.caps):
+            if spent >= cap:
                 if w not in self.warned:
                     self.warned.add(w)
-                    log.warning("chat: spent $%.2f in %s, the cap: silent until it ends",
-                                spent[w], w)  # fmt: skip
+                    log.warning(
+                        "chat: spent $%.2f in %s, the cap: silent until it ends",
+                        spent,
+                        w,
+                    )
                 return False
         return True
 
     def add(self, usd):
-        """Charge usd; the window totals (infinite if the charge can't be recorded)."""
+        """Charge usd; the window totals, in memory (the file catches up)."""
         with self.lock:
-            self.unrecorded += usd
-            if self.broken:
-                return [math.inf] * 2
-            try:
-                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-                with open(self.path + ".lock", "a") as lock:
-                    fcntl.flock(lock, fcntl.LOCK_EX)
-                    if (spent := self.read()) is None:
-                        return [math.inf] * 2
+            self.owed += usd
+        self.writer.kick()
+        return self.totals()
+
+    def sync(self):
+        """On the writer thread: add the charges owed to the file, and reload it."""
+        if self.broken:
+            return
+        with self.lock:
+            owed = self.owed
+        try:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            with locked(self.path):
+                try:
+                    with open(self.path) as f:
+                        spent = json.load(f)
+                except FileNotFoundError:
+                    spent = {}
+                if not isinstance(spent, dict):
+                    raise ValueError("not a JSON object")  # noqa: TRY004 - a corrupt file
+                if owed:
                     for w in self.windows():
-                        spent[w] = spent.get(w, 0.0) + self.unrecorded
+                        spent[w] = spent.get(w, 0.0) + owed
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(spent, f, indent=0, sort_keys=True)
                     os.replace(self.path + ".tmp", self.path)
-            except OSError as e:
-                self.fail(e, transient=True)
-                return [math.inf] * 2
-            if self.retry is not None:
-                log.info("chat: ledger %s written again ($%.4f caught up)", self.path, self.unrecorded)
-                self.retry = None
-            self.unrecorded = 0.0
-            return [spent[w] for w in self.windows()]
+        except ValueError as e:
+            log.error(
+                "chat: ledger %s: %s; no paid calls until this is fixed", self.path, e
+            )
+            self.broken = True
+            self.seeded.set()
+            return
+        except OSError as e:
+            if not self.failing:
+                log.error(
+                    "chat: ledger %s: %s; spend kept in memory, retrying", self.path, e
+                )
+            self.failing = True
+            raise
+        if self.failing:
+            log.info("chat: ledger %s written again ($%.4f caught up)", self.path, owed)
+        self.failing = False
+        with self.lock:
+            self.file, self.owed = spent, self.owed - owed
+        self.seeded.set()
 
 
 class Claude:

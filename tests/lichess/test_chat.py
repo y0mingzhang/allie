@@ -1,7 +1,10 @@
 import json
+import os
+import pathlib
 import re
 import threading
 import time
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -113,7 +116,7 @@ def test_clean_and_played():
     assert not chat.gg("g" * 5000)
     assert time.monotonic() - start < 0.05  # no backtracking
     b = chess.Board()
-    for u in "e2e4 e7e5 g1f3 b8c6".split():
+    for u in ["e2e4", "e7e5", "g1f3", "b8c6"]:
         b.push_uci(u)
     assert chat.recase("nf3 then bc4 or bb5, be ok", b) == "Nf3 then Bc4 or Bb5, be ok"
     b = chess.Board("7k/8/8/1B6/2p5/1P6/8/4K3 w - - 0 1")  # bxc4 and Bxc4 both legal
@@ -168,7 +171,7 @@ def test_moments_draw_resign(engine):
     g = Game(engine, p_moment=0, quiet_p_moment=0, p_draw=1, p_end=1, every=0, linger=5,
              min_plies=0)  # fmt: skip
     g.chatter(m)
-    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()
+    moves = ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"]
     g.feed(g.full(), *[state(" ".join(moves[: k + 1])) for k in range(len(moves))])
     assert m.calls == []  # p_moment 0: the updates wait
     g.feed(g.say("hi"))  # they chat: the chatty rates
@@ -214,21 +217,33 @@ def script(c, feel):
 
 
 def test_reciprocity(engine, caplog):
-    """While they don't chat, remarks only in the quiet slots (the opening, a plan or a
-    compliment, the finish); their gg after the game gets the fixed reply only if nothing
-    was said after the game. Once they chat, the chatty rates; after two of our lines
-    without a reply, the quiet ones again. Their lines are logged."""
+    """While they don't chat, remarks only of the game's quiet kinds; their gg after the game
+    gets the fixed reply only if nothing was said after the game. Once they chat, one kind
+    more; after two of our lines without a reply, the quiet kinds again. Their lines are
+    logged."""
     caplog.set_level("INFO", logger="allie.lichess.chat")
     m = Model("Nice.")
     g = Game(engine, opp="shy", hello="", quiet_p_moment=1, every=0, p_end=1, linger=5,
              min_plies=4)  # fmt: skip
     c = g.chatter(m)
+    c.allowed = (["opening", "compliment"], ["opening", "compliment", "plan"])
     script(c, lambda n: 0.5 if n < 9 else 0.3)  # their 5th move (ply 9) is strong
-    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5 c2c3 d7d6".split()
+    moves = [
+        "e2e4",
+        "e7e5",
+        "g1f3",
+        "b8c6",
+        "f1c4",
+        "g8f6",
+        "d2d3",
+        "f8c5",
+        "c2c3",
+        "d7d6",
+    ]
     g.feed(g.full())
     for k in range(1, len(moves) + 1):
         g.feed(state(" ".join(moves[:k])))
-    assert c.kinds == ["opening", "compliment"]  # not the plan: the middle slot is used
+    assert c.kinds == ["opening", "compliment"]
     g.feed(state(" ".join(moves), status="resign", winner="black"))
     assert c.kinds[-1] == "finish" and len(m.calls) == 3
     g.feed(g.say("gg wp"))
@@ -240,15 +255,33 @@ def test_reciprocity(engine, caplog):
     assert q.posts == [
         ("player", chat.GG)
     ]  # nothing said after the game: the fixed reply
-    d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=0, every=0)
+    d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=1, every=0)
     c = d.chatter(Model("hey"))
+    c.allowed = ([], ["endgame"])
     d.feed(d.full(), d.say("hi"))
     assert c.engaged()
-    c.moment(time.monotonic(), "endgame")  # a kind with no quiet slot
+    c.moment(time.monotonic(), "endgame")  # the kind they get once they chat
     c.respond()
     assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
     c.moment(time.monotonic(), "scramble")
     assert c.want is None
+
+
+def test_pick():
+    """Each game draws 1-3 kinds by `mix` (one more once they chat), by weight, and a
+    finish line with chance p_end."""
+    import random
+
+    cfg = Chat()
+    ns = SimpleNamespace(cfg=cfg, rng=random.Random(0))
+    picks = [Chatter.pick(ns) for _ in range(4000)]
+    sizes = Counter(len(q) for (q, _), _ in picks)
+    for k, p in enumerate(cfg.mix, 1):
+        assert abs(sizes[k] / 4000 - p) < 0.03
+    assert all(e[: len(q)] == q and len(e) == len(q) + 1 for (q, e), _ in picks)
+    first = Counter(q[0] for (q, _), _ in picks)
+    assert first.most_common(1)[0][0] == "opening"
+    assert abs(sum(f for _, f in picks) / 4000 - cfg.p_end) < 0.03
 
 
 def test_facts_and_kinds(engine):
@@ -258,9 +291,10 @@ def test_facts_and_kinds(engine):
     m = Model("")
     g = Game(engine, opp="tac", white=True, hello="", p_moment=1, every=0, scramble=150)
     c = g.chatter(m)
+    c.allowed = (list(chat.WEIGHTS), list(chat.WEIGHTS))
     script(c, lambda n: 0.5 if n < 5 else 0.3)  # our 3rd move (ply 5) is a mistake
     g.feed(g.full(), g.say("hi"))  # they chat: the chatty rates
-    moves = "e2e4 d7d5 e4d5 d8d5 d1h5 d5h5".split()  # 3. Qh5?? Qxh5
+    moves = ["e2e4", "d7d5", "e4d5", "d8d5", "d1h5", "d5h5"]  # 3. Qh5?? Qxh5
     for k in range(1, 6):
         g.feed(state(" ".join(moves[:k])))
     g.feed(state(" ".join(moves), wtime=140000))
@@ -278,20 +312,20 @@ def test_facts_and_kinds(engine):
 
 def test_recent_survives_an_outage(engine, tmp_path, caplog, monkeypatch):
     """A full disk (or any filesystem error) on the recent lines, or their lock held: the
-    chat carries on without them, logged once, and a game still gets its lines posted."""
+    lines live on in memory, the writer retries (logged once) and catches up; nothing
+    waits on the file, and a game still gets its lines posted."""
     import fcntl
 
     path = tmp_path / "recent.json"
-    r = chat.Recent(str(path), 5)
+    r = chat.Recent(str(path), 5, retry=0.2)
     r.add("one")
-    assert r.read() == ["one"]
+    assert r.writer.flush() and json.loads(path.read_text()) == ["one"]
     with open(str(path) + ".lock", "a") as held:  # another process holds the lock
         fcntl.flock(held, fcntl.LOCK_EX)
         start = time.monotonic()
         r.add("two")
-        assert time.monotonic() - start < 2 and r.read() == []  # gave up; left alone
-    r.retry = 0.0
-    assert r.read() == ["one"]
+        assert time.monotonic() - start < 0.1 and r.read() == ["one", "two"]
+        time.sleep(1.5)
     real = open
 
     def full(file, *args, **kwargs):
@@ -300,26 +334,21 @@ def test_recent_survives_an_outage(engine, tmp_path, caplog, monkeypatch):
         return real(file, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", full)
-    r.retry = 0.0
     r.add("three")
-    r.add("four")  # inside the wait: not even tried
-    assert r.read() == []
-    assert (
-        sum("recent lines" in x.message for x in caplog.records) == 2
-    )  # lock, then quota
+    time.sleep(0.5)
+    assert r.read() == ["one", "two", "three"]
     g = Game(engine, opp="disk", hello="", quiet_p_moment=1, every=0, recent=5,
              recent_file=str(path))  # fmt: skip
-    g.chatter(Model("Still talking."))
+    c = g.chatter(Model("Still talking."))
+    c.allowed = (list(chat.WEIGHTS), list(chat.WEIGHTS))
     g.feed(g.full())
     for k in range(1, 7):
-        g.feed(state(" ".join("e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()[:k])))
+        g.feed(state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"][:k])))
     assert g.posts and g.posts[-1] == ("player", "Still talking.")
-    path.write_text("{corrupt")
     monkeypatch.setattr("builtins.open", real)
-    r.retry = 0.0
-    assert r.read() == []  # corrupt: empty, and rewritten with the next line
-    r.add("five")
-    assert r.read() == ["five"]
+    assert r.writer.flush(5)  # the game's own line may be there too, from its writer
+    lines = json.loads(path.read_text())
+    assert [x for x in lines if x != "Still talking."] == ["one", "two", "three"]
 
 
 def test_one_goodbye(engine):
@@ -345,7 +374,7 @@ def test_long_goodbye_posts_whole(engine):
     text = (
         "Thanks for the game, that was a hard fight all the way. " * 3 + "See you soon."
     )
-    g = Game(engine, opp="long", hello="", quiet_p_moment=1, min_plies=2, linger=5)
+    g = Game(engine, opp="long", hello="", p_end=1, min_plies=2, linger=5)
     g.chatter(Model(text))
     g.feed(g.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
     assert len(g.posts) == 2 and " ".join(x for _, x in g.posts) == text.strip()
@@ -353,8 +382,9 @@ def test_long_goodbye_posts_whole(engine):
 
 def test_recent_keeps_lines_when_a_read_fails(tmp_path, monkeypatch):
     path = tmp_path / "recent.json"
-    r = chat.Recent(str(path), 5)
+    r = chat.Recent(str(path), 5, retry=0.2)
     r.add("one")
+    assert r.writer.flush()
     real = open
 
     def stale(file, mode="r", *args, **kwargs):
@@ -364,8 +394,13 @@ def test_recent_keeps_lines_when_a_read_fails(tmp_path, monkeypatch):
 
     monkeypatch.setattr("builtins.open", stale)
     r.add("two")
+    time.sleep(0.5)
     monkeypatch.setattr("builtins.open", real)
-    assert json.loads(path.read_text()) == ["one"]  # not replaced by ["two"]
+    assert json.loads(path.read_text()) in (
+        ["one"],
+        ["one", "two"],
+    )  # never just ["two"]
+    assert r.writer.flush(5) and json.loads(path.read_text()) == ["one", "two"]
 
 
 def test_traded_and_hanging():
@@ -373,7 +408,7 @@ def test_traded_and_hanging():
     b.push_uci("e4d5")  # the king takes: never a trade square, never hanging
     assert chat.traded(b) is None and chat.hanging(b, chess.WHITE) == []
     b = chess.Board()
-    for u in "e2e4 d7d5 e4d5".split():
+    for u in ["e2e4", "d7d5", "e4d5"]:
         b.push_uci(u)
     assert chat.traded(b) == chess.D5 and chat.hanging(b, chess.WHITE, chess.D5) == []
     assert chat.hanging(b, chess.WHITE) == ["d5"]
@@ -391,12 +426,20 @@ def test_recent_lines(engine, tmp_path):
         recent=3,
         recent_file=path,
     )
-    g.chatter(Model("A line to remember."))
+    g.chatter(Model("A line to remember.")).allowed = (
+        list(chat.WEIGHTS),
+        list(chat.WEIGHTS),
+    )
     g.feed(g.full())
-    for k, _ in enumerate("e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()):
-        g.feed(state(" ".join("e2e4 e7e5 g1f3 b8c6 f1c4 g8f6".split()[: k + 1])))
-    assert json.loads(open(path).read()) == ["A line to remember."]
+    for k, _ in enumerate(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"]):
+        g.feed(
+            state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"][: k + 1]))
+        )
+    read = lambda: json.loads(pathlib.Path(path).read_text())
+    wait(lambda: os.path.exists(path) and read() == ["A line to remember."])
+    chat.RECENTS.clear()  # a new process: seeded from the file
     h = Game(engine, opp="r2", hello="", recent=3, recent_file=path)
+    chat.recent(h.match.bot.config.chat).writer.flush()
     c = h.chatter(Model("x"))
     h.feed(h.full())
     assert "- A line to remember." in c.system[1]["text"]
@@ -409,6 +452,7 @@ def test_short_game_ends_quietly(engine):
     g = Game(engine, opp="brief", hello="", quiet_p_moment=1, p_end=0, every=0)
     c = g.chatter(m)
     g.feed(g.full())
+    c.allowed = (list(chat.WEIGHTS), list(chat.WEIGHTS))
     c.ply = lambda t, j, *a: c.moment(t, "compliment")  # every move a moment
     g.feed(state("e2e4 e7e5", status="resign", winner="black"))
     assert m.calls == [] and g.posts == []
@@ -489,7 +533,7 @@ def test_clocks_takeback_and_late(engine):
     c.put({"type": "opponentGone", "gone": False})
     wait(lambda: m.calls)
     for k in range(2, 6):
-        c.put(state(" ".join("e2e4 e7e5 g1f3 b8c6 f1c4".split()[:k])))
+        c.put(state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4"][:k])))
     m.gate.set()
     c.q.join()
     assert g.posts == []  # late
@@ -567,23 +611,29 @@ def test_through_the_bot(engine, monkeypatch):
 
 
 def test_ledger(tmp_path, caplog):
+    """Caps on in-memory totals, seeded from the file and written back by the writer; a
+    corrupt file stops paid calls and is kept."""
     t = [llm.datetime(2026, 10, 4, 23, tzinfo=llm.UTC)]
     path = tmp_path / "spend.json"
-    ledger = lambda: llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
+    ledger = lambda: llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0], retry=0.2)
     a = ledger()
     assert a.allows() and a.add(0.6) == [0.6, 0.6] and a.allows()
     a.add(0.5)
     assert not a.allows() and not a.allows()
     assert sum("2026-10-04" in r.message for r in caplog.records) == 1
-    b = ledger()  # a restart
+    assert a.writer.flush()
+    assert json.loads(path.read_text())["2026-10-04"] == pytest.approx(1.1)
+    b = ledger()  # a restart: seeded from the file
     assert not b.allows()
     t[0] = llm.datetime(2026, 10, 5, 1, tzinfo=llm.UTC)
     assert b.allows() and b.add(0.4) == pytest.approx([0.4, 1.5]) and not b.allows()
     t[0] = llm.datetime(2026, 11, 1, tzinfo=llm.UTC)
-    assert b.allows()
+    assert b.allows() and b.writer.flush()
     path.write_text("{not json")  # corrupt: no paid calls, and the evidence stays
     c = ledger()
-    assert not c.allows() and c.add(0.1) == [float("inf")] * 2
+    assert not c.allows()
+    c.add(0.1)
+    c.writer.flush(1)
     assert path.read_text() == "{not json" and not c.allows()
 
 
@@ -693,6 +743,7 @@ def test_claude(monkeypatch, tmp_path):
     usd = (300 * 2 + 100 * 2.5 + 700 * 0.2 + 12 * 10) / 1e6
     assert r.usd == pytest.approx(usd)
     day = llm.datetime.now(llm.UTC).strftime("%Y-%m-%d")
+    assert m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] == pytest.approx(usd)
     start = time.monotonic()
     assert m(system, [{"role": "user", "content": "u"}]) is None  # timeout
@@ -705,6 +756,7 @@ def test_claude(monkeypatch, tmp_path):
     partial = (
         300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + 300) * 10
     ) / 1e6  # + all it could write
+    m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] == pytest.approx(usd + partial)
     before = json.loads(ledger.read_text())[day]
     start = time.monotonic()
@@ -712,6 +764,7 @@ def test_claude(monkeypatch, tmp_path):
         m(system, [{"role": "user", "content": "u"}]) is None
     )  # over the total deadline
     assert time.monotonic() - start < 1.4
+    m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] > before  # still charged
     assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
     assert m(system, [{"role": "user", "content": "u"}]) is None
@@ -735,12 +788,12 @@ def test_config(tmp_path):
 
 
 def test_ledger_survives_an_outage(tmp_path, caplog, monkeypatch):
-    """A filesystem outage silences paid calls for RETRY seconds, keeps the charges it could
-    not record, and writes them once the file works again."""
+    """A filesystem outage never blocks a call: the caps hold in memory, the writer
+    retries (logged once) and writes the charges it owes once the file works again."""
     t = [llm.datetime(2026, 10, 4, 12, tzinfo=llm.UTC)]
     path = tmp_path / "spend.json"
-    a = llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0])
-    assert a.add(0.1) == pytest.approx([0.1, 0.1])
+    a = llm.Ledger(str(path), 1.0, 1.5, now=lambda: t[0], retry=0.2)
+    assert a.add(0.1) == pytest.approx([0.1, 0.1]) and a.writer.flush()
     real = open
 
     def broken(file, *args, **kwargs):
@@ -749,12 +802,14 @@ def test_ledger_survives_an_outage(tmp_path, caplog, monkeypatch):
         return real(file, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", broken)
-    assert a.add(0.2) == [float("inf")] * 2 and not a.allows()
-    t[0] += llm.timedelta(seconds=a.RETRY + 1)
-    assert not a.allows()  # still failing: another wait
+    start = time.monotonic()
+    assert a.add(0.2) == pytest.approx([0.3, 0.3]) and a.allows()
+    assert (
+        a.add(0.8) == pytest.approx([1.1, 1.1]) and not a.allows()
+    )  # the cap, in memory
+    assert time.monotonic() - start < 0.1  # nothing waited on the file
+    time.sleep(0.6)  # a few failed writes
     monkeypatch.setattr("builtins.open", real)
-    assert not a.allows()  # inside the new wait
-    t[0] += llm.timedelta(seconds=a.RETRY + 1)
-    assert a.allows()
-    assert json.loads(path.read_text())["2026-10-04"] == pytest.approx(0.3)
-    assert sum("no paid calls" in r.message for r in caplog.records) == 1
+    assert a.writer.flush(5)
+    assert json.loads(path.read_text())["2026-10-04"] == pytest.approx(1.1)
+    assert sum("spend kept in memory" in r.message for r in caplog.records) == 1

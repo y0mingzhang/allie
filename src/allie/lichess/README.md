@@ -173,16 +173,18 @@ involved.
   - the finish (in games of `min_plies` or more, not aborted);
   - a declined draw offer, a takeback request, the opponent leaving.
 
-  Rates: while the opponent chats, `p_moment` (`p_draw`, `p_end`) and `remarks` a game. Until they
-  write, or once `unanswered` of the bot's lines in a row get no reply, `quiet_p_moment` and only
-  these slots, one remark each: the opening, a plan or a compliment, the finish, a declined draw. A
-  "gg" after the game gets a fixed reply (no call) if the bot said nothing after the game.
+  Variety: each game draws which of the first six kinds it may use, by weight (the opening most
+  often): 1, 2 or 3 of them with chances `mix` while the opponent is quiet, one more once they chat
+  (`p_moment` per chance then, `quiet_p_moment` before). A finish line comes with chance `p_end`;
+  `p_draw` at a declined draw offer; at most `remarks` remarks a game. Quiet means until they write,
+  or once `unanswered` of the bot's lines in a row get no reply. A "gg" after the game gets a fixed
+  reply (no call) if the bot said nothing after the game.
 - **Voice.** A friendly, curious club player, in plain sentence case: short, warm, no jokes or slang.
   Never a dig at the opponent's mistakes.
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
   In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
-  message naming a move not yet played (a bare square only if it is a legal pawn push) is dropped. After the game it reviews from
-  Allie's view when asked.
+  message naming a move not yet played (a bare square only if it is a legal pawn push) is dropped.
+  After the game it reviews from Allie's view when asked.
 - **`!quiet`.** It mutes the bot for that game and their rematches, including a message already being
   written.
 - **Never in the way.** The chat reads its own copy of the game stream on a reader thread and keeps its
@@ -193,8 +195,10 @@ involved.
   - After the game, once the stream closes, it reads new chat lines from the game's chat page.
 - **Spend cap.** Each response's tokens are priced into a ledger file (`ledger`) by UTC day and month
   (Sonnet 5.5, $ per million tokens: 2 input, 2.50 / 4 cache write for 5 min / 1 h, 0.20 cache read,
-  10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over. A spend
-  limit on the key in the Anthropic Console is the backstop.
+  10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over. The totals
+  live in memory, seeded from the file at start; a background thread writes the charges to it (and
+  picks up other processes'), retrying a failed write, so no call waits on the filesystem. The same
+  goes for the recent lines. A spend limit on the key in the Anthropic Console is the backstop.
 - **Logs.** Every chat line, theirs and the bot's, as `game ID chat (room) NAME: text`.
 - **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`
   (`chmod 600`) or `ANTHROPIC_API_KEY`. Each call is logged with its tokens (new, cached, written,

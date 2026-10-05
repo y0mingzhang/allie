@@ -14,7 +14,6 @@ The chat reads its own copy of the game stream (split) and keeps its own model s
 engine Game) on its own thread: a move never waits for the chat, nor a reply for a move.
 """
 
-import fcntl
 import gzip
 import json
 import logging
@@ -35,7 +34,7 @@ import chess
 import torch
 
 from .engine import TIME, WDL, Game
-from .llm import Reply, model
+from .llm import Reply, Writer, locked, model
 from .tokens import MOVE_ID
 
 log = logging.getLogger(__name__)
@@ -44,32 +43,26 @@ LIMIT = 140  # Lichess's longest chat line
 # expected score lost to their move that makes it a good one; to yours, a mistake
 GOOD, SWING = 0.10, 0.12
 PLAN = 0.15  # chance per own middlegame move that the plan remark comes up
-KINDS = {  # the remarks, what the model is asked for, and their slot in a quiet game
-    "opening": (
-        "the opening: a short, friendly remark on it (its name, character or idea)",
-        "opening",
-    ),
-    "plan": (
-        "your plan: the idea behind the move you just played (not what comes next)",
-        "middle",
-    ),
-    "mistake": (
-        "your own mistake, now punished: own it briefly and with good grace",
-        None,
-    ),
-    "compliment": ("their good move: a brief, genuine compliment", "middle"),
-    "endgame": ("the endgame starting: a short remark on it", None),
-    "scramble": ("your clock running low: a short remark on your time trouble", None),
-    "finish": (
-        "the end of the game: a short, gracious closing line, nothing about their mistakes",
-        "finish",
-    ),
-    "draw": (
-        "their draw offer, which you declined: a short, friendly word on it",
-        "draw",
-    ),
-    "takeback": ("their takeback request", None),
-    "gone": ("them leaving the game", None),
+KINDS = {  # the remarks, and what the model is asked for
+    "opening": "the opening: a short, friendly remark on it (its name, character or idea)",
+    "plan": "your plan: the idea behind the move you just played (not what comes next)",
+    "mistake": "your own mistake, now punished: own it briefly and with good grace",
+    "compliment": "their good move: a brief, genuine compliment",
+    "endgame": "the endgame starting: a short remark on it",
+    "scramble": "your clock running low: a short remark on your time trouble",
+    "finish": "the end of the game: a short, gracious closing line, nothing about their mistakes",
+    "draw": "their draw offer, which you declined: a short, friendly word on it",
+    "takeback": "their takeback request",
+    "gone": "them leaving the game",
+}
+# each game picks which of these it may remark on, drawn by weight (see Chat.mix)
+WEIGHTS = {
+    "opening": 3,
+    "compliment": 2,
+    "plan": 2,
+    "endgame": 1.5,
+    "mistake": 1,
+    "scramble": 1,
 }
 MUTED = set()  # opponents who typed !quiet, for the life of the process
 RECENT = {}  # opponent -> (time, how the last game with them ended), for rematches
@@ -179,18 +172,19 @@ class Chat:
     day_cap: float = 1.0  # USD a UTC day, then silent until the next day
     month_cap: float = 15.0  # USD a UTC month
     ledger: str = "~/.config/allie/chat-spend.json"  # spend by day and month
-    # remarks: one of each kind (KINDS) a game at most, by chance when one comes up. While
-    # the opponent chats: p_moment a chance, p_draw at their declined draw offer, p_end at
-    # the end (of a game of min_plies or more, not aborted), `remarks` a game. Until they
-    # write, or once `unanswered` of our lines in a row got no reply: quiet_p_moment a
-    # chance, and only the quiet slots (the opening, a plan or compliment, the finish, a
-    # declined draw).
+    # remarks: each game draws which kinds it may remark on (WEIGHTS, without replacement):
+    # 1, 2 or 3 with chances `mix` while the opponent is quiet, one more once they chat; at
+    # most one of each kind, by chance (p_moment, quiet_p_moment) when it comes up, `every`
+    # plies apart. The finish line with chance p_end (games of min_plies or more, not
+    # aborted); p_draw at their declined draw offer; `remarks` a game at most.
+    # Quiet: until they write, or once `unanswered` of our lines in a row got no reply.
+    mix: tuple = (0.35, 0.45, 0.2)
     p_moment: float = 0.7
+    quiet_p_moment: float = 0.6
     p_draw: float = 0.4
-    p_end: float = 0.7
+    p_end: float = 0.35
     min_plies: int = 10
     remarks: int = 4
-    quiet_p_moment: float = 0.6
     unanswered: int = 2
     every: int = 6  # plies from any call to an unprompted one, at least
     # seconds: the clock remark once our clock is under this (or a tenth of the base)
@@ -278,10 +272,8 @@ class Chatter:
         self.system, self.convo, self.pending = None, [], []
         self.want = None  # (reason, room, unprompted, event time) of the call due
         self.said = self.answered = 0
-        self.kinds, self.slots = (
-            [],
-            set(),
-        )  # remark kinds used this game; quiet slots used
+        self.kinds = []  # remark kinds used this game
+        self.allowed, self.finishing = self.pick()  # the ones it may use
         self.endgame = self.scrambled = self.closed = (
             False  # seen; seen; said after the end
         )
@@ -573,7 +565,7 @@ class Chatter:
             and len(self.sans) >= self.cfg.min_plies
         )
         if played:
-            self.moment(t, "finish", self.cfg.p_end, spaced=False, budget=False)
+            self.moment(t, "finish", 1.0, spaced=False, budget=False)
 
     def result(self):
         us = "white" if self.white else "black"
@@ -646,23 +638,39 @@ class Chatter:
         """Do they chat back: they wrote, and not `unanswered` of our lines since?"""
         return self.talked and self.unreplied < self.cfg.unanswered
 
+    def pick(self):
+        """This game's remark kinds, in a weighted random order (the first k while they're
+        quiet, one more once they chat), and whether it may close with a finish line."""
+        kinds, order = dict(WEIGHTS), []
+        while kinds:
+            k = self.rng.choices(list(kinds), weights=list(kinds.values()))[0]
+            order.append(k)
+            del kinds[k]
+        k = self.rng.choices(range(1, len(self.cfg.mix) + 1), weights=self.cfg.mix)[0]
+        return (order[:k], order[: k + 1]), self.rng.random() < self.cfg.p_end
+
     def moment(self, t, kind, p=None, spaced=True, budget=True):
-        """Maybe call the model for a remark of this kind: once a kind a game, by chance,
-        within the game's budget, `every` plies from the last call; while they don't chat,
-        only in the quiet slots, one remark a slot. Whether the chance was taken."""
+        """Maybe call the model for a remark of this kind: one of the game's kinds, once,
+        by chance, within the budget, `every` plies from the last call. Whether the chance
+        was taken."""
         c, engaged = self.cfg, self.engaged()
-        slot = KINDS[kind][1]
         if self.want or self.muted() or kind in self.kinds:
             return False
-        if not engaged and (slot is None or slot in self.slots):
+        if kind in WEIGHTS and kind not in self.allowed[engaged]:
             return False
-        if engaged and budget and self.said >= c.remarks:
+        if (
+            kind == "finish"
+            and not self.finishing
+            or kind in ("takeback", "gone")
+            and not engaged
+        ):
+            return False
+        if budget and self.said >= c.remarks:
             return False
         if spaced and len(self.sans) - self.last < c.every:
             return False
-        if self.rng.random() < (
-            (c.p_moment if p is None else p) if engaged else c.quiet_p_moment
-        ):
+        p = p if p is not None else c.p_moment if engaged else c.quiet_p_moment
+        if self.rng.random() < p:
             self.want = (kind, c.rooms[0], True, t)
         return True
 
@@ -699,9 +707,8 @@ class Chatter:
         if unprompted:
             self.said += 1
             self.kinds.append(reason)
-            self.slots.add(KINDS[reason][1])
             done = ", ".join(self.kinds[:-1]) or "none"
-            why = f"{KINDS[reason][0]}. Remarks already made this game: {done}"
+            why = f"{KINDS[reason]}. Remarks already made this game: {done}"
         else:
             self.answered += 1
             why = "a message to you"
@@ -964,73 +971,60 @@ def hanging(board, color, skip=None):
 
 
 class Recent:
-    """The last n unprompted lines, across games and restarts: a JSON list in a file shared
-    by processes. Best effort, on the chat thread only: a corrupt file reads as empty; a
-    filesystem error, or another process holding the lock over a second, leaves the file
-    alone for RETRY seconds, logged once. (A hung NFS server can still block the chat
-    threads, never a game.)"""
+    """The last n unprompted lines, across games and restarts. They live in memory, seeded
+    from a JSON list in a file shared by processes; a writer thread merges new lines into
+    the file and reloads it, so the chat never waits on the filesystem. A failed write is
+    retried (logged once); a corrupt file is rewritten."""
 
-    RETRY = 300
-
-    def __init__(self, path, n):
-        self.path, self.n, self.lock, self.retry = path, n, threading.Lock(), 0.0
-
-    def load(self):
-        """The lines; [] for a missing or corrupt file; OSError for anything else."""
-        try:
-            with open(self.path) as f:
-                lines = json.load(f)
-        except FileNotFoundError:
-            return []
-        except ValueError:
-            return []  # rewritten with the next line
-        return (
-            [x for x in lines if isinstance(x, str)][-self.n :]
-            if isinstance(lines, list)
-            else []
-        )
+    def __init__(self, path, n, every=300.0, retry=30.0):
+        self.path, self.n, self.lock, self.failing = path, n, threading.Lock(), False
+        self.lines, self.new = [], []  # all known; added here, not in the file yet
+        self.writer = Writer(self.sync, "chat-recent", every, retry) if n else None
 
     def read(self):
-        if not self.n or time.monotonic() < self.retry:
-            return []
-        try:
-            return self.load()
-        except OSError as e:
-            return self.fail(e)
-
-    def fail(self, e):
-        if time.monotonic() >= self.retry:
-            log.warning(
-                "chat: recent lines %s: %s; without them for %d s",
-                self.path,
-                e,
-                self.RETRY,
-            )
-        self.retry = time.monotonic() + self.RETRY
-        return []
+        with self.lock:
+            return list(self.lines)
 
     def add(self, text):
-        if not self.n or time.monotonic() < self.retry:
+        if not self.n:
             return
         with self.lock:
-            try:
-                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-                with open(self.path + ".lock", "a") as lock:
-                    # another process holding the lock: wait a second at most
-                    for _ in range(10):
-                        try:
-                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                            break
-                        except BlockingIOError:
-                            time.sleep(0.1)
-                    else:
-                        raise TimeoutError("the lock is held")
-                    lines = [*(x for x in self.load() if x != text), text][-self.n :]
+            self.lines = [*(x for x in self.lines if x != text), text][-self.n :]
+            self.new.append(text)
+        self.writer.kick()
+
+    def sync(self):
+        """On the writer thread: merge the new lines into the file, and reload it."""
+        with self.lock:
+            new = list(self.new)
+        try:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            with locked(self.path):
+                try:
+                    with open(self.path) as f:
+                        lines = json.load(f)
+                except (FileNotFoundError, ValueError):
+                    lines = []  # missing or corrupt: written afresh
+                if not isinstance(lines, list):
+                    lines = []
+                lines = [x for x in lines if isinstance(x, str) and x not in new] + new
+                lines = lines[-self.n :]
+                if new:
                     with open(self.path + ".tmp", "w") as f:
                         json.dump(lines, f, indent=0)
                     os.replace(self.path + ".tmp", self.path)
-            except OSError as e:  # TimeoutError and BlockingIOError are OSErrors too
-                self.fail(e)
+        except OSError as e:
+            if not self.failing:
+                log.warning(
+                    "chat: recent lines %s: %s; kept in memory, retrying", self.path, e
+                )
+            self.failing = True
+            raise
+        self.failing = False
+        with self.lock:
+            self.new = self.new[len(new) :]
+            later = list(self.new)
+            self.lines = [*(x for x in lines if x not in later), *later][-self.n :]
 
 
 RECENTS, LOCK = {}, threading.Lock()
