@@ -57,7 +57,7 @@ KINDS = {  # the remarks, and what the model is asked for
 }
 # each game picks which of these it may remark on, drawn by weight (see Chat.mix)
 WEIGHTS = {
-    "opening": 3,
+    "opening": 2,
     "compliment": 2,
     "plan": 2,
     "endgame": 1.5,
@@ -407,8 +407,11 @@ class Chatter:
                 f"You played them {ago:.0f} min ago: {r[1]}. Likely a rematch."
             )
         if lines := recent(self.cfg).read():
-            header.append("Your unprompted lines in recent games (don't reuse their wording, "
-                          "openings or shape):\n" + "\n".join(f"- {x}" for x in lines))  # fmt: skip
+            header.append("Your unprompted lines in recent games, with other opponents. Don't "
+                          "reuse their wording, openings or shape, and don't refer to those "
+                          "games: this opponent wasn't there, so no \"this time\" or "
+                          "\"again\" (unless this game is a rematch, as said above):\n"
+                          + "\n".join(f"- {x}" for x in lines))  # fmt: skip
         cached = {"type": "ephemeral", "ttl": "1h"}
         self.system = [
             {"type": "text", "text": SYSTEM, "cache_control": cached},

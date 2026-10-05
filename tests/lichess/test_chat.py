@@ -283,7 +283,8 @@ def test_pick():
         assert abs(sizes[k] / 4000 - p) < 0.03
     assert all(e[: len(q)] == q and len(e) == len(q) + 1 for (q, e), _ in picks)
     first = Counter(q[0] for (q, _), _ in picks)
-    assert first.most_common(1)[0][0] == "opening"
+    share = chat.WEIGHTS["opening"] / sum(chat.WEIGHTS.values())
+    assert abs(first["opening"] / 4000 - share) < 0.03
     assert abs(sum(f for _, f in picks) / 4000 - cfg.p_end) < 0.03
 
 
@@ -472,7 +473,9 @@ def test_recent_lines(engine, tmp_path):
     chat.recent(h.match.bot.config.chat).writer.flush()
     c = h.chatter(Model("x"))
     h.feed(h.full())
-    assert "- A line to remember." in c.system[1]["text"]
+    header = c.system[1]["text"]
+    assert "- A line to remember." in header and "with other opponents" in header
+    assert '"this time"' in header
 
 
 def test_short_game_ends_quietly(engine):
