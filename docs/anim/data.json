@@ -875,9 +875,43 @@
         "power20": 1.2381,
         "nofloor": 1.2003
       },
-      "central": 1.2421,
-      "lo": 1.2381,
-      "hi": 1.2497
+      "old": {
+        "lo": 1.2381,
+        "hi": 1.2497
+      },
+      "steps": [
+        {
+          "name": "bigger model,\nmore tokens",
+          "d": -0.009,
+          "ci": [-0.016, -0.0036]
+        },
+        {
+          "name": "longer decay\nto 0.1%",
+          "d": -0.0012,
+          "ci": null
+        },
+        {
+          "name": "new router",
+          "d": -0.004,
+          "ci": [-0.01, 0.002]
+        },
+        {
+          "name": "112B-token\ndata table",
+          "d": 0.0014,
+          "ci": null
+        }
+      ],
+      "central": 1.241,
+      "lo": 1.231,
+      "hi": 1.251,
+      "noise": 0.005,
+      "next": {
+        "count": "2–3",
+        "n": [200000000.0, 700000000.0],
+        "tpp": [30, 100],
+        "check_from": 0.3,
+        "ckpt_noise": 0.01
+      }
     },
     "miss": {
       "backtest": {

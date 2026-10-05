@@ -64,9 +64,9 @@ GRIDC, PALE, GREY = "#E2DCCF", "#F2D3BF", "#9C968C"
 
 VIDEO = dict(
     name="scaling-law",
-    scenes=[*[f"S{i}" for i in range(9)], "M1", "M2", "M3", "S9"],
+    scenes=[*[f"S{i}" for i in range(9)], "M1", "M2", "M3", "S9", "S10"],
     gif=(["S7", 8.6], 13.5),
-    poster=["S9", 20.5],
+    poster=["S10", 27.0],
 )
 
 
@@ -1825,7 +1825,8 @@ class S9(Scene):
                   *cap("So anchor the level on Allie 2.0: refit the troughs with 2.0 as a fourth point."))  # fmt: skip
         self.play(GrowFromCenter(dd["frontier4"]), FadeIn(tl["frontier4"]))
         cap.hold()
-        y0, y1 = P.p(c21, F["lo"])[1], P.p(c21, F["hi"])[1]
+        O = F["old"]
+        y0, y1 = P.p(c21, O["lo"])[1], P.p(c21, O["hi"])[1]
         band = Rectangle(
             width=0.36,
             height=y1 - y0 + 0.2,
@@ -1834,32 +1835,114 @@ class S9(Scene):
             stroke_width=0,
         ).move_to([x, (y0 + y1) / 2, 0])
         self.play(FadeIn(band), *[GrowFromCenter(dd[k_]) for k_ in ("shift", "power20")], *[FadeIn(tl[k_]) for k_ in ("shift", "power20")],
-                  *cap(f"Every reading anchored on 2.0 lands between {F['lo']:.3f} and {F['hi']:.3f}."))  # fmt: skip
+                  *cap(f"Readings anchored on 2.0 span {O['lo']:.3f} to {O['hi']:.3f}."))  # fmt: skip
         self.bring_to_front(dd["frontier4"])
         cap.hold()
-
-        card = VGroup(lab("Allie 2.1 forecast", 24, INK2), lab(f"{F['central']:.3f}", 58, INK, "SEMIBOLD"),
-                      lab(f"range {F['lo']:.3f} – {F['hi']:.3f}", 24, INK2), lab(f"Allie 2.0: {M['Y20']:.3f}", 24, INK2),
-                      lab("both big runs, before any second anneal", 18, MUTED)).arrange(DOWN, buff=0.14)  # fmt: skip
-        box = RoundedRectangle(
-            corner_radius=0.15,
-            width=card.width + 0.7,
-            height=card.height + 0.55,
-            fill_color=PANEL,
-            fill_opacity=1,
-            stroke_width=0,
-        )
-        cg = VGroup(box, card.move_to(box)).move_to([-4.0, -0.95, 0])
         self.play(
-            FadeIn(cg, shift=0.15 * UP),
             *cap(
-                f"Forecast for Allie 2.1's big run: {F['central']:.3f}, {M['Y20'] - F['central']:.3f} below Allie 2.0's."
+                "But none of them knows what else changed from 2.0 to 2.1, or how noisy one run is."
+            )
+        )
+        cap.hold(0.6)
+        outro(self)
+
+
+class S10(Scene):
+    def construct(self):
+        paper(self)
+        cap = Cap(self)
+        k = kicker("Forecasting Allie 2.1")
+        F = D["forecast"]
+        O, y20 = F["old"], M["Y20"]
+        P = Plot((-0.7, 8.5), (1.226, 1.259), 11.8, 4.3, (0.25, 0.35), logx=False,
+                 yt=[(y, f"{y:.2f}") for y in (1.23, 1.24, 1.25)], yl="loss (nats)")  # fmt: skip
+
+        def under(x, s, color=INK2):
+            return lab(s, 20, color).next_to(P.p(x, 1.226), DOWN, buff=0.14)
+
+        lvl = Line(P.p(-0.32, y20), P.p(0.32, y20), color=INK, stroke_width=6)
+        l0 = lab(f"{y20:.4f}", 22, INK, "SEMIBOLD").next_to(lvl, UP, buff=0.1)
+        n0 = under(0, "Allie 2.0\nbig run", INK)
+        self.play(FadeIn(k), FadeIn(P), Create(lvl), FadeIn(l0), FadeIn(n0),
+                  *cap(f"Instead, start from Allie 2.0's big run, {y20:.3f}, and add each change."))  # fmt: skip
+        cap.hold()
+
+        def step(i, a, st):
+            b = a + st["d"]
+            u = 1.3 * i
+            x0, x1 = P.p(u - 0.28, 0)[0], P.p(u + 0.28, 0)[0]
+            ya, yb = P.p(0, a)[1], P.p(0, b)[1]
+            col = BLUE if st["d"] < 0 else ORANGE
+            g = VGroup(DashedLine(P.p(u - 1.3 + 0.32, a), P.p(u - 0.28, a), color=MUTED, stroke_width=2, dash_length=0.06),
+                       Rectangle(width=x1 - x0, height=max(abs(ya - yb), 0.03), fill_color=col, fill_opacity=0.8,
+                                 stroke_width=0).move_to([(x0 + x1) / 2, (ya + yb) / 2, 0]))  # fmt: skip
+            if st["ci"]:
+                cx = (x0 + x1) / 2
+                c0, c1 = P.p(0, a + st["ci"][0])[1], P.p(0, a + st["ci"][1])[1]
+                g.add(VGroup(Line([cx, c0, 0], [cx, c1, 0]), Line([cx - 0.07, c0, 0], [cx + 0.07, c0, 0]),
+                             Line([cx - 0.07, c1, 0], [cx + 0.07, c1, 0])).set_stroke(INK, 2.5))  # fmt: skip
+            v = lab(signed(st["d"], 4), 22, INK, "SEMIBOLD").next_to(
+                g[1:], UP, buff=0.1
+            )
+            return VGroup(g, v, under(u, st["name"])), b
+
+        a, steps = y20, []
+        for i, st in enumerate(F["steps"], 1):
+            g, a = step(i, a, st)
+            steps.append(g)
+        s0 = F["steps"][0]
+        self.play(GrowFromEdge(steps[0][0][1], UP), FadeIn(steps[0][0][0]), FadeIn(steps[0][0][2:]), FadeIn(steps[0][1:]),
+                  *cap(f"The sweep gives the step to a bigger model on more tokens: {signed(s0['d'])}."))  # fmt: skip
+        cap.hold()
+        self.play(LaggedStart(*[FadeIn(g, shift=0.1 * DOWN) for g in steps[1:]], lag_ratio=0.4), run_time=1.6,
+                  *cap("Then 2.1's longer decay, its new router, and its 112B-token table's small cost."))  # fmt: skip
+        cap.hold()
+
+        xf = 6.6
+        cx = P.p(xf, 0)[0]
+        f0, f1 = P.p(0, F["lo"])[1], P.p(0, F["hi"])[1]
+        ci = VGroup(Line([cx, f0, 0], [cx, f1, 0], stroke_width=7), Line([cx - 0.12, f0, 0], [cx + 0.12, f0, 0], stroke_width=4),
+                    Line([cx - 0.12, f1, 0], [cx + 0.12, f1, 0], stroke_width=4)).set_color(INK)  # fmt: skip
+        fd = diamond(P.p(xf, a), INK, 0.14)
+        conn = DashedLine(
+            P.p(1.3 * len(F["steps"]) + 0.28, a),
+            P.p(xf - 0.2, a),
+            color=MUTED,
+            stroke_width=2,
+            dash_length=0.06,
+        )
+        fl = lab(f"{F['central']:.3f}", 30, INK, "SEMIBOLD").next_to(
+            fd, RIGHT, buff=0.2
+        )
+        fn = under(xf, "Allie 2.1\nbig run", INK)
+        cl = lab(f"90%: {F['lo']:.3f}–{F['hi']:.3f}", 20, INK2).next_to(
+            ci, UP, buff=0.1
+        )
+        self.play(Create(conn), GrowFromCenter(fd), FadeIn(fl), FadeIn(fn),
+                  *cap(f"Allie 2.1's big run: about {F['central']:.3f}, {y20 - F['central']:.3f} below 2.0."))  # fmt: skip
+        cap.hold()
+        self.add(ci)
+        self.bring_to_front(fd)
+        self.play(GrowFromCenter(ci), FadeIn(cl),
+                  *cap(f"Add the steps' spread and ±{F['noise']:.3f} of run noise: 90% between {F['lo']:.3f} and {F['hi']:.3f}."))  # fmt: skip
+        cap.hold()
+        xo = 7.8
+        ox = P.p(xo, 0)[0]
+        o0, o1 = P.p(0, O["lo"])[1], P.p(0, O["hi"])[1]
+        old = VGroup(Line([ox, o0, 0], [ox, o1, 0], stroke_width=7), Line([ox - 0.1, o0, 0], [ox + 0.1, o0, 0], stroke_width=4),
+                     Line([ox - 0.1, o1, 0], [ox + 0.1, o1, 0], stroke_width=4)).set_color(MUTED)  # fmt: skip
+        on = under(xo, "earlier\nreadings", MUTED)
+        self.play(
+            GrowFromCenter(old),
+            FadeIn(on),
+            *cap(
+                f"Wider than the earlier readings' {O['lo']:.3f}–{O['hi']:.3f}: they left out these steps and noise."
             ),
         )
         cap.hold()
         self.play(
             *cap(
-                f"Allocation still follows the exponents: the optimum is {size(LAW['nopt21'])} active on {LAW['dopt21'] / 1e9:.0f}B tokens."
+                f"The compute-optimal split at 2.1's compute would be {size(LAW['nopt21'])} active on {LAW['dopt21'] / 1e9:.0f}B tokens."
             )
         )
         cap.hold()
@@ -1867,24 +1950,40 @@ class S9(Scene):
         self.play(
             *[FadeOut(m) for m in self.mobjects if m is not cap.cur and m is not k]
         )
-        t1 = text("Trust the exponents.", 54, INK, weight="SEMIBOLD")
-        t2 = text("Anchor the level on Allie 2.0.", 54, ORANGE, weight="SEMIBOLD")
-        t3 = lab(
-            "Next: a budget near 10<sup>20</sup> FLOPs, to measure the floor directly.",
-            28,
-            INK2,
+        N = F["next"]
+        head = text("How we forecast now", 44, INK, weight="SEMIBOLD")
+        rules = ("Anchor the level on the biggest real run; the sweep gives the step from it.",
+                 "Report the spread across law forms and the troughs' band, not one fit's error bar.",
+                 f"Train the sweep the way the big run trains: decay to {D['miss']['lr_end_20']:.1%} of peak.",
+                 f"Before the next big run: {N['count']} long runs, {size(N['n'][0])}–{size(N['n'][1])} active, "
+                 f"{N['tpp'][0]}–{N['tpp'][1]} tokens per parameter.")  # fmt: skip
+        items = VGroup(
+            *[
+                VGroup(Dot(radius=0.06, color=ORANGE), text(r, 28, INK2)).arrange(
+                    RIGHT, buff=0.25
+                )
+                for r in rules
+            ]
         )
-        VGroup(t1, t2, t3).arrange(DOWN, buff=0.35, aligned_edge=LEFT).move_to(
-            [0, 0.35, 0]
+        items.arrange(DOWN, buff=0.32, aligned_edge=LEFT)
+        VGroup(head, items).arrange(DOWN, buff=0.5, aligned_edge=LEFT).move_to(
+            [0, 0.3, 0]
         )
-        t3.shift(0.25 * DOWN)
         self.play(
-            Write(t1),
+            Write(head),
             *cap(
-                "The recipe: exponents from the sweep, level from the biggest run we have."
+                f"First real check: 2.1's loss at the same point in its run as 2.0's, from about {N['check_from']:.0%} on."
             ),
         )
-        self.play(Write(t2))
-        self.play(FadeIn(t3, shift=0.1 * UP))
-        cap.hold(1.2)
+        cap.hold()
+        self.play(
+            *cap(
+                f"Earlier checkpoints say little: they carry at least ±{N['ckpt_noise']:.3f} of noise."
+            )
+        )
+        self.play(
+            LaggedStart(*[FadeIn(r, shift=0.1 * UP) for r in items], lag_ratio=0.5),
+            run_time=2.4,
+        )
+        cap.hold(1.5)
         outro(self, 1.2)
