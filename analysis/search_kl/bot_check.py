@@ -25,6 +25,7 @@ from allie.search import kl  # noqa: E402
 from calib_search_cpu import Position  # noqa: E402
 
 import common as c  # noqa: E402
+from score_kl import parse  # noqa: E402
 import evaluate as ev  # noqa: E402
 
 MODEL = "/data/group_data/dei-group/yimingz3/allie/lichess/allie-2.0-annealed"
@@ -37,10 +38,8 @@ def main():
     p.add_argument("run")
     p.add_argument("--n", type=int, default=24)
     p.add_argument("--budget", type=int, default=256)
-    p.add_argument("--own", type=float, default=5.0)
-    p.add_argument("--opp", type=float, default=5.0)
-    p.add_argument("--soft", action="store_true")
-    p.add_argument("--kappa", type=float, default=0.0)
+    p.add_argument("--grow", default="5:5:s:k0.5", help="kl.grow tilts (score_kl spec)")
+    p.add_argument("--read", default="12:12:s:x0.95", help="kl.backup that reads Q (score_kl spec)")
     p.add_argument("--clock", default="zero")
     p.add_argument(
         "--beta", type=float, default=8.0, help="output tilt for the total variation"
@@ -49,12 +48,12 @@ def main():
     torch.set_num_threads(4)
     F = ev.load_forest(c.OUT / "pikl" / a.run)
     keep = F["cost"] <= a.budget
-    tilt = dict(own=a.own, opp=a.opp, soft=a.soft, kappa=a.kappa)
-    V, _, _ = kl.backup(F, keep, **tilt)
+    grow, read = parse(a.grow), parse(a.read)
+    V, _, _ = kl.backup(F, keep, **read)
     z = np.load(POS)
     off, tokens, feats, meta = z["offsets"], z["tokens"], z["feats"], z["meta"]
     engine = Engine(Model(MODEL, int8=True, backend="fast", threads=4))
-    search = KL(**tilt, clock_rule=a.clock)
+    search = KL(grow, read, a.clock)
     rows = np.linspace(0, len(F["index"]) - 1, a.n).astype(int)
     tv, corr, agree = [], [], []
     for r in rows:
@@ -73,7 +72,8 @@ def main():
         gq = {int(F["token"][k]): -V[k] for k in kids}
         gv = F["wdl"][F["roots"][r]]
         tok = [MOVE_ID[m] for m in moves]
-        g = np.array([gq.get(t, gv[0] - gv[2]) for t in tok])
+        v0 = np.arctanh(read["squash"] * (gv[0] - gv[2])) if read["squash"] else gv[0] - gv[2]
+        g = np.array([gq.get(t, v0) for t in tok])
         both = np.array([t in gq for t in tok])
         lp = np.log(np.maximum(prior, 1e-300))
         pb, pg = (

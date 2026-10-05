@@ -19,6 +19,7 @@ import numpy as np
 
 WDL = slice(2413, 2416)
 CONTEXT = 1025  # the model's longest game, header included
+TINY = 1e-5  # unexpanded prior mass below this is rounding (float32 dumps leave ~1e-7): the node is fully expanded
 
 
 def softmax(z):
@@ -29,7 +30,8 @@ def softmax(z):
 class Forest:
     """Search trees over a batch of roots (node r < n is root r), grown in network calls. Node i's legal
     moves sit at edges start[i]..start[i] + count[i] by falling prior; below the roots the first done[i] are expanded.
-    cost[i]: network evaluations of its root's tree up to node i, so cost <= b is the tree of budget b."""
+    cost[i]: network evaluations of its root's tree up to node i, so cost <= b is the tree of budget b (up to a
+    terminal node or two: a budget-b grow re-ranks once more after a last call that reached terminals)."""
 
     def __init__(self, bridge, positions, lengths, cap, values=None, policy=(0, 0), prior=None):
         """bridge: one bridge, or views of the same roots that each evaluate every node (e.g. other header
@@ -66,7 +68,7 @@ class Forest:
         z = [np.asarray(b.root_logits, float) for b in self.bridges]
         self.heads = (z[0] if prior is None else self.prior_logits)[:, 2350:2416]
         self._set(np.arange(n), z)
-        self.rootw = np.concatenate([root_weights(self.ep[self.start[r] : self.start[r] + self.count[r]]) for r in range(n)])
+        self.rootw = self.rootw0 = np.concatenate([root_weights(self.ep[self.start[r] : self.start[r] + self.count[r]]) for r in range(n)])
         root = [self.etok[self.start[r] : self.start[r] + self.count[r]] for r in range(n)]
         self.rootpv = np.stack([np.concatenate([softmax(x[r][m]) for r, m in enumerate(root)]) for x in z], 1)
 
@@ -146,7 +148,7 @@ def backup(F, keep=None, own=0.0, opp=0.0, soft=False, kappa=0.0, squash=0.0):
     """Values (side to move) of the nodes in `keep` (default all) of a forest's view() or dump: each
     node's policy p tilted by beta (own at even depths, opp at odd), times (1 + (subtree - 1) / 16)^kappa
     (kappa 0.5: KL weight falling as 1 / sqrt(subtree), as allie.search's soft backup sharpens), its
-    unexpanded moves at its own value. squash > 0: values on the log-odds scale, arctanh(squash (W - L)).
+    unexpanded moves at its own value. 0 < squash < 1: values on the log-odds scale, arctanh(squash (W - L)).
     Returns (V, sigma, rest): each child's probability under its parent's tilted policy and each
     node's tilted probability per unit prior of an unexpanded move."""
     par, d = F["parent"], np.asarray(F["depth"], np.int64)
@@ -162,15 +164,15 @@ def backup(F, keep=None, own=0.0, opp=0.0, soft=False, kappa=0.0, squash=0.0):
         np.add.at(seen, par[c], prior[c])
         np.add.at(sub, par[c], sub[c])
     beta = np.where(d % 2 == 0, own, opp) * (1 + (sub - 1) / 16) ** kappa
-    left = np.maximum(1 - seen, 0)
+    left = np.where(seen < 1 - TINY, 1 - seen, 0.0)
     V, hi, Z = v.copy(), v.copy(), np.ones(n)
     for c in levels[:0:-1]:
         p, q = par[c], -V[c]
-        hi[p] = np.where(left[p] > 1e-12, v[p], -np.inf)
+        hi[p] = np.where(left[p] > 0, v[p], -np.inf)
         np.maximum.at(hi, p, q)
         e = prior[c] * np.exp(beta[p] * (q - hi[p]))
         u = np.unique(p)
-        Z[u] = left[u] * np.exp(beta[u] * (v[u] - hi[u]))
+        Z[u] = left[u] * np.exp(beta[u] * np.minimum(v[u] - hi[u], 0))
         num = Z * v
         np.add.at(Z, p, e)
         np.add.at(num, p, e * q)
@@ -183,7 +185,7 @@ def backup(F, keep=None, own=0.0, opp=0.0, soft=False, kappa=0.0, squash=0.0):
     for c in levels[1:]:
         p = par[c]
         sigma[c] = prior[c] * np.exp(beta[p] * (-V[c] - hi[p])) / Z[p]
-    return V, sigma, np.exp(beta * (v - hi)) / Z
+    return V, sigma, np.exp(beta * np.minimum(v - hi, 0)) / Z
 
 
 def root_weights(p):
@@ -202,7 +204,7 @@ def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width
     backup's."""
     n, E = F.n, len(F.rootw)
     top = np.repeat(np.arange(n), F.count[:n])
-    cov = F.rootw.copy()
+    cov = F.rootw0
     while True:
         need = np.where(F.count[:n] > 1, budget - F.spent, 0)
         size = F.size
