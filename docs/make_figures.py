@@ -817,10 +817,10 @@ def rating():
 def calibrated():
     """Move accuracy and blunder rate (Stockfish on every legal move) against rating, per time control: the humans'
     own moves (line, 95% band), and the expected values of the move distributions the Lichess bot plays at that
-    rating, sampled straight from the policy or calibrated as shipped (allie.lichess.calibration.CELLS: per
-    position, its search rungs mixed by the think times the bot draws), with 95% intervals clustered by game
-    (analysis/elo_strength/calib_plotdata.py). Calibrated points only where the bot searches."""
-    data = jload(X / "elo-strength/calib/plot-capped.json")
+    rating, sampled straight from the policy or calibrated as shipped (allie.lichess.calibration: per position,
+    its search rungs mixed by the think times the bot draws), with 95% intervals clustered by game
+    (analysis/elo_strength/calib_unified.py --params --plot)."""
+    data = jload(X / "elo-strength/calib/plot-unified.json")
     formats = ("bullet", "blitz", "rapid", "classical")
     who = ("Humans", "Allie (raw policy)", "Allie (calibrated)")
     pts, n = [], 0
@@ -829,10 +829,7 @@ def calibrated():
         if f not in formats or not 800 <= int(b) <= 2600:
             continue
         n += c["n"]
-        search = c["choice"] != "raw"
-        for w, src, dx in ((who[0], "human", 0), (who[1], "raw", -30 if search else 0), (who[2], "calibrated", 30)):  # fmt: skip
-            if src == "calibrated" and not search:
-                continue
+        for w, src, dx in ((who[0], "human", 0), (who[1], "raw", -30), (who[2], "calibrated", 30)):
             for metric, scale in (("accuracy", 1), ("blunder", 100)):
                 v, e = c[src][metric] * scale, 1.96 * c[src][metric + "_se"] * scale
                 pts.append({"f": f, "x": int(b) + dx, "s": w, "m": metric, "v": v, "lo": v - e, "hi": v + e})  # fmt: skip

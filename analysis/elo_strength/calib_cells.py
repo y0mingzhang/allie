@@ -34,6 +34,7 @@ NAMES = []  # candidates, set by names() from BETAS
 def names():
     NAMES[:] = (["raw"] + [f"coverage {n}" for n in COV] + [f"coverage {n} b{b:g}" for n in COV for b in BETAS]
                 + [f"coverage {n}f b{b:g}" for n in COV for b in BETAS if FILL]
+                + [f"coverage {n}a b{b:g}" for n in COV for b in BETAS if ATANH]
                 + [f"lookahead {c} b{b:g}" for c in CALLS for b in BETAS])  # fmt: skip
 # ms of one search alone, 4 threads, int8, a 6-CPU preempt node (EPYC 9354; bench/searchcost.py, median
 # of 6 positions); coverage 8 extrapolated
@@ -42,8 +43,12 @@ COST = {("coverage", 8): 200, ("coverage", 32): 741, ("coverage", 128): 2832, ("
         ("lookahead", 16): 5067}  # fmt: skip
 
 
-def tilted(lp, q):
-    """[beta, move] of pi ~ exp(lp + beta q)."""
+ATANH = 0.0  # --atanh A: also coverage tilted on arctanh(A q), the W - L value's log-odds (tags 128a, ...)
+
+
+def tilted(lp, q, atanh=False):
+    """[beta, move] of pi ~ exp(lp + beta q), or of beta arctanh(ATANH q)."""
+    q = np.arctanh(ATANH * np.clip(q, -1, 1)) if atanh else q
     z = lp[None] + np.array(BETAS)[:, None] * q[None]
     z = np.exp(z - z.max(1, keepdims=True))
     return z / z.sum(1, keepdims=True)
@@ -65,32 +70,36 @@ def filled(q, heads, prior):
 
 
 THINK = False  # --think: also each coverage beta as the bot plays it under the think-time cap
-LADDER = (8, 32, 128, 256, 1024)  # allie.lichess.calibration.LADDER["coverage"]
-SIM = 0.015  # seconds a simulation (allie.lichess.calibration.COST["coverage"]; --sim)
+TOPS = {}
+LADDERS = [("8", "32", "128", "256", "1024")]  # --ladder: coverage tags by cost (256v3: 256 simulations, 3 views)
+SIM = 0.015  # seconds a simulation (the 6-cpu bot; allie.lichess.calibration.COST is 16 cpus'; --sim)
 LAG, RESERVE, SHARE = 0.3, 2.5, 0.5  # allie.lichess: Play.lag, behaviour.json's guard
+MARGIN = 0.0  # seconds a search ends before the think time (allie.lichess.calibration.MARGIN)
 
 
 def reach(time_logits, clock, inc, seconds):
-    """P(the bot's think time >= each of `seconds`) and whether the clock's tenth allows them
-    (allie.lichess.behaviour.think: a think-head bin, uniform within it, less the lag, under the guard)."""
+    """P(the bot's think time >= each of `seconds` plus MARGIN) and whether the clock's tenth allows
+    them (allie.lichess.behaviour.think: a think-head bin, uniform within it, less the lag, under the
+    guard)."""
     p = np.exp(time_logits - time_logits.max())
     p /= p.sum()
     b = np.arange(len(p))[:, None]
     s = np.asarray(seconds, float)[None]
-    lin = np.clip(b + 0.5 - LAG - s, 0, 1)
+    t = s + MARGIN
+    lin = np.clip(b + 0.5 - LAG - t, 0, 1)
     with np.errstate(divide="ignore"):
-        log = np.clip(0.5 - (7.06 * np.log((s + LAG) / 16) - (b - 16)), 0, 1)
+        log = np.clip(0.5 - (7.06 * np.log((t + LAG) / 16) - (b - 16)), 0, 1)
     out = p @ np.where(b < 16, lin, log)
     if clock is not None:
         hard = max(clock - RESERVE, 0.0)
-        out = np.where((s[0] <= min(hard * SHARE + inc, hard)) & (s[0] <= hard / 10), out, 0.0)
+        out = np.where((t[0] <= min(hard * SHARE + inc, hard)) & (s[0] <= hard / 10), out, 0.0)
     return out
 
 
-def weights(time_logits, clock, inc, rungs):
-    """P(the bot searches each rung) for rungs (ascending), the policy first: the largest rung
-    whose simulations at SIM seconds fit both the drawn think time and a tenth of the clock."""
-    up = reach(time_logits, clock, inc, np.array(rungs) * SIM)  # P(rung >= r)
+def weights(time_logits, clock, inc, seconds):
+    """P(the bot searches each rung) for rungs costing `seconds` (ascending), the policy first: the
+    largest rung that fits both the drawn think time and a tenth of the clock."""
+    up = reach(time_logits, clock, inc, np.asarray(seconds, float))  # P(rung >= r)
     up = np.minimum.accumulate(up)
     return -np.diff(np.r_[1.0, up, 0.0])
 
@@ -108,16 +117,19 @@ def lookahead(d):
 
 
 def extra(d):
-    """Another coverage run's chunks: position -> (legal tokens, prior, {tag: (P or None, Q)}) for
-    every cov_q{tag} (e.g. 1024, 256v2) except the base budgets without a suffix."""
+    """Another run's chunks: position -> (legal tokens, prior, {tag: (P or None, Q)}) for every cov_q{tag}
+    (e.g. 1024, 256v2, 512k: piKL leaves) except the base budgets without a suffix, and every cov_x{tag}
+    (values already on a log-odds scale) as tag + "x", tilted linearly only."""
     out = {}
     for z in cf.chunks(d):
         tags = [k[5:] for k in z if k.startswith("cov_q") and k[5:] not in map(str, COV)]
+        xs = [k[5:] for k in z if k.startswith("cov_x")]
         for n, i in enumerate(z["index"]):
             a, b = z["offsets"][n], z["offsets"][n + 1]
             out[int(i)] = (z["legal"][a:b].astype(int), z["prior"][a:b].astype(float),
                            {t: (z[f"cov_p{t}"][a:b].astype(float) if f"cov_p{t}" in z else None,
-                                z[f"cov_q{t}"][a:b].astype(float)) for t in tags})  # fmt: skip
+                                z[f"cov_q{t}"][a:b].astype(float)) for t in tags}
+                           | {t + "x": (None, z[f"cov_x{t}"][a:b].astype(float)) for t in xs})  # fmt: skip
     return out
 
 
@@ -135,7 +147,7 @@ def offsets(d):
 
 def leaves(tag):
     """Leaf evaluations of a coverage tag: simulations times views (256v2: 512; 256f: 256)."""
-    n, v = re.fullmatch(r"(\d+)(?:v(\d+))?f?", tag).groups()
+    n, v = re.fullmatch(r"(\d+)(?:v(\d+))?(?:ko|[kcit])?x?[fa]?", tag).groups()
     return int(n) * int(v or 1)
 
 
@@ -149,9 +161,14 @@ def rows(d, coverage, la, ex=(), off=None):
         tags = sorted({t for v in e.values() for t in v[2]}, key=leaves)
         for t in tags:
             NAMES.extend([f"coverage {t}"] + [f"coverage {t} b{b:g}" for b in BETAS])
+            if ATANH and not t.endswith("x"):
+                NAMES.extend(f"coverage {t}a b{b:g}" for b in BETAS)
     if off:
         NAMES.extend(f"offset {dl:+d}" for dl in sorted({dl for v in off.values() for dl in v[2]}))
-    tops = list(COV) + sorted({int(t) for e in ex for v in e.values() for t in v[2] if t.isdigit()})
+    tops = TOPS  # top rung -> its ladder up to it
+    for lad in LADDERS:
+        for k in range(1, len(lad) + 1):
+            tops.setdefault(lad[k - 1], lad[:k])
     if THINK:
         NAMES.extend(f"capped {t}" + (f" b{b:g}" if b is not None else "") for t in tops for b in (None, *BETAS))
     col = {n: j for j, n in enumerate(NAMES)}
@@ -168,7 +185,7 @@ def rows(d, coverage, la, ex=(), off=None):
         lp = np.log(np.maximum(raw, 1e-300))
         x = np.full((len(NAMES), 3), np.nan, np.float32)
 
-        rung = {}  # simulations -> {beta or None: (accuracy, blunder, P(human move))}, raw prior
+        rung = {}  # coverage tag -> {beta or None: (accuracy, blunder, P(human move))}
 
         def put(names, P, ce0, r=None, betas=None):
             P = np.atleast_2d(P)
@@ -182,14 +199,16 @@ def rows(d, coverage, la, ex=(), off=None):
         ce0 = -np.log(max(raw[h], 1e-12))
         put(["raw"], raw, ce0)
         for n in COV:
-            put([f"coverage {n}"], dd[f"cov_p{n}"].astype(float), ce0, n, [None])
+            put([f"coverage {n}"], dd[f"cov_p{n}"].astype(float), ce0, str(n), [None])
             put(
                 [f"coverage {n} b{b:g}" for b in BETAS],
                 tilted(lp, dd[f"cov_q{n}"].astype(float)),
-                ce0, n, BETAS,
+                ce0, str(n), BETAS,
             )
             if FILL:
                 put([f"coverage {n}f b{b:g}" for b in BETAS], tilted(lp, filled(dd[f"cov_q{n}"], dd["heads"], raw)), ce0)
+            if ATANH:
+                put([f"coverage {n}a b{b:g}" for b in BETAS], tilted(lp, dd[f"cov_q{n}"].astype(float), True), ce0, f"{n}a", BETAS)
         if i in la:
             legal, prior, qs = la[i]
             order = {t: k for k, t in enumerate(legal)}
@@ -211,25 +230,24 @@ def rows(d, coverage, la, ex=(), off=None):
             prior = prior[perm]
             ce1, lp1 = -np.log(max(prior[h], 1e-12)), np.log(np.maximum(prior, 1e-300))
             for t, (P, q) in runs.items():
-                r = int(t) if t.isdigit() else None
                 if P is not None:
-                    put([f"coverage {t}"], P[perm], ce1, r, [None])
-                put([f"coverage {t} b{b:g}" for b in BETAS], tilted(lp1, q[perm]), ce1, r, BETAS)
+                    put([f"coverage {t}"], P[perm], ce1, t, [None])
+                put([f"coverage {t} b{b:g}" for b in BETAS], tilted(lp1, q[perm]), ce1, t, BETAS)
+                if ATANH and not t.endswith("x"):
+                    put([f"coverage {t}a b{b:g}" for b in BETAS], tilted(lp1, q[perm], True), ce1, f"{t}a", BETAS)
         if THINK:
             tok = int(tokens[starts[i] + 2])
             clock = float(m[7]) if m[7] >= 0 else None
-            rs = sorted(r for r in rung if r in LADDER)  # the bot's coverage rungs
-            w = weights(dd["heads"][:63].astype(float), clock, tok - 10 if 10 <= tok <= 190 else 0, rs)
+            inc = tok - 10 if 10 <= tok <= 190 else 0
             base = np.r_[mm @ raw, raw[h]]
-            for t in tops:
-                if t not in rs:
+            for t, lad in tops.items():
+                if any(r not in rung for r in lad):
                     continue
-                k = rs.index(t) + 1
-                ww = np.r_[w[:k], w[k:].sum()]  # rungs above the top: the top
+                ww = weights(dd["heads"][:63].astype(float), clock, inc, [leaves(r) * SIM for r in lad])
                 for bt in (None, *BETAS):
-                    if any(bt not in rung[r] for r in rs[:k]):
+                    if any(bt not in rung[r] for r in lad):
                         continue
-                    mix = ww[0] * base + sum(wi * rung[r][bt] for wi, r in zip(ww[1:], rs[:k], strict=True))
+                    mix = ww[0] * base + sum(wi * rung[r][bt] for wi, r in zip(ww[1:], lad, strict=True))
                     name = f"capped {t}" + (f" b{bt:g}" if bt is not None else "")
                     x[col[name]] = (mix[0], mix[1], -np.log(max(mix[2], 1e-12)) - ce0)
         if off and i in off:
@@ -311,7 +329,7 @@ def describe(name):
     budget = int(budget) if budget.lstrip("+-").isdigit() else budget
     beta = float(p[2][1:]) if len(p) > 2 else None
     kind_ = "coverage" if kind == "capped" else kind
-    n = int(budget.rstrip("f")) if isinstance(budget, str) and budget.rstrip("f").isdigit() else budget  # 128f: 128's
+    n = int(budget.rstrip("fa")) if isinstance(budget, str) and budget.rstrip("fa").isdigit() else budget  # 128f: 128's
     ms = 0 if kind == "offset" else COST.get((kind_, n), round(COST["coverage", 256] / 256 * leaves(str(budget))) if kind_ == "coverage" else 0)
     return kind, budget, beta, ms
 
@@ -325,6 +343,8 @@ def main():
     p.add_argument("--extra", nargs="*", default=[], help="other coverage runs' chunk dirs (cov_q{tag}, cov_p{tag})")
     p.add_argument("--out", default="cells.json")
     p.add_argument("--search-bullet", action="store_true", help="else bullet plays the policy: a search's seconds exceed its think times")
+    p.add_argument("--ladder", action="append", help="coverage tags by cost, comma-separated (repeatable); default 8,32,128,256,1024")
+    p.add_argument("--atanh", type=float, default=0.0, help="also tilt on arctanh(A Q) (e.g. 0.99): tags 128a, ...")
     p.add_argument("--sim", type=float, default=SIM, help="seconds a coverage simulation, for --think")
     p.add_argument("--think", action="store_true", help="also each beta under the bot's think-time cap (capped T bB)")
     p.add_argument("--fill", action="store_true", help="also coverage Q with unexpanded moves at the expanded mean")
@@ -335,6 +355,11 @@ def main():
     globals()["FILL"] = a.fill
     globals()["THINK"] = a.think
     globals()["SIM"] = a.sim
+    globals()["ATANH"] = a.atanh
+    if a.atanh and not a.ladder:
+        globals()["LADDERS"] = LADDERS + [tuple(t + "a" for t in LADDERS[0])]
+    if a.ladder:
+        globals()["LADDERS"] = [tuple(x.split(",")) for x in a.ladder]
     names()
     d = Path(a.dir)
     la = lookahead(Path(a.lookahead)) if a.lookahead else {}
@@ -390,6 +415,7 @@ def main():
                 "se_ce",
             )
             table[f"{cf.FORMATS[f]}/{b}"] = dict(n=int(sel.sum()), choice=NAMES[c], kind=kind, budget=budget, beta=beta, ms=ms,
+                                                 ladder=list(TOPS[str(budget)]) if kind == "capped" else None,
                                                  stats=dict(zip(cols, map(float, s))), raw=dict(zip(cols, map(float, st[0]))),
                                                  cv=[dict(choice=n, stats=dict(zip(cols, map(float, x)))) for n, x in cv],
                                                  all={n: dict(zip(cols, map(float, st[j]))) for j, n in enumerate(NAMES)

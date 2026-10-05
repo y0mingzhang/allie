@@ -42,6 +42,7 @@ class Engine:
         self.model, self.max_batch, self.max_items = model, max_batch, max_items
         self.server = getattr(model.fast, "server", None)
         self._forwards = self._tokens = self._widest = 0  # widest: most items in one forward
+        self.sim_cost = calibration.COST  # seconds a search simulation took lately (moving average)
         if self.server is None:
             self.requests = queue.SimpleQueue()
             self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
@@ -315,25 +316,29 @@ def strongest(game, play, search, clock):
 
 def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
-    sampled at temperature 1 from the policy, or from the distribution its cell's searcher gives,
-    the search no longer than the think time drawn for the move (the bot keeps a human pace).
-    search: {"coverage": tree.Coverage(), "lookahead": tree.Lookahead(), "kl": tree.KL()}."""
+    sampled at temperature 1 from the policy tilted by coverage search's values. The search stops
+    calibration.MARGIN before the think time drawn for the move (the bot keeps a human pace); a
+    stopped search plays the policy."""
     start = monotonic()
     legal, p, wdl, time = game.position()
     think = game.think(play, clock, time)
-    s, cell = p, calibration.cell(game.elo[len(game.moves) % 2], game.speed)
+    s = p
     # searches cost what calibration.COST assumes only on the fast CPU backend
-    if search and cell and len(legal) > 1 and game.engine.model.fast is not None:
-        kind, rungs, *form = cell
-        left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
+    if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
+        now = monotonic()
+        left = None if clock is None else clock - (now - start)  # less any wait for the engine
+        stop = start + think - calibration.MARGIN if play.think_time else np.inf
         reserve = behaviour.PARAMETERS["guard"]["reserve"]
-        n = calibration.affordable(kind, rungs, left, reserve, think if play.think_time else None)
-        beta = rungs.get(n)
-        deadline = monotonic() + calibration.limit(left, reserve)
-        if n and (found := search[kind](game, n, deadline)) is not None:
-            moves, q = found[0], found[1] if beta is None else calibration.tilt(*found[-2:], beta, form == ["atanh"])
-            s = np.zeros(len(legal))
-            s[[legal.index(m) for m in moves]] = q
+        e = game.engine
+        n = calibration.affordable(left, reserve, stop - now, min(max(calibration.COST, e.sim_cost), 4 * calibration.COST))
+        if n:
+            t = monotonic()
+            found = search(game, n, min(t + calibration.limit(left, reserve), stop))
+            e.sim_cost += 0.3 * ((monotonic() - t) / n - e.sim_cost)
+            if found is not None:
+                beta = calibration.beta(game.elo[len(game.moves) % 2], time)
+                s = np.zeros(len(legal))
+                s[[legal.index(m) for m in found[0]]] = calibration.tilt(*found[-2:], beta)
     i = int(game.rng.choice(len(legal), p=s / s.sum()))
     return game.behave(play, clock, legal[i], s[i], wdl, time, think)
 

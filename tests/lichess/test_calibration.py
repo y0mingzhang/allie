@@ -11,85 +11,71 @@ from allie.lichess.model import Model
 from .test_tokens import random_game
 
 
-def test_cells_bin_the_rating(monkeypatch):
-    low, mid, high = ("coverage", {32: None}), ("coverage", {128: None}), ("lookahead", {8: 4.0})
-    monkeypatch.setattr(calibration, "CELLS", {("blitz", 800): low, ("blitz", 2000): mid, ("blitz", 2600): high})
-    assert calibration.cell(2000, "blitz") == calibration.cell(2199, "blitz") == mid
-    assert calibration.cell(500, "blitz") == low and calibration.cell(3100, "blitz") == high
-    assert calibration.cell(2200, "blitz") is calibration.cell(2000, "bullet") is None
-
-
-def test_cells_are_on_their_ladders():
-    """Every searching cell's rungs are on its searcher's ladder; beta None (the calibrated
-    distribution) only for coverage and not with the log-odds tilt; bullet never searches."""
-    for (speed, b), (kind, rungs, *form) in calibration.CELLS.items():
-        assert rungs and set(rungs) <= set(calibration.LADDER[kind]) and form in ([], ["atanh"])
-        assert all(beta is not None or (kind == "coverage" and not form) for beta in rungs.values())
-        assert speed in ("blitz", "rapid", "classical") and b % 200 == 0 and 800 <= b <= 2600
+def test_beta_grows_with_rating_and_think_time():
+    quick, slow = np.zeros(63), np.zeros(63)
+    quick[2], slow[30] = 1, 1  # 2.5 s; about 2 min
+    b = calibration.beta
+    assert b(1700, quick) < b(1700, slow) and b(1200, slow) < b(1700, slow) < b(2400, slow)
+    t = float(calibration.SECONDS[30])
+    assert b(2700, slow) == pytest.approx(calibration.BETA0 * np.exp(calibration.GAMMA) * (t / 10) ** calibration.DELTA)
 
 
 def test_the_clock_caps_the_budget():
-    """The largest of the cell's rungs that fits a tenth of the clock above the reserve (review: a
-    0.2 s clock must not search); a search may run to a fifth before it stops."""
-    for kind, rungs in (("coverage", (1024, 256, 128, 32, 8)), ("coverage", (128,)), ("lookahead", (8, 2))):
-        for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 154.0, 156.0, 258.0, 260.0, 1000.0):
-            n = calibration.affordable(kind, rungs, clock, reserve=1.0)
-            tenth = calibration.limit(clock, 1.0) / 2
-            assert n in (0, *rungs) and n * calibration.COST[kind] <= tenth
-            assert all(b * calibration.COST[kind] > tenth for b in rungs if b > n)
-    rungs = (1024, 256, 128)
-    assert calibration.affordable("coverage", rungs, 0.2) == 0 and calibration.affordable("coverage", rungs, None) == 1024
-    sim = calibration.COST["coverage"]
-    at = lambda seconds: calibration.affordable("coverage", rungs, 10 * seconds + 1.0)  # a tenth above the reserve
-    assert at(1024 * sim) == 1024 and at(1024 * sim - 0.01) == 256 and at(128 * sim - 0.01) == 0  # then the policy
-    assert calibration.affordable("coverage", rungs, 1e4, think=1024 * sim - 0.01) == 256  # the think time caps it too
-    assert calibration.affordable("coverage", rungs, 1e4, think=128 * sim - 0.01) == 0
+    """The largest rung that fits a tenth of the clock above the reserve (review: a 0.2 s clock must
+    not search) and the think time; a search may run to a fifth before it stops."""
+    rungs, sim = calibration.LADDER, calibration.COST
+    for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 154.0, 156.0, 258.0, 260.0, 1000.0):
+        n = calibration.affordable(clock, reserve=1.0)
+        tenth = calibration.limit(clock, 1.0) / 2
+        assert n in (0, *rungs) and n * sim <= tenth and all(b * sim > tenth for b in rungs if b > n)
+    assert calibration.affordable(0.2) == 0 and calibration.affordable(None) == max(rungs)
+    at = lambda seconds: calibration.affordable(10 * seconds + 1.0)  # a tenth above the reserve
+    top, below = rungs[-1], rungs[-2]
+    assert at(top * sim) == top and at(top * sim - 0.01) == below and at(8 * sim - 0.001) == 0  # then the policy
+    assert calibration.affordable(1e4, think=top * sim - 0.01) == below  # the think time caps it too
+    assert calibration.affordable(1e4, think=8 * sim - 0.001) == 0
     assert calibration.limit(51.0, 1.0) == 10.0
 
 
 def test_tilt():
-    prior, q = np.array([0.5, 0.3, 0.2]), np.array([-1.0, 0.0, 1.0])
-    assert calibration.tilt(prior, q, 0.0) == pytest.approx(prior)
-    p = calibration.tilt(prior, q, 2.0)
-    assert p.sum() == pytest.approx(1) and p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4))
-    p = calibration.tilt(prior, np.array([-0.5, 0.0, 0.5]), 2.0, atanh=True)  # log-odds of 0.99 Q
-    assert p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.495)))
-    assert np.isfinite(calibration.tilt(prior, q, 2.0, atanh=True)).all()  # Q = +-1 stays finite
-    p = calibration.tilt(prior, np.array([-1.5, 0.0, 1.5]), 2.0, atanh=True)  # clipped to +-1
+    prior = np.array([0.5, 0.3, 0.2])
+    assert calibration.tilt(prior, np.array([-1.0, 0.0, 1.0]), 0.0) == pytest.approx(prior)
+    p = calibration.tilt(prior, np.array([-0.5, 0.0, 0.5]), 2.0)  # log-odds of 0.99 Q
+    assert p.sum() == pytest.approx(1) and p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.495)))
+    assert np.isfinite(calibration.tilt(prior, np.array([-1.0, 0.0, 1.0]), 2.0)).all()  # Q = +-1 stays finite
+    p = calibration.tilt(prior, np.array([-1.5, 0.0, 1.5]), 2.0)  # clipped to +-1
     assert p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.99)))
-    p = calibration.tilt(np.array([0.9, 0.1]), np.array([0.9, 1.0]), 4.0)  # where the tilts disagree
-    assert p.argmax() == 0 and calibration.tilt(np.array([0.9, 0.1]), np.array([0.9, 1.0]), 4.0, atanh=True).argmax() == 1
+    p = calibration.tilt(np.array([0.9, 0.1]), np.array([0.9, 1.0]), 4.0)  # the log-odds tilt prefers the clearer win
+    assert p.argmax() == 1
 
 
 class Search:
-    """Records budgets and deadlines; gives the legal moves in reverse board order, coverage's
-    calibrated distribution with the board's first move certain, and a flat prior with the board's
-    last move valued 1 and the others -1."""
+    """Records budgets and deadlines; gives the legal moves in reverse board order (the mode maps
+    them by name), a calibrated distribution it must not use, a flat prior, and the board's last move
+    valued 1, the others -1."""
 
-    def __init__(self, kind):
-        self.kind, self.budgets, self.deadlines, self.late = kind, [], [], False
+    def __init__(self):
+        self.budgets, self.deadlines, self.late, self.seconds = [], [], False, 0.0
 
     def __call__(self, game, n, deadline=np.inf):
         self.budgets.append(n)
         self.deadlines.append(deadline)
+        time.sleep(self.seconds)
         if self.late:
             return None
-        moves = [m.uci() for m in game.board.legal_moves][::-1]  # not the board's order: mapped by name
-        last, prior = np.arange(len(moves)) == 0, np.full(len(moves), 1 / len(moves))
-        if self.kind == "coverage":
-            return moves, (np.arange(len(moves)) == len(moves) - 1).astype(float), prior, np.where(last, 1.0, -1.0)
-        return moves, prior, np.where(last, 1.0, -1.0)
+        moves = [m.uci() for m in game.board.legal_moves][::-1]
+        first = np.arange(len(moves)) == len(moves) - 1  # the board's first move
+        return moves, first.astype(float), np.full(len(moves), 1 / len(moves)), np.where(np.arange(len(moves)) == 0, 1.0, -1.0)
 
 
 def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     legal_of = lambda g: [m.uci() for m in g.board.legal_moves]
     play = Play(mode="calibrated", think_time=False, resign=False, draws=False)
-    search = dict(coverage=Search("coverage"), lookahead=Search("lookahead"))
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: None})})
+    search = Search()
     game = Game(Engine(tiny), 2000, 2000, 600, 5, "rapid", seed=0)  # FP32: the reference backend
     game.update(random_game(3, 20), 590, 585)
     assert game.decide(play, search, 590).move in legal_of(game)
-    assert search["coverage"].budgets == []  # no search off the fast backend
+    assert search.budgets == []  # no search off the fast backend
     from allie.lichess import fast
 
     try:
@@ -97,41 +83,29 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"no fast kernels: {e}")
     engine = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2))
-    game = Game(engine, 2000, 2000, 600, 5, "rapid", seed=0)
+    game = Game(engine, 2000, 1500, 600, 5, "rapid", seed=0)
     game.update(random_game(3, 20), 590, 585)
+    assert len(game.moves) == 20  # white to move
     assert game.decide(play, None, 590).move in legal_of(game)  # no searcher: the policy
-    assert game.decide(play, search, 590).move == legal_of(game)[0]  # coverage's calibrated distribution
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 40.0, 32: None})})
-    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # coverage's values: prior exp(40 Q)
-    assert game.decide(play, search, 30).move == legal_of(game)[0]  # 30 s left: rung 32, with its own beta
-    assert search["coverage"].budgets == [256, 256, 32]
-    tilts, tilt = [], calibration.tilt
-    monkeypatch.setattr(calibration, "tilt", lambda *a: tilts.append(a[3:]) or tilt(*a))
-    game.decide(play, search, 590)  # the Q tilt
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 4.0}, "atanh")})
-    game.decide(play, search, 590)  # the log-odds tilt
-    assert tilts == [(False,), (True,)] and search["coverage"].budgets.pop() == 256
-    search["coverage"].budgets.pop()
-    monkeypatch.setattr(calibration, "tilt", tilt)
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("lookahead", {8: 40.0})})
-    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # prior exp(40 Q)
-    assert search["lookahead"].budgets == [8]
-    monkeypatch.setattr(calibration, "CELLS", {})
-    game.decide(play, search, 590)
-    assert search["coverage"].budgets == [256, 256, 32] and search["lookahead"].budgets == [8]  # no cell: no search
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: None})})
+    betas, beta = [], calibration.beta
+    monkeypatch.setattr(calibration, "beta", lambda r, t: betas.append(r) or 40.0)
+    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # the values' tilt, not the calibrated distribution
+    assert search.budgets == [calibration.LADDER[-1]] and betas == [2000]  # the clock allows the top rung; white's rating
+    reserve, rungs = behaviour.PARAMETERS["guard"]["reserve"], calibration.LADDER
+    clock = 10 * rungs[-2] * calibration.COST + (reserve + 1) / 2  # a tenth above the reserve just misses rungs[-2]
+    assert game.decide(play, search, clock).move == legal_of(game)[-1]
+    assert search.budgets[-1] == calibration.affordable(clock, reserve) == rungs[-3]
+    monkeypatch.setattr(calibration, "beta", beta)
     t = time.monotonic()
-    reserve = behaviour.PARAMETERS["guard"]["reserve"]
-    search["coverage"].late = True  # past its deadline: the move comes from the policy
+    search.late = True  # past its deadline: the move comes from the policy
     d = game.decide(play, search, 590)
-    assert search["coverage"].budgets == [256, 256, 32, 256]
-    assert search["coverage"].deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
+    assert search.deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
     legal, p, _, _ = game.position()
     assert d.probability == pytest.approx(p[legal.index(d.move)])
 
 
 def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
-    """The think time is drawn before the search and caps its rung (with that rung's beta); the
+    """The think time is drawn before the search, caps its rung and stops it MARGIN before; the
     Decision waits that same think time."""
     from allie.lichess import fast
 
@@ -139,22 +113,29 @@ def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
         fast.library()
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"no fast kernels: {e}")
-    legal_of = lambda g: [m.uci() for m in g.board.legal_moves]
     play = Play(mode="calibrated", think_time=True, resign=False, draws=False)
-    search = dict(coverage=Search("coverage"), lookahead=Search("lookahead"))
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 40.0, 32: None})})
+    search = Search()
     game = Game(Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0)
     game.update(random_game(3, 20), 590, 585)
-    sim = calibration.COST["coverage"]
-    for think, rung, move in ((256 * sim, 256, -1), (256 * sim - 0.01, 32, 0), (32 * sim - 0.01, None, None)):
+    sim, margin = calibration.COST, calibration.MARGIN
+    for think, rung in ((256 * sim + margin + 0.05, 256), (256 * sim + margin - 0.01, 128), (8 * sim + margin - 0.001, None)):
         draws = iter([think, 1e3])  # a second draw would wait 1,000 s
         monkeypatch.setattr(game, "think", lambda play, clock, time, d=draws: next(d))
-        d = game.decide(play, search, 590)
-        assert d.think == think  # drawn once, before the search
-        if rung is None:
-            assert search["coverage"].budgets == [256, 32]  # no rung fits: the policy
-        else:
-            assert search["coverage"].budgets[-1] == rung and d.move == legal_of(game)[move]
+        n, t = len(search.budgets), time.monotonic()
+        assert game.decide(play, search, 590).think == think  # drawn once, before the search
+        assert search.budgets[n:] == ([] if rung is None else [rung])  # no rung fits: the policy
+        if rung:  # it stops MARGIN before the think time from the decision's start
+            assert t <= search.deadlines[-1] - (think - margin) <= time.monotonic()
+    game.engine.sim_cost = 2 * sim  # recent searches measured twice COST (a busy machine)
+    monkeypatch.setattr(game, "think", lambda play, clock, time: 256 * sim + margin + 0.05)
+    search.seconds = 64 * sim  # a quarter of COST a simulation
+    game.decide(play, search, 590)
+    assert search.budgets[-1] == 128 and game.engine.sim_cost == pytest.approx(0.7 * 2 * sim + 0.3 * sim / 2, rel=0.1)
+    game.engine.sim_cost = 1e3  # a stalled search: the price stays at 4 COST, small rungs still search
+    monkeypatch.setattr(game, "think", lambda play, clock, time: 32 * 4 * sim + margin + 0.05)
+    search.seconds = 0.0
+    game.decide(play, search, 590)
+    assert search.budgets[-1] == 32
 
 
 def test_close_serves_queued_requests(tiny):
@@ -176,8 +157,3 @@ def test_close_serves_queued_requests(tiny):
         t.join(5)
     assert got == [42] and not engine.thread.is_alive()
 
-
-def test_kl_cells_tilt():
-    """A kl rung's searcher returns (moves, prior, Q): it needs a beta (None would play the prior)."""
-    for searcher, rungs, *_ in calibration.CELLS.values():
-        assert searcher != "kl" or all(b is not None for b in rungs.values())

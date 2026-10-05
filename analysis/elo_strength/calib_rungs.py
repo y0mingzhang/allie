@@ -42,7 +42,8 @@ def main():
                 cands.update(t[k]["all"])
                 pick = t[k] if t[k]["kind"] != "raw" else pick
         if pick["kind"] == "capped":
-            out[k] = {r: pick["beta"] for r in LADDER if r <= pick["budget"]}
+            lad = pick.get("ladder") or [str(r) for r in LADDER if r <= pick["budget"]]
+            out[k] = {int(t) if t.isdigit() else t: pick["beta"] for t in lad}
             print(f"{k:15s} {pick['choice']}: rungs up to {pick['budget']} at beta {pick['beta']}")
             continue
         if pick["kind"] != "coverage" or not isinstance(pick["budget"], int):
