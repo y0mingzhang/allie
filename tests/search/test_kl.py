@@ -151,3 +151,17 @@ def test_views():
         e = slice(F.start[r], F.start[r] + F.count[r])
         for k, x in enumerate((b, v)):
             assert np.allclose(d["root_probs_v"][e, k], kl.softmax(x.logits(b.paths[r])[F.etok[e]]))
+
+
+def test_prior():
+    """A view under another header searches; the roots keep the game's own policy."""
+    b, v = Bridge(PREFIXES), View(PREFIXES)
+    F = kl.Forest(v, [from_prefix(np.array(p)) for p in PREFIXES], [len(p) for p in PREFIXES], 4096, prior=b.root_logits)
+    kl.grow(F, 20, own=4)
+    for r in range(F.n):
+        e = slice(F.start[r], F.start[r] + F.count[r])
+        assert np.allclose(F.ep[e], kl.softmax(b.root_logits[r][F.etok[e]]))
+    assert np.allclose(F.heads, b.root_logits[:, 2350:2416])
+    i = F.n + 1
+    e = slice(F.start[i], F.start[i] + F.count[i])
+    assert np.allclose(F.ep[e], kl.softmax(v.logits(v.paths[i])[F.etok[e]]))

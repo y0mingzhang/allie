@@ -31,11 +31,13 @@ class Forest:
     moves sit at edges start[i]..start[i] + count[i] by falling prior; below the roots the first done[i] are expanded.
     cost[i]: network evaluations of its root's tree up to node i, so cost <= b is the tree of budget b."""
 
-    def __init__(self, bridge, positions, lengths, cap, values=None, policy=(0, 0)):
+    def __init__(self, bridge, positions, lengths, cap, values=None, policy=(0, 0), prior=None):
         """bridge: one bridge, or views of the same roots that each evaluate every node (e.g. other header
         ratings): the W/D/L is the mean of the views in `values` (default all), the policy the root's first
-        view's and below it view policy[0] at the mover's nodes, policy[1] at the opponent's."""
+        view's and below it view policy[0] at the mover's nodes, policy[1] at the opponent's. prior: the
+        roots' logits under the game's own header, its policy and heads the roots' when no view reads it."""
         n = len(positions)
+        self.prior_logits = None if prior is None else np.asarray(prior, float)
         self.bridges = bridge if isinstance(bridge, list) else [bridge]
         self.values = list(range(len(self.bridges))) if values is None else values
         self.policy = policy
@@ -62,7 +64,7 @@ class Forest:
         )
         self.edges = 0
         z = [np.asarray(b.root_logits, float) for b in self.bridges]
-        self.heads = z[0][:, 2350:2416]
+        self.heads = (z[0] if prior is None else self.prior_logits)[:, 2350:2416]
         self._set(np.arange(n), z)
         self.rootw = np.concatenate([root_weights(self.ep[self.start[r] : self.start[r] + self.count[r]]) for r in range(n)])
         root = [self.etok[self.start[r] : self.start[r] + self.count[r]] for r in range(n)]
@@ -76,7 +78,8 @@ class Forest:
             self.etok, self.ep = np.resize(self.etok, grow), np.resize(self.ep, grow)
             self.ekid = np.resize(self.ekid, grow)
         for k, (i, m) in enumerate(zip(ids, legal)):
-            p = softmax(z[0 if i < self.n else self.policy[self.depth[i] % 2]][k][m])
+            pz = self.prior_logits if i < self.n and self.prior_logits is not None else z[0 if i < self.n else self.policy[self.depth[i] % 2]]
+            p = softmax(pz[k][m])
             o = np.argsort(-p, kind="stable")
             e = slice(self.edges, self.edges + len(m))
             self.etok[e], self.ep[e], self.ekid[e] = m[o], p[o], -1
@@ -136,7 +139,7 @@ class Forest:
                     leaves=self.spent.copy(), heads=self.heads.astype(np.float32),
                     root_moves=np.concatenate([self.etok[self.start[r]:self.start[r] + self.count[r]] for r in roots]).astype(np.int16),
                     root_probs=np.concatenate([self.ep[self.start[r]:self.start[r] + self.count[r]] for r in roots]).astype(np.float32),
-                    root_len=self.count[:self.n].copy()) | ({} if len(self.bridges) == 1 else dict(wdlv=self.wdlv[s].astype(np.float32), root_probs_v=self.rootpv.astype(np.float32)))  # fmt: skip
+                    root_len=self.count[:self.n].copy()) | ({} if len(self.bridges) == 1 else dict(wdlv=self.wdlv[s].astype(np.float32))) | ({} if len(self.bridges) == 1 and self.prior_logits is None else dict(root_probs_v=self.rootpv.astype(np.float32)))  # fmt: skip
 
 
 def backup(F, keep=None, own=0.0, opp=0.0, soft=False, kappa=0.0):
@@ -185,12 +188,13 @@ def root_weights(p):
     return w / max(w.sum(), 1e-300)
 
 
-def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0):
+def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0, full=False):
     """Best-first by reach until each root has `budget` network evaluations (or nothing to expand): each
     call takes per root its max(k, g * evaluations so far) unexpanded moves of largest reach, below the
     root at most `width` of them from one node. root > 0: the root's move weights are the mean of
     sqrt(p (1 - p)) and sqrt(pi (1 - pi)), pi ~ p exp(root Q) the output tilt (unexpanded moves at the
-    root's value), each normalized: the search follows where the tilted output is uncertain."""
+    root's value), each normalized: the search follows where the tilted output is uncertain. full: every
+    root move is evaluated before any deeper node."""
     n, E = F.n, len(F.rootw)
     top = np.repeat(np.arange(n), F.count[:n])
     cov = F.rootw.copy()
@@ -219,7 +223,7 @@ def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width
         score = reach[i] * rest[i] * F.ep[e]
         free = np.flatnonzero((F.ekid[:E] < 0) & (need[top] > 0) & (F.length[top] < CONTEXT))
         i, j = np.r_[top[free], i], np.r_[free - F.start[top[free]], j]
-        score = np.r_[F.rootw[free], score]
+        score = np.r_[F.rootw[free] + full, score]
         r = F.owner[i]
         o = np.lexsort((j, -score, r))
         r, i, j = r[o], i[o], j[o]

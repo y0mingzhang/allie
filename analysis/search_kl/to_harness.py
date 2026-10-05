@@ -17,6 +17,16 @@ from score_kl import parse  # noqa: E402
 from evaluate import soft_backup  # noqa: E402
 
 
+def restrict(res, sel):
+    """Harness chunk arrays for the roots in `sel` only."""
+    off = res["offsets"]
+    moves = np.repeat(sel, np.diff(off))
+    out = {k: (v[sel] if k in ("index", "heads") or k.startswith("leaves") else v[moves] if k in ("legal", "prior", "prior_v") or k.startswith("q") else v)
+           for k, v in res.items()}  # fmt: skip
+    out["offsets"] = np.r_[0, np.cumsum(np.diff(off)[sel])]
+    return out
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("run")
@@ -28,6 +38,7 @@ def main():
         help="the views whose W/D/L the backup reads (default the run's)",
     )
     p.add_argument("--budgets", default="8,16,32,64,128,256,512,1024,2048,4096")
+    p.add_argument("--subset", default="", help="keep only these positions (an index .npy)")
     a = p.parse_args()
     budgets = [int(b) for b in a.budgets.split(",")]
     run, out = Path(a.run), Path(a.out)
@@ -52,6 +63,8 @@ def main():
         kid[[slot[int(o), int(t)] for o, t in zip(r, z["token"][d1])]] = d1
         res = dict(index=z["index"], budgets=np.array(budgets), legal=z["root_moves"], prior=z["root_probs"],
                    heads=z["heads"], offsets=off)  # fmt: skip
+        if "root_probs_v" in z:  # the roots' policy under each view
+            res["prior_v"] = z["root_probs_v"]
         assert (roots == np.flatnonzero(z["parent"] < 0)).all()
         for b in budgets:
             keep = z["cost" if "cost" in z else "tag"] <= b
@@ -64,6 +77,10 @@ def main():
                 z["owner"][keep & ~z["terminal"] & (z["parent"] >= 0)], minlength=n
             )
             res[f"leaves{b}"] = (views * leaves).astype(np.int32)
+        if a.subset:
+            res = restrict(res, np.isin(res["index"], np.load(a.subset)))
+            if not len(res["index"]):
+                continue
         np.savez(out / f.name, **res)
     print(f"{out}: {len(list(out.glob('*.npz')))} chunks", flush=True)
 

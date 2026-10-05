@@ -288,13 +288,16 @@ class Lookahead:
 
 class KL:
     """search(game, leaves, deadline) -> (legal moves, their prior, their searched values for the mover),
-    or None if the search runs past deadline (time.monotonic()): allie.search.kl on the game's cache, the
-    mover's own nodes tilted by `own`, the opponent's by `opp` (0: the human reply model), grown best-first
-    to `leaves` network evaluations; moves left unexpanded at the root take the root's own value. On the
-    fast backend it runs on the game's thread, as Coverage does."""
+    or None if the search runs past deadline (time.monotonic()): allie.search.kl on the game's cache, grown
+    best-first by reach to `leaves` network evaluations with each side's policy tilted by its values (`own`
+    the mover's beta, `opp` the opponent's, sharpened by subtree size as (1 + (n - 1) / 16)^kappa; soft: the
+    regularized objective as value) and read by the same backup; moves left unexpanded at the root take the
+    root's own value. The tree's clocks do not advance (clock_rule "zero"). On the fast backend it runs on
+    the game's thread, as Coverage does."""
 
-    def __init__(self, own=4.0, opp=0.0, clock_rule="zero"):
-        self.own, self.opp, self.clock_rule = own, opp, clock_rule
+    def __init__(self, own=5.0, opp=5.0, soft=True, kappa=0.5, clock_rule="zero"):
+        self.tilt = dict(own=own, opp=opp, soft=soft, kappa=kappa)
+        self.clock_rule = clock_rule
         load()
 
     def __call__(self, game, leaves, deadline=np.inf):
@@ -307,8 +310,8 @@ class KL:
             tree.concurrent, tree.deadline = concurrent, deadline
             bridge = tree.handles([game.tokens], [feats], self.clock_rule)
             F = kl.Forest(bridge, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], tree.capacity)
-            kl.grow(F, leaves, self.own, self.opp)
-            moves, prior, q = kl.root_q(F, kl.backup(F.view(), own=self.own, opp=self.opp)[0], 0)
+            kl.grow(F, leaves, **self.tilt)
+            moves, prior, q = kl.root_q(F, kl.backup(F.view(), **self.tilt)[0], 0)
             return moves, prior, np.where(np.isnan(q), F.value[0], q)
 
         try:

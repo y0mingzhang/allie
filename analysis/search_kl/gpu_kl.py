@@ -35,6 +35,8 @@ def main():
     p.add_argument("--soft", action="store_true")
     p.add_argument("--kappa", type=float, default=0.0)
     p.add_argument("--root", type=float, default=0.0, help="kl.grow root: the output tilt beta that steers root weights")
+    p.add_argument("--full", action="store_true", help="kl.grow full: every root move first")
+    p.add_argument("--prior", default="", help="a view (e.g. 0) read at the roots only, for their policy and heads")
     p.add_argument("--k", type=int, default=8)
     p.add_argument("--g", type=float, default=0.125)
     p.add_argument("--width", type=int, default=4)
@@ -77,6 +79,7 @@ def main():
             fts = [feats[off[i] : off[i + 1]].astype(np.float32) for i in rows]
             oracle.reset()
             bridges = view_bridges(oracle, prefixes, fts, views)
+            prior = view_bridges(oracle, prefixes, fts, [a.prior])[0].root_logits if a.prior else None
             F = kl.Forest(
                 bridges,
                 [from_prefix(q) for q in prefixes],
@@ -84,8 +87,9 @@ def main():
                 oracle.capacity,
                 values,
                 policy,
+                prior=prior,
             )
-            kl.grow(F, a.budget, a.own, a.opp, a.soft, a.kappa, a.k, a.g, a.width, a.root)
+            kl.grow(F, a.budget, a.own, a.opp, a.soft, a.kappa, a.k, a.g, a.width, a.root, a.full)
             parts.append(F.dump())
         n0 = np.cumsum([0] + [len(d["parent"]) for d in parts])
         r0 = np.cumsum([0] + [len(d["calls"]) for d in parts])

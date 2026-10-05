@@ -57,6 +57,9 @@ def main():
     p.add_argument("--budgets", default="256,1024")
     p.add_argument("--kappas", default="0,0.25,0.5,1")
     p.add_argument("--fill", default="root", choices=["root", "mean"])
+    p.add_argument("--contrast", default="", help="gammas for the rating-contrast term (runs with per-view root policies)")
+    p.add_argument("--contrast-view", type=int, default=1)
+    p.add_argument("--only", default="", help="variants to score (default all)")
     a = p.parse_args()
     z, budgets = load(a.run)
     D = c.Data()
@@ -72,6 +75,10 @@ def main():
         perm[a0:b0] = [slot[int(t)] for t in z["legal"][a0:b0]]
     S.prior = np.empty(len(S.legal))
     S.prior[perm] = z["prior"]
+    pv = None
+    if "prior_v" in z and a.contrast:
+        pv = np.empty(len(S.legal))
+        pv[perm] = z["prior_v"][:, a.contrast_view]
     w = z["heads"][:, 63:66].astype(float)
     w = np.exp(w - w.max(1, keepdims=True))
     v0 = (w[:, 0] - w[:, 2]) / w.sum(1)
@@ -106,6 +113,11 @@ def main():
                                                                        for k, x in enumerate(sk)))]  # fmt: skip
             variants.append(("rkl", lambda lb: reverse(C, C.prior, qc, np.exp(-lb))))
             variants.append(("half", lambda lb: 0.5 * C.prior + 0.5 * tilt(C, lp, qc, np.exp(lb))))
+            if pv is not None:  # rating contrast: pi ~ p exp(beta Q + gamma (log p_view - log p))
+                adv = np.log(np.maximum(pv[C.flat], 1e-30)) - lp
+                for gamma in map(float, a.contrast.split(",")):
+                    variants.append((f"con{gamma:g}", lambda lb, g=gamma: tilt(C, lp + g * adv, qc, np.exp(lb))))
+            variants = [v for v in variants if not a.only or v[0] in a.only.split(",")]
             for name, pi in variants:
                 grid = np.linspace(-4, 5, 10)
                 acc = [ev.expect(C, pi(x)).mean(0)[0] - h[0] for x in grid]
