@@ -5,13 +5,15 @@ temperature 1 from the policy; from allie.search coverage's calibrated human-mov
 a fixed number of simulations; or from the policy tilted by the searched values, pi ~ prior
 exp(beta Q), after a fixed number of coverage simulations or lookahead calls.
 
-Chosen for the annealed Allie 2.0 on 220,000 positions of the golden evaluation's July 2026 human
-games (up to 5,000 per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py): per
-cell, among the searches whose human-move cross-entropy is below the policy's at 95% confidence,
-the cheapest whose expected move accuracy and blunder rate (Stockfish scoring every legal move) are
-within 20 Elo of the closest to the humans'; the policy where none qualifies, and in bullet, whose
-think times a search outlasts. The searching cells' errors (Elo, + stronger than the humans:
-accuracy / blunder rate) and cross-entropy gaps are in the comments.
+Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
+positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py): per cell, among
+the searches whose human-move cross-entropy is below the policy's at 95% confidence (standard errors
+clustered by game), the cheapest whose expected move accuracy and blunder rate (Stockfish scoring
+every legal move) are within 20 Elo of the closest to the humans'; the policy where none qualifies,
+and in bullet, whose think times a search outlasts. The searching cells' errors (Elo, + stronger than
+the humans: accuracy / blunder rate) and cross-entropy gaps are in the comments. Classical 2400 and
+2600 search 1,024 simulations (about 25 s alone on 6 CPUs), which a tenth of the clock allows with
+about 260 s left; with less they step down to 256.
 
 A search is sized for a tenth of the clock left above the reserve at COST seconds a simulation or
 call: the budget steps down its searcher's ladder until it fits. A search still running at a fifth
@@ -38,10 +40,10 @@ CELLS = {
     ("classical", 1800): ("coverage", 32, 1.0),  # -22 / -44, -0.0042
     ("classical", 2000): ("coverage", 32, 4.0),  # +10 / +5, -0.0113
     ("classical", 2200): ("coverage", 128, 6.0),  # -49 / +2, -0.0189
-    ("classical", 2400): ("coverage", 256, 8.0),  # -113 / -161, -0.0395
-    ("classical", 2600): ("coverage", 256, 12.0),  # -207 / -313, -0.0395
+    ("classical", 2400): ("coverage", 1024, 8.0),  # -73 / -81, -0.0441
+    ("classical", 2600): ("coverage", 1024, 16.0),  # -131 / -197, -0.0322
 }
-LADDER = dict(coverage=(8, 32, 128, 256), lookahead=(1, 2, 4, 8, 16))
+LADDER = dict(coverage=(8, 32, 128, 256, 1024), lookahead=(1, 2, 4, 8, 16))
 COST = dict(coverage=1 / 40, lookahead=0.35)  # seconds a simulation or call (bench, 4 threads)
 
 
