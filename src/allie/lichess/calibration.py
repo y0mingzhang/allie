@@ -9,8 +9,8 @@ The move's think time is drawn first (behaviour.think) and caps the search with 
 left above the reserve, at COST seconds a simulation or call: the largest of the cell's rungs that
 fits is searched, with its beta, and the policy plays when none fits. So the bot keeps a human pace,
 searching most on the moves a human would think longest about (COST: 15 ms a simulation, about the
-median of 1,024-simulation searches in a 6-CPU load test of 10 games, 14.3-14.6 s). A search still running at a fifth of the clock
-stops, and the policy plays.
+median of 1,024-simulation searches in a 6-CPU load test of 10 games, 14.3-14.6 s). A search still
+running at a fifth of the clock stops, and the policy plays.
 
 Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
 positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py --think), scoring
