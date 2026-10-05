@@ -27,6 +27,8 @@ chat = ["anthropic>=1.0"]
 test = ["pytest>=8"]
 # docs/make_figures.py: Vega-Lite charts rendered to PNG
 figures = ["altair>=5.5", "vl-convert-python>=1.7"]
+# allie.lichess: the Rust engine (rust/allie-fast: int8 forward, KV caches, tree searches); needs cargo
+fast = ["allie-fast"]
 
 [project.scripts]
 allie-train = "allie.cli:train"
@@ -42,8 +44,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/allie"]
 
+[tool.uv.workspace]
+members = ["rust/allie-fast"]
+
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
+allie-fast = { workspace = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

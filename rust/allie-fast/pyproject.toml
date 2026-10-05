@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "allie-fast"
+version = "0.1.0"
+description = "Allie's CPU engine in Rust (allie.lichess's fast backend and tree searches)"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.maturin]
+module-name = "allie_fast"
+features = ["pyo3/extension-module"]
