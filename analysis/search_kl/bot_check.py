@@ -17,7 +17,7 @@ sys.path[:0] = [
     "/home/yimingz3/src/allie-wt-elo/analysis/elo_strength",
     "/home/yimingz3/src/allie-wt-seff/analysis/search_eff",
 ]
-from allie.data.vocab import INCREMENTS_ID  # noqa: E402
+from allie.data.vocab import INCREMENTS_ID, MOVE_ID  # noqa: E402
 from allie.lichess.engine import Engine  # noqa: E402
 from allie.lichess.model import Model  # noqa: E402
 from allie.lichess.tree import KL  # noqa: E402
@@ -72,7 +72,7 @@ def main():
         kids = np.flatnonzero(keep & (F["parent"] == F["roots"][r]))
         gq = {int(F["token"][k]): -V[k] for k in kids}
         gv = F["wdl"][F["roots"][r]]
-        tok = [int(t) for t in moves]
+        tok = [MOVE_ID[m] for m in moves]
         g = np.array([gq.get(t, gv[0] - gv[2]) for t in tok])
         both = np.array([t in gq for t in tok])
         lp = np.log(np.maximum(prior, 1e-300))

@@ -188,13 +188,14 @@ def root_weights(p):
     return w / max(w.sum(), 1e-300)
 
 
-def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0, full=False):
+def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0, full=False, floor=0.0):
     """Best-first by reach until each root has `budget` network evaluations (or nothing to expand): each
     call takes per root its max(k, g * evaluations so far) unexpanded moves of largest reach, below the
     root at most `width` of them from one node. root > 0: the root's move weights are the mean of
     sqrt(p (1 - p)) and sqrt(pi (1 - pi)), pi ~ p exp(root Q) the output tilt (unexpanded moves at the
     root's value), each normalized: the search follows where the tilted output is uncertain. full: every
-    root move is evaluated before any deeper node."""
+    root move is evaluated before any deeper node. floor: below the root, reach follows the tilted policy
+    mixed with the share `floor` of the human policy itself (breadth where the tilt is sure)."""
     n, E = F.n, len(F.rootw)
     top = np.repeat(np.arange(n), F.count[:n])
     cov = F.rootw.copy()
@@ -202,6 +203,7 @@ def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width
         need = np.where(F.count[:n] > 1, budget - F.spent, 0)
         size = F.size
         V, sigma, rest = backup(F.view(), own=own, opp=opp, soft=soft, kappa=kappa)
+        sigma, rest = (1 - floor) * sigma + floor * F.prior[:size], (1 - floor) * rest + floor
         if root:
             kid = F.ekid[:E]
             z = np.log(np.maximum(F.ep[:E], 1e-300)) + root * np.where(kid >= 0, -V[np.maximum(kid, 0)], F.value[top])
