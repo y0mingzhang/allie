@@ -815,67 +815,65 @@ def rating():
 
 
 def calibrated():
-    """The strength of Allie 2.0's move distribution minus the humans' at their rating, in Elo: the mean of move
-    accuracy's and blunder rate's gaps (Stockfish on every legal move) read through the human curves, per time
-    control and 200-point bin, for the policy and for the Lichess bot's calibrated play
-    (analysis/elo_strength/calib_cells.py; its picks are allie.lichess.calibration.CELLS). Calibrated play is
-    cross-checked: settings chosen on half of the games, scored on the other half, both ways averaged."""
-    cells = jload(X / "elo-strength/calib/cells-ann2c-cov-clustered.json")
-    slow = jload(X / "elo-strength/calib/cells-cl24-1024.json")  # 1,024 simulations
-    cells |= {k: slow[k] for k in ("classical/2400", "classical/2600")}
-    gap = lambda s: (s["elo_accuracy"] + s["elo_blunder"]) / 2
-    half = lambda s: np.hypot(s["se_accuracy"], s["se_blunder"]) / 2
-    formats = ("blitz", "rapid", "classical")
-    bins = range(800, 2601, 200)
-    pts, n = [], sum(cells[f"{f}/{b}"]["n"] for f in formats for b in bins)
-    for f in formats:
-        for b in bins:
-            c = cells[f"{f}/{b}"]
-            d = np.mean([gap(h["stats"]) for h in c["cv"]])
-            e = 1.96 * np.hypot(*[half(h["stats"]) for h in c["cv"]]) / 2
-            pts += [{"f": f, "x": b, "s": "Policy", "d": gap(c["raw"])},
-                    {"f": f, "x": b, "s": "Calibrated", "d": d, "lo": d - e, "hi": d + e, "search": c["kind"] != "raw"}]  # fmt: skip
-    sx, sy = (
-        alt.Scale(domain=[700, 2700], nice=False),
-        alt.Scale(domain=[-640, 330], nice=False),
-    )
-    panels = []
-    for i, f in enumerate(formats):
-        b = values([p for p in pts if p["f"] == f])
-        cal = b.transform_filter(alt.datum.s == "Calibrated")
-        x = alt.X("x:Q", scale=sx, title="Rating" if i == 1 else None,
-                  axis=alt.Axis(values=[800, 1400, 2000, 2600], grid=False, format="d"))  # fmt: skip
-        y = alt.Y("d:Q", scale=sy, title="Elo vs humans" if i == 0 else None,
-                  axis=alt.Axis(values=[-600, -400, -200, 0, 200], grid=True, labels=i == 0, labelExpr=signed_axis(0)))  # fmt: skip
-        layers = [
-            values([{"d": 0}]).mark_rule(color=INK, strokeWidth=1.4).encode(y=y),
-            cal.mark_area(color=ALLIE, opacity=0.15).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q"),
-            b.transform_filter(alt.datum.s == "Policy").mark_line(color=NEUTRAL_DARK, strokeWidth=2).encode(x=x, y=y),
-            cal.mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y),
-            cal.transform_filter(alt.datum.search).mark_point(color=ALLIE, filled=True, size=46, opacity=1).encode(x=x, y=y),
-        ]  # fmt: skip
-        if i == 0:
-            lab = values([{"x": 720, "d": 45, "t": "Humans", "c": INK2}, {"x": 1180, "d": -330, "t": "Policy", "c": NEUTRAL_DARK},
-                          {"x": 1700, "d": 150, "t": "Calibrated", "c": ALLIE}])  # fmt: skip
-            layers.append(lab.mark_text(align="left", fontWeight=600).encode(x=x, y=y, text="t:N", color=alt.Color("c:N", scale=None)))  # fmt: skip
-        panels.append(
-            alt.layer(*layers).properties(
-                width=178, height=250, title=panel_title(f.capitalize())
-            )
-        )
-    chart = alt.hconcat(*panels, spacing=18).properties(title=title(
-        "Calibrated play narrows the gap to human strength",
-        "Expected strength of the bot's moves minus that of humans at the same rating and time control, in Elo",
-        f"(move accuracy and blunder rate, scored by Stockfish), on {n:,} positions from July 2026 games.",
-        "Policy: moves sampled straight from the model. Calibrated: chosen on half of the games, scored on the",
-        "other half (band: 95% interval); dots mark where it searches. In bullet it never searches."))  # fmt: skip
+    """Move accuracy and blunder rate (Stockfish on every legal move) against rating, per time control: the humans'
+    own moves (line, 95% band), and the expected values of the move distributions the Lichess bot plays at that
+    rating, sampled straight from the policy or calibrated as shipped (allie.lichess.calibration.CELLS: per
+    position, its search rungs mixed by the think times the bot draws), with 95% intervals clustered by game
+    (analysis/elo_strength/calib_plotdata.py). Calibrated points only where the bot searches."""
+    data = jload(X / "elo-strength/calib/plot-capped.json")
+    formats = ("bullet", "blitz", "rapid", "classical")
+    who = ("Humans", "Allie (raw policy)", "Allie (calibrated)")
+    pts, n = [], 0
+    for key, c in data["cells"].items():
+        f, b = key.split("/")
+        if f not in formats or not 800 <= int(b) <= 2600:
+            continue
+        n += c["n"]
+        search = c["choice"] != "raw"
+        for w, src, dx in ((who[0], "human", 0), (who[1], "raw", -30 if search else 0), (who[2], "calibrated", 30)):  # fmt: skip
+            if src == "calibrated" and not search:
+                continue
+            for metric, scale in (("accuracy", 1), ("blunder", 100)):
+                v, e = c[src][metric] * scale, 1.96 * c[src][metric + "_se"] * scale
+                pts.append({"f": f, "x": int(b) + dx, "s": w, "m": metric, "v": v, "lo": v - e, "hi": v + e})  # fmt: skip
+    color = alt.Color("s:N", title=None, scale=alt.Scale(domain=list(who), range=[INK2, NEUTRAL_DARK, ALLIE]),
+                      legend=alt.Legend(orient="top", direction="horizontal", labelFontSize=15, symbolSize=160,
+                                        symbolStrokeWidth=2.5, columnPadding=28, offset=12))  # fmt: skip
+    shape = alt.Shape("s:N", scale=alt.Scale(domain=list(who), range=["stroke", "circle", "diamond"]), legend=None)  # fmt: skip
+    big = {"labelFontSize": 14, "titleFontSize": 15, "titleFontWeight": 600, "titleColor": INK}  # fmt: skip
+    rows = []
+    for r, (metric, label, dom, log, ticks) in enumerate((
+        ("accuracy", "Move accuracy", [83, 96.6], False, [84, 87, 90, 93, 96]),
+        ("blunder", "Blunder rate", [1, 14], True, [1, 2, 5, 10]),
+    )):  # fmt: skip
+        panels = []
+        for i, f in enumerate(formats):
+            b = values([p for p in pts if p["f"] == f and p["m"] == metric])
+            sy = alt.Scale(domain=dom, type="log" if log else "linear", nice=False)
+            x = alt.X("x:Q", scale=alt.Scale(domain=[650, 2750], nice=False), title="Rating" if r == 1 else None,
+                      axis=alt.Axis(values=[800, 1700, 2600], grid=False, format="d", **big))  # fmt: skip
+            y = alt.Y("v:Q", scale=sy, title=label if i == 0 else None,
+                      axis=alt.Axis(values=ticks, grid=True, labels=i == 0, labelExpr="datum.value + '%'", **big))  # fmt: skip
+            hum = b.transform_filter(alt.datum.s == who[0])
+            dots = b.transform_filter(alt.datum.s != who[0])
+            layers = [
+                hum.mark_area(color=INK2, opacity=0.12, clip=True).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q"),
+                hum.mark_line(strokeWidth=2.5).encode(x=x, y=y, color=color),
+                dots.mark_rule(strokeWidth=1.4, clip=True).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q", color=color),
+                dots.mark_point(filled=True, size=70, opacity=1).encode(x=x, y=y, color=color, shape=shape),
+            ]  # fmt: skip
+            panel = alt.layer(*layers).properties(width=150, height=180)
+            t = alt.TitleParams(f.capitalize(), anchor="middle", fontSize=16, fontWeight=600, color=INK, offset=8)  # fmt: skip
+            panels.append(panel.properties(title=t) if r == 0 else panel)
+        rows.append(alt.hconcat(*panels, spacing=12))
+    chart = alt.vconcat(*rows, spacing=14).properties(title=title("Calibrated play tracks human move quality"))  # fmt: skip
     save(chart, "calibrated")
+    print(f"  {n:,} positions")
     for f in formats:
-        for s in ("Policy", "Calibrated"):
-            d = np.array([p["d"] for p in pts if p["f"] == f and p["s"] == s])
-            print(
-                f"  {f:9s} {s:10s} RMS {np.sqrt((d**2).mean()):4.0f} Elo  mean {signed(d.mean(), 0)}"
-            )
+        sl = data["slopes"][f]
+        print(f"  {f:9s} slope vs humans: accuracy policy {sl['accuracy']['raw']['ratio']:.2f}x, calibrated "
+              f"{sl['accuracy']['calibrated']['ratio']:.2f}x; blunder policy {sl['blunder']['raw']['ratio']:.2f}x, "
+              f"calibrated {sl['blunder']['calibrated']['ratio']:.2f}x")  # fmt: skip
 
 
 def binned(values_):
