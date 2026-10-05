@@ -4,6 +4,9 @@
 //! by the last step submit their next leaves, so concurrent games' work lands in one step. Callers block for
 //! their reply with the GIL released.
 //!
+//! Requests of plain items only (games' moves, a view's prefill) go first, in a step of their own, so a move
+//! waits for the step in flight but never behind other games' leaves (`moves_first`).
+//!
 //! Pointer contract: a request's ids, feats and boards are copied at submission; its caches, slot buffers and
 //! `out` are written in place during the step, so the caller keeps them alive and untouched until its reply
 //! (the blocking call returns), as the Python side does for `Engine.step`.
@@ -12,7 +15,8 @@
 
 use std::collections::VecDeque;
 use std::ops::Range;
-use std::sync::{Arc, Condvar, Mutex};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -40,6 +44,30 @@ unsafe impl Send for Request {}
 impl Request {
     pub fn items(&self) -> usize {
         self.meta.len() / 8
+    }
+
+    /// Plain items only: a game's move or prefill, no search leaves.
+    pub fn plain(&self) -> bool {
+        self.meta.chunks(8).all(|q| q[4] == 0)
+    }
+
+    /// The spans the server slices by fit (the engine checks the rest): items of at least one token at
+    /// consecutive offsets covering the tokens, path items' slots within the paths; in checked arithmetic.
+    pub fn valid(&self) -> bool {
+        let mut off = 0i64;
+        for q in self.meta.chunks(8) {
+            if q.len() < 8 || q[1] < 1 || q[3] != off || q[5] < 0 || q[6] < 0 {
+                return false;
+            }
+            if q[4] > 0 && q[6].checked_add(q[5]).is_none_or(|e| e > self.paths.len() as i64) {
+                return false;
+            }
+            match off.checked_add(q[1]) {
+                Some(x) => off = x,
+                None => return false,
+            }
+        }
+        off == self.ids.len() as i64 && self.caches.len() == 6 * self.items()
     }
 }
 
@@ -79,13 +107,15 @@ struct State {
 
 /// max_items: the most items merged into a step; min_items: a batch this large runs at once; gather: the
 /// window after a step's first request, waited while fewer requests than the last step's have arrived;
-/// chunk > 0: every request runs alone, in steps of at most `chunk` items (the equality gate's batching).
+/// chunk > 0: every request runs alone, in steps of at most `chunk` items (the equality gate's batching);
+/// moves_first: queued plain-only requests run first, in a step of their own.
 #[derive(Clone, Copy)]
 pub struct Policy {
     pub max_items: usize,
     pub min_items: usize,
     pub gather: Duration,
     pub chunk: usize,
+    pub moves_first: bool,
 }
 
 #[derive(Default, Clone)]
@@ -160,9 +190,12 @@ impl Inner {
         *self.policy.lock().unwrap()
     }
 
-    /// Queue a request and block for its reply: the engine's error code (0: the logits are in `out`), or -1
-    /// when the server has stopped.
+    /// Queue a request and block for its reply: the engine's error code (0: the logits are in `out`; 3 for
+    /// spans that do not fit, refused here; 5 when the step panicked), or -1 when the server has stopped.
     pub fn submit(&self, req: Request) -> i32 {
+        if !req.valid() {
+            return 3;
+        }
         let reply = Arc::new(Reply { done: Mutex::new(None), cv: Condvar::new() });
         {
             let mut st = self.state.lock().unwrap();
@@ -188,7 +221,20 @@ impl Inner {
             }
             st = self.cv.wait(st).unwrap();
         }
-        self.engine.lock().unwrap().pool.wake(); // the workers spin while the batch gathers
+        self.engine.lock().unwrap_or_else(PoisonError::into_inner).pool.wake(); // the workers spin while the batch gathers
+        if pol.moves_first && pol.chunk == 0 && st.queue.iter().any(|p| p.req.plain()) {
+            let (mut batch, mut items, mut rest) = (Vec::new(), 0, VecDeque::new());
+            while let Some(p) = st.queue.pop_front() {
+                if p.req.plain() && (batch.is_empty() || items + p.req.items() <= pol.max_items) {
+                    items += p.req.items();
+                    batch.push(p);
+                } else {
+                    rest.push_back(p);
+                }
+            }
+            st.queue = rest;
+            return Some(batch);
+        }
         let mut batch = vec![st.queue.pop_front().unwrap()];
         let mut items = batch[0].req.items();
         if pol.chunk == 0 && items < pol.max_items {
@@ -223,15 +269,20 @@ impl Inner {
         Some(batch)
     }
 
-    /// One step over `parts`, each request's rows copied to its `out`; the engine's error code.
+    /// One step over `parts`, each request's rows copied to its `out`; the engine's error code, 5 if it panicked
+    /// (its callers get the error; the server keeps serving).
     fn step(&self, parts: &[Part], out: &mut Vec<f32>) -> i32 {
+        catch_unwind(AssertUnwindSafe(|| self.run(parts, out))).unwrap_or(5)
+    }
+
+    fn run(&self, parts: &[Part], out: &mut Vec<f32>) -> i32 {
         let v = self.dims[4];
         let (ids, feats, boards, meta, caches, paths) = merge(parts);
         let (t, s) = (ids.len(), meta.len() / 8);
         if out.len() < s * v {
             out.resize(s * v, 0.0);
         }
-        let err = self.engine.lock().unwrap().step(t, s, ids.as_ptr(), feats.as_ptr(), boards.as_ptr(), &meta, &caches, &paths, out.as_mut_ptr());
+        let err = self.engine.lock().unwrap_or_else(PoisonError::into_inner).step(t, s, ids.as_ptr(), feats.as_ptr(), boards.as_ptr(), &meta, &caches, &paths, out.as_mut_ptr());
         if err == 0 {
             let mut row = 0;
             for (r, range) in parts {
@@ -285,12 +336,13 @@ pub struct PyServer {
 impl PyServer {
     /// `Engine`'s arguments, then the gather policy: max_items (the most items in a step), min_items (a batch
     /// this large runs at once), gather (seconds waited after a step's first request for the other requests
-    /// of the last step), chunk (> 0: every request alone, in steps of at most chunk items).
+    /// of the last step), chunk (> 0: every request alone, in steps of at most chunk items), moves_first (plain-only
+    /// requests first, in a step of their own).
     #[new]
-    #[pyo3(signature = (cfg, scale, floor, globals, layers, cpus=None, groups=None, spin=0.002, max_items=128, min_items=48, gather=3e-4, chunk=0))]
-    fn new(cfg: Vec<i64>, scale: f64, floor: f64, globals: Vec<usize>, layers: Vec<usize>, cpus: Option<Vec<i32>>, groups: Option<Vec<i32>>, spin: f64, max_items: usize, min_items: usize, gather: f64, chunk: usize) -> PyResult<Self> {
+    #[pyo3(signature = (cfg, scale, floor, globals, layers, cpus=None, groups=None, spin=0.002, max_items=128, min_items=48, gather=3e-4, chunk=0, moves_first=true))]
+    fn new(cfg: Vec<i64>, scale: f64, floor: f64, globals: Vec<usize>, layers: Vec<usize>, cpus: Option<Vec<i32>>, groups: Option<Vec<i32>>, spin: f64, max_items: usize, min_items: usize, gather: f64, chunk: usize, moves_first: bool) -> PyResult<Self> {
         let engine = Engine::new(&cfg, (scale, floor), &globals, &layers, cpus, groups, spin).map_err(PyValueError::new_err)?;
-        let policy = Policy { max_items: max_items.max(1), min_items, gather: Duration::from_secs_f64(gather.max(0.0)), chunk };
+        let policy = Policy { max_items: max_items.max(1), min_items, gather: Duration::from_secs_f64(gather.max(0.0)), chunk, moves_first };
         let inner = Arc::new(Inner::new(engine, policy));
         let me = inner.clone();
         let thread = std::thread::Builder::new().name("allie-server".into()).spawn(move || me.serve())?;
@@ -303,6 +355,13 @@ impl PyServer {
     fn step(&self, py: Python<'_>, t: usize, s: usize, ids: usize, feats: usize, boards: usize, meta: Vec<i64>, caches: Vec<usize>, paths: Vec<i64>, out: usize) -> i32 {
         if meta.len() < 8 * s || caches.len() < 6 * s {
             return 3;
+        }
+        let (mut meta, mut caches) = (meta, caches);
+        meta.truncate(8 * s);
+        caches.truncate(6 * s);
+        let n = meta.chunks(8).try_fold(0i64, |a, q| a.checked_add(q[1]));
+        if n != Some(t as i64) || t > 1 << 24 {
+            return 3; // the tokens to copy are not the items' spans
         }
         let req = unsafe {
             Request {
@@ -324,13 +383,13 @@ impl PyServer {
     #[pyo3(signature = (on=true))]
     fn profile(&self, py: Python<'_>, on: bool) -> Vec<f64> {
         let inner = self.inner.clone();
-        py.allow_threads(move || inner.engine.lock().unwrap().profile(on).to_vec())
+        py.allow_threads(move || inner.engine.lock().unwrap_or_else(PoisonError::into_inner).profile(on).to_vec())
     }
 
     /// Sleeping workers spin again, ready for a step.
     fn wake(&self, py: Python<'_>) {
         let inner = self.inner.clone();
-        py.allow_threads(move || inner.engine.lock().unwrap().pool.wake())
+        py.allow_threads(move || inner.engine.lock().unwrap_or_else(PoisonError::into_inner).pool.wake())
     }
 
     /// on: no step starts until every pause is lifted; requests queue up and merge.
@@ -419,6 +478,16 @@ impl PyServer {
     fn set_chunk(&self, n: usize) {
         self.inner.policy.lock().unwrap().chunk = n;
     }
+
+    #[getter]
+    fn get_moves_first(&self) -> bool {
+        self.inner.policy().moves_first
+    }
+
+    #[setter]
+    fn set_moves_first(&self, on: bool) {
+        self.inner.policy.lock().unwrap().moves_first = on;
+    }
 }
 
 impl Drop for PyServer {
@@ -465,6 +534,29 @@ mod tests {
         }
         let t = off as usize;
         Request { ids, feats: (0..3 * t).map(|x| x as f32).collect(), boards: (0..68 * t).map(|x| x as u8).collect(), meta, caches, paths, out: std::ptr::null_mut() }
+    }
+
+    #[test]
+    fn plain_requests() {
+        assert!(request(&[(5, 3, false), (2, 1, false)]).plain());
+        assert!(!request(&[(5, 3, false), (9, 1, true)]).plain());
+    }
+
+    #[test]
+    fn invalid_spans() {
+        let ok = request(&[(5, 3, false), (9, 1, true)]);
+        assert!(ok.valid());
+        for (i, v) in [(1, i64::MAX), (1, 0), (3, 7), (5, -1), (6, i64::MAX), (5, 3)] {
+            let mut r = request(&[(5, 3, false), (9, 1, true)]);
+            r.meta[8 + i] = v; // the path item's
+            if i == 1 && v == i64::MAX {
+                r.meta[1] = 1;
+            }
+            assert!(!r.valid(), "meta[{}] = {v}", 8 + i);
+        }
+        let mut r = request(&[(5, 3, false)]);
+        r.ids.pop();
+        assert!(!r.valid());
     }
 
     #[test]

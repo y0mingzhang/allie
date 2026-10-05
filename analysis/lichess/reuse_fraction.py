@@ -82,6 +82,7 @@ def main():
                         st = game.last_search
                 rows[name].append(
                     dict(
+                        first=turn == 0,
                         reused=st["reused"],
                         evaluated=st["evaluated"],
                         kept_pulls=st.get("kept_pulls", st["reused"]),
@@ -110,8 +111,8 @@ def main():
     for name, r in rows.items():
         frac = np.array([x["reused"] for x in r]) / a.budget
         later = (
-            np.array([x["reused"] for x in r[1:]]) / a.budget if len(r) > 1 else frac
-        )  # the first turn of a game is always fresh
+            np.array([x["reused"] for x in r if not x["first"]]) / a.budget
+        )  # a game's first turn is always fresh
         q = lambda v: dict(
             mean=round(float(v.mean()), 3),
             median=round(float(np.median(v)), 3),
@@ -123,6 +124,8 @@ def main():
             reused_fraction=q(frac),
             reused_fraction_after_first=q(later),
             fresh_starts=int((frac == 0).sum()),
+            fresh_after_first=int((later == 0).sum()),
+            turns_after_first=len(later),
             leaves_evaluated=dict(
                 off=a.budget, on=round(float(np.mean([x["evaluated"] for x in r])), 1)
             ),

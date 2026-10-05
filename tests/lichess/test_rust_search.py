@@ -608,6 +608,17 @@ def test_reuse_through_the_searchers(tiny_path):
         and abs(out[1].sum() - 1) < 1e-9
     )
     assert game.trees[("coverage", ("true",))][0] is cov  # the same tree, re-rooted
+    _, moves = grandchild(cov)
+    game.update(game.moves + [tree.MOVES[t - 378] for t in moves], 1680, 1670)
+    game.clocks[-3] = (
+        1600  # a clock learnt late revises a row the tree was searched on: no reuse
+    )
+    search(game, 64)
+    assert (
+        game.last_search["reused"] == 0
+        and game.trees[("coverage", ("true",))][0] is not cov
+    )
+    cov = game.trees[("coverage", ("true",))][0]
     game.update(game.moves[:-1], 1690, 1680)  # a takeback: the prefix no longer matches
     search(game, 64)
     assert (
@@ -630,3 +641,70 @@ def test_reuse_through_the_searchers(tiny_path):
     game = setup(engine, 8, 15)
     plain(game, 32)
     assert "trees" not in game.__dict__ or ("coverage", ("true",)) not in game.trees
+
+
+@pytest.mark.parametrize("moves_first", [True, False])
+def test_moves_go_first(tiny_path, moves_first):
+    """A game's move (a plain-only request) queued behind another game's search leaves runs first, in a step of its
+    own (moves_first, the default); without it the two merge into one step."""
+    import threading
+
+    engine = Engine(rust_model(tiny_path))
+    srv = engine.server
+    srv.moves_first = moves_first
+    searching, mover = setup(engine, 3, 14), setup(engine, 4, 15)
+    z, feats = (
+        searching.sync().double().numpy(),
+        np.array(searching.features(), np.float32),
+    )
+    par = treers.Coverage().parameters
+    first = len(
+        allie_fast.Coverage(
+            list(searching.tokens), z, feats, searching.inc, 32, par["cpuct"]
+        ).select()
+    )
+    mover.sync()
+    mover.update(mover.moves + [next(iter(mover.board.legal_moves)).uci()], 1680, 1680)
+    release = threading.Event()
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
+    time.sleep(0.1)
+    srv.sizes()
+    search = threading.Thread(target=treers.Coverage(), args=(searching, 32))
+    search.start()
+    time.sleep(0.3)
+    move = threading.Thread(target=mover.sync)
+    move.start()
+    time.sleep(0.3)
+    assert srv.stats()["queued"] == 2
+    release.set()
+    for t in (blocker, search, move):
+        t.join()
+    sizes = srv.sizes()
+    assert first > 1 and sizes[:2] == (
+        [1, first] if moves_first else [first + 1, sizes[1]]
+    )
+
+
+def test_native_errors_raise(tiny_path):
+    """A step the engine refuses surfaces as a RuntimeError naming the step's leaves, and the server keeps serving;
+    a request whose spans do not fit is refused before it is queued."""
+    engine = Engine(rust_model(tiny_path))
+    game = setup(engine, 7, 14)
+    z, feats = game.sync().double().numpy(), np.array(game.features(), np.float32)
+    cov = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 32, 2.5)
+    k, v, e, cap, n = treers.ref(game.cache)
+    with pytest.raises(
+        RuntimeError, match=r"a search step of \d+ leaves: tokens, paths or slots"
+    ):
+        cov.run(
+            engine.server, [(k, v, e, cap, cap + 1)]
+        )  # more rows than the cache holds
+    ids = torch.zeros(1, dtype=torch.int64)
+    meta = [0, 2**63 - 1, cap, 0, 0, 0, 0, 0]
+    assert (
+        engine.server.step(1, 1, ids.data_ptr(), 0, 0, meta, [k, v, e, 0, 0, 0], [], 0)
+        == 3
+    )
+    out = treers.Coverage()(game, 8)
+    assert out is not None and engine.server.stats()["queued"] == 0

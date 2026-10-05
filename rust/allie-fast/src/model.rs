@@ -157,8 +157,9 @@ struct Chunk {
 }
 
 /// each token's experts and gates, the tokens grouped by expert, the up chunks
-#[derive(Default)]
 struct Routing {
+    pidx: *mut usize, // idx and gate as raw pointers for the parallel route phase (set by size())
+    pgate: *mut f32,
     idx: Vec<usize>,
     cnt: Vec<usize>,
     start: Vec<usize>,
@@ -172,7 +173,15 @@ struct Routing {
     active: Vec<usize>,
 }
 
+impl Default for Routing {
+    fn default() -> Self {
+        Routing { pidx: std::ptr::null_mut(), pgate: std::ptr::null_mut(), idx: Vec::new(), cnt: Vec::new(), start: Vec::new(), at: Vec::new(), stok: Vec::new(), gate: Vec::new(), sgate: Vec::new(), ptok: Vec::new(), segs: Vec::new(), upch: Vec::new(), active: Vec::new() }
+    }
+}
+
 impl Routing {
+    /// Sized by one thread before the step; the threads of the route phase then write disjoint tokens' entries
+    /// of idx and gate through pidx / pgate (no &mut to the shared Routing on several threads at once).
     fn size(&mut self, t: usize, keep: usize, e: usize) {
         let n = t * keep;
         if self.idx.len() < n {
@@ -185,6 +194,8 @@ impl Routing {
         self.cnt.resize(e, 0);
         self.start.resize(e, 0);
         self.at.resize(e, 0);
+        self.pidx = self.idx.as_mut_ptr();
+        self.pgate = self.gate.as_mut_ptr();
     }
 }
 
@@ -684,19 +695,28 @@ impl Engine {
             }
         }
         let (mut off, ctx) = (0i64, self.ctx as i64);
+        const MAX_SLOTS: i64 = 1 << 22; // a slot buffer's capacity (trees hold a few thousand); caches hold <= ctx
         for q in meta[..8 * s].chunks(8) {
             let (n0, len, cap, scap, plen, poff, dest) = (q[0], q[1], q[2], q[4], q[5], q[6], q[7]);
-            if len < 1 || n0 < 0 || q[3] != off {
+            if len < 1 || n0 < 0 || cap < 0 || cap > ctx || q[3] != off || scap < 0 || scap > MAX_SLOTS {
                 return 3;
             }
+            let Some(end) = n0.checked_add(len) else { return 3 };
             if scap == 0 {
-                if n0 + len > cap.min(ctx) {
+                if end > cap {
                     return 3;
                 }
-            } else if len != 1 || n0 > cap || plen < 0 || n0 + plen + 1 > ctx || poff < 0 || poff + plen > paths.len() as i64 || !(0..scap).contains(&dest) || paths[poff as usize..(poff + plen) as usize].iter().any(|r| !(0..scap).contains(r)) {
-                return 3;
+            } else {
+                if len != 1 || n0 > cap || plen < 0 || poff < 0 {
+                    return 3;
+                }
+                let (Some(pend), Some(pos)) = (poff.checked_add(plen), n0.checked_add(plen)) else { return 3 };
+                if pos >= ctx || pend > paths.len() as i64 || !(0..scap).contains(&dest) || paths[poff as usize..pend as usize].iter().any(|r| !(0..scap).contains(r)) {
+                    return 3;
+                }
             }
-            off += len;
+            let Some(next) = off.checked_add(len) else { return 3 };
+            off = next;
         }
         if s > 0 && off != t as i64 || s == 0 && t != 0 {
             return 3;
@@ -1228,7 +1248,7 @@ impl Engine {
     }
 
     /// top-k of one token and its gates. Exact ties in the biased scores go to the lower expert id
-    unsafe fn route(&self, ly: &Layer, k: usize, r: &mut Routing) {
+    unsafe fn route(&self, ly: &Layer, k: usize, r: &Routing) {
         let (e, topk, keep) = (self.e, self.topk, self.keep);
         let s = self.rs.p.add(k * e) as *const f32;
         let mut best = [0f32; 64];
@@ -1259,8 +1279,8 @@ impl Engine {
         }
         let f = (topk as f64).sqrt() as f32 / if sum < self.floor { self.floor } else { sum };
         for j in 0..keep {
-            r.idx[k * keep + j] = bi[j];
-            r.gate[k * keep + j] = rb(*s.add(bi[j]) * f);
+            *r.pidx.add(k * keep + j) = bi[j];
+            *r.pgate.add(k * keep + j) = rb(*s.add(bi[j]) * f);
         }
     }
 
@@ -1338,7 +1358,7 @@ impl Engine {
             let (k0, kstep) = if solo { (0, 1) } else { (t, nt) };
             let mut k = k0;
             while k < tt {
-                self.route(ly, k, &mut *rp);
+                self.route(ly, k, &*rp);
                 k += kstep;
             }
             if !solo {

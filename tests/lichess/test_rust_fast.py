@@ -399,3 +399,35 @@ def test_rust_rejects_aliasing_items(tiny_path):
     # of one tree with distinct slots and shared paths
     z = step(m, [(c, *one), Leaf(c, *one, t, (1,), 2), Leaf(c, *one, t, (1,), 3), Leaf(c, *one, t, (), 4)])
     assert z.shape == (4, 2432) and c.n == 5
+
+
+def test_rust_rejects_overflowing_spans(tiny_path):
+    """Spans near i64's end are refused by the engine, not computed."""
+    m = Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2)
+    ids, feats, boards = inputs(random_game(6, 6))
+    c = Cache(m)
+    e = m.fast.native()
+    out = torch.empty(1, 2432)
+    ptrs = [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr(), 0, 0, 0]
+    for meta in ([2**63 - 1, 1, c.capacity, 0, 0, 0, 0, 0], [0, 2**63 - 1, c.capacity, 0, 0, 0, 0, 0],
+                 [0, 1, 2**62, 0, 0, 0, 0, 0], [2**63 - 1, 1, c.capacity, 0, 8, 1, 0, 1], [0, 1, c.capacity, 0, 8, 2**63 - 1, 0, 1]):  # fmt: skip
+        assert e.step(1, 1, ids[:1].data_ptr(), feats[:1].data_ptr(), boards[:1].data_ptr(), meta, ptrs, [1], out.data_ptr()) == 3, meta
+
+
+def test_rust_leaf_before_cache_growth_in_one_step(tiny_path):
+    """A plain item growing a cache in the same step as a leaf reading it: the leaf must see the grown cache's
+    layout (capacity is the row stride), the same bits as with the cache grown beforehand."""
+    m = Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2)
+    ids, feats, boards = inputs(random_game(7, 20))
+    out = []
+    for grow_early in (True, False):
+        root = Cache(m, 8)
+        step(m, [(root, ids[:4], feats[:4], boards[:4])])
+        t = Slots(m, 16)
+        if grow_early:
+            root.reserve(12)
+        z = step(m, [Leaf(root, ids[4:5], feats[4:5], boards[4:5], t, (), 1), (root, ids[5:13], feats[5:13], boards[5:13])])
+        assert torch.isfinite(z).all() and root.n == 12
+        out.append((z, t.k[:, :, 1].clone(), t.v[:, :, 1].clone(), t.e[1].clone()))
+    for a, b in zip(*out):
+        assert torch.equal(a, b)

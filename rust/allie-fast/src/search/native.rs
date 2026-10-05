@@ -92,17 +92,20 @@ impl Batch {
         self.n += 1;
     }
 
-    /// The logits [n, V] (float32) from the server, or the engine's error.
+    /// The logits [n, V] (float32) from the server, or the engine's error naming the step's leaves.
     pub fn submit(mut self, server: &Inner) -> Result<Vec<f32>, String> {
         let mut out = vec![0f32; self.n * self.v];
         self.req.out = out.as_mut_ptr();
-        match server.submit(self.req) {
-            0 => Ok(out),
-            1 => Err("token outside the vocabulary".into()),
-            2 => Err("board state out of range".into()),
-            3 => Err("tokens, paths or slots past the cache, the tree or the context".into()),
-            _ => Err("the server has stopped".into()),
-        }
+        let why = match server.submit(self.req) {
+            0 => return Ok(out),
+            1 => "a token outside the vocabulary",
+            2 => "a board state out of range",
+            3 => "tokens, paths or slots past the cache, the tree or the context",
+            4 => "items alias: a write overlaps another item's reads or writes",
+            5 => "the engine failed (a panic in the step)",
+            _ => "the server has stopped",
+        };
+        Err(format!("a search step of {} leaves: {why}", self.n))
     }
 }
 

@@ -4,14 +4,17 @@ batch sizes.
 
 usage: search_load.py --model DIR --pgns 'GLOB' [--games 10] [--rounds 3] [--budget 128] [--searcher coverage|kl]
        [--threads 4] [--torch-threads 1] [--ply 30] [--backend fast|rust] [--native] [--max-items N] [--min-items N]
-       [--gather SECONDS] [--out FILE]
+       [--gather SECONDS] [--moves-first 0|1] [--out FILE]
 --native: the all-Rust loop (treers through the model's Server, Rust backend); --max-items / --min-items / --gather set
-the Server's merge policy; the Server's gather statistics are reported.
+the Server's merge policy; the Server's gather statistics are reported. Also the plain-move latency a game sees under
+the load (an extra game playing one move every 100 ms: its one-token sync queued behind the leaf batches, median and
+p90 ms) and the process's peak RSS.
 """
 
 import argparse
 import glob
 import json
+import resource
 import sys
 import threading
 import time
@@ -59,6 +62,7 @@ def main():
     p.add_argument("--max-items", type=int)
     p.add_argument("--min-items", type=int)
     p.add_argument("--gather", type=float)
+    p.add_argument("--moves-first", type=lambda s: bool(int(s)), choices=(False, True))
     p.add_argument("--out")
     a = p.parse_args()
     torch.set_num_threads(a.torch_threads)
@@ -67,7 +71,7 @@ def main():
     srv = getattr(m.fast, "server", None)
     assert not a.native or srv is not None, "--native needs the Rust backend"
     if srv:
-        for k in ("max_items", "min_items", "gather"):
+        for k in ("max_items", "min_items", "gather", "moves_first"):
             if getattr(a, k) is not None:
                 setattr(srv, k, getattr(a, k))
     engine = Engine(m)
@@ -110,6 +114,22 @@ def main():
             if a.native:
                 leaves.append(game.last_search["evaluated"])
 
+    mover = load_game(
+        engine, read_pgn(long[a.games % len(long)], a.ply + 1)
+    )  # plays a move every 100 ms meanwhile
+    move_ms, stop, clock = [], threading.Event(), [mover.base, mover.base]
+
+    def play():
+        while not stop.is_set() and not mover.board.is_game_over():
+            clock[len(mover.moves) % 2] -= 1
+            mover.update(
+                mover.moves + [next(iter(mover.board.legal_moves)).uci()], *clock
+            )
+            t0 = time.perf_counter()
+            mover.sync()  # one new token, queued behind the searches' leaf batches
+            move_ms.append(1000 * (time.perf_counter() - t0))
+            stop.wait(0.1)
+
     for g in games:  # warm every game's cache and the kernels
         searcher(g, 8)
     leaves.clear(), sizes.clear()
@@ -120,9 +140,11 @@ def main():
     threads = [threading.Thread(target=run, args=(g,)) for g in games]
     for t in threads:
         t.start()
+    threading.Thread(target=play).start()
     for t in threads:
         t.join()
     wall = time.perf_counter() - t0
+    stop.set()
     n_leaves = sum(leaves)
     secs = np.array([s for s, _ in per_search])
     gather = None
@@ -134,10 +156,15 @@ def main():
             for k in ("steps", "items", "requests", "waited", "wait_s", "joined")
         }
         gather.update(
-            max_items=srv.max_items, min_items=srv.min_items, gather_s=srv.gather
+            max_items=srv.max_items,
+            min_items=srv.min_items,
+            gather_s=srv.gather,
+            moves_first=srv.moves_first,
         )
     row = dict(model=str(a.model), backend=a.backend, native=a.native, searcher=a.searcher, budget=a.budget, games=a.games, rounds=a.rounds,
                threads=m.fast.threads, torch_threads=torch.get_num_threads(), server=gather,
+               move_ms=dict(n=len(move_ms), median=round(float(np.median(move_ms)), 1), p90=round(float(np.percentile(move_ms, 90)), 1)) if move_ms else None,
+               peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss >> 10,
                cpu=open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].split(":")[1].strip(),
                searches=len(per_search), leaves=n_leaves, wall_s=round(wall, 2),
                ms_per_leaf_throughput=round(1000 * wall / n_leaves, 3),  # the node's cost per leaf under load

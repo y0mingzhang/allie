@@ -724,6 +724,94 @@ mod tests {
         assert_eq!(np_sum(&b), want);
     }
 
+    fn token(uci: &str) -> i64 {
+        crate::chess::MOVE_START + crate::chess::vocab().uci.iter().position(|m| m == uci).unwrap() as i64
+    }
+
+    /// Deterministic logits from a hash of the token sequence.
+    fn fake(prefix: &[i64]) -> Vec<f64> {
+        let mut s = prefix.iter().fold(0x9E3779B97F4A7C15u64, |h, &t| (h ^ t as u64).wrapping_mul(0x100000001B3));
+        (0..VOCAB)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                6. * ((s >> 11) as f64 / (1u64 << 53) as f64) - 3.
+            })
+            .collect()
+    }
+
+    fn line(f: &Forest, root: &[i64], mut c: usize) -> Vec<i64> {
+        let mut t = Vec::new();
+        while c != 0 {
+            t.push(f.nodes[c].token);
+            c = f.nodes[c].parent as usize;
+        }
+        [root, &t.into_iter().rev().collect::<Vec<_>>()].concat()
+    }
+
+    fn grow(f: &mut Forest, root: &[i64], budget: i64) {
+        let g = Grow { read: Read { own: 5., opp: 5., soft: true, kappa: 0.5, squash: 0. }, k: 8, g: 0.125, width: 4, full: false, floor: 0. };
+        while let Some(p) = f.step(budget, g).unwrap().map(|p| p.to_vec()) {
+            let z: Vec<f64> = p.iter().flat_map(|&c| fake(&line(f, root, c))).collect();
+            f.apply(&[&z]).unwrap();
+        }
+    }
+
+    #[test]
+    fn reroot_keeps_the_subtree_values() {
+        let p: Vec<i64> = [vec![2348, 199, 12, 1, 5, 0, 0, 1, 5, 0, 0], ["e2e4", "e7e5", "g1f3"].iter().map(|m| token(m)).collect()].concat();
+        let feats: Vec<[f32; 3]> = (0..p.len()).map(|i| if i < 11 { [-1.; 3] } else { [180. - i as f32, 181. - i as f32, -1.] }).collect();
+        let mut f = Forest::build(&p, &[&fake(&p)], None, &feats, 2, 400, false).unwrap();
+        grow(&mut f, &p, 96);
+        assert_eq!(f.spent, 96);
+        let n = f.nodes.len();
+        let mut size = vec![1usize; n];
+        for i in (1..n).rev() {
+            size[f.nodes[i].parent as usize] += size[i];
+        }
+        let g = (1..n).filter(|&i| f.nodes[i].depth == 2 && f.nodes[i].count > 0).max_by_key(|&i| size[i]).unwrap();
+        assert!(size[g] > 3, "a grandchild with a subtree");
+        let kept: Vec<usize> = (0..n).filter(|&i| { let mut j = i as i32; while j > 0 && j != g as i32 { j = f.nodes[j as usize].parent; } j == g as i32 }).collect();
+        let read = Read { own: 12., opp: 12., soft: true, kappa: 0., squash: 0.95 };
+        let (v, sigma, _) = f.backup(read);
+        let old: Vec<([u8; 68], i32, [f64; 3], u32)> = kept.iter().map(|&i| (f.nodes[i].board, f.nodes[i].depth, f.clocks[0].feats[i], f.nodes[i].slot)).collect();
+        let moves = [f.nodes[f.nodes[g].parent as usize].token, f.nodes[g].token];
+        let q = [p.clone(), moves.to_vec()].concat();
+        let longer: Vec<[f32; 3]> = feats.iter().copied().chain([[170., 160., 3.], [150., 160., 8.]]).collect();
+        assert_eq!(f.rebase(&moves, &[&fake(&q)], None, &[longer.clone()]), Ok(Some(kept.clone())));
+        assert_eq!((f.nodes.len(), f.nodes[0].length as usize, f.calls), (kept.len(), q.len(), 0));
+        let (v2, sigma2, _) = f.backup(read);
+        for (k, &i) in kept.iter().enumerate().skip(1) {
+            assert_eq!(v2[k], v[i], "V of kept node {i}");
+            assert_eq!((f.nodes[k].board, f.nodes[k].depth + 2, f.clocks[0].feats[k], f.nodes[k].slot), old[k]);
+            if f.nodes[k].depth >= 2 {
+                assert_eq!(sigma2[k], sigma[i]);
+            }
+            let p = f.nodes[k].parent as usize;
+            assert!(p < k && f.edges[f.nodes[k].edge as usize].kid == k as i32 && f.edges[f.nodes[k].edge as usize].token == f.nodes[k].token);
+            assert!(f.nodes[p].start <= f.nodes[k].edge as usize && (f.nodes[k].edge as usize) < f.nodes[p].start + f.nodes[p].count);
+        }
+        let live = f.nodes[1..].iter().filter(|x| !x.terminal).count() as i64;
+        assert_eq!((f.spent, f.reused, f.clocks[0].feats[0]), (live, live, [150., 160., 8.]));
+        let legal = f.nodes[0].pos.legal_tokens();
+        assert_eq!(f.nodes[0].count, legal.len());
+        grow(&mut f, &q, 96);
+        assert_eq!(f.spent, 96);
+        let (_, _, qv) = f.root_values(read);
+        assert!(qv.iter().all(|x| x.is_finite()));
+        // a reply the forest never expanded: nothing kept
+        let c1 = f.edges[f.nodes[0].start].kid;
+        if c1 > 0 {
+            let x = &f.nodes[c1 as usize];
+            if let Some(e) = (x.start..x.start + x.count).find(|&e| f.edges[e].kid < 0) {
+                let t = [f.nodes[c1 as usize].token, f.edges[e].token];
+                let lon: Vec<[f32; 3]> = longer.iter().copied().chain([[1.; 3], [1.; 3]]).collect();
+                assert_eq!(f.rebase(&t, &[&fake(&q)], None, &[lon]), Ok(None));
+            }
+        }
+    }
+
     #[test]
     fn tilts() {
         assert_eq!(tilt(17., 0.5), 2f64.sqrt());

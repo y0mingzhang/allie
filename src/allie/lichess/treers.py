@@ -61,18 +61,23 @@ def games_of(searcher, game):
     return games, [g.sync() for g in games]
 
 
-def reusable(game, key, reuse):
-    """The game's kept tree for `key` when the game has moved on exactly two plies since it; its slot is
-    cleared, to be set again by the caller."""
+def reusable(game, games, key, reuse):
+    """The game's kept tree for `key` when every cache (the game's and its views') holds exactly the rows the tree
+    was searched on plus two plies (a clock learnt later that changed an earlier row starts fresh); the game's slot
+    for it is cleared, to be set again by keep()."""
     trees = game.__dict__.setdefault("trees", {})
     old = trees.pop(key, None) if reuse else None
-    if (
-        old is not None
-        and len(game.tokens) == len(old[1]) + 2
-        and game.tokens[:-2] == old[1]
+    if old is not None and all(
+        len(g.used) == len(u) + 2 and g.used[: len(u)] == u
+        for g, u in zip(games, old[1])
     ):
         return old[0]
     return None
+
+
+def keep(game, games, key, tree):
+    """Keep a finished tree with the cache rows it was searched on, for reusable()."""
+    game.trees[key] = (tree, [list(g.used) for g in games])
 
 
 class Coverage:
@@ -162,7 +167,7 @@ class Coverage:
         """The whole search in Rust through the Server, from the kept tree when reuse allows; None past the
         deadline."""
         key = ("coverage", self.views)
-        cov = reusable(game, key, self.reuse)
+        cov = reusable(game, games, key, self.reuse)
         if (
             cov is not None
             and cov.reroot(game.tokens[-2:], root, feats, budget) is None
@@ -184,11 +189,8 @@ class Coverage:
         s = cov.stats()
         game.last_search = dict(searcher="coverage", budget=budget, reused=s["reused_leaves"], kept_pulls=s["kept_pulls"],
                                 evaluated=s["evaluated_leaves"], nodes=s["nodes"], late=not done)  # fmt: skip
-        if done and self.reuse:
-            game.trees[key] = (
-                cov,
-                list(game.tokens),
-            )  # an unfinished (late) tree cannot be re-rooted
+        if done and self.reuse:  # an unfinished (late) tree cannot be re-rooted
+            keep(game, games, key, cov)
         return cov if done else None
 
     def outputs(self, game, cov, root, legal, feats, budget, simulations):
@@ -322,7 +324,7 @@ class KL:
 
     def native(self, srv, game, games, feats, roots, prior, cap, leaves, deadline):
         key = ("kl", self.views, self.clock_rule)
-        forest = reusable(game, key, self.reuse)
+        forest = reusable(game, games, key, self.reuse)
         if (
             forest is not None
             and forest.reroot(game.tokens[-2:], roots, prior, feats) is None
@@ -351,5 +353,5 @@ class KL:
         game.last_search = dict(searcher="kl", budget=leaves, reused=forest.reused, evaluated=forest.spent - forest.reused,
                                 nodes=forest.size, late=not done)  # fmt: skip
         if done and self.reuse:
-            game.trees[key] = (forest, list(game.tokens))
+            keep(game, games, key, forest)
         return forest if done else None

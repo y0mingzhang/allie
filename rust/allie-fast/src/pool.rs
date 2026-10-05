@@ -108,6 +108,12 @@ impl Pool {
             Some(g) if g.len() >= n => g[..n].iter().map(|&x| x.max(0) as usize).collect(),
             _ => vec![0; n],
         };
+        // the clamp may drop every member of a group: renumber the groups that remain (an empty group would
+        // never arrive at the barrier)
+        let mut ids = group.clone();
+        ids.sort_unstable();
+        ids.dedup();
+        let group: Vec<usize> = group.iter().map(|g| ids.binary_search(g).unwrap()).collect();
         let ngroups = group.iter().max().unwrap() + 1;
         let groups: Vec<Group> = (0..ngroups).map(|g| Group { count: AtomicI32::new(0), size: group.iter().filter(|&&x| x == g).count() as i32 }).collect();
         let inner = Arc::new(Inner {
@@ -222,6 +228,26 @@ impl Drop for Pool {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn clamped_groups_are_renumbered() {
+        // three threads asked for with groups [0, 2, 1], two granted: the groups in use are 0 and 2 -> 0 and 1
+        let pool = Pool::new(2, None, Some(vec![0, 2, 1]), 0.001);
+        assert!(pool.n() <= 2);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let p = std::sync::Arc::new(pool);
+        let q = p.clone();
+        std::thread::spawn(move || {
+            for _ in 0..20 {
+                q.run(&|t| {
+                    q.barrier(t);
+                    q.barrier(t);
+                });
+            }
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the barrier must not hang on a renumbered group");
+    }
 
     #[test]
     fn runs_and_barriers() {

@@ -219,9 +219,10 @@ class RustFast:
                 raise ValueError("items alias: a leaf reads rows a plain item writes")
 
     def _step(self, items):
+        for item in items:  # every cache grown first: a later item's reserve() would leave an earlier item's
+            self.check(*item)  # capacity (the engine's row stride) stale against the pointers taken below
         meta, paths, lo, seen = [], [], 0, set()
         for item in items:
-            self.check(*item)
             cache, ids = item[0], item[1]
             if isinstance(item, Leaf):
                 meta += [cache.n, 1, cache.capacity, lo, item.tree.capacity, len(item.path), len(paths), item.slot]  # fmt: skip
