@@ -1106,7 +1106,10 @@ def played(text, moves):
 
 def clean(text):
     """The model's text as one line: no links, markup or wrapping quotes."""
-    text = " ".join(re.sub(r"</?[a-z_]+>", "", text.replace("**", "")).split())
+    text = " ".join(re.sub(r"</?[a-z_]+/?>", " ", text.replace("**", "")).split())
+    text = re.sub(
+        r"(?<=[a-z][.!?])(?=[A-Z][a-z])", " ", text
+    )  # "game.Looks": two sentences
     text = text.strip("\"'\u201c\u201d{}")
     return "" if re.search(r"https?://|www\.", text) else text
 
