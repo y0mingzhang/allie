@@ -16,6 +16,19 @@ from .test_tokens import random_game
 tree = pytest.importorskip("allie.lichess.tree")
 
 
+def fast_model(tiny_path, backend, threads):
+    """A tiny Model on the C++ or the Rust CPU backend, or skip."""
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    if backend == "rust":
+        pytest.importorskip("allie_fast")
+    return Model(tiny_path, dtype=torch.bfloat16, backend=backend, threads=threads)
+
+
 def test_nodes_match_prefill(tiny):
     game = Game(Engine(tiny), 1500, 1600, 180, 2)
     game.update(random_game(4, 21), 170, 165)
@@ -100,16 +113,11 @@ def node_logits(model):
     return torch.tensor(np.concatenate([z1, z2])), seqs
 
 
-def test_fast_nodes_match_reference(tiny_path, tiny):
+@pytest.mark.parametrize("backend", ["fast", "rust"])
+def test_fast_nodes_match_reference(tiny_path, backend, tiny):
     """The fast backend's nodes (the game's cache copied, the path appended) differ from the
     reference tree's by BF16 rounding only: no further from an FP32 prefill than the reference."""
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
-    model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)
+    model = fast_model(tiny_path, backend, 3)
     assert model.fast is not None
     got, seqs = node_logits(model)
     ref, _ = node_logits(Model(tiny_path, dtype=torch.bfloat16, backend="torch"))
@@ -120,24 +128,50 @@ def test_fast_nodes_match_reference(tiny_path, tiny):
     assert (p - q).abs().max() < 1e-3
 
 
+def test_rust_leaves_match_copied_nodes(tiny_path):
+    """On the Rust backend Nodes.fast evaluates a call's nodes in place (Leaf items, one step); the same nodes
+    through the copying code (Nodes.copied, one step too) give bitwise the same logits and slot rows."""
+    model = fast_model(tiny_path, "rust", 3)
+    game = Game(Engine(model), 1500, 1600, 180, 2)
+    game.update(random_game(4, 21), 170, 165)
+    feats, n = np.array(game.features(), np.float32), len(game.tokens)
+    trees = [tree.Tree(game, game.sync(), 64) for _ in range(2)]
+    a, b = (t.handles([game.tokens], [feats]) for t in trees)
+    b.fast = lambda ids, chunk=8: b.copied(ids, len(ids))  # today's way, the same batch
+    boards, calls, next_id, frontier = {0: game.board.copy()}, [], 1, [0]
+    for depth in range(1, 6):  # every frontier node's first two legal moves, one call a depth
+        handles, grown = [], []
+        for p in frontier:
+            for mv in list(boards[p].legal_moves)[:2]:
+                boards[next_id] = boards[p].copy()
+                boards[next_id].push(mv)
+                handles.append([next_id, p, MOVE_ID[mv.uci()], n + depth])
+                grown.append(next_id)
+                next_id += 1
+        frontier = grown[: 8 // depth + 1]
+        calls.append(handles)
+    for h in calls:
+        za, zb = a(h), b(h)
+        assert np.array_equal(za, zb) and np.isfinite(za).all(), f"depth {h[0][3] - n}"
+    s = slice(1, next_id)
+    x, y = trees
+    assert torch.equal(x.k[:, :, s], y.k[:, :, s]) and torch.equal(x.v[:, :, s], y.v[:, :, s]) and torch.equal(x.e[s], y.e[s])
+    assert game.cache.n == n and next_id > 20 and not x.caches and len(y.caches) == max(map(len, calls))
+
+
 @pytest.mark.skipif(
     not (native / "chess.hpp").exists() or not shutil.which("c++"),
     reason="native search",
 )
-def test_concurrent_searches_match_sequential(tiny_path):
+@pytest.mark.parametrize("backend", ["fast", "rust"])
+def test_concurrent_searches_match_sequential(tiny_path, backend):
     """On the fast backend, searches run on the games' threads and their nodes share the engine's
     batches with other games' moves: the same results as one at a time, up to BF16 batching noise.
     The engine is held busy while the requests queue, so they must merge."""
     pytest.importorskip("pybind11")
     import threading
 
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
-    model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)
+    model = fast_model(tiny_path, backend, 3)
     engine, search = Engine(model), tree.Coverage()
 
     def setup(s):
@@ -181,17 +215,12 @@ def test_concurrent_searches_match_sequential(tiny_path):
     not (native / "chess.hpp").exists() or not shutil.which("c++"),
     reason="native search",
 )
-def test_a_search_past_its_deadline_stops(tiny_path, monkeypatch):
+@pytest.mark.parametrize("backend", ["fast", "rust"])
+def test_a_search_past_its_deadline_stops(tiny_path, backend, monkeypatch):
     """A search past its deadline stops at its next nodes and gives no distribution; the game
     searches again after."""
     pytest.importorskip("pybind11")
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
-    model = Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2)
+    model = fast_model(tiny_path, backend, 2)
     game, search = Game(Engine(model), 2400, 2400, 1800, 20, "classical"), tree.Coverage()
     game.update(random_game(5, 14), 1700, 1690)
     calls, inner = [], tree.Nodes.__call__
@@ -226,20 +255,15 @@ def test_lookahead_values_every_move(tiny):
     not (native / "chess.hpp").exists() or not shutil.which("c++"),
     reason="native search",
 )
-def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path):
+@pytest.mark.parametrize("backend", ["fast", "rust"])
+def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path, backend):
     """On the fast backend lookahead runs on the games' threads through the engine's batches: the
     same values as one at a time, up to BF16 batching noise, with the engine held busy while the
     requests queue so they must merge; past its deadline it gives None."""
     pytest.importorskip("pybind11")
     import threading
 
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
-    engine, search = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)), tree.Lookahead(m=4, k=2)
+    engine, search = Engine(fast_model(tiny_path, backend, 3)), tree.Lookahead(m=4, k=2)
     games = []
     for s in range(3):
         games.append(Game(engine, 2400, 2400, 1800, 20, "classical"))
@@ -396,19 +420,14 @@ def test_kl_views_read_every_node_under_them(tiny, monkeypatch):
     reason="native search",
 )
 @pytest.mark.parametrize("views", [("true",), ("r3000/noclock", "true")])
-def test_fast_kl_runs_concurrently_and_stops_late(tiny_path, views):
+@pytest.mark.parametrize("backend", ["fast", "rust"])
+def test_fast_kl_runs_concurrently_and_stops_late(tiny_path, backend, views):
     """As lookahead: on the fast backend KL runs on the games' threads through the engine's batches, the same
     values as one at a time up to BF16 batching noise; past its deadline it gives None."""
     pytest.importorskip("pybind11")
     import threading
 
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
-    engine, search = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)), tree.KL(views=views)
+    engine, search = Engine(fast_model(tiny_path, backend, 3)), tree.KL(views=views)
     games = []
     for s in range(3):
         games.append(Game(engine, 2400, 2400, 1800, 20, "classical"))

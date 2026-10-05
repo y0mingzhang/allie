@@ -187,6 +187,7 @@ def main():
     p.add_argument("--pgn", required=True)
     p.add_argument("--ply", type=int, default=40)
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--backend", default="fast", choices=("fast", "rust"), help="the C++ kernels or the Rust engine")
     p.add_argument("--torch-threads", type=int, help="torch's own threads (default: --threads, as the bot sets them)")
     p.add_argument("--searchers", default="coverage,kl")
     p.add_argument("--budgets", default="32,128,1024")
@@ -197,7 +198,7 @@ def main():
     a = p.parse_args()
     torch.set_num_threads(a.torch_threads or a.threads)
     t0 = time.perf_counter()
-    m = Model(a.model, "cpu", torch.bfloat16, None, True, "fast", a.threads)
+    m = Model(a.model, "cpu", torch.bfloat16, None, True, a.backend, a.threads)
     assert m.fast is not None, "fast backend needed"
     g = read_pgn(a.pgn, a.ply)
     engine, game = setup(m, g)
@@ -207,6 +208,7 @@ def main():
         game=g["site"],
         ply=len(g["moves"]),
         tokens=len(game.tokens),
+        backend=a.backend,
         threads=m.fast.threads,
         torch_threads=torch.get_num_threads(),
         cpu=open("/proc/cpuinfo")

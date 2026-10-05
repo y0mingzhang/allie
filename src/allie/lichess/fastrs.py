@@ -9,10 +9,26 @@ import os
 import threading
 import weakref
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 
 from .fast import LAYER, PHASES, SCALED, cpu_order, cpus, threads_default
+
+
+class Leaf(NamedTuple):
+    """A search node evaluated in place (the engine's path item): the token `ids` [1] at position cache.n +
+    len(path) attends to the cache's rows and then to the slots `path` (its ancestors below the root, in order)
+    of the tree's buffer (k, v [L, H, capacity, hd], e [capacity, D]); its keys, values and embedding are written
+    to `slot`. The cache is read only. Its first four fields are a plain item's, so engine.py batches it as one."""
+
+    cache: object
+    ids: torch.Tensor
+    feats: torch.Tensor
+    boards: torch.Tensor
+    tree: object
+    path: tuple
+    slot: int
 
 
 class RustFast:
@@ -131,8 +147,10 @@ class RustFast:
             self.native()
             return self._step(items)
 
-    def check(self, cache, ids, feats, boards):
-        m, n = self.model, len(ids)
+    def check(self, cache, ids, feats, boards, *leaf):
+        """An item's shapes, and the cache grown for a plain one; its tensors (and a Leaf's tree's) are
+        checked by layout()."""
+        n = len(ids)
         if (
             n < 1
             or ids.shape != (n,)
@@ -142,11 +160,25 @@ class RustFast:
             raise ValueError(
                 "an item: ids [m], feats [m, 3] and boards [m, 68], m >= 1"
             )
-        if cache.model is not m:
+        if cache.model is not self.model:
             raise ValueError("a cache of another model")
-        cache.reserve(cache.n + n)
-        shape, cap = (m.layers, m.heads, cache.capacity, m.head_dim), cache.capacity
-        for t, s in ((cache.k, shape), (cache.v, shape), (cache.e, (cap, m.width))):
+        if not leaf:
+            cache.reserve(cache.n + n)
+            return
+        tree, path, slot = leaf
+        if n != 1 or not all(0 <= r < tree.capacity for r in (slot, *path)):
+            raise ValueError(
+                "a leaf: one token, its path and slot within the tree's capacity"
+            )
+
+    def layout(self, c, seen):
+        """c's k, v and e in the model's layout at c.capacity (a cache or a tree buffer, once a step)."""
+        if id(c) in seen:
+            return
+        seen.add(id(c))
+        m = self.model
+        shape = (m.layers, m.heads, c.capacity, m.head_dim)
+        for t, s in ((c.k, shape), (c.v, shape), (c.e, (c.capacity, m.width))):
             if (
                 t.shape != s
                 or t.dtype != m.dtype
@@ -157,13 +189,23 @@ class RustFast:
 
     def _step(self, items):
         self.handle.wake()  # workers wake while the inputs are gathered
-        meta, caches, lo = [], [], 0
+        meta, paths, lo, seen = [], [], 0, set()
         for item in items:
             self.check(*item)
             cache, ids = item[0], item[1]
-            meta += [cache.n, len(ids), cache.capacity, lo]
-            caches += [cache.k.data_ptr(), cache.v.data_ptr(), cache.e.data_ptr()]
+            if isinstance(item, Leaf):
+                meta += [cache.n, 1, cache.capacity, lo, item.tree.capacity, len(item.path), len(paths), item.slot]  # fmt: skip
+                paths += item.path
+                self.layout(item.tree, seen)
+            else:
+                meta += [cache.n, len(ids), cache.capacity, lo, 0, 0, 0, 0]
+            self.layout(cache, seen)
             lo += len(ids)
+        caches = []  # after every reserve(): a grown cache's tensors are new
+        for item in items:
+            c, t = item[0], item.tree if isinstance(item, Leaf) else None
+            caches += [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr()]
+            caches += [0, 0, 0] if t is None else [t.k.data_ptr(), t.v.data_ptr(), t.e.data_ptr()]  # fmt: skip
 
         def cat(j, dtype):
             return torch.cat([it[j] for it in items]).to("cpu", dtype).contiguous()
@@ -177,10 +219,11 @@ class RustFast:
             len(items), self.model.config["vocab"], dtype=torch.float32, device="cpu"
         )
         err = self.handle.step(lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
-                               meta, caches, out.data_ptr())  # fmt: skip
+                               meta, caches, paths, out.data_ptr())  # fmt: skip
         if err:
             raise ValueError(("token outside the vocabulary", "board state out of range",
-                              "tokens past the cache or the context")[err - 1])  # fmt: skip
-        for cache, ids, *_ in items:
-            cache.n += len(ids)
+                              "tokens, paths or slots past the cache, the tree or the context")[err - 1])  # fmt: skip
+        for item in items:
+            if not isinstance(item, Leaf):
+                item[0].n += len(item[1])
         return out

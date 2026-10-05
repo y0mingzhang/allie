@@ -4,12 +4,14 @@ rows on the same ISA, for each of the three variants (the C++ rebuilt for the ma
 import multiprocessing
 import threading
 
+import numpy as np
 import pytest
 import torch
 
 from allie.lichess import fast
+from allie.lichess.fastrs import Leaf
 from allie.lichess.model import Cache, Model, step
-from allie.lichess.tokens import HEADER
+from allie.lichess.tokens import CONTEXT, HEADER
 
 from .test_model import inputs
 from .test_tokens import random_game
@@ -100,8 +102,14 @@ def same(a, b):
 def test_rust_matches_cxx_bitwise(tiny_path, isa, int8, monkeypatch):
     ref = cxx(tiny_path, MARCH[isa], monkeypatch, int8=int8, threads=3)
     got = rust(tiny_path, isa, monkeypatch, int8=int8, threads=3)
-    want = {b"avx512": "avx512", b"avx2": "avx2", b"generic": "scalar"}[ref.fast.lib.allie_isa()]
-    assert got.fast.isa == want and (isa == "native" or want == isa), (got.fast.isa, want, isa)
+    want = {b"avx512": "avx512", b"avx2": "avx2", b"generic": "scalar"}[
+        ref.fast.lib.allie_isa()
+    ]
+    assert got.fast.isa == want and (isa == "native" or want == isa), (
+        got.fast.isa,
+        want,
+        isa,
+    )
     same(replay(got), replay(ref))
 
 
@@ -146,9 +154,166 @@ def test_rust_rejects_bad_inputs(tiny_path):
     # the engine's own span check: a cache claiming more rows than its capacity
     e = m.fast.native()
     c = Cache(m)
-    meta = [c.capacity, 1, c.capacity, 0]
+    meta = [c.capacity, 1, c.capacity, 0, 0, 0, 0, 0]
     assert e.step(1, 1, ids[:1].data_ptr(), feats[:1].data_ptr(), boards[:1].data_ptr(), meta,
-                  [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr()], torch.empty(1, 2432).data_ptr()) == 3  # fmt: skip
+                  [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr(), 0, 0, 0], [], torch.empty(1, 2432).data_ptr()) == 3  # fmt: skip
+    # leaves: a slot or path entry past the tree, a path past the context, two tokens
+    step(m, [(c, ids[:4], feats[:4], boards[:4])])
+    t, one = Slots(m, 8), (ids[4:5], feats[4:5], boards[4:5])
+    for bad in (
+        Leaf(c, *one, t, (1,), 8),
+        Leaf(c, *one, t, (1, 9), 2),
+        Leaf(c, ids[4:6], feats[4:6], boards[4:6], t, (), 2),
+    ):
+        with pytest.raises(ValueError, match="a leaf"):
+            step(m, [bad])
+    with pytest.raises(ValueError, match="past"):
+        step(m, [Leaf(c, *one, t, (1,) * (CONTEXT - 4), 2)])
+    assert c.n == 4
+
+
+class Slots:
+    """A tree's slot buffer as tree.Tree keeps it: k, v [L, H, cap, hd], e [cap, D]; NaN where never written."""
+
+    def __init__(self, model, capacity):
+        kw = dict(dtype=model.dtype, device=model.device)
+        self.k = torch.full(
+            (model.layers, model.heads, capacity, model.head_dim), torch.nan, **kw
+        )
+        self.v, self.e = (
+            torch.full_like(self.k, torch.nan),
+            torch.full((capacity, model.width), torch.nan, **kw),
+        )
+        self.capacity = capacity
+
+
+def random_tree(rng, nodes, depth):
+    """parent[i] for nodes 1..nodes (0 the root; parents precede their children), depths at most `depth`:
+    chains with probability 0.4, else a random shallower node."""
+    parent, dep = np.zeros(nodes + 1, np.int64), np.zeros(nodes + 1, np.int64)
+    for i in range(1, nodes + 1):
+        p = (
+            i - 1
+            if rng.random() < 0.4 and dep[i - 1] < depth
+            else rng.choice(np.flatnonzero(dep[:i] < depth))
+        )
+        parent[i], dep[i] = p, dep[p] + 1
+    return parent, dep
+
+
+def path(parent, i):
+    p = []
+    while i:
+        p.append(int(i))
+        i = parent[i]
+    return p[::-1]
+
+
+def leaves_both_ways(model, seed=0, roots=3, nodes=40, depth=8):
+    """Random trees over several games' caches, their nodes evaluated in the same batches both as Leaf items (in
+    place) and today's way (the game's prefix copied into a pooled cache, the ancestors' rows at n0.., a plain
+    one-token item), batches mixing roots and plain one- and two-token appends of another game: (each batch's
+    logits, the slot buffers, the game caches' rows) each way."""
+    rng = np.random.default_rng(seed)
+    games, n0s = [], []
+    for r in range(roots):
+        ids, feats, boards = GAMES[r]
+        n0 = HEADER + 4 + 3 * r
+        c = Cache(model, n0 + 1)
+        step(model, [(c, ids[:n0], feats[:n0], boards[:n0])])
+        games.append(c)
+        n0s.append(n0)
+    trees = [random_tree(rng, nodes, depth) for _ in range(roots)]
+    slots = [[Slots(model, nodes + 1) for _ in range(roots)] for _ in range(2)]
+    spare = [Cache(model, 8) for _ in range(2)]
+    at, zs = 0, [[], []]
+    for i in range(1, nodes + 1):
+        order = rng.permutation(roots) if rng.random() < 0.5 else range(roots)
+        ids, feats, boards = GAMES[roots + 1]  # a plain item of 1 or 2 of its tokens
+        extra = min(int(rng.integers(0, 3)) if rng.random() < 0.5 else 0, len(ids) - at)
+        items, pooled = [[], []], []
+        for r in order:
+            ids, feats, boards = GAMES[(r * 13 + i) % len(GAMES)]
+            j = (i * 5) % 36
+            tok = (ids[j : j + 1], feats[j : j + 1], boards[j : j + 1])
+            parent, dep = trees[r]
+            anc, n0 = path(parent, parent[i]), n0s[r]
+            items[0].append(Leaf(games[r], *tok, slots[0][r], tuple(anc), i))
+            c = Cache(model, n0 + len(anc) + 1)
+            c.k[:, :, :n0], c.v[:, :, :n0], c.e[:n0] = (
+                games[r].k[:, :, :n0],
+                games[r].v[:, :, :n0],
+                games[r].e[:n0],
+            )
+            s = slots[1][r]
+            for d, a in enumerate(anc):
+                c.k[:, :, n0 + d], c.v[:, :, n0 + d], c.e[n0 + d] = (
+                    s.k[:, :, a],
+                    s.v[:, :, a],
+                    s.e[a],
+                )
+            c.n = n0 + len(anc)
+            items[1].append((c, *tok))
+            pooled.append((c, r))
+        if extra:
+            for w in range(2):
+                items[w].append(
+                    (
+                        spare[w],
+                        ids[at : at + extra],
+                        feats[at : at + extra],
+                        boards[at : at + extra],
+                    )
+                )
+            at += extra
+        for w in range(2):
+            zs[w].append(step(model, items[w]))
+        for c, r in pooled:
+            s, p = slots[1][r], c.n - 1
+            s.k[:, :, i], s.v[:, :, i], s.e[i] = c.k[:, :, p], c.v[:, :, p], c.e[p]
+    rows = lambda c: (
+        c.k[:, :, : c.n].clone(),
+        c.v[:, :, : c.n].clone(),
+        c.e[: c.n].clone(),
+    )
+    assert all(c.n == n0 for c, n0 in zip(games, n0s)), "a leaf grew the game's cache"
+    return zs, slots, [rows(c) for c in games + spare]
+
+
+def same_leaves(a, b):
+    (za, sa, ga), (zb, sb, gb) = a, b
+    for i, (x, y) in enumerate(zip(za, zb)):
+        bad = (x != y).sum().item()
+        assert bad == 0, (
+            f"batch {i}: {bad} of {x.numel()} logits differ, max {(x - y).abs().max().item()}"
+        )
+    for r, (x, y) in enumerate(zip(sa, sb)):
+        for name in "kve":
+            s, t = getattr(x, name)[..., 1:, :], getattr(y, name)[..., 1:, :]
+            assert torch.equal(s, t), f"tree {r} slots {name} differ"
+    for j, (x, y) in enumerate(zip(ga, gb)):
+        assert all(torch.equal(s, t) for s, t in zip(x, y)), f"cache {j} differs"
+
+
+@pytest.mark.parametrize("int8", [False, True])
+@pytest.mark.parametrize("isa", ["native", "avx2", "scalar"])
+def test_rust_leaves_match_copied_bitwise(tiny_path, isa, int8, monkeypatch):
+    """A node evaluated in place (a Leaf item: the cache's rows, then its ancestors' slots) is bitwise the node
+    evaluated on a copy of the cache with the path appended, logits and the slot's new k, v and e alike."""
+    m = rust(tiny_path, isa, monkeypatch, int8=int8, threads=3)
+    zs, slots, rows = leaves_both_ways(m)
+    same_leaves((zs[0], slots[0], rows), (zs[1], slots[1], rows))
+    assert all(torch.isfinite(z).all() for z in zs[0]) and len(zs[0]) == 40
+    assert all(
+        torch.isnan(s.k[:, :, 0]).all() for s in slots[0]
+    )  # the root's slot is never touched
+
+
+def test_rust_leaves_thread_count_does_not_change_results(tiny_path, monkeypatch):
+    a = rust(tiny_path, "native", monkeypatch, int8=True, threads=1)
+    b = rust(tiny_path, "native", monkeypatch, int8=True, threads=3)
+    (za, sa, ra), (zb, sb, rb) = (leaves_both_ways(x, nodes=16) for x in (a, b))
+    same_leaves((za[0], sa[0], ra), (zb[0], sb[0], rb))
 
 
 def test_rust_profile_threads_isa(tiny_path):

@@ -20,6 +20,7 @@ from allie.search.board import advance_clocks, predicted_seconds, root_other_pre
 from allie.search.native import from_prefix, load
 
 from .engine import Game
+from .fastrs import Leaf, RustFast
 from .model import Cache
 from .tokens import CONTEXT, HEADER, MOVE_START, MOVES, advance, header
 
@@ -187,11 +188,34 @@ class Nodes:
         return p[::-1]
 
     def fast(self, ids, chunk=8):
-        """The nodes' logits from the fast backend. Each node runs on a copy of the game's cache
-        (pooled: the kernel writes only past the root, so the copied prefix stays) holding its
-        ancestors' keys, values and embeddings at their own positions (kept in the tree's slots when
-        they ran); only the node's own token is new. Up to `chunk` nodes run in one step: the pool holds
-        that many copies (about 13 MB each at move 40, 1 024 tokens at most: 150 MB)."""
+        """The nodes' logits from the fast backend: in place on the Rust engine (leaves), from copies of
+        the game's cache on the C++ kernels (copied)."""
+        if isinstance(self.tree.model.fast, RustFast):
+            return self.leaves(ids)
+        return self.copied(ids, chunk)
+
+    def leaves(self, ids):
+        """Every node a Leaf item of one step: the engine attends over the game's cache and then the node's
+        ancestors' slots and writes its keys, values and embedding to its own slot (the tree's k, v and e
+        are the slot buffer; node i's slot is i). Nothing is copied; when concurrent, the step joins the
+        engine's batches with other games' work."""
+        t = self.tree
+        if monotonic() > t.deadline:
+            raise Late
+        tok = torch.as_tensor(self.token[ids])
+        feats = torch.as_tensor(self.feats[ids], dtype=torch.float32)
+        boards = torch.tensor(np.frombuffer(b"".join(self.board[i] for i in ids), np.uint8).reshape(-1, 68))
+        items = [Leaf(t.cache, tok[j : j + 1], feats[j : j + 1], boards[j : j + 1], t, tuple(self.path(self.parent[i])), int(i))
+                 for j, i in enumerate(ids)]  # fmt: skip
+        z = t.game.engine.steps(items) if t.concurrent else t.model.fast.step(items)
+        return z.double().numpy()
+
+    def copied(self, ids, chunk=8):
+        """Each node runs on a copy of the game's cache (pooled: the kernel writes only past the root, so
+        the copied prefix stays) holding its ancestors' keys, values and embeddings at their own positions
+        (kept in the tree's slots when they ran); only the node's own token is new. Up to `chunk` nodes run
+        in one step: the pool holds that many copies (about 13 MB each at move 40, 1 024 tokens at most:
+        150 MB)."""
         t, m = self.tree, self.tree.model
         n0 = t.cache.n
         out = []

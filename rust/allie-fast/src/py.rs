@@ -29,14 +29,17 @@ impl PyEngine {
         Ok(PyEngine { inner: Box::new(inner) })
     }
 
-    /// One step of T tokens over S sequences: ids (int64 [T]), feats (float32 [T, 3]), boards (uint8 [T,
-    /// 68]) and out (float32 [S, V]) as data pointers; meta: per sequence n0 len cap off; caches: per
-    /// sequence the k, v and e pointers. Returns 0, or 1 for a token outside the vocabulary, 2 for a board
-    /// state out of range, 3 for spans that do not fit. The GIL is released while the threads compute.
+    /// One step of T tokens over S items: ids (int64 [T]), feats (float32 [T, 3]), boards (uint8 [T, 68]) and
+    /// out (float32 [S, V]) as data pointers; meta: per item n0 len cap off scap plen poff dest (scap 0: a plain
+    /// item appending len tokens to its cache; else a path item, a search leaf whose one token attends to the
+    /// cache's n0 rows then to slots paths[poff..poff + plen] of a slot buffer of capacity scap, its keys,
+    /// values and embedding written to slot dest); caches: per item the cache's k, v, e pointers then the slot
+    /// buffer's (0 for a plain item). Returns 0, or 1 for a token outside the vocabulary, 2 for a board state
+    /// out of range, 3 for spans, paths or slots that do not fit. The GIL is released while the threads compute.
     #[allow(clippy::too_many_arguments)]
-    fn step(&mut self, py: Python<'_>, t: usize, s: usize, ids: usize, feats: usize, boards: usize, meta: Vec<i64>, caches: Vec<usize>, out: usize) -> i32 {
+    fn step(&mut self, py: Python<'_>, t: usize, s: usize, ids: usize, feats: usize, boards: usize, meta: Vec<i64>, caches: Vec<usize>, paths: Vec<i64>, out: usize) -> i32 {
         let e = &mut *self.inner;
-        py.allow_threads(move || e.step(t, s, ids as *const i64, feats as *const f32, boards as *const u8, &meta, &caches, out as *mut f32))
+        py.allow_threads(move || e.step(t, s, ids as *const i64, feats as *const f32, boards as *const u8, &meta, &caches, &paths, out as *mut f32))
     }
 
     /// Seconds spent in each of the 17 phases since the last call (fast.py's PHASES order); on: keep

@@ -104,6 +104,10 @@ pub struct Layer {
     skout: i64,
 }
 
+/// an item: `len` tokens appended to a game's cache (k, v: [L, H, cap, hd], e: [cap, D]) after its n0 rows; or,
+/// a path item (scap > 0), one search leaf evaluated in place: its token at position n0 + plen attends to the
+/// cache's n0 rows and then to slots paths[path..path + plen] of a slot buffer (sk, sv, se, capacity scap: the
+/// leaf's ancestors in order), and its own keys, values and embedding go to slot `dest`; the cache is read only
 #[derive(Clone, Copy)]
 struct Seq {
     n0: usize,
@@ -112,6 +116,26 @@ struct Seq {
     k: *mut u16,
     v: *mut u16,
     e: *mut u16,
+    sk: *mut u16,
+    sv: *mut u16,
+    se: *mut u16,
+    scap: usize,
+    path: usize,
+    plen: usize,
+    dest: usize,
+}
+
+impl Seq {
+    #[inline(always)]
+    fn leaf(&self) -> bool {
+        self.scap > 0
+    }
+
+    /// token k's position
+    #[inline(always)]
+    fn pos(&self, k: usize) -> usize {
+        self.n0 + if self.leaf() { self.plen } else { k - self.off }
+    }
 }
 
 /// one up / fc matrix (rows: gate halves, then value halves) for some tokens
@@ -221,6 +245,7 @@ pub struct Engine {
     boards: *const u8,
     out: *mut f32,
     seq: Vec<Seq>,
+    paths: Vec<usize>,
     tseq: Vec<usize>,
     last: Vec<usize>,
     units: Vec<usize>,
@@ -294,6 +319,16 @@ fn clockfeat(t: *const f32, f: *mut f32) {
             *f.add(j * 18 + 17) = 1.0;
         }
     }
+}
+
+/// q . k over the nc vectors of a BF16 row
+#[inline(always)]
+unsafe fn score<S: Simd>(qr: &[S::V; 32], nc: usize, kr: *const u16) -> f32 {
+    let mut a = S::zero();
+    for c in 0..nc {
+        a = S::fma(qr[c], S::ld_bf16(kr.add(c * S::VL)), a);
+    }
+    S::sum(a)
 }
 
 /// a short block of weights fetched before it is read
@@ -511,6 +546,7 @@ impl Engine {
             boards: std::ptr::null(),
             out: std::ptr::null_mut(),
             seq: Vec::new(),
+            paths: Vec::new(),
             tseq: Vec::new(),
             last: Vec::new(),
             units: Vec::new(),
@@ -566,11 +602,13 @@ impl Engine {
         t
     }
 
-    /// One step: T tokens of S sequences. meta: per sequence n0 len cap off; caches: per sequence k v e
-    /// (pointers as integers); out: S x V. Returns 0, or 1 for a token outside the vocabulary, 2 for a
-    /// board state outside its ranges, 3 for spans that do not fit.
-    pub fn step(&mut self, t: usize, s: usize, ids: *const i64, feats: *const f32, boards: *const u8, meta: &[i64], caches: &[usize], out: *mut f32) -> i32 {
-        if meta.len() < 4 * s || caches.len() < 3 * s {
+    /// One step: T tokens of S items. meta: per item n0 len cap off scap plen poff dest (scap 0: a plain item,
+    /// the rest ignored; else a path item: len 1, its slots paths[poff..poff + plen], all slots < scap);
+    /// caches: per item the cache's k v e then the slot buffer's k v e (0 for a plain item), pointers as
+    /// integers; out: S x V. Returns 0, or 1 for a token outside the vocabulary, 2 for a board state outside
+    /// its ranges, 3 for spans, paths or slots that do not fit.
+    pub fn step(&mut self, t: usize, s: usize, ids: *const i64, feats: *const f32, boards: *const u8, meta: &[i64], caches: &[usize], paths: &[i64], out: *mut f32) -> i32 {
+        if meta.len() < 8 * s || caches.len() < 6 * s {
             return 3;
         }
         let d = self.d;
@@ -587,12 +625,20 @@ impl Engine {
                 }
             }
         }
-        let mut off = 0i64;
-        for q in meta[..4 * s].chunks(4) {
-            if q[1] < 1 || q[0] < 0 || q[0] + q[1] > q[2].min(self.ctx as i64) || q[3] != off {
+        let (mut off, ctx) = (0i64, self.ctx as i64);
+        for q in meta[..8 * s].chunks(8) {
+            let (n0, len, cap, scap, plen, poff, dest) = (q[0], q[1], q[2], q[4], q[5], q[6], q[7]);
+            if len < 1 || n0 < 0 || q[3] != off {
                 return 3;
             }
-            off += q[1];
+            if scap == 0 {
+                if n0 + len > cap.min(ctx) {
+                    return 3;
+                }
+            } else if len != 1 || n0 > cap || plen < 0 || n0 + plen + 1 > ctx || poff < 0 || poff + plen > paths.len() as i64 || !(0..scap).contains(&dest) || paths[poff as usize..(poff + plen) as usize].iter().any(|r| !(0..scap).contains(r)) {
+                return 3;
+            }
+            off += len;
         }
         if s > 0 && off != t as i64 || s == 0 && t != 0 {
             return 3;
@@ -604,14 +650,31 @@ impl Engine {
         self.boards = boards;
         self.out = out;
         self.seq.clear();
+        self.paths.clear();
+        self.paths.extend(paths.iter().map(|&r| r as usize));
         self.tseq.resize(t, 0);
         self.last.resize(s, 0);
         self.units.clear();
         let qc = 1.max(32.min(t * self.h / (4 * nt) + 1));
         for si in 0..s {
-            let q = &meta[4 * si..4 * si + 4];
+            let q = &meta[8 * si..8 * si + 8];
+            let c = &caches[6 * si..6 * si + 6];
             let (n0, len, cap, off) = (q[0] as usize, q[1] as usize, q[2] as usize, q[3] as usize);
-            self.seq.push(Seq { n0, off, cap, k: caches[3 * si] as *mut u16, v: caches[3 * si + 1] as *mut u16, e: caches[3 * si + 2] as *mut u16 });
+            self.seq.push(Seq {
+                n0,
+                off,
+                cap,
+                k: c[0] as *mut u16,
+                v: c[1] as *mut u16,
+                e: c[2] as *mut u16,
+                sk: c[3] as *mut u16,
+                sv: c[4] as *mut u16,
+                se: c[5] as *mut u16,
+                scap: q[4] as usize,
+                path: q[6] as usize,
+                plen: q[5] as usize,
+                dest: q[7] as usize,
+            });
             for j in 0..len {
                 self.tseq[off + j] = si;
             }
@@ -798,12 +861,23 @@ impl Engine {
             let ek = self.e_.p.add(k * d);
             if j > 0 {
                 std::ptr::copy_nonoverlapping(ek.sub(d), prev, d);
-            } else if s.n0 > 0 {
-                for dd in 0..d {
-                    *prev.add(dd) = bf(*s.e.add((s.n0 - 1) * d + dd));
-                }
             } else {
-                std::ptr::write_bytes(prev, 0, d);
+                // the row before: a leaf's last ancestor slot, else the cache's last row
+                let before = if s.leaf() && s.plen > 0 {
+                    Some(s.se.add(self.paths[s.path + s.plen - 1] * d))
+                } else if s.n0 > 0 {
+                    Some(s.e.add((s.n0 - 1) * d))
+                } else {
+                    None
+                };
+                match before {
+                    Some(b) => {
+                        for dd in 0..d {
+                            *prev.add(dd) = bf(*b.add(dd));
+                        }
+                    }
+                    None => std::ptr::write_bytes(prev, 0, d),
+                }
             }
             let c = rb(smear * rb(sigm(rb(dot::<S>(ek, self.smear_gate, 16)))));
             let xk = self.x.p.add(k * d);
@@ -816,7 +890,7 @@ impl Engine {
                 *x2.add(dd) = bf(*e2.add(dd));
             }
             norm::<S>(x2, x2, d);
-            let ce = s.e.add((s.n0 + j) * d);
+            let ce = if s.leaf() { s.se.add(s.dest * d) } else { s.e.add((s.n0 + j) * d) };
             for dd in 0..d {
                 *ce.add(dd) = tobf(*ek.add(dd));
             }
@@ -869,13 +943,14 @@ impl Engine {
         }
     }
 
-    /// token k, head hh: q and k normed and rotated, v (+ value embedding); k and v into the cache
+    /// token k, head hh: q and k normed and rotated, v (+ value embedding); k and v into the cache (a leaf's:
+    /// into its slot)
     #[inline(always)]
     unsafe fn rotary<S: Simd>(&self, i: usize, k: usize, hh: usize, gk: *const f32) {
         let ly = &self.layers[i];
         let s = &self.seq[self.tseq[k]];
         let (d, h, hd) = (self.d, self.h, self.hd);
-        let p = s.n0 + (k - s.off);
+        let p = s.pos(k);
         let half = hd / 2;
         let row = self.qkv.p.add(k * 3 * d) as *const f32;
         let mut qn = [0f32; 256];
@@ -885,8 +960,9 @@ impl Engine {
         let cs = self.cosv.add(p * half);
         let sn = self.sinv.add(p * half);
         let qo = self.q.p.add(k * d + hh * hd);
-        let kc = s.k.add(((i * h + hh) * s.cap + p) * hd);
-        let vc = s.v.add(((i * h + hh) * s.cap + p) * hd);
+        let (kb, vb, stride, at) = if s.leaf() { (s.sk, s.sv, s.scap, s.dest) } else { (s.k, s.v, s.cap, p) };
+        let kc = kb.add(((i * h + hh) * stride + at) * hd);
+        let vc = vb.add(((i * h + hh) * stride + at) * hd);
         for c in 0..half {
             let (co, si) = (bf(*cs.add(c)), bf(*sn.add(c)));
             *qo.add(c) = rb(rb(qn[c] * co) + rb(qn[c + half] * si));
@@ -908,33 +984,51 @@ impl Engine {
         }
     }
 
-    /// token k's attention in head hh over its game's cache, times the output gate; sc: scores
+    /// a leaf's row j after the cache's: its ancestors' slots in order, then its own
+    #[inline(always)]
+    fn slot(&self, s: &Seq, j: usize) -> usize {
+        if j < s.plen {
+            self.paths[s.path + j]
+        } else {
+            s.dest
+        }
+    }
+
+    /// token k's attention in head hh over its game's cache (a leaf's: the cache's rows, then its slots), times
+    /// the output gate; sc: scores
     #[inline(always)]
     unsafe fn attend<S: Simd>(&self, i: usize, k: usize, hh: usize, gk: *const f32, sc: *mut f32) {
         let s = &self.seq[self.tseq[k]];
         let (d, h, hd, vl) = (self.d, self.h, self.hd, S::VL);
         let kp = s.k.add((i * h + hh) * s.cap * hd) as *const u16;
         let vp = s.v.add((i * h + hh) * s.cap * hd) as *const u16;
-        let p = s.n0 + (k - s.off);
+        let p = s.pos(k);
         let qv = self.q.p.add(k * d + hh * hd) as *const f32;
         let nc = hd / vl;
         let mut qr = [S::zero(); 32];
         for (c, q) in qr.iter_mut().enumerate().take(nc) {
             *q = S::ld(qv.add(c * vl));
         }
+        let n = p + 1;
+        let nk = if s.leaf() { s.n0 } else { n }; // rows read from the cache
         let mut mx = f32::NEG_INFINITY;
-        for r in 0..=p {
-            let mut a = S::zero();
-            for c in 0..nc {
-                a = S::fma(qr[c], S::ld_bf16(kp.add(r * hd + c * vl)), a);
-            }
-            let v = S::sum(a) * self.scale;
+        for r in 0..nk {
+            let v = score::<S>(&qr, nc, kp.add(r * hd)) * self.scale;
             *sc.add(r) = v;
             if mx < v {
                 mx = v;
             }
         }
-        let n = p + 1;
+        if s.leaf() {
+            let sk = s.sk.add((i * h + hh) * s.scap * hd) as *const u16;
+            for r in nk..n {
+                let v = score::<S>(&qr, nc, sk.add(self.slot(s, r - nk) * hd)) * self.scale;
+                *sc.add(r) = v;
+                if mx < v {
+                    mx = v;
+                }
+            }
+        }
         let mut r = 0;
         let mut vs = S::zero();
         while r + vl <= n {
@@ -951,10 +1045,20 @@ impl Engine {
             r += 1;
         }
         let mut o = [S::zero(); 32];
-        for r in 0..n {
+        for r in 0..nk {
             let pr = S::set(*sc.add(r));
             for c in 0..nc {
                 o[c] = S::fma(pr, S::ld_bf16(vp.add(r * hd + c * vl)), o[c]);
+            }
+        }
+        if s.leaf() {
+            let sv = s.sv.add((i * h + hh) * s.scap * hd) as *const u16;
+            for r in nk..n {
+                let pr = S::set(*sc.add(r));
+                let row = sv.add(self.slot(s, r - nk) * hd);
+                for c in 0..nc {
+                    o[c] = S::fma(pr, S::ld_bf16(row.add(c * vl)), o[c]);
+                }
             }
         }
         let yo = self.y.p.add(k * d + hh * hd);

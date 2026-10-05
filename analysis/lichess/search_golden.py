@@ -63,11 +63,12 @@ def main():
     assert m.fast is not None
     engine = Engine(m)
     searchers = {"coverage": tree.Coverage(), "kl": tree.KL()}
-    leaf_logits, inner = [], tree.Nodes.__call__
+    leaf_logits, handles_seen, inner = [], [], tree.Nodes.__call__
 
     def recorded(self_, handles):
         z = inner(self_, handles)
         leaf_logits.append(np.asarray(z, np.float64).copy())
+        handles_seen.append(np.asarray(handles, np.int64).copy())
         return z
 
     tree.Nodes.__call__ = recorded
@@ -77,9 +78,12 @@ def main():
         if game.board.is_game_over() or game.board.legal_moves.count() < 2:
             continue
         key = f"{f.split('/')[-1][:-4]}@{ply}"
+        out[key + "/root_logits"] = game.sync().double().numpy()
+        out[key + "/tokens"] = np.array(game.tokens, np.int64)
+        out[key + "/features"] = np.array(game.features(), np.float32)
         for name in a.searchers.split(","):
             for budget in map(int, a.budgets.split(",")):
-                leaf_logits.clear()
+                leaf_logits.clear(), handles_seen.clear()
                 res = searchers[name](game, budget)
                 assert res is not None
                 tag = f"{key}/{name}/{budget}"
@@ -94,6 +98,8 @@ def main():
                     out[f"{tag}/{part}"] = np.asarray(res[1 + j], np.float64)
                 z = np.concatenate(leaf_logits) if leaf_logits else np.zeros((0, 2432))
                 out[tag + "/leaf_logits"] = z.astype(np.float32)
+                out[tag + "/handles"] = np.concatenate(handles_seen) if handles_seen else np.zeros((0, 4), np.int64)
+                out[tag + "/calls"] = np.array([len(h) for h in handles_seen], np.int64)
                 n_leaves += len(z)
         if i % 20 == 0:
             print(

@@ -44,12 +44,13 @@ def main():
     p.add_argument("--budget", type=int, default=128)
     p.add_argument("--searcher", default="coverage")
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--backend", default="fast", choices=("fast", "rust"), help="the C++ kernels or the Rust engine")
     p.add_argument("--torch-threads", type=int, default=1)
     p.add_argument("--ply", type=int, default=30)
     p.add_argument("--out")
     a = p.parse_args()
     torch.set_num_threads(a.torch_threads)
-    m = Model(a.model, "cpu", torch.bfloat16, None, True, "fast", a.threads)
+    m = Model(a.model, "cpu", torch.bfloat16, None, True, a.backend, a.threads)
     assert m.fast is not None
     engine = Engine(m)
     files = sorted(glob.glob(a.pgns))
@@ -98,7 +99,7 @@ def main():
     wall = time.perf_counter() - t0
     n_leaves = sum(leaves)
     secs = np.array([s for s, _ in per_search])
-    row = dict(model=str(a.model), searcher=a.searcher, budget=a.budget, games=a.games, rounds=a.rounds,
+    row = dict(model=str(a.model), backend=a.backend, searcher=a.searcher, budget=a.budget, games=a.games, rounds=a.rounds,
                threads=m.fast.threads, torch_threads=torch.get_num_threads(),
                cpu=open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].split(":")[1].strip(),
                searches=len(per_search), leaves=n_leaves, wall_s=round(wall, 2),
