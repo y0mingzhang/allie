@@ -13,39 +13,43 @@ median of 1,024-simulation searches in a 6-CPU load test of 10 games, 14.3-14.6 
 running at a fifth of the clock stops, and the policy plays.
 
 Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
-positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py --think), scoring
-each cell as the bot plays it: per position, the rungs mixed by the think-time draws. Per cell,
-among the rung sets and betas whose human-move cross-entropy is below the policy's at 95% confidence
-(standard errors clustered by game), the cheapest whose expected move accuracy and blunder rate
-(Stockfish scoring every legal move) are within 20 Elo of the closest to the humans'; the policy
-where none qualifies, and in bullet, whose think times a search outlasts.
+positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py --think --atanh
+0.99), scoring each cell as the bot plays it: per position, the rungs mixed by the think-time draws.
+Per cell, among the rung sets, tilts (on Q or on its log-odds) and betas whose human-move
+cross-entropy is below the policy's at 95% confidence (standard errors clustered by game), the
+cheapest whose expected move accuracy and blunder rate (Stockfish scoring every legal move) are
+within 20 Elo of the closest to the humans'; the policy where none qualifies, and in bullet, whose
+think times a search outlasts.
 """
 
 import numpy as np
 
-# (speed, bin) -> (searcher, {rung: beta}): the largest rung that the move's think time and the clock
-# allow is searched, beta None for coverage's calibrated distribution; a cell not listed plays the
-# policy. Comments: the cell's errors (Elo, accuracy / blunder rate) and cross-entropy gap as the bot
-# plays it, its rungs mixed by the think times it draws
+# (speed, bin) -> (searcher, {rung: beta}[, "atanh"]): the largest rung that the move's think time
+# and the clock allow is searched, beta None for coverage's calibrated distribution, "atanh" for a
+# tilt on the values' log-odds; a cell not listed plays the policy. Comments: the cell's errors (Elo,
+# accuracy / blunder rate) and cross-entropy gap as the bot plays it, its rungs mixed by the think
+# times it draws
 # fmt: off
 CELLS = {
-    ("blitz", 1800): ("coverage", {32: 0.5, 8: 0.5}),  # -87 / -107, -0.0020
-    ("blitz", 2000): ("coverage", {128: None, 32: None, 8: None}),  # -49 / -79, -0.0073
-    ("blitz", 2200): ("coverage", {256: 2.0, 128: 2.0, 32: 2.0, 8: 2.0}),  # -62 / -30, -0.0088
+    ("blitz", 1600): ("coverage", {32: 0.2, 8: 0.2}),  # -97 / -55, -0.0006
+    ("blitz", 1800): ("coverage", {32: 0.75, 8: 0.75}),  # -41 / -63, -0.0022
+    ("blitz", 2000): ("coverage", {32: 1.5, 8: 1.5}),  # +0 / -34, -0.0041
+    ("blitz", 2200): ("coverage", {128: 1.5, 32: 1.5, 8: 1.5}, "atanh"),  # -50 / -25, -0.0078
     ("blitz", 2400): ("coverage", {32: 4.0, 8: 4.0}),  # -16 / -73, -0.0117
-    ("blitz", 2600): ("coverage", {256: 4.0, 128: 4.0, 32: 4.0, 8: 4.0}),  # -26 / -90, -0.0209
+    ("blitz", 2600): ("coverage", {128: 3.0, 32: 3.0, 8: 3.0}, "atanh"),  # -12 / -79, -0.0179
     ("rapid", 1600): ("coverage", {128: 0.5, 32: 0.5, 8: 0.5}),  # -57 / -40, -0.0018
     ("rapid", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # -55 / +27, -0.0033
-    ("rapid", 2000): ("coverage", {128: 1.0, 32: 1.0, 8: 1.0}),  # -65 / -71, -0.0053
-    ("rapid", 2200): ("coverage", {32: 3.0, 8: 3.0}),  # +2 / +9, -0.0099
-    ("rapid", 2400): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}),  # -11 / +15, -0.0275
-    ("rapid", 2600): ("coverage", {256: 8.0, 128: 8.0, 32: 8.0, 8: 8.0}),  # -73 / -45, -0.0423
-    ("classical", 1600): ("coverage", {32: 0.5, 8: 0.5}),  # -62 / -91, -0.0025
-    ("classical", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # -23 / -45, -0.0042
+    ("rapid", 2000): ("coverage", {32: 1.5, 8: 1.5}),  # -25 / -33, -0.0049
+    ("rapid", 2200): ("coverage", {32: 2.0, 8: 2.0}, "atanh"),  # -2 / +0, -0.0146
+    ("rapid", 2400): ("coverage", {128: 4.0, 32: 4.0, 8: 4.0}, "atanh"),  # -10 / +15, -0.0276
+    ("rapid", 2600): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -37 / +9, -0.0216
+    ("classical", 1000): ("coverage", {32: 0.1, 8: 0.1}, "atanh"),  # -84 / -30, -0.0005
+    ("classical", 1600): ("coverage", {128: 0.75, 32: 0.75, 8: 0.75}),  # +6 / -41, -0.0028
+    ("classical", 1800): ("coverage", {32: 0.75, 8: 0.75}, "atanh"),  # -18 / -44, -0.0047
     ("classical", 2000): ("coverage", {32: 4.0, 8: 4.0}),  # +6 / +1, -0.0121
-    ("classical", 2200): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}),  # -57 / -12, -0.0234
-    ("classical", 2400): ("coverage", {1024: 12.0, 256: 12.0, 128: 12.0, 32: 12.0, 8: 12.0}),  # -41 / -56, -0.0247
-    ("classical", 2600): ("coverage", {1024: 16.0, 256: 16.0, 128: 16.0, 32: 16.0, 8: 16.0}),  # -188 / -304, -0.0466
+    ("classical", 2200): ("coverage", {128: 4.0, 32: 4.0, 8: 4.0}, "atanh"),  # -30 / +20, -0.0276
+    ("classical", 2400): ("coverage", {1024: 6.0, 256: 6.0, 128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -26 / -35, -0.0395
+    ("classical", 2600): ("coverage", {1024: 6.0, 256: 6.0, 128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -171 / -263, -0.0394
 }
 # fmt: on
 LADDER = dict(coverage=(8, 32, 128, 256, 1024), lookahead=(1, 2, 4, 8, 16))
@@ -69,8 +73,11 @@ def affordable(searcher, rungs, clock, reserve=1.0, think=None):
     return max((b for b in rungs if b * COST[searcher] <= fits), default=0)
 
 
-def tilt(prior, q, beta):
-    """The searched distribution: pi ~ prior exp(beta Q)."""
-    z = np.log(np.maximum(prior, 1e-300)) + beta * np.asarray(q, float)
+def tilt(prior, q, beta, atanh=False):
+    """The searched distribution: pi ~ prior exp(beta Q), or with atanh prior exp(beta arctanh(0.99 Q)),
+    on the W - L value's log-odds (Q saturates near +-1, so a fixed beta under-tilts clear positions)."""
+    q = np.asarray(q, float)
+    q = np.arctanh(0.99 * np.clip(q, -1, 1)) if atanh else q
+    z = np.log(np.maximum(prior, 1e-300)) + beta * q
     z = np.exp(z - z.max())
     return z / z.sum()

@@ -21,10 +21,10 @@ def test_cells_bin_the_rating(monkeypatch):
 
 def test_cells_are_on_their_ladders():
     """Every searching cell's rungs are on its searcher's ladder; beta None (the calibrated
-    distribution) only for coverage; bullet never searches."""
-    for (speed, b), (kind, rungs) in calibration.CELLS.items():
-        assert rungs and set(rungs) <= set(calibration.LADDER[kind])
-        assert all(beta is not None or kind == "coverage" for beta in rungs.values())
+    distribution) only for coverage and not with the log-odds tilt; bullet never searches."""
+    for (speed, b), (kind, rungs, *form) in calibration.CELLS.items():
+        assert rungs and set(rungs) <= set(calibration.LADDER[kind]) and form in ([], ["atanh"])
+        assert all(beta is not None or (kind == "coverage" and not form) for beta in rungs.values())
         assert speed in ("blitz", "rapid", "classical") and b % 200 == 0 and 800 <= b <= 2600
 
 
@@ -52,6 +52,9 @@ def test_tilt():
     assert calibration.tilt(prior, q, 0.0) == pytest.approx(prior)
     p = calibration.tilt(prior, q, 2.0)
     assert p.sum() == pytest.approx(1) and p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4))
+    p = calibration.tilt(prior, np.array([-0.5, 0.0, 0.5]), 2.0, atanh=True)  # log-odds of 0.99 Q
+    assert p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.495)))
+    assert np.isfinite(calibration.tilt(prior, q, 2.0, atanh=True)).all()  # Q = +-1 stays finite
 
 
 class Search:
@@ -98,6 +101,9 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # coverage's values: prior exp(40 Q)
     assert game.decide(play, search, 30).move == legal_of(game)[0]  # 30 s left: rung 32, with its own beta
     assert search["coverage"].budgets == [256, 256, 32]
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 4.0}, "atanh")})
+    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # log-odds tilt: Q = +-1 at 4 arctanh(0.99)
+    search["coverage"].budgets.pop()
     monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("lookahead", {8: 40.0})})
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # prior exp(40 Q)
     assert search["lookahead"].budgets == [8]
