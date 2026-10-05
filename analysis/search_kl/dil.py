@@ -59,6 +59,7 @@ def main():
     p.add_argument("--fill", default="root", choices=["root", "mean"])
     p.add_argument("--contrast", default="", help="gammas for the rating-contrast term (runs with per-view root policies)")
     p.add_argument("--contrast-view", type=int, default=1)
+    p.add_argument("--contrast-run", default="", help="a harness run whose prior_v gives the contrast (default this one)")
     p.add_argument("--only", default="", help="variants to score (default all)")
     a = p.parse_args()
     z, budgets = load(a.run)
@@ -76,9 +77,13 @@ def main():
     S.prior = np.empty(len(S.legal))
     S.prior[perm] = z["prior"]
     pv = None
-    if "prior_v" in z and a.contrast:
+    src = load(a.contrast_run)[0] if a.contrast_run else z
+    if "prior_v" in src and a.contrast:  # the view's root policy, by position and move token
+        at = {(int(i), int(t)): x for i, o0, o1 in zip(src["index"], src["offsets"][:-1], src["offsets"][1:])
+              for t, x in zip(src["legal"][o0:o1], src["prior_v"][o0:o1, a.contrast_view])}  # fmt: skip
+        idx = np.repeat(z["index"], np.diff(z["offsets"]))
         pv = np.empty(len(S.legal))
-        pv[perm] = z["prior_v"][:, a.contrast_view]
+        pv[perm] = [at[int(i), int(t)] for i, t in zip(idx, z["legal"])]
     w = z["heads"][:, 63:66].astype(float)
     w = np.exp(w - w.max(1, keepdims=True))
     v0 = (w[:, 0] - w[:, 2]) / w.sum(1)
