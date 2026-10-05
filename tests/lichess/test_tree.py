@@ -9,7 +9,7 @@ import torch
 
 from allie.lichess.engine import Engine, Game, Play
 from allie.lichess.model import Cache, Model, step
-from allie.lichess.tokens import MOVE_ID
+from allie.lichess.tokens import MOVE_ID, header
 
 from .test_tokens import random_game
 
@@ -263,3 +263,65 @@ def test_fast_lookahead_runs_concurrently_and_stops_late(tiny_path):
     for (m1, p1, q1), (m2, p2, q2) in zip(alone, together):
         assert m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 1e-2
     assert search(games[0], 4, deadline=time.monotonic() - 1) is None
+
+
+def test_mixed_averages_wdl():
+    rng = np.random.default_rng(0)
+    zs = [rng.normal(0, 3, (5, 2432)) for _ in range(3)]
+    z = tree.mixed(zs)
+    soft = lambda x: np.exp(x - x.max(-1, keepdims=True)) / np.exp(x - x.max(-1, keepdims=True)).sum(-1, keepdims=True)
+    np.testing.assert_allclose(soft(z[:, tree.WDL]), np.mean([soft(x[:, tree.WDL]) for x in zs], 0), atol=1e-12)
+    np.testing.assert_array_equal(np.delete(z, np.r_[tree.WDL], 1), np.delete(zs[0], np.r_[tree.WDL], 1))
+
+
+def test_view_follows_a_takeback(tiny):
+    game, moves, clock = Game(Engine(tiny), 2400, 2500, 180, 2), random_game(5, 12), [180, 180]
+    for k in range(1, len(moves) + 1):  # every move's clock known: a takeback keeps the earlier features
+        clock[(k - 1) % 2] -= 3
+        game.update(moves[:k], *clock)
+    view = tree.View(game, "r2800")
+    view.sync()
+    game.update(moves[:-2], *clock)
+    fresh = tree.View(game, "r2800")
+    assert view.tokens == fresh.tokens and fresh.tokens[3:11] == [2, 8, 0, 0, 2, 8, 0, 0]
+    np.testing.assert_allclose(view.sync(), fresh.sync(), atol=1e-4)  # incremental vs one prefill
+    assert view.cache.n == len(game.tokens)
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_coverage_views_play_legal_moves(tiny):
+    pytest.importorskip("pybind11")
+    game = Game(Engine(tiny), 2400, 2500, 1800, 10)
+    game.update(random_game(8, 14), 1700, 1690)
+    alone = tree.Coverage()(game, 8)
+    for views in (("true", "r2800"), ("noclock", "swap/noclock", "r3000"), ("r3000/noclock", "tc180+2/swap/noclock")):
+        moves, p, prior, q = tree.Coverage(views=views)(game, 8)
+        assert sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
+        assert abs(p.sum() - 1) < 1e-9 and abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all()
+        assert alone[0] == moves and np.allclose(alone[2], prior)  # the game's own prior: only the values mix
+    assert {"r2800", "noclock", "swap/noclock", "r3000"} <= set(game.views)
+
+
+def test_view_specs(tiny):
+    game = Game(Engine(tiny), 2400, 2500, 1800, 10)
+    game.update(random_game(8, 6), 1700, 1690)
+    own = game.tokens[3:11]
+    assert tree.View(game, "swap").tokens[3:11] == own[4:] + own[:4]
+    assert tree.View(game, "r3000/noclock").tokens[3:11] == [3, 0, 0, 0] * 2
+    assert tree.View(game, "swap").features() == game.features()
+    assert all(f == [-1] * 3 for f in tree.View(game, "swap/noclock").features())
+    assert any(f != [-1] * 3 for f in game.features())
+    blitz = tree.View(game, "tc180+2/swap/noclock").tokens
+    assert blitz[1:3] == header(180, 2, 0, 0)[1:3] and blitz[3:11] == own[4:] + own[:4] and blitz[11:] == game.tokens[11:]
+    assert tree.View(game, "tc180+2/noclock").inc == 2 and tree.View(game, "swap").inc == game.inc == 10
+    with pytest.raises(ValueError):
+        tree.View(game, "tc180")
+
+
+def test_coverage_views_respect_the_deadline_in_sync(tiny):
+    game = Game(Engine(tiny), 2400, 2500, 1800, 10)
+    game.update(random_game(8, 14), 1700, 1690)
+    assert tree.Coverage(views=("true", "r2800"))(game, 8, deadline=time.monotonic() - 1) is None

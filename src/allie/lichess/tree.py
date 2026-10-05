@@ -7,6 +7,7 @@ calibration.json hurts this model at every budget.
 """
 
 import json
+import weakref
 from pathlib import Path
 from time import monotonic
 
@@ -18,10 +19,12 @@ from allie.search import Search, lookahead
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
 from allie.search.native import from_prefix, load
 
+from .engine import Game
 from .model import Cache
-from .tokens import CONTEXT, MOVE_START, MOVES, advance
+from .tokens import CONTEXT, HEADER, MOVE_START, MOVES, advance, header
 
 CALIBRATION = Path(__file__).with_name("calibration-allie-2.0.json")
+WDL = slice(2413, 2416)
 # simulations -> the output policy fitted for them (8, 25 and 32 reuse 128's, 1024 256's)
 POLICY = {5: "5", 8: "128", 25: "128", 32: "128", 128: "128", 256: "256", 1024: "256"}
 
@@ -219,17 +222,24 @@ class Nodes:
 class Coverage:
     """search(game, simulations, deadline) -> (legal moves, searched human-move probabilities, their
     prior, their searched values for the mover), or None if the search runs past deadline
-    (time.monotonic())."""
+    (time.monotonic()). views: the readings every node is evaluated under ("true": the game's own; else a
+    View spec); its W/D/L is their mean (Mixed), the tree's other outputs the first view's, the root's
+    prior and think time always the game's own."""
 
-    def __init__(self, threads=4):
+    def __init__(self, threads=4, views=("true",)):
         self.parameters = json.loads(CALIBRATION.read_text())
         bp = self.parameters["budget_policies"]
         for b, key in POLICY.items():
             bp.setdefault(str(b), bp[key])
-        self.threads = threads
+        self.threads, self.views = threads, tuple(views)
         load(), load("value")  # built or loaded now, not in a game's first search
 
     def __call__(self, game, simulations, deadline=np.inf):
+        own = game.__dict__.setdefault("views", {})
+        games = [game if v == "true" else own.get(v) or own.setdefault(v, View(game, v)) for v in self.views]
+        zs = [g.sync() for g in games]
+        if self.views != ("true",) and monotonic() > deadline:  # a view's first sync prefills the whole game
+            return None
         z = game.sync()
         feats = np.array(game.features(), np.float32)
         elo = game.elo[len(game.moves) % 2]
@@ -242,9 +252,11 @@ class Coverage:
         concurrent = game.engine.model.fast is not None
 
         def run():
-            tree = Tree(game, z, capacity=4 * simulations + 256)
-            tree.concurrent, tree.deadline = concurrent, deadline
-            s = Search(tree, threads=1 if concurrent else self.threads, calibration=self.parameters)
+            trees = [Tree(g, x, capacity=4 * simulations + 256) for g, x in zip(games, zs)]
+            for t in trees:
+                t.concurrent, t.deadline = concurrent, deadline
+            oracle = Mixed(trees, z.double().numpy()) if self.views != ("true",) else trees[0]
+            s = Search(oracle, threads=1 if concurrent else self.threads, calibration=self.parameters)
             return s._batch([row], [feats], "coverage", simulations, "predicted",
                             False, 0.9, 2.0, 1.25)[0]  # fmt: skip
 
@@ -256,6 +268,96 @@ class Coverage:
             return None
         moves = [MOVES[t - MOVE_START] for t in out["tokens"]]
         return moves, out["probabilities"], out["legal_prior"], out["values"]
+
+
+class View:
+    """The game read under another header or with no clocks: its own cache, the game's moves. spec: parts
+    joined by '/': rE (both ratings E), swap (the ratings exchanged), tcB+I (base and increment seconds),
+    noclock (every clock feature unknown)."""
+
+    def __init__(self, game, spec):
+        self.game, self.engine = weakref.proxy(game), game.engine  # the game owns its views
+        head, self.clockless, self.inc = list(game.tokens[1:11]), False, game.inc
+        for part in spec.split("/"):
+            if part == "swap":
+                head = head[:2] + head[6:] + head[2:6]
+            elif part.startswith("tc") and part[2:].replace("+", "", 1).isdigit() and "+" in part:
+                base, inc = map(int, part[2:].split("+"))
+                head[:2] = header(base, inc, 0, 0)[1:3]
+                self.inc = inc if inc <= 180 else None  # the clocks advance by the header's increment
+            elif part == "noclock":
+                self.clockless = True
+            elif part.startswith("r") and part[1:].isdigit():
+                head[2:] = [int(c) for c in f"{min(int(part[1:]), 9999):04d}" * 2]
+            else:
+                raise ValueError(f"unknown view part {part!r}")
+        self.head = head
+        self.cache, self.logits, self.used = Cache(game.engine.model), None, []
+
+    tokens = property(lambda self: self.game.tokens[:1] + self.head + self.game.tokens[11:])
+    boards = property(lambda self: self.game.boards)
+
+    def features(self):
+        return [[-1] * 3] * len(self.game.tokens) if self.clockless else self.game.features()
+
+    def sync(self):
+        n = len(self.game.tokens)
+        if self.cache.n > n:  # the game was taken back past the view's cache
+            self.cache.truncate(n)
+            self.used, self.logits = self.used[:n], None
+        return Game.sync(self)
+
+
+def mixed(zs):
+    """The first logits with the W/D/L rows set to the log of the mean W/D/L probabilities of all."""
+    z = np.array(zs[0], np.float64)
+    p = [np.exp(x - x.max(-1, keepdims=True)) for x in (np.asarray(y, np.float64)[..., WDL] for y in zs)]
+    z[..., WDL] = np.log(np.mean([q / q.sum(-1, keepdims=True) for q in p], 0))
+    return z
+
+
+class Mixed:
+    """allie.search's oracle over Trees of the game's views: every node is evaluated under each; its W/D/L
+    is their mean, every other output the first view's; the root's policy and think time are `own`'s
+    (the game's own logits)."""
+
+    def __init__(self, trees, own):
+        self.trees, self.own = trees, own
+
+    new_tokens = property(lambda self: sum(t.new_tokens for t in self.trees))
+
+    def reset(self):
+        for t in self.trees:
+            t.reset()
+
+    def handles(self, prefixes, feats, clock_rule="predicted"):
+        assert list(prefixes[0][HEADER:]) == list(self.trees[0].game.tokens[HEADER:])
+        return MixedNodes([t.handles([t.game.tokens], [np.array(t.game.features(), np.float32)], clock_rule)
+                           for t in self.trees], self.own, clock_rule)  # fmt: skip
+
+
+class MixedNodes:
+    """Every view's nodes; the root's policy and think time the game's own, and inside the tree every view's
+    clocks follow the first view's think times."""
+
+    def __init__(self, nodes, own, clock_rule):
+        self.nodes, self.root_logits = nodes, mixed([n.root_logits for n in nodes])
+        self.root_logits[0, : WDL.start] = own[: WDL.start]
+        self.root_logits[0, WDL.stop :] = own[WDL.stop :]
+        if clock_rule == "predicted":
+            for n in nodes:
+                n.elapsed[0] = predicted_seconds(self.root_logits)[0]
+
+    queries = property(lambda self: self.nodes[0].queries)
+    per_root_queries = property(lambda self: self.nodes[0].per_root_queries)
+
+    def __call__(self, handles):
+        ids = np.asarray(handles, np.int64)[:, 0]
+        z = [self.nodes[0](handles)]
+        for n in self.nodes[1:]:
+            z.append(n(handles))
+            n.elapsed[ids] = self.nodes[0].elapsed[ids]
+        return mixed(z)
 
 
 class Lookahead:
