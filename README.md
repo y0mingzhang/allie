@@ -179,7 +179,7 @@ The [bot's guide](src/allie/lichess/README.md) covers bot accounts, settings and
 
 ### Calibrated play
 
-In its `calibrated` mode the bot plays close to the strength of humans of its rating (by default, yours) at the game's time control. Sampling straight from the model plays weaker than such humans, most at high ratings and in classical, so in each time control and 200-point rating band the bot either samples from the model or first searches a little, always sampling at temperature 1. It searches only where the searched moves also predict human moves better than the model alone, and never in bullet. The [bot's guide](src/allie/lichess/README.md) covers the setting (search runs on the CPU backend and needs the `search` extra), [calibration.py](src/allie/lichess/calibration.py) lists the bands, and the [How Allie Searches](https://claude.ai/artifact/DvSBkCBwqQvo4ghZWRZfRt) deck explains the search.
+In its `calibrated` mode the bot plays close to the strength of humans of its rating (by default, yours) at the game's time control. Sampling straight from the model plays weaker than such humans, most at high ratings and in classical, so in each time control and 200-point rating band the bot either samples from the model or first searches a little, always sampling at temperature 1. It searches only where the searched moves also predict human moves better than the model alone, and never in bullet. The [bot's guide](src/allie/lichess/README.md) covers the setting (search runs on the CPU backend and needs the `search` extra) and [calibration.py](src/allie/lichess/calibration.py) lists the bands.
 
 ![Strength of the bot's moves minus that of humans at the same rating, by time control: sampling the policy and calibrated play](docs/figures/calibrated.png)
 
