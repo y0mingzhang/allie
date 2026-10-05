@@ -179,5 +179,5 @@ def test_close_serves_queued_requests(tiny):
 
 def test_kl_cells_tilt():
     """A kl rung's searcher returns (moves, prior, Q): it needs a beta (None would play the prior)."""
-    for searcher, rungs in calibration.CELLS.values():
+    for searcher, rungs, *_ in calibration.CELLS.values():
         assert searcher != "kl" or all(b is not None for b in rungs.values())

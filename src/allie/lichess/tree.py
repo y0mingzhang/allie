@@ -394,26 +394,38 @@ class KL:
     best-first by reach to `leaves` network evaluations (kl.grow keywords `grow`: each side's policy tilted
     by its values) and read by kl.backup keywords `read`. With read's squash the values are log odds,
     arctanh(squash (W - L)), and so is Q; moves left unexpanded at the root take the root's own value. The
-    tree's clocks do not advance (clock_rule "zero"). On the fast backend it runs on the game's thread, as
+    tree's clocks do not advance (clock_rule "zero"). views: as Coverage's, the readings every node is
+    evaluated under, its W/D/L their mean, the policy below the root the first view's, the root's prior the
+    game's own; each view costs a network read a leaf. On the fast backend it runs on the game's thread, as
     Coverage does."""
 
     GROW = dict(own=5.0, opp=5.0, soft=True, kappa=0.5)
     READ = dict(own=12.0, opp=12.0, soft=True, squash=0.95)
 
-    def __init__(self, grow=None, read=None, clock_rule="zero"):
+    def __init__(self, grow=None, read=None, clock_rule="zero", views=("true",)):
         self.grow, self.read, self.clock_rule = grow or self.GROW, read or self.READ, clock_rule
+        self.views = tuple(views)
+        assert self.views == ("true",) or clock_rule == "zero", "views keep their own clocks only on the zero rule"
         load()
 
     def __call__(self, game, leaves, deadline=np.inf):
+        own = game.__dict__.setdefault("views", {})
+        games = [game if v == "true" else own.get(v) or own.setdefault(v, View(game, v)) for v in self.views]
+        zs = [g.sync() for g in games]
+        if self.views != ("true",) and monotonic() > deadline:  # a view's first sync prefills the whole game
+            return None
         z = game.sync()
-        feats = np.array(game.features(), np.float32)
+        feats = [np.array(g.features(), np.float32) for g in games]
         concurrent = game.engine.model.fast is not None
 
         def run():
-            tree = Tree(game, z, capacity=2 * leaves + 256)
-            tree.concurrent, tree.deadline = concurrent, deadline
-            bridge = tree.handles([game.tokens], [feats], self.clock_rule)
-            F = kl.Forest(bridge, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], tree.capacity)
+            trees = [Tree(g, x, capacity=2 * leaves + 256) for g, x in zip(games, zs)]
+            bridges = []
+            for t, g, f in zip(trees, games, feats):
+                t.concurrent, t.deadline = concurrent, deadline
+                bridges.append(t.handles([g.tokens], [f], self.clock_rule))
+            root = None if self.views == ("true",) else z[None].double().numpy()  # the game's own prior
+            F = kl.Forest(bridges, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], trees[0].capacity, prior=root)
             kl.grow(F, leaves, **self.grow)
             moves, prior, q = kl.root_q(F, kl.backup(F.view(), **self.read)[0], 0)
             s = self.read.get("squash", 0.0)

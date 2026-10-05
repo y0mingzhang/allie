@@ -356,7 +356,47 @@ def test_kl_values_searched_moves(tiny, monkeypatch):
     not (native / "chess.hpp").exists() or not shutil.which("c++"),
     reason="native search",
 )
-def test_fast_kl_runs_concurrently_and_stops_late(tiny_path):
+def test_kl_views_read_every_node_under_them(tiny, monkeypatch):
+    """KL views as Coverage's: the tree is the first view's, its W/D/L the views' mean, the root's prior the
+    game's own. Two readings of the game itself give the plain search."""
+    pytest.importorskip("pybind11")
+    from allie.search import kl
+
+    game, played = Game(Engine(tiny), 2400, 2500, 1800, 10), random_game(9, 14)
+    game.update(played, 1700, 1690)
+    grown, grow = [], kl.grow
+    monkeypatch.setattr(kl, "grow", lambda F, *a, **k: grown.append(F) or grow(F, *a, **k))
+    alone = tree.KL()(game, 16)
+    twice = tree.KL(views=("true", "true"))(game, 16)
+    assert alone[0] == twice[0] and np.allclose(alone[1], twice[1]) and np.allclose(alone[2], twice[2], atol=1e-9)
+    soft = lambda x: np.exp(x - x.max()) / np.exp(x - x.max()).sum()
+    for views in (("r3000/noclock",), ("r3000/tc1800+20/noclock", "true")):
+        moves, prior, q = tree.KL(views=views)(game, 16)
+        F = grown[-1]
+        assert F.spent[0] == 16 and sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
+        assert alone[0] == moves and np.allclose(alone[1], prior) and np.isfinite(q).all()
+        view = game.views[views[0]].sync().double().numpy()
+        np.testing.assert_allclose(F.wdlv[0, 0], soft(view[tree.WDL]), atol=1e-12)
+        assert not np.allclose(F.wdlv[0, 0], soft(game.sync().double().numpy()[tree.WDL]))
+    tree.KL(views=("r3000/noclock", "true"))(game, 16)
+    F = grown[-1]
+    live = ~F.terminal[: F.size]
+    np.testing.assert_allclose(F.wdl[: F.size][live], F.wdlv[: F.size][live].mean(1), atol=1e-12)
+    for c in np.flatnonzero((F.parent[: F.size] == 0) & live)[:4]:  # below the root, each node read as the view reads it
+        g = Game(game.engine, 2400, 2500, 1800, 10)
+        g.update(played + [tree.MOVES[int(F.token[c]) - tree.MOVE_START]], 1700, 1690)
+        np.testing.assert_allclose(F.wdlv[c, 0], soft(tree.View(g, "r3000/noclock").sync().double().numpy()[tree.WDL]), atol=1e-4)
+    calls, inner = [], tree.Nodes.__call__
+    monkeypatch.setattr(tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h))
+    assert tree.KL(views=("r2800",))(game, 8, deadline=time.monotonic() - 1) is None and not calls
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+@pytest.mark.parametrize("views", [("true",), ("r3000/noclock", "true")])
+def test_fast_kl_runs_concurrently_and_stops_late(tiny_path, views):
     """As lookahead: on the fast backend KL runs on the games' threads through the engine's batches, the same
     values as one at a time up to BF16 batching noise; past its deadline it gives None."""
     pytest.importorskip("pybind11")
@@ -368,7 +408,7 @@ def test_fast_kl_runs_concurrently_and_stops_late(tiny_path):
         fast.library()
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"no fast kernels: {e}")
-    engine, search = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)), tree.KL()
+    engine, search = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)), tree.KL(views=views)
     games = []
     for s in range(3):
         games.append(Game(engine, 2400, 2400, 1800, 20, "classical"))

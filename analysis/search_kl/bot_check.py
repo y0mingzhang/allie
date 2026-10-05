@@ -2,10 +2,11 @@
 (training checkpoint, bf16) on the same positions and budget: per position the root Q of every searched move,
 the trees' sizes, and the tilted outputs' total variation.
 
-python bot_check.py RUN --n 24 --budget 256 [--own 4 --opp 0 --clock zero]
+python bot_check.py RUN --n 24 --budget 256 [--grow 5:5:s:k0.5 --read 12:12:s:x0.95 --clock zero --views r3000/noclock]
 """
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -41,11 +42,14 @@ def main():
     p.add_argument("--grow", default="5:5:s:k0.5", help="kl.grow tilts (score_kl spec)")
     p.add_argument("--read", default="12:12:s:x0.95", help="kl.backup that reads Q (score_kl spec)")
     p.add_argument("--clock", default="zero")
+    p.add_argument("--views", default="true", help="tree.KL views, comma-separated (the run's own, as tree.View specs)")
     p.add_argument(
         "--beta", type=float, default=8.0, help="output tilt for the total variation"
     )
     a = p.parse_args()
     torch.set_num_threads(4)
+    run = json.loads((c.OUT / "pikl" / a.run / "args.json").read_text())
+    assert a.views == "true" or run.get("prior") == "0", "a views check needs a run read at the game's own root prior"
     F = ev.load_forest(c.OUT / "pikl" / a.run)
     keep = F["cost"] <= a.budget
     grow, read = parse(a.grow), parse(a.read)
@@ -53,7 +57,7 @@ def main():
     z = np.load(POS)
     off, tokens, feats, meta = z["offsets"], z["tokens"], z["feats"], z["meta"]
     engine = Engine(Model(MODEL, int8=True, backend="fast", threads=4))
-    search = KL(grow, read, a.clock)
+    search = KL(grow, read, a.clock, a.views.split(","))
     rows = np.linspace(0, len(F["index"]) - 1, a.n).astype(int)
     tv, corr, agree = [], [], []
     for r in rows:
