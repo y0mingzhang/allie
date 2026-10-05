@@ -284,6 +284,38 @@ def test_errors_on_the_opponents_turn_do_not_resign(engine, monkeypatch, caplog)
     assert not any("giving up" in r.message for r in caplog.records)
 
 
+@pytest.mark.parametrize(("search", "think"), [(0.6, 1.2), (0.9, 0.3)])
+def test_think_time_counts_from_the_state(engine, monkeypatch, search, think):
+    """The think-time wait starts when the state arrives: a search inside the sampled think
+    time does not add to it (a move takes max(think, search), the human's pace), and a search
+    longer than the think time adds no wait."""
+    from dataclasses import replace
+
+    from allie.lichess import bot as botmod
+    from allie.lichess import engine as enginemod
+
+    decide, on_state, took = enginemod.Game.decide, botmod.Match.on_state, []
+
+    def searching(self, *args):
+        d = decide(self, *args)
+        time.sleep(search)
+        return replace(d, think=think, resign=False, offer_draw=False)
+
+    def timed(self, s):
+        t0, moved = time.monotonic(), self.moved
+        on_state(self, s)
+        if self.moved != moved:
+            took.append(time.monotonic() - t0)
+
+    monkeypatch.setattr(enginemod.Game, "decide", searching)
+    monkeypatch.setattr(botmod.Match, "on_state", timed)
+    mock, _ = start(engine, think_time=True)
+    mock.challenge("random", "allie", 600, 0, color="black")  # the bot is white
+    wait(lambda: len(took) >= 3, timeout=60)
+    want = max(search, think)
+    assert all(want <= t < want + 0.25 for t in took), took
+
+
 def test_refused_move_resyncs(engine, caplog):
     """Lichess refuses a move and the game goes on (a desync, not the opponent resigning
     meanwhile): the bot resyncs from a fresh stream and moves again instead of flagging."""
