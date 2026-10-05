@@ -8,6 +8,7 @@ pub mod kernels;
 pub mod model;
 pub mod pool;
 pub mod py;
+pub mod search;
 pub mod simd;
 
 #[pyfunction]
@@ -20,5 +21,6 @@ fn allie_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     chess::register(m)?;
     py::register(m)?;
+    search::register(m)?;
     Ok(())
 }
