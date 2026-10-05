@@ -821,6 +821,8 @@ def calibrated():
     (analysis/elo_strength/calib_cells.py; its picks are allie.lichess.calibration.CELLS). Calibrated play is
     cross-checked: settings chosen on half of the games, scored on the other half, both ways averaged."""
     cells = jload(X / "elo-strength/calib/cells-ann2c-cov-clustered.json")
+    slow = jload(X / "elo-strength/calib/cells-cl24-1024.json")  # 1,024 simulations
+    cells |= {k: slow[k] for k in ("classical/2400", "classical/2600")}
     gap = lambda s: (s["elo_accuracy"] + s["elo_blunder"]) / 2
     half = lambda s: np.hypot(s["se_accuracy"], s["se_blunder"]) / 2
     formats = ("blitz", "rapid", "classical")

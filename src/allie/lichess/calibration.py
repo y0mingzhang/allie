@@ -16,8 +16,8 @@ the humans: accuracy / blunder rate) and cross-entropy gaps are in the comments.
 the clock allows with about 260 s left; with less they step down to 256 with that rung's beta.
 
 A search is sized for a tenth of the clock left above the reserve at COST seconds a simulation or
-call: the budget steps down the cell's rungs until it fits, each rung with its own beta. A search still running at a fifth
-of the clock stops, and the move comes from the policy.
+call: the budget steps down the cell's rungs until it fits, each rung with its own beta. A search
+still running at a fifth of the clock stops, and the move comes from the policy.
 """
 
 import numpy as np
