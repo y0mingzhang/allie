@@ -67,6 +67,8 @@ def main():
     p.add_argument("--source", required=True)
     p.add_argument("--mcts", default="8,32,128,512", help="MCTS budgets ('' for none)")
     p.add_argument("--coverage", default="8,32,128", help="coverage budgets")
+    p.add_argument("--cells", default="", help="only these format:bin cells, e.g. 3:2400,3:2600 (format 0-3)")
+    p.add_argument("--batch", type=int, default=128, help="rows per search batch (large budgets: fewer)")
     a = p.parse_args()
     z = np.load(a.positions)
     off, tokens, feats, meta = z["offsets"], z["tokens"], z["feats"], z["meta"]
@@ -78,16 +80,22 @@ def main():
         32,
     ):  # as allie.lichess.tree: budgets without their own policy use 128's
         par["budget_policies"].setdefault(str(b), par["budget_policies"]["128"])
+    for b in [int(x) for x in a.coverage.split(",") if x]:  # larger budgets: 256's (beta tilts use only Q)
+        par["budget_policies"].setdefault(str(b), par["budget_policies"]["256"])
     t0 = time.monotonic()
     oracle = Capture(MoEOracle(a.checkpoint, a.source, slots=1 << 17, rows=1 << 17))
-    search = Search(oracle, batch_size=128, threads=8, calibration=par)
+    search = Search(oracle, batch_size=a.batch, threads=8, calibration=par)
+    keep = np.arange(len(meta))
+    if a.cells:
+        want = {tuple(map(int, c.split(":"))) for c in a.cells.split(",")}
+        keep = np.array([i for i in keep if (int(meta[i, 2]), int(meta[i, 3])) in want])
     print(f"startup {time.monotonic() - t0:.0f}s", flush=True)
-    chunks = range(0, len(meta), a.chunk)
+    chunks = range(0, len(keep), a.chunk)
     for lo in list(chunks)[a.shard :: a.shards]:
         dst = out / f"{lo:06d}.npz"
         if dst.exists():
             continue
-        idx = np.arange(lo, min(lo + a.chunk, len(meta)))
+        idx = keep[lo : lo + a.chunk]
         rows, fts = [], []
         for i in idx:
             prefix = tokens[off[i] : off[i + 1]].astype(np.int64)
@@ -103,10 +111,10 @@ def main():
         for b in [int(x) for x in a.coverage.split(",") if x]:
             t = time.monotonic()
             r, heads = [], []
-            for s in range(0, len(rows), 128):
+            for s in range(0, len(rows), a.batch):
                 r += search._batch(
-                    rows[s : s + 128],
-                    fts[s : s + 128],
+                    rows[s : s + a.batch],
+                    fts[s : s + a.batch],
                     "coverage",
                     b,
                     "predicted",
@@ -130,8 +138,8 @@ def main():
         for b in [int(x) for x in a.mcts.split(",") if x]:
             t = time.monotonic()
             r = []
-            for s in range(0, len(rows), 128):
-                r += mcts(search, rows[s : s + 128], fts[s : s + 128], b)
+            for s in range(0, len(rows), a.batch):
+                r += mcts(search, rows[s : s + a.batch], fts[s : s + a.batch], b)
             res[f"mcts_n{b}"] = np.concatenate([c for c, _ in r])
             res[f"mcts_q{b}"] = np.concatenate([q for _, q in r])
             timing[f"mcts{b}"] = time.monotonic() - t
