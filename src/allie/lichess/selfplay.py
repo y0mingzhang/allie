@@ -134,7 +134,7 @@ def bench(config, model, search, moves, concurrent=1, base=180, inc=2):
         device=str(model.device),
         dtype=str(model.dtype),
         experts=model.keep,
-        threads=__import__("torch").get_num_threads(),
+        threads=model.fast.threads if model.fast else __import__("torch").get_num_threads(),
         concurrent=concurrent,
         search=play.search if play.mode == "strongest" else 0,
         decisions=len(rows),

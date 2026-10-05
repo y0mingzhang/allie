@@ -21,8 +21,13 @@ def model(c):
         torch.set_num_threads(c.threads)
     dtype = dict(bfloat16=torch.bfloat16, float32=torch.float32)[c.dtype]
     int8 = c.int8 if c.int8 is not None else c.device == "cpu" and dtype == torch.bfloat16
-    return Model(resolve(c.model), c.device, dtype, c.active_experts or None, int8,
-                 c.backend or None, c.threads or None)  # fmt: skip
+    m = Model(resolve(c.model), c.device, dtype, c.active_experts or None, int8,
+              c.backend or None, c.threads or None)  # fmt: skip
+    if m.fast is not None:
+        # the kernels' pool does the heavy work on `threads` pinned CPUs; torch's own ops (cache copies,
+        # softmaxes) on as many more threads fight it for the same CPUs: -13% a search leaf on 6 CPUs
+        torch.set_num_threads(1)
+    return m
 
 
 def coverage(c):
