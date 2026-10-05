@@ -5,52 +5,51 @@ temperature 1 from the policy; from allie.search coverage's calibrated human-mov
 a fixed number of simulations; or from the policy tilted by the searched values, pi ~ prior
 exp(beta Q), after a fixed number of coverage simulations or lookahead calls.
 
-Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
-positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py): per cell, among
-the searches whose human-move cross-entropy is below the policy's at 95% confidence (standard errors
-clustered by game), the cheapest whose expected move accuracy and blunder rate (Stockfish scoring
-every legal move) are within 20 Elo of the closest to the humans'; the policy where none qualifies,
-and in bullet, whose think times a search outlasts. The searching cells' errors (Elo, + stronger than
-the humans: accuracy / blunder rate) and cross-entropy gaps are in the comments. Classical 2400 and
-2600 search 1,024 simulations (25.6 s at COST; under load, 15 s median on 6 CPUs), which a tenth of
-the clock allows with about 260 s left; with less they step down to 256 with that rung's beta.
+The move's think time is drawn first (behaviour.think) and caps the search with a tenth of the clock
+left above the reserve, at COST seconds a simulation or call: the largest of the cell's rungs that
+fits is searched, with its beta, and the policy plays when none fits. So the bot keeps a human pace,
+searching most on the moves a human would think longest about (1,024 simulations take 15.4 s at
+COST, their median in a 6-CPU load test of 10 games). A search still running at a fifth of the clock
+stops, and the policy plays.
 
-The think time for the move is drawn first (behaviour.think), and a search is sized for it and for a
-tenth of the clock left above the reserve at COST seconds a simulation or call: the budget steps
-down the cell's rungs until it fits, each rung with its own beta, and with no rung that fits the
-move comes from the policy. So the bot keeps a human pace, searching most on the moves a human would
-think longest about. A search still running at a fifth of the clock stops, and the policy plays.
+Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
+positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py --think), scoring
+each cell as the bot plays it: per position, the rungs mixed by the think-time draws. Per cell,
+among the rung sets and betas whose human-move cross-entropy is below the policy's at 95% confidence
+(standard errors clustered by game), the cheapest whose expected move accuracy and blunder rate
+(Stockfish scoring every legal move) are within 20 Elo of the closest to the humans'; the policy
+where none qualifies, and in bullet, whose think times a search outlasts.
 """
 
 import numpy as np
 
-# (speed, bin) -> (searcher, {rung: beta}): the largest rung the clock allows is searched, beta None
-# for coverage's calibrated distribution; each rung's beta is its own best whose human-move
-# cross-entropy beats the policy's (rungs with none are left out); a cell not listed plays the policy.
-# Comments: the top rung's errors (Elo, accuracy / blunder rate) and cross-entropy gap
+# (speed, bin) -> (searcher, {rung: beta}): the largest rung that the move's think time and the clock
+# allow is searched, beta None for coverage's calibrated distribution; a cell not listed plays the
+# policy. Comments: the cell's errors (Elo, accuracy / blunder rate) and cross-entropy gap as the bot
+# plays it, its rungs mixed by the think times it draws
 # fmt: off
 CELLS = {
-    ("blitz", 1800): ("coverage", {128: 0.5, 32: 0.5, 8: 0.5}),  # 128: -67 / -87, -0.0019
-    ("blitz", 2000): ("coverage", {128: None, 32: None, 8: 1.0}),  # 128: -34 / -63, -0.0073
-    ("blitz", 2200): ("coverage", {128: 2.0, 32: 2.0, 8: 2.0}),  # 128: -40 / -7, -0.0074
-    ("blitz", 2400): ("coverage", {128: 3.0, 32: 3.0, 8: 3.0}),  # 128: +12 / -27, -0.0103
-    ("blitz", 2600): ("coverage", {256: 3.0, 128: 3.0, 32: 3.0, 8: 4.0}),  # 256: -16 / -60, -0.0155
-    ("rapid", 1600): ("coverage", {128: 0.5}),  # 128: -53 / -36, -0.0017
-    ("rapid", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # 32: -53 / +29, -0.0034
-    ("rapid", 2000): ("coverage", {128: 1.0, 32: 1.0, 8: 1.0}),  # 128: -60 / -66, -0.0049
-    ("rapid", 2200): ("coverage", {32: 3.0, 8: 2.0}),  # 32: +8 / +14, -0.0082
-    ("rapid", 2400): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}),  # 128: +16 / +62, -0.0192
-    ("rapid", 2600): ("coverage", {256: 8.0, 128: 8.0, 32: 8.0, 8: 6.0}),  # 256: -40 / +24, -0.0307
-    ("classical", 1600): ("coverage", {128: 0.5, 32: 0.5, 8: 0.5}),  # 128: -45 / -78, -0.0026
-    ("classical", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # 32: -22 / -44, -0.0042
-    ("classical", 2000): ("coverage", {32: 4.0, 8: 3.0}),  # 32: +10 / +5, -0.0113
-    ("classical", 2200): ("coverage", {128: 6.0, 32: 6.0, 8: 4.0}),  # 128: -49 / +2, -0.0189
-    ("classical", 2400): ("coverage", {1024: 8.0, 256: 8.0, 128: 8.0, 32: 8.0, 8: 6.0}),  # 1024: -73 / -81, -0.0441
-    ("classical", 2600): ("coverage", {1024: 16.0, 256: 12.0, 128: 12.0, 32: 8.0, 8: 8.0}),  # 1024: -131 / -197, -0.0322
+    ("blitz", 1800): ("coverage", {32: 0.5, 8: 0.5}),  # -87 / -107, -0.0020
+    ("blitz", 2000): ("coverage", {128: None, 32: None, 8: None}),  # -49 / -79, -0.0073
+    ("blitz", 2200): ("coverage", {256: 2.0, 128: 2.0, 32: 2.0, 8: 2.0}),  # -62 / -30, -0.0088
+    ("blitz", 2400): ("coverage", {32: 4.0, 8: 4.0}),  # -16 / -73, -0.0117
+    ("blitz", 2600): ("coverage", {256: 4.0, 128: 4.0, 32: 4.0, 8: 4.0}),  # -26 / -90, -0.0209
+    ("rapid", 1600): ("coverage", {128: 0.5, 32: 0.5, 8: 0.5}),  # -57 / -40, -0.0018
+    ("rapid", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # -55 / +27, -0.0033
+    ("rapid", 2000): ("coverage", {128: 1.0, 32: 1.0, 8: 1.0}),  # -65 / -71, -0.0053
+    ("rapid", 2200): ("coverage", {32: 3.0, 8: 3.0}),  # +2 / +9, -0.0099
+    ("rapid", 2400): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}),  # -11 / +15, -0.0275
+    ("rapid", 2600): ("coverage", {256: 8.0, 128: 8.0, 32: 8.0, 8: 8.0}),  # -73 / -45, -0.0423
+    ("classical", 1600): ("coverage", {32: 0.5, 8: 0.5}),  # -62 / -91, -0.0025
+    ("classical", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # -23 / -45, -0.0042
+    ("classical", 2000): ("coverage", {32: 4.0, 8: 4.0}),  # +6 / +1, -0.0121
+    ("classical", 2200): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}),  # -57 / -12, -0.0234
+    ("classical", 2400): ("coverage", {1024: 12.0, 256: 12.0, 128: 12.0, 32: 12.0, 8: 12.0}),  # -41 / -56, -0.0247
+    ("classical", 2600): ("coverage", {1024: 16.0, 256: 16.0, 128: 16.0, 32: 16.0, 8: 16.0}),  # -188 / -304, -0.0466
 }
 # fmt: on
 LADDER = dict(coverage=(8, 32, 128, 256, 1024), lookahead=(1, 2, 4, 8, 16))
-COST = dict(coverage=1 / 40, lookahead=0.35)  # seconds a simulation or call (bench, 4 threads)
+COST = dict(coverage=0.015, lookahead=0.35)  # seconds a simulation or call (6-cpu load test, 10 games)
 
 
 def cell(rating, speed):

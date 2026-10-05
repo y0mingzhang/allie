@@ -32,17 +32,18 @@ def test_the_clock_caps_the_budget():
     """The largest of the cell's rungs that fits a tenth of the clock above the reserve (review: a
     0.2 s clock must not search); a search may run to a fifth before it stops."""
     for kind, rungs in (("coverage", (1024, 256, 128, 32, 8)), ("coverage", (128,)), ("lookahead", (8, 2))):
-        for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 258.0, 260.0, 1000.0):
+        for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 154.0, 156.0, 258.0, 260.0, 1000.0):
             n = calibration.affordable(kind, rungs, clock, reserve=1.0)
             tenth = calibration.limit(clock, 1.0) / 2
             assert n in (0, *rungs) and n * calibration.COST[kind] <= tenth
             assert all(b * calibration.COST[kind] > tenth for b in rungs if b > n)
     rungs = (1024, 256, 128)
     assert calibration.affordable("coverage", rungs, 0.2) == 0 and calibration.affordable("coverage", rungs, None) == 1024
-    assert calibration.affordable("coverage", rungs, 259.0) == 1024 and calibration.affordable("coverage", rungs, 255.0) == 256
-    assert calibration.affordable("coverage", rungs, 20.0) == 0  # 128 needs 33 s: below it the policy
-    assert calibration.affordable("coverage", rungs, 1000.0, think=7.0) == 256  # the think time caps it too
-    assert calibration.affordable("coverage", rungs, 1000.0, think=3.0) == 0
+    sim = calibration.COST["coverage"]
+    at = lambda seconds: calibration.affordable("coverage", rungs, 10 * seconds + 1.0)  # a tenth above the reserve
+    assert at(1024 * sim) == 1024 and at(1024 * sim - 0.01) == 256 and at(128 * sim - 0.01) == 0  # then the policy
+    assert calibration.affordable("coverage", rungs, 1e4, think=1024 * sim - 0.01) == 256  # the think time caps it too
+    assert calibration.affordable("coverage", rungs, 1e4, think=128 * sim - 0.01) == 0
     assert calibration.limit(51.0, 1.0) == 10.0
 
 
@@ -129,12 +130,13 @@ def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
     monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 40.0, 32: None})})
     game = Game(Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0)
     game.update(random_game(3, 20), 590, 585)
-    for think, rung, move in ((10.0, 256, -1), (1.0, 32, 0), (0.5, None, None)):
+    sim = calibration.COST["coverage"]
+    for think, rung, move in ((256 * sim, 256, -1), (256 * sim - 0.01, 32, 0), (32 * sim - 0.01, None, None)):
         monkeypatch.setattr(game, "think", lambda play, clock, time, t=think: t)
         d = game.decide(play, search, 590)
         assert d.think == think
         if rung is None:
-            assert search["coverage"].budgets == [256, 32]  # no rung fits 0.5 s: the policy
+            assert search["coverage"].budgets == [256, 32]  # no rung fits: the policy
         else:
             assert search["coverage"].budgets[-1] == rung and d.move == legal_of(game)[move]
 
