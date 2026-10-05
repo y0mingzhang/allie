@@ -615,24 +615,27 @@ impl Engine {
 
     /// A step's writes must not overlap its reads or each other (the threads run items concurrently): a leaf's
     /// destination slot is not in its own path, nor another leaf's destination or path on the same slot buffer; a
-    /// slot buffer is never a cache; one cache is appended by at most one plain item, and a leaf reading it reads
-    /// only rows below that item's first write; distinct buffers do not overlap in memory. Read-only sharing (the
+    /// slot buffer is never a cache (not even its own leaf's); one cache is appended by at most one plain item,
+    /// and a leaf reading it reads only rows below that item's first write; a view's k, v and e are disjoint, and
+    /// memory recurs across items only as the identical view (pointers, layout, role). Read-only sharing (the
     /// game's prefix under many leaves, a slot buffer under many leaves) stays.
     fn aliases(&self, s: usize, meta: &[i64], caches: &[usize], paths: &[i64]) -> bool {
         let kv = |cap: usize| cap * self.l * self.h * self.hd * 2;
         let e = |cap: usize| cap * self.d * 2;
         let item = |i: usize| (&meta[8 * i..8 * i + 8], &caches[6 * i..6 * i + 6]);
         let path = |q: &[i64]| &paths[q[6] as usize..(q[6] + q[5]) as usize];
-        let mut bufs: Vec<(usize, usize, usize, usize, usize, usize)> = Vec::new(); // k v e start, k v e sizes
+        let meets = |a0: usize, al: usize, b0: usize, bl: usize| a0 < b0 + bl && b0 < a0 + al;
+        // a view of memory: k v e starts, k/v and e byte lengths, role (0 a cache, 1 a slot buffer)
+        let mut views: Vec<(usize, usize, usize, usize, usize, u8)> = Vec::new();
         for i in 0..s {
             let (q, c) = item(i);
             let leaf = q[4] > 0;
             if leaf && path(q).contains(&q[7]) {
                 return true;
             }
-            bufs.push((c[0], c[1], c[2], kv(q[2] as usize), kv(q[2] as usize), e(q[2] as usize)));
+            views.push((c[0], c[1], c[2], kv(q[2] as usize), e(q[2] as usize), 0));
             if leaf {
-                bufs.push((c[3], c[4], c[5], kv(q[4] as usize), kv(q[4] as usize), e(q[4] as usize)));
+                views.push((c[3], c[4], c[5], kv(q[4] as usize), e(q[4] as usize), 1));
             }
             for j in 0..i {
                 let (r, b) = item(j);
@@ -649,19 +652,27 @@ impl Engine {
                 if leaf && other_leaf && c[3] == b[3] && (q[7] == r[7] || path(r).contains(&q[7]) || path(q).contains(&r[7])) {
                     return true;
                 }
-                if leaf && c[3] == b[0] || other_leaf && b[3] == c[0] {
-                    return true; // a slot buffer used as a cache
-                }
             }
         }
-        bufs.sort();
-        bufs.dedup();
-        let overlap = |a0: usize, al: usize, b0: usize, bl: usize| a0 != b0 && a0 < b0 + bl && b0 < a0 + al;
-        for (i, a) in bufs.iter().enumerate() {
-            for b in &bufs[..i] {
-                for (x, xl) in [(a.0, a.3), (a.1, a.4), (a.2, a.5)] {
-                    for (y, yl) in [(b.0, b.3), (b.1, b.4), (b.2, b.5)] {
-                        if overlap(x, xl, y, yl) {
+        // within a view its channels are disjoint; across views, the same memory may only recur as the identical view
+        // (the same pointers, layout and role: the item-level rules above cover its rows); anything else that
+        // touches it, from a different start, a different layout or the other role, is an alias
+        views.sort_unstable();
+        views.dedup();
+        for (i, a) in views.iter().enumerate() {
+            let ch = |v: &(usize, usize, usize, usize, usize, u8)| [(v.0, v.3), (v.1, v.3), (v.2, v.4)];
+            let ca = ch(a);
+            for x in 0..3 {
+                for y in 0..x {
+                    if meets(ca[x].0, ca[x].1, ca[y].0, ca[y].1) {
+                        return true;
+                    }
+                }
+            }
+            for b in &views[..i] {
+                for (x, xl) in ca {
+                    for (y, yl) in ch(b) {
+                        if meets(x, xl, y, yl) {
                             return true;
                         }
                     }

@@ -395,6 +395,20 @@ def test_rust_rejects_aliasing_items(tiny_path):
     ptrs = [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr(), t.k.data_ptr(), t.v.data_ptr(), t.e.data_ptr()]
     assert e.step(1, 1, ids[4:5].data_ptr(), feats[4:5].data_ptr(), boards[4:5].data_ptr(), meta, ptrs, [1],
                   torch.empty(1, 2432).data_ptr()) == 4  # fmt: skip
+    # raw pointer cases the Python mirror cannot see: a single leaf whose slot buffer is its own cache (every
+    # pointer equal), a cache whose k and v are one buffer, two caches sharing only their v buffer
+    cp = [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr()]
+    tp = [t.k.data_ptr(), t.v.data_ptr(), t.e.data_ptr()]
+    one_leaf = [c.n, 1, c.capacity, 0, t.capacity, 0, 0, 2]
+    out2 = torch.empty(2, 2432)  # alive for the whole call: the step writes it (a temporary's pointer dangles)
+    args = lambda m_, p_, pa=[]: e.step(len(m_) // 8, len(m_) // 8, ids[4:6].data_ptr(), feats[4:6].data_ptr(), boards[4:6].data_ptr(), m_, p_, pa, out2.data_ptr())  # noqa: E731
+    assert args(one_leaf, cp + cp) == 4
+    assert args(one_leaf, cp + [t.k.data_ptr(), c.v.data_ptr(), t.e.data_ptr()]) == 4
+    assert args([c.n, 1, c.capacity, 0, 0, 0, 0, 0], [cp[0], cp[0], cp[2], 0, 0, 0]) == 4
+    c2 = Cache(m, c.capacity)
+    two = [c.n, 1, c.capacity, 0, 0, 0, 0, 0, 0, 1, c2.capacity, 1, 0, 0, 0, 0]
+    assert args(two, cp + [0, 0, 0] + [c2.k.data_ptr(), c.v.data_ptr(), c2.e.data_ptr()] + [0, 0, 0]) == 4
+    assert args(one_leaf, cp + tp, [0]) == 0  # the same leaf with its own tree runs
     # a leaf reading rows below a plain item's first write on the same cache is fine, and so are many leaves
     # of one tree with distinct slots and shared paths
     z = step(m, [(c, *one), Leaf(c, *one, t, (1,), 2), Leaf(c, *one, t, (1,), 3), Leaf(c, *one, t, (), 4)])
