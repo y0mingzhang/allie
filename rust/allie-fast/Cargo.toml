@@ -2,7 +2,7 @@
 name = "allie-fast"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.89"  # AVX-512 intrinsics
 description = "Allie's CPU engine in Rust: the int8 forward, KV caches and the tree searches, for allie.lichess"
 license = "MIT"
 
@@ -11,10 +11,15 @@ name = "allie_fast"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3-py312"] }
+pyo3 = { version = "0.22", features = ["abi3-py312"] }
 numpy = "0.22"
 shakmaty = "0.27"
 libc = "0.2"
+
+# maturin builds with extension-module (pyproject.toml); `cargo test --no-default-features` links libpython
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
 
 [profile.release]
 opt-level = 3

@@ -64,8 +64,9 @@ class Model:
     with the gates they have in the top-k (the speed knob; None = all). int8: the block
     matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory.
     backend: "fast" runs step() in fast.py: its C++ kernels on CPU (BF16 activations), CUDA
-    graphs of forward() on GPU; "torch" in the PyTorch code below (the reference); None: fast
-    where it applies (CPU with BF16, any GPU) and works."""
+    graphs of forward() on GPU; "rust" the Rust port of the CPU kernels (fastrs.py); "torch" in
+    the PyTorch code below (the reference); None: fast where it applies (CPU with BF16, any GPU)
+    and works."""
 
     def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False,
                  backend=None, threads=None):  # fmt: skip
@@ -101,17 +102,21 @@ class Model:
         self.skip_lambdas = s[3 * n + 2 : 3 * n + 5]
         self.ve = c["value_embeds"]
         self.fast = self.graphs = None
-        assert backend in (None, "fast", "torch"), backend
+        assert backend in (None, "fast", "rust", "torch"), backend
         if backend != "torch" and (backend or self.device.type == "cuda" or dtype == torch.bfloat16):
             try:
                 from .fast import Fast, Graphs
 
                 if self.device.type == "cuda":
                     self.graphs = Graphs(self, strict=backend == "fast")
+                elif backend == "rust":
+                    from .fastrs import RustFast
+
+                    self.fast = RustFast(self, threads)
                 else:
                     self.fast = Fast(self, threads)
             except Exception as e:
-                if backend == "fast":
+                if backend in ("fast", "rust"):
                     raise
                 warnings.warn(f"Allie's fast backend is unavailable, using PyTorch: {e}")
 

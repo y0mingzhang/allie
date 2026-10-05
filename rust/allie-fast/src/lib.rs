@@ -4,6 +4,11 @@
 use pyo3::prelude::*;
 
 pub mod chess;
+pub mod kernels;
+pub mod model;
+pub mod pool;
+pub mod py;
+pub mod simd;
 
 #[pyfunction]
 fn version() -> &'static str {
@@ -14,5 +19,6 @@ fn version() -> &'static str {
 fn allie_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     chess::register(m)?;
+    py::register(m)?;
     Ok(())
 }
