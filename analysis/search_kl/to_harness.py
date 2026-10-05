@@ -39,14 +39,16 @@ def main():
     )
     p.add_argument("--budgets", default="8,16,32,64,128,256,512,1024,2048,4096")
     p.add_argument("--subset", default="", help="keep only these positions (an index .npy)")
+    p.add_argument("--shard", type=int, default=0)
+    p.add_argument("--shards", type=int, default=1)
     p.add_argument("--calib", action="store_true", help="calib_cells.py's chunk keys (legal, prior, heads, cov_q{b}k)")
     a = p.parse_args()
     budgets = [int(b) for b in a.budgets.split(",")]
     run, out = Path(a.run), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     views = len(json.loads((run / "args.json").read_text()).get("views", "0").split(","))
-    for f in sorted(run.glob("[0-9]*.npz")):
-        if ".partial" in f.name:
+    for f in sorted(run.glob("[0-9]*.npz"))[a.shard :: a.shards]:
+        if ".partial" in f.name or (out / f.name).exists():
             continue
         z = dict(np.load(f))
         if a.value_views:
