@@ -104,7 +104,7 @@ def test_budget_protocol_and_prefix():
     for i in range(
         F.n, F.size
     ):  # cost counts the evaluations so far; parents come first
-        assert F.parent[i] < i and F.cost[i] >= F.cost[i - 1] or F.owner[i] != F.owner[i - 1]
+        assert F.parent[i] < i and (F.cost[i] >= F.cost[i - 1] or F.owner[i] != F.owner[i - 1])
         assert (F.cost[i] >= F.cost[F.parent[i]]) or F.parent[i] < F.n
     for r in range(F.n):
         own = np.flatnonzero(F.owner[: F.size] == r)

@@ -204,7 +204,7 @@ def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width
     backup's."""
     n, E = F.n, len(F.rootw)
     top = np.repeat(np.arange(n), F.count[:n])
-    cov = F.rootw0
+    cov = F.rootw = F.rootw0
     while True:
         need = np.where(F.count[:n] > 1, budget - F.spent, 0)
         size = F.size
