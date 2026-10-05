@@ -1,64 +1,46 @@
 """Calibrated strength (`play.mode = "calibrated"`): Allie asked to play at rating R makes moves of
 the quality an R-rated human makes at the same time control, predicting human moves no worse than
-its policy does. Per time control and 200-point rating bin (CELLS), the move is sampled at
-temperature 1 from the policy; from allie.search coverage's calibrated human-move distribution after
-a fixed number of simulations; or from the policy tilted by the searched values, pi ~ prior
-exp(beta Q) or, on their log-odds, prior exp(beta arctanh(0.99 Q)), after a fixed number of coverage
-simulations or lookahead calls.
+its policy does on average. One rule for every rating and time control, no thresholds: the move's
+think time is drawn first (behaviour.think); coverage search runs the largest rung of LADDER that
+fits both it less MARGIN and a tenth of the clock above the reserve, a simulation priced at COST or
+at the bot's recent measured cost when higher (up to 4 COST: a busy or slower machine searches
+less), and the move is sampled at temperature 1 from the policy tilted by the searched values'
+log-odds, pi ~ prior exp(beta arctanh(0.99 Q)), with
 
-The move's think time is drawn first (behaviour.think) and caps the search with a tenth of the clock
-left above the reserve, at COST seconds a simulation or call: the largest of the cell's rungs that
-fits is searched, with its beta, and the policy plays when none fits. So the bot keeps a human pace,
-searching most on the moves a human would think longest about (COST: 15 ms a simulation, about the
-median of 1,024-simulation searches in a 6-CPU load test of 10 games, 14.3-14.6 s). A search still
-running at a fifth of the clock stops, and the policy plays.
+    beta = BETA0 exp(GAMMA (R - 1700) / 1000) (t / 10 s)^DELTA,
 
-Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
-positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.py --think --atanh
-0.99), scoring each cell as the bot plays it: per position, the rungs mixed by the think-time draws.
-Per cell, among the rung sets, tilts (on Q or on its log-odds) and betas whose human-move
-cross-entropy is below the policy's at 95% confidence (standard errors clustered by game), the
-cheapest whose expected move accuracy and blunder rate (Stockfish scoring every legal move) are
-within 20 Elo of the closest to the humans'; the policy where none qualifies, in bullet, whose
-think times a search outlasts, and where a pick qualifies only at the gate's edge and neither half
-of the games, picking on its own, confirms it on the other (blitz 1600, classical 1000).
+t the position's expected human think time (the think-time head's mean). Stronger players and harder
+positions get a sharper tilt, fast ones (bullet) little. A search stops at the think time less
+MARGIN (or a fifth of the clock), and the policy plays: no search runs past the drawn think time.
+
+Fitted for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
+positions per time control and 200-point bin, 800-2600; analysis/elo_strength/calib_unified.py),
+scoring each position as the bot plays it (its rungs mixed by the think-time draws): the debiased
+squared Elo error of move accuracy and blunder rate (Stockfish on every legal move) summed over the
+blitz, rapid and classical bins, with the human-move cross-entropy at or below the policy's on
+average over all bins, DELTA from 0.5, 0.625, 0.75 and 1 (each game half's fit picks these same
+values), MARGIN included. RMS Elo error, all games / each half scored by the other half's fit:
+bullet 107 / 0 (its flat human curve leaves bullet Elo mostly noise), blitz 0 / 0, rapid 64 / 42,
+classical 64 / 49; the per-cell table this replaces, held out: 141 / 80 / 72 / 76. Cross-entropy
+against the policy's: bullet +0.0014, blitz -0.0043, rapid -0.0071, classical -0.0069 nats; bullet
+1800 above it at 95% (+0.0012 +- 0.0011). Bullet 2600 plays +95 / +188 Elo strong, classical 2400
+and 2600 weak (-68 / -121, -134 / -241): LADDER stops at 256, the largest search scored on every bin.
 """
 
 import numpy as np
 
-# (speed, bin) -> (searcher, {rung: beta}[, "atanh"]): the largest rung that the move's think time
-# and the clock allow is searched, beta None for coverage's calibrated distribution, "atanh" for a
-# tilt on the values' log-odds; a cell not listed plays the policy. Comments: the cell's errors (Elo,
-# accuracy / blunder rate) and cross-entropy gap as the bot plays it, its rungs mixed by the think
-# times it draws
-# fmt: off
-CELLS = {
-    ("blitz", 1800): ("coverage", {32: 0.75, 8: 0.75}),  # -41 / -63, -0.0022
-    ("blitz", 2000): ("coverage", {32: 1.5, 8: 1.5}),  # +0 / -34, -0.0041
-    ("blitz", 2200): ("coverage", {128: 1.5, 32: 1.5, 8: 1.5}, "atanh"),  # -50 / -25, -0.0078
-    ("blitz", 2400): ("coverage", {32: 4.0, 8: 4.0}),  # -16 / -73, -0.0117
-    ("blitz", 2600): ("coverage", {128: 3.0, 32: 3.0, 8: 3.0}, "atanh"),  # -12 / -79, -0.0179
-    ("rapid", 1600): ("coverage", {128: 0.5, 32: 0.5, 8: 0.5}),  # -57 / -40, -0.0018
-    ("rapid", 1800): ("coverage", {32: 1.0, 8: 1.0}),  # -55 / +27, -0.0033
-    ("rapid", 2000): ("coverage", {32: 1.5, 8: 1.5}),  # -25 / -33, -0.0049
-    ("rapid", 2200): ("coverage", {32: 2.0, 8: 2.0}, "atanh"),  # -2 / +0, -0.0146
-    ("rapid", 2400): ("coverage", {128: 4.0, 32: 4.0, 8: 4.0}, "atanh"),  # -10 / +15, -0.0276
-    ("rapid", 2600): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -37 / +9, -0.0216
-    ("classical", 1600): ("coverage", {128: 0.75, 32: 0.75, 8: 0.75}),  # +6 / -41, -0.0028
-    ("classical", 1800): ("coverage", {32: 0.75, 8: 0.75}, "atanh"),  # -18 / -44, -0.0047
-    ("classical", 2000): ("coverage", {32: 4.0, 8: 4.0}),  # +6 / +1, -0.0121
-    ("classical", 2200): ("coverage", {128: 4.0, 32: 4.0, 8: 4.0}, "atanh"),  # -30 / +20, -0.0276
-    ("classical", 2400): ("coverage", {1024: 6.0, 256: 6.0, 128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -26 / -35, -0.0395
-    ("classical", 2600): ("coverage", {1024: 6.0, 256: 6.0, 128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -171 / -263, -0.0394
-}
-# fmt: on
-LADDER = dict(coverage=(8, 32, 128, 256, 1024), lookahead=(1, 2, 4, 8, 16))
-COST = dict(coverage=0.015, lookahead=0.35)  # seconds a simulation or call (6-cpu load test, 10 games)
+BETA0, GAMMA, DELTA = 0.297, 3.0, 0.625
+LADDER = (8, 32, 128, 256)
+COST = 0.008  # seconds a coverage simulation (16 cpus, 12 threads, 10 games)
+MARGIN = 0.2  # seconds a search ends before the think time (an engine step under load is <= 0.17 s)
+_BINS = np.arange(63)
+SECONDS = np.where(_BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06))  # think-time head bins
 
 
-def cell(rating, speed):
-    """(searcher, {rung: beta}[, "atanh"]) for a player of `rating` at `speed`, or None: the policy."""
-    return CELLS.get((speed, min(max(int(rating) // 200 * 200, 800), 2600)))
+def beta(rating, time):
+    """The tilt for a player of `rating` at a position whose think-time head is `time` (63 bins)."""
+    t = float(np.asarray(time, float) @ SECONDS / np.sum(time))
+    return BETA0 * np.exp(GAMMA * (rating - 1700) / 1000) * (t / 10) ** DELTA
 
 
 def limit(clock, reserve=1.0):
@@ -66,18 +48,17 @@ def limit(clock, reserve=1.0):
     return np.inf if clock is None else max(clock - reserve, 0.0) / 5
 
 
-def affordable(searcher, rungs, clock, reserve=1.0, think=None):
-    """The largest of `rungs` that fits both a tenth of the clock left above the reserve (half of
-    limit()) and the move's think time at COST seconds a simulation or call; 0: none."""
-    fits = min(limit(clock, reserve) / 2, np.inf if think is None else think)
-    return max((b for b in rungs if b * COST[searcher] <= fits), default=0)
+def affordable(clock, reserve=1.0, think=np.inf, cost=COST):
+    """The largest rung of LADDER that fits both a tenth of the clock left above the reserve (half
+    of limit()) and `think` seconds at `cost` seconds a simulation; 0: none."""
+    fits = min(limit(clock, reserve) / 2, think)
+    return max((b for b in LADDER if b * cost <= fits), default=0)
 
 
-def tilt(prior, q, beta, atanh=False):
-    """The searched distribution: pi ~ prior exp(beta Q), or with atanh prior exp(beta arctanh(0.99 Q)),
-    on the W - L value's log-odds (Q saturates near +-1, so a fixed beta under-tilts clear positions)."""
-    q = np.asarray(q, float)
-    q = np.arctanh(0.99 * np.clip(q, -1, 1)) if atanh else q
+def tilt(prior, q, beta):
+    """The searched distribution: pi ~ prior exp(beta arctanh(0.99 Q)), on the W - L value's log-odds
+    (Q saturates near +-1, so a tilt on Q itself under-tilts clear positions)."""
+    q = np.arctanh(0.99 * np.clip(np.asarray(q, float), -1, 1))
     z = np.log(np.maximum(prior, 1e-300)) + beta * q
     z = np.exp(z - z.max())
     return z / z.sum()

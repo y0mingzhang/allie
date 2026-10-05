@@ -31,12 +31,8 @@ def model(c):
 
 
 def coverage(c):
-    """The searcher play.mode uses: coverage for strongest, coverage and lookahead for calibrated."""
-    if c.play.mode == "calibrated":
-        from .tree import Coverage, Lookahead
-
-        return dict(coverage=Coverage(), lookahead=Lookahead())
-    if c.play.mode == "strongest" and c.play.search:
+    """The searcher play.mode uses: coverage, for calibrated and for strongest with search."""
+    if c.play.mode == "calibrated" or c.play.mode == "strongest" and c.play.search:
         from .tree import Coverage
 
         return Coverage()
