@@ -15,9 +15,11 @@ the humans: accuracy / blunder rate) and cross-entropy gaps are in the comments.
 2600 search 1,024 simulations (25.6 s at COST; under load, 15 s median on 6 CPUs), which a tenth of
 the clock allows with about 260 s left; with less they step down to 256 with that rung's beta.
 
-A search is sized for a tenth of the clock left above the reserve at COST seconds a simulation or
-call: the budget steps down the cell's rungs until it fits, each rung with its own beta. A search
-still running at a fifth of the clock stops, and the move comes from the policy.
+The think time for the move is drawn first (behaviour.think), and a search is sized for it and for a
+tenth of the clock left above the reserve at COST seconds a simulation or call: the budget steps
+down the cell's rungs until it fits, each rung with its own beta, and with no rung that fits the
+move comes from the policy. So the bot keeps a human pace, searching most on the moves a human would
+think longest about. A search still running at a fifth of the clock stops, and the policy plays.
 """
 
 import numpy as np
@@ -61,10 +63,10 @@ def limit(clock, reserve=1.0):
     return np.inf if clock is None else max(clock - reserve, 0.0) / 5
 
 
-def affordable(searcher, rungs, clock, reserve=1.0):
-    """The largest of `rungs` that fits a tenth of the clock left above the reserve (half of
-    limit()) at COST seconds a simulation or call; 0: none."""
-    fits = limit(clock, reserve) / 2
+def affordable(searcher, rungs, clock, reserve=1.0, think=None):
+    """The largest of `rungs` that fits both a tenth of the clock left above the reserve (half of
+    limit()) and the move's think time at COST seconds a simulation or call; 0: none."""
+    fits = min(limit(clock, reserve) / 2, np.inf if think is None else think)
     return max((b for b in rungs if b * COST[searcher] <= fits), default=0)
 
 

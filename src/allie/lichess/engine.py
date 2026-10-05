@@ -229,14 +229,20 @@ class Game:
         x = ((loss, d, w), ply, self.elo[me], FORMATS.get(self.speed, 1), clock, self.base)
         return behaviour.resign(*x, self.rng, on_turn=False)
 
-    def behave(self, play, clock, move, probability, wdl, time):
-        """A Decision for this move: think time, resignation and draw offer as humans of the
-        bot's rating behave (behaviour.py)."""
+    def think(self, play, clock, time):
+        """Seconds to wait for this move, as humans of the bot's rating would (behaviour.think)."""
+        if not play.think_time:
+            return 0.0
+        return behaviour.think(time, self.rng, clock, self.inc, len(self.moves), play.lag)
+
+    def behave(self, play, clock, move, probability, wdl, time, think=None):
+        """A Decision for this move: think time (drawn here unless given), resignation and draw
+        offer as humans of the bot's rating behave (behaviour.py)."""
         ply = len(self.moves)
         x = (wdl, ply, self.elo[ply % 2], FORMATS.get(self.speed, 1), clock, self.base)
         return Decision(
             move=move,
-            think=behaviour.think(time, self.rng, clock, self.inc, ply, play.lag) if play.think_time else 0.0,
+            think=self.think(play, clock, time) if think is None else think,
             wdl=wdl,
             probability=float(probability),
             resign=play.resign and behaviour.resign(*x, self.rng),
@@ -287,17 +293,19 @@ def strongest(game, play, search, clock):
 
 def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
-    sampled at temperature 1 from the policy, or from the distribution its cell's searcher gives.
+    sampled at temperature 1 from the policy, or from the distribution its cell's searcher gives,
+    the search no longer than the think time drawn for the move (the bot keeps a human pace).
     search: {"coverage": tree.Coverage(), "lookahead": tree.Lookahead()}."""
     start = monotonic()
     legal, p, wdl, time = game.position()
+    think = game.think(play, clock, time)
     s, cell = p, calibration.cell(game.elo[len(game.moves) % 2], game.speed)
     # searches cost what calibration.COST assumes only on the fast CPU backend
     if search and cell and len(legal) > 1 and game.engine.model.fast is not None:
         kind, rungs = cell
         left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
         reserve = behaviour.PARAMETERS["guard"]["reserve"]
-        n = calibration.affordable(kind, rungs, left, reserve)
+        n = calibration.affordable(kind, rungs, left, reserve, think if play.think_time else None)
         beta = rungs.get(n)
         deadline = monotonic() + calibration.limit(left, reserve)
         if n and (found := search[kind](game, n, deadline)) is not None:
@@ -305,7 +313,7 @@ def calibrated(game, play, search, clock):
             s = np.zeros(len(legal))
             s[[legal.index(m) for m in moves]] = q
     i = int(game.rng.choice(len(legal), p=s / s.sum()))
-    return game.behave(play, clock, legal[i], s[i], wdl, time)
+    return game.behave(play, clock, legal[i], s[i], wdl, time, think)
 
 
 # play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and

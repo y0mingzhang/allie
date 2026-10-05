@@ -41,6 +41,8 @@ def test_the_clock_caps_the_budget():
     assert calibration.affordable("coverage", rungs, 0.2) == 0 and calibration.affordable("coverage", rungs, None) == 1024
     assert calibration.affordable("coverage", rungs, 259.0) == 1024 and calibration.affordable("coverage", rungs, 255.0) == 256
     assert calibration.affordable("coverage", rungs, 20.0) == 0  # 128 needs 33 s: below it the policy
+    assert calibration.affordable("coverage", rungs, 1000.0, think=7.0) == 256  # the think time caps it too
+    assert calibration.affordable("coverage", rungs, 1000.0, think=3.0) == 0
     assert calibration.limit(51.0, 1.0) == 10.0
 
 
@@ -110,6 +112,31 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     assert search["coverage"].deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
     legal, p, _, _ = game.position()
     assert d.probability == pytest.approx(p[legal.index(d.move)])
+
+
+def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
+    """The think time is drawn before the search and caps its rung (with that rung's beta); the
+    Decision waits that same think time."""
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    legal_of = lambda g: [m.uci() for m in g.board.legal_moves]
+    play = Play(mode="calibrated", think_time=True, resign=False, draws=False)
+    search = dict(coverage=Search("coverage"), lookahead=Search("lookahead"))
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 40.0, 32: None})})
+    game = Game(Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0)
+    game.update(random_game(3, 20), 590, 585)
+    for think, rung, move in ((10.0, 256, -1), (1.0, 32, 0), (0.5, None, None)):
+        monkeypatch.setattr(game, "think", lambda play, clock, time, t=think: t)
+        d = game.decide(play, search, 590)
+        assert d.think == think
+        if rung is None:
+            assert search["coverage"].budgets == [256, 32]  # no rung fits 0.5 s: the policy
+        else:
+            assert search["coverage"].budgets[-1] == rung and d.move == legal_of(game)[move]
 
 
 def test_close_serves_queued_requests(tiny):
