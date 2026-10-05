@@ -12,7 +12,7 @@ from .test_tokens import random_game
 
 
 def test_cells_bin_the_rating(monkeypatch):
-    low, mid, high = ("coverage", 32, None), ("coverage", 128, None), ("lookahead", 8, 4.0)
+    low, mid, high = ("coverage", {32: None}), ("coverage", {128: None}), ("lookahead", {8: 4.0})
     monkeypatch.setattr(calibration, "CELLS", {("blitz", 800): low, ("blitz", 2000): mid, ("blitz", 2600): high})
     assert calibration.cell(2000, "blitz") == calibration.cell(2199, "blitz") == mid
     assert calibration.cell(500, "blitz") == low and calibration.cell(3100, "blitz") == high
@@ -20,23 +20,27 @@ def test_cells_bin_the_rating(monkeypatch):
 
 
 def test_cells_are_on_their_ladders():
-    """Every searching cell's budget is a rung of its searcher's; beta None (the calibrated
+    """Every searching cell's rungs are on its searcher's ladder; beta None (the calibrated
     distribution) only for coverage; bullet never searches."""
-    for (speed, b), (kind, budget, beta) in calibration.CELLS.items():
-        assert budget in calibration.LADDER[kind] and (beta is not None or kind == "coverage")
+    for (speed, b), (kind, rungs) in calibration.CELLS.items():
+        assert rungs and set(rungs) <= set(calibration.LADDER[kind])
+        assert all(beta is not None or kind == "coverage" for beta in rungs.values())
         assert speed in ("blitz", "rapid", "classical") and b % 200 == 0 and 800 <= b <= 2600
 
 
 def test_the_clock_caps_the_budget():
-    """The largest rung up to the cell's budget that fits a tenth of the clock above the reserve
-    (review: a 0.2 s clock must not search); a search may run to a fifth before it stops."""
-    for kind, budget in (("coverage", 256), ("coverage", 128), ("lookahead", 8)):
-        for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 1000.0):
-            n = calibration.affordable(kind, budget, clock, reserve=1.0)
+    """The largest of the cell's rungs that fits a tenth of the clock above the reserve (review: a
+    0.2 s clock must not search); a search may run to a fifth before it stops."""
+    for kind, rungs in (("coverage", (1024, 256, 128, 32, 8)), ("coverage", (128,)), ("lookahead", (8, 2))):
+        for clock in (None, 0.2, 2.0, 5.0, 10.0, 30.0, 100.0, 258.0, 260.0, 1000.0):
+            n = calibration.affordable(kind, rungs, clock, reserve=1.0)
             tenth = calibration.limit(clock, 1.0) / 2
-            assert n in (0, *calibration.LADDER[kind]) and n <= budget and n * calibration.COST[kind] <= tenth
-            assert all(b * calibration.COST[kind] > tenth for b in calibration.LADDER[kind] if n < b <= budget)
-    assert calibration.affordable("coverage", 256, 0.2) == 0 and calibration.affordable("coverage", 256, None) == 256
+            assert n in (0, *rungs) and n * calibration.COST[kind] <= tenth
+            assert all(b * calibration.COST[kind] > tenth for b in rungs if b > n)
+    rungs = (1024, 256, 128)
+    assert calibration.affordable("coverage", rungs, 0.2) == 0 and calibration.affordable("coverage", rungs, None) == 1024
+    assert calibration.affordable("coverage", rungs, 259.0) == 1024 and calibration.affordable("coverage", rungs, 255.0) == 256
+    assert calibration.affordable("coverage", rungs, 20.0) == 0  # 128 needs 33 s: below it the policy
     assert calibration.limit(51.0, 1.0) == 10.0
 
 
@@ -71,7 +75,7 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     legal_of = lambda g: [m.uci() for m in g.board.legal_moves]
     play = Play(mode="calibrated", think_time=False, resign=False, draws=False)
     search = dict(coverage=Search("coverage"), lookahead=Search("lookahead"))
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", 256, None)})
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: None})})
     game = Game(Engine(tiny), 2000, 2000, 600, 5, "rapid", seed=0)  # FP32: the reference backend
     game.update(random_game(3, 20), 590, 585)
     assert game.decide(play, search, 590).move in legal_of(game)
@@ -87,21 +91,22 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     game.update(random_game(3, 20), 590, 585)
     assert game.decide(play, None, 590).move in legal_of(game)  # no searcher: the policy
     assert game.decide(play, search, 590).move == legal_of(game)[0]  # coverage's calibrated distribution
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", 256, 40.0)})
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: 40.0, 32: None})})
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # coverage's values: prior exp(40 Q)
-    assert search["coverage"].budgets == [256, 256]
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("lookahead", 8, 40.0)})
+    assert game.decide(play, search, 30).move == legal_of(game)[0]  # 30 s left: rung 32, with its own beta
+    assert search["coverage"].budgets == [256, 256, 32]
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("lookahead", {8: 40.0})})
     assert game.decide(play, search, 590).move == legal_of(game)[-1]  # prior exp(40 Q)
     assert search["lookahead"].budgets == [8]
     monkeypatch.setattr(calibration, "CELLS", {})
     game.decide(play, search, 590)
-    assert search["coverage"].budgets == [256, 256] and search["lookahead"].budgets == [8]  # no cell: no search
-    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", 256, None)})
+    assert search["coverage"].budgets == [256, 256, 32] and search["lookahead"].budgets == [8]  # no cell: no search
+    monkeypatch.setattr(calibration, "CELLS", {("rapid", 2000): ("coverage", {256: None})})
     t = time.monotonic()
     reserve = behaviour.PARAMETERS["guard"]["reserve"]
     search["coverage"].late = True  # past its deadline: the move comes from the policy
     d = game.decide(play, search, 590)
-    assert search["coverage"].budgets == [256] * 3
+    assert search["coverage"].budgets == [256, 256, 32, 256]
     assert search["coverage"].deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
     legal, p, _, _ = game.position()
     assert d.probability == pytest.approx(p[legal.index(d.move)])

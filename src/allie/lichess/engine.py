@@ -294,10 +294,11 @@ def calibrated(game, play, search, clock):
     s, cell = p, calibration.cell(game.elo[len(game.moves) % 2], game.speed)
     # searches cost what calibration.COST assumes only on the fast CPU backend
     if search and cell and len(legal) > 1 and game.engine.model.fast is not None:
-        kind, budget, beta = cell
+        kind, rungs = cell
         left = None if clock is None else clock - (monotonic() - start)  # less any wait for the engine
         reserve = behaviour.PARAMETERS["guard"]["reserve"]
-        n = calibration.affordable(kind, budget, left, reserve)
+        n = calibration.affordable(kind, rungs, left, reserve)
+        beta = rungs.get(n)
         deadline = monotonic() + calibration.limit(left, reserve)
         if n and (found := search[kind](game, n, deadline)) is not None:
             moves, q = found[0], found[1] if beta is None else calibration.tilt(*found[-2:], beta)
