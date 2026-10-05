@@ -19,8 +19,9 @@ positions per time control and bin, 800-2600; analysis/elo_strength/calib_cells.
 Per cell, among the rung sets, tilts (on Q or on its log-odds) and betas whose human-move
 cross-entropy is below the policy's at 95% confidence (standard errors clustered by game), the
 cheapest whose expected move accuracy and blunder rate (Stockfish scoring every legal move) are
-within 20 Elo of the closest to the humans'; the policy where none qualifies, and in bullet, whose
-think times a search outlasts.
+within 20 Elo of the closest to the humans'; the policy where none qualifies, in bullet, whose
+think times a search outlasts, and where a pick qualifies only at the gate's edge and neither half
+of the games, picking on its own, confirms it on the other (blitz 1600, classical 1000).
 """
 
 import numpy as np
@@ -32,7 +33,6 @@ import numpy as np
 # times it draws
 # fmt: off
 CELLS = {
-    ("blitz", 1600): ("coverage", {32: 0.2, 8: 0.2}),  # -97 / -55, -0.0006
     ("blitz", 1800): ("coverage", {32: 0.75, 8: 0.75}),  # -41 / -63, -0.0022
     ("blitz", 2000): ("coverage", {32: 1.5, 8: 1.5}),  # +0 / -34, -0.0041
     ("blitz", 2200): ("coverage", {128: 1.5, 32: 1.5, 8: 1.5}, "atanh"),  # -50 / -25, -0.0078
@@ -44,7 +44,6 @@ CELLS = {
     ("rapid", 2200): ("coverage", {32: 2.0, 8: 2.0}, "atanh"),  # -2 / +0, -0.0146
     ("rapid", 2400): ("coverage", {128: 4.0, 32: 4.0, 8: 4.0}, "atanh"),  # -10 / +15, -0.0276
     ("rapid", 2600): ("coverage", {128: 6.0, 32: 6.0, 8: 6.0}, "atanh"),  # -37 / +9, -0.0216
-    ("classical", 1000): ("coverage", {32: 0.1, 8: 0.1}, "atanh"),  # -84 / -30, -0.0005
     ("classical", 1600): ("coverage", {128: 0.75, 32: 0.75, 8: 0.75}),  # +6 / -41, -0.0028
     ("classical", 1800): ("coverage", {32: 0.75, 8: 0.75}, "atanh"),  # -18 / -44, -0.0047
     ("classical", 2000): ("coverage", {32: 4.0, 8: 4.0}),  # +6 / +1, -0.0121
