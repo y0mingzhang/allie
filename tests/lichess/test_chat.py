@@ -474,7 +474,7 @@ def test_recent_lines(engine, tmp_path):
     c = h.chatter(Model("x"))
     h.feed(h.full())
     header = c.system[1]["text"]
-    assert "- A line to remember." in header and "with other opponents" in header
+    assert "- A line to remember." in header and "other opponents" in header
     assert '"this time"' in header
 
 

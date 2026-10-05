@@ -407,10 +407,9 @@ class Chatter:
                 f"You played them {ago:.0f} min ago: {r[1]}. Likely a rematch."
             )
         if lines := recent(self.cfg).read():
-            header.append("Your unprompted lines in recent games, with other opponents. Don't "
-                          "reuse their wording, openings or shape, and don't refer to those "
-                          "games: this opponent wasn't there, so no \"this time\" or "
-                          "\"again\" (unless this game is a rematch, as said above):\n"
+            header.append("Your unprompted lines in recent games, mostly with other opponents. "
+                          "Don't reuse their wording, openings or shape, and don't refer to "
+                          "them or to those games at all (no \"this time\" or \"again\"):\n"
                           + "\n".join(f"- {x}" for x in lines))  # fmt: skip
         cached = {"type": "ephemeral", "ttl": "1h"}
         self.system = [

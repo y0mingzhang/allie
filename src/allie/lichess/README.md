@@ -179,7 +179,7 @@ involved.
   with chance `p_end`; `p_draw` at a declined draw offer; at most `remarks` remarks a game. Quiet means
   until they write, or once `unanswered` of the bot's lines in a row get no reply. A "gg" after the
   game gets a fixed reply (no call) if the bot said nothing after the game. The bot's last `recent`
-  remarks reach the model as lines from games with other opponents, not to be reused or referred to.
+  remarks reach the model as lines from recent games, not to be reused or referred to.
 - **Voice.** A friendly, curious club player, in plain sentence case: short, warm, no jokes or slang.
   Never a dig at the opponent's mistakes.
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
