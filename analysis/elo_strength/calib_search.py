@@ -8,6 +8,7 @@ python calib_search.py POSITIONS.npz OUT_DIR --shard i --shards n
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -20,9 +21,8 @@ from oracle import MoEOracle
 from search import Search
 from search.native import from_prefix, load
 
-CALIBRATION = Path(
-    "/home/yimingz3/src/allie-wt-elo-pkg/src/allie/lichess/calibration-allie-v3.0.json"
-)
+# the bot's output calibration and backup (this checkout's; ALLIE_SRC overrides it)
+CALIBRATION = Path(os.environ.get("ALLIE_SRC", Path(__file__).resolve().parents[2] / "src")) / "allie/lichess/calibration-allie-2.0.json"
 
 
 class Capture:

@@ -65,19 +65,31 @@ def main():
                 elo=float(info["elo"][sel].mean()),
                 choice=pick,
             )
-            for name, v in (
-                ("human", H[sel]),
-                ("raw", X[sel, col["raw"], :2]),
-                ("calibrated", X[sel, col[pick], :2]),
-            ):
-                m, se = cc.clustered(np.asarray(v, float), g)
-                row[name] = dict(
-                    accuracy=float(m[0]),
-                    accuracy_se=float(se[0]),
-                    blunder=float(m[1]),
-                    blunder_se=float(se[1]),
-                )
+            row |= metrics(
+                g, human=H[sel], raw=X[sel, col["raw"], :2], calibrated=X[sel, col[pick], :2]
+            )
             cells[key] = row
+    Path(d / a.out).write_text(
+        json.dumps(dict(cells=cells, slopes=slopes(cells)), indent=1) + "\n"
+    )
+
+
+def metrics(game, **sets):
+    """{name: accuracy, blunder rate and their standard errors clustered by game} per (N, 2) set."""
+    out = {}
+    for name, v in sets.items():
+        m, se = cc.clustered(np.asarray(v, float)[:, :2], game)
+        out[name] = dict(
+            accuracy=float(m[0]),
+            accuracy_se=float(se[0]),
+            blunder=float(m[1]),
+            blunder_se=float(se[1]),
+        )
+    return out
+
+
+def slopes(cells):
+    """Per time control and metric, each source's slope against rating and its ratio to the humans'."""
     slopes = {}
     print(
         "slope per 1,000 rating points (accuracy points; log blunder rate), and the bot's over the humans'"
@@ -103,9 +115,7 @@ def main():
             print(f"  {fmt:9s} {metric:8s} human {s['human'][0]:+7.3f}  raw {s['raw'][0]:+7.3f} ({s['raw'][0] / s['human'][0]:.2f}x)"
                   f"  calibrated {s['calibrated'][0]:+7.3f} ({s['calibrated'][0] / s['human'][0]:.2f}x)")  # fmt: skip
         slopes[fmt] = out
-    Path(d / a.out).write_text(
-        json.dumps(dict(cells=cells, slopes=slopes), indent=1) + "\n"
-    )
+    return slopes
 
 
 if __name__ == "__main__":
