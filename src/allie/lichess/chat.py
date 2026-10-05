@@ -1055,10 +1055,10 @@ def recent(cfg):
     path = cfg.recent_file or os.path.join(
         os.path.dirname(os.path.expanduser(cfg.ledger)), "recent-lines.json"
     )
-    with LOCK:
-        return RECENTS.setdefault(
-            (path, cfg.recent), Recent(os.path.expanduser(path), cfg.recent)
-        )
+    with LOCK:  # one instance (and writer thread) a file, made once
+        if (key := (path, cfg.recent)) not in RECENTS:
+            RECENTS[key] = Recent(os.path.expanduser(path), cfg.recent)
+        return RECENTS[key]
 
 
 def mmss(ms):

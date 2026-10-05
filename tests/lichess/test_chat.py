@@ -382,6 +382,13 @@ def test_long_goodbye_posts_whole(engine):
     assert len(g.posts) == 2 and " ".join(x for _, x in g.posts) == text.strip()
 
 
+def test_recent_is_made_once(tmp_path):
+    cfg = Chat(recent=5, recent_file=str(tmp_path / "recent.json"))
+    before = sum(t.name == "chat-recent" for t in threading.enumerate())
+    assert len({id(chat.recent(cfg)) for _ in range(20)}) == 1
+    assert sum(t.name == "chat-recent" for t in threading.enumerate()) == before + 1
+
+
 def test_recent_dedupes_while_failing(tmp_path, monkeypatch):
     path = tmp_path / "recent.json"
     r = chat.Recent(str(path), 5, retry=0.2)
@@ -823,6 +830,9 @@ def test_ledger_edges(tmp_path, caplog):
     spent = json.loads(path.read_text())
     assert spent["2026-10-04"] == pytest.approx(0.9) and "2026-10-05" not in spent
     assert a.totals() == pytest.approx([0.0, 0.9]) and a.allows()
+    for bad in ('{"2026-10": NaN}', '{"2026-10": -1}'):
+        path.write_text(bad)
+        assert not llm.Ledger(str(path), 1.0, 1.5, retry=0.2).allows()
     path.write_text('{"2026-10": null}')
     b = llm.Ledger(str(path), 1.0, 1.5, retry=0.2)
     assert not b.allows() and b.broken and path.read_text() == '{"2026-10": null}'

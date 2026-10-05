@@ -211,7 +211,12 @@ class Ledger:
                 spent = json.load(f)
         except FileNotFoundError:
             return {}
-        number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+        number = lambda x: (
+            isinstance(x, (int, float))
+            and not isinstance(x, bool)
+            and math.isfinite(x)
+            and x >= 0
+        )
         if not isinstance(spent, dict) or not all(map(number, spent.values())):
             raise ValueError("not a ledger")
         return spent
