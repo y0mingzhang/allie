@@ -325,3 +325,70 @@ def test_coverage_views_respect_the_deadline_in_sync(tiny):
     game = Game(Engine(tiny), 2400, 2500, 1800, 10)
     game.update(random_game(8, 14), 1700, 1690)
     assert tree.Coverage(views=("true", "r2800"))(game, 8, deadline=time.monotonic() - 1) is None
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_kl_values_searched_moves(tiny, monkeypatch):
+    """The KL searcher spends exactly its leaves on the bot's cache and reads the tree it grew: every legal
+    move, Q on the log-odds scale, unexpanded moves at the root's own value."""
+    pytest.importorskip("pybind11")
+    from allie.search import kl
+
+    game = Game(Engine(tiny), 2400, 2500, 1800, 10)
+    game.update(random_game(7, 14), 1700, 1690)
+    grown, grow = [], kl.grow
+    monkeypatch.setattr(kl, "grow", lambda F, *a, **k: grown.append(F) or grow(F, *a, **k))
+    search = tree.KL()
+    moves, prior, q = search(game, 24)
+    F = grown[0]
+    assert F.spent[0] == 24 and sorted(moves) == sorted(m.uci() for m in game.board.legal_moves)
+    assert abs(prior.sum() - 1) < 1e-9 and np.isfinite(q).all() and (np.abs(q) <= np.arctanh(0.95)).all()
+    kid = F.ekid[F.start[0] : F.start[0] + F.count[0]]
+    V = kl.backup(F.view(), **search.read)[0]
+    assert np.allclose(q[kid >= 0], -V[kid[kid >= 0]])
+    assert np.allclose(q[kid < 0], np.arctanh(0.95 * F.value[0]))
+
+
+@pytest.mark.skipif(
+    not (native / "chess.hpp").exists() or not shutil.which("c++"),
+    reason="native search",
+)
+def test_fast_kl_runs_concurrently_and_stops_late(tiny_path):
+    """As lookahead: on the fast backend KL runs on the games' threads through the engine's batches, the same
+    values as one at a time up to BF16 batching noise; past its deadline it gives None."""
+    pytest.importorskip("pybind11")
+    import threading
+
+    from allie.lichess import fast
+
+    try:
+        fast.library()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no fast kernels: {e}")
+    engine, search = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=3)), tree.KL()
+    games = []
+    for s in range(3):
+        games.append(Game(engine, 2400, 2400, 1800, 20, "classical"))
+        games[-1].update(random_game(s, 12 + 2 * s), 1700, 1690)
+    alone, together = [search(g, 16) for g in games], [None] * len(games)
+    release = threading.Event()
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
+
+    def go(i):
+        together[i] = search(games[i], 16)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(len(games))]
+    for t in threads:
+        t.start()
+    time.sleep(0.5)
+    release.set()
+    for t in [blocker, *threads]:
+        t.join()
+    assert engine.widest > 8
+    for (m1, p1, q1), (m2, p2, q2) in zip(alone, together):
+        assert m1 == m2 and np.abs(p1 - p2).max() < 1e-9 and np.abs(q1 - q2).max() < 5e-2
+    assert search(games[0], 16, deadline=time.monotonic() - 1) is None

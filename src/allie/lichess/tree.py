@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from allie.search import Search, lookahead
+from allie.search import Search, kl, lookahead
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
 from allie.search.native import from_prefix, load
 
@@ -380,6 +380,44 @@ class Lookahead:
             tree.concurrent, tree.deadline = concurrent, deadline
             bridge = tree.handles([game.tokens], [feats])
             return lookahead.search(bridge, game.tokens, calls, self.m, self.k, self.beta)
+
+        try:
+            moves, prior, q = run() if concurrent else game.engine.run(run)
+        except Late:
+            return None
+        return [MOVES[t - MOVE_START] for t in moves], prior, q
+
+
+class KL:
+    """search(game, leaves, deadline) -> (legal moves, their prior, their searched values for the mover),
+    or None if the search runs past deadline (time.monotonic()): allie.search.kl on the game's cache, grown
+    best-first by reach to `leaves` network evaluations (kl.grow keywords `grow`: each side's policy tilted
+    by its values) and read by kl.backup keywords `read`. With read's squash the values are log odds,
+    arctanh(squash (W - L)), and so is Q; moves left unexpanded at the root take the root's own value. The
+    tree's clocks do not advance (clock_rule "zero"). On the fast backend it runs on the game's thread, as
+    Coverage does."""
+
+    GROW = dict(own=5.0, opp=5.0, soft=True, kappa=0.5)
+    READ = dict(own=12.0, opp=12.0, soft=True, squash=0.95)
+
+    def __init__(self, grow=None, read=None, clock_rule="zero"):
+        self.grow, self.read, self.clock_rule = grow or self.GROW, read or self.READ, clock_rule
+        load()
+
+    def __call__(self, game, leaves, deadline=np.inf):
+        z = game.sync()
+        feats = np.array(game.features(), np.float32)
+        concurrent = game.engine.model.fast is not None
+
+        def run():
+            tree = Tree(game, z, capacity=2 * leaves + 256)
+            tree.concurrent, tree.deadline = concurrent, deadline
+            bridge = tree.handles([game.tokens], [feats], self.clock_rule)
+            F = kl.Forest(bridge, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], tree.capacity)
+            kl.grow(F, leaves, **self.grow)
+            moves, prior, q = kl.root_q(F, kl.backup(F.view(), **self.read)[0], 0)
+            s = self.read.get("squash", 0.0)
+            return moves, prior, np.where(np.isnan(q), np.arctanh(s * np.clip(F.value[0], -1, 1)) if s else F.value[0], q)
 
         try:
             moves, prior, q = run() if concurrent else game.engine.run(run)

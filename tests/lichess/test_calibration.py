@@ -175,3 +175,9 @@ def test_close_serves_queued_requests(tiny):
     for t in (blocker, waiter, closer):
         t.join(5)
     assert got == [42] and not engine.thread.is_alive()
+
+
+def test_kl_cells_tilt():
+    """A kl rung's searcher returns (moves, prior, Q): it needs a beta (None would play the prior)."""
+    for searcher, rungs in calibration.CELLS.values():
+        assert searcher != "kl" or all(b is not None for b in rungs.values())
