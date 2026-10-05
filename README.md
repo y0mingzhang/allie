@@ -36,7 +36,7 @@ Three silent, captioned animations, about five minutes each. Each teaser links t
 
 | [![How Allie Works: the router picks 16 of 256 experts for a move](docs/videos/how-allie-works.gif)](docs/videos/how-allie-works.mp4) | [![Fitting Allie's Scaling Law: the law's forecast for Allie 2.0 against the loss it reached](docs/videos/scaling-law.gif)](docs/videos/scaling-law.mp4) | [![How Allie Searches: coverage and lookahead search trees growing side by side](docs/videos/how-allie-searches.gif)](docs/videos/how-allie-searches.mp4) |
 |:---:|:---:|:---:|
-| **[How Allie Works](docs/videos/how-allie-works.mp4)** (4:36): from a game's tokens to 16 of 256 experts to three predictions | **[Fitting Allie's Scaling Law](docs/videos/scaling-law.mp4)** (4:57): the sweep, three ways to fit it, and why it missed Allie 2.0's big run | **[How Allie Searches](docs/videos/how-allie-searches.mp4)** (4:32): search that adds strength and still predicts human moves |
+| **[How Allie Works](docs/videos/how-allie-works.mp4)** (4:36): from a game's tokens to 16 of 256 experts to three predictions | **[Fitting Allie's Scaling Law](docs/videos/scaling-law.mp4)** (6:11): the sweep, three ways to fit it, and why it missed Allie 2.0's big run | **[How Allie Searches](docs/videos/how-allie-searches.mp4)** (4:32): search that adds strength and still predicts human moves |
 
 ## How we built it
 

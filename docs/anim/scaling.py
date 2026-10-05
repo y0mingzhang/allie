@@ -1,6 +1,6 @@
 """Fitting Allie's scaling law: what an isoFLOP slice is, why its trough moves with compute, Chinchilla's three
-approaches on the MoE sweep, the Allie 2.0 miss, the data term and the Allie 2.1 forecast. Every number drawn is
-in data.json["scaling"]."""
+approaches on the MoE sweep, the Allie 2.0 miss, the data term, why the law missed and the Allie 2.1 forecast.
+Every number drawn is in data.json["scaling"]."""
 
 import numpy as np
 from manim import (
@@ -24,6 +24,7 @@ from manim import (
     LaggedStart,
     Line,
     ManimColor,
+    Polygon,
     Rectangle,
     RoundedRectangle,
     Scene,
@@ -61,7 +62,12 @@ M, SW, LAW, A1, A2 = D["meta"], D["sweep"], D["law"], D["envelope"], D["troughs"
 BUD = ("#D98A55", ORANGE, "#7A2E0C")
 GRIDC, PALE, GREY = "#E2DCCF", "#F2D3BF", "#9C968C"
 
-VIDEO = dict(name="scaling-law", scenes=[f"S{i}" for i in range(10)], gif=(["S7", 8.6], 13.5), poster=["S9", 20.5])
+VIDEO = dict(
+    name="scaling-law",
+    scenes=[*[f"S{i}" for i in range(9)], "M1", "M2", "M3", "S9"],
+    gif=(["S7", 8.6], 13.5),
+    poster=["S9", 20.5],
+)
 
 
 class Cap(Captions):
@@ -143,6 +149,14 @@ class Plot(VGroup):
             axis_config=dict(stroke_color=RULE, stroke_width=2, include_ticks=False),
         ).move_to(np.array([*center, 0][:3], float))
         self.ax.y_axis.set_opacity(0)
+        self.ax.x_axis.set_opacity(0)
+        self.base = Line(
+            self.ax.c2p(self.x0, self.y0),
+            self.ax.c2p(self.x1, self.y0),
+            stroke_color=RULE,
+            stroke_width=2,
+        )
+        self.ax.add(self.base)
         self.grid = VGroup(
             *[
                 Line(
@@ -169,7 +183,7 @@ class Plot(VGroup):
         self.add(self.grid, self.ax, self.yt, self.xt)
         if xl:
             self.xl = lab(xl, px + 2, INK2).next_to(
-                self.ax.x_axis, DOWN, buff=0.15 + (0.38 if xt else 0)
+                self.xt if xt else self.base, DOWN, buff=0.12 if xt else 0.15
             )
             self.add(self.xl)
         if yl:
@@ -278,7 +292,9 @@ def points(P, b, hollow_out=False, r=0.085):
 def parabola(P, b, pad=0.15, width=5):
     s = SW[b]
     ns = [q["n"] for q in s["points"] if q["window"]]
-    x = np.logspace(np.log10(min(ns)) - pad, min(np.log10(max(ns)) + pad, np.log10(4.2e8)), 60)
+    x = np.logspace(
+        np.log10(min(ns)) - pad, min(np.log10(max(ns)) + pad, np.log10(4.2e8)), 60
+    )
     return P.line(x, np.polyval(s["parabola"], np.log(x)), BUD[b], width)
 
 
@@ -344,7 +360,9 @@ class S0(Scene):
             *[parabola(P, b, 0.35, 6).set_stroke(opacity=0.22) for b in range(3)]
         )
         title = text("Fitting Allie's Scaling Law", 66, INK, weight="SEMIBOLD")
-        sub = text(f"{M['runs']} training runs, three ways to fit them, one forecast", 30, INK2)
+        sub = text(
+            f"{M['runs']} training runs, three ways to fit them, one forecast", 30, INK2
+        )
         VGroup(title, sub).arrange(DOWN, buff=0.35, aligned_edge=LEFT).move_to(
             [0, 0.3, 0]
         )
@@ -780,12 +798,14 @@ class S3(Scene):
             yl="learning rate",
             px=19,
         )
-        fr = SW[0]["c"] / SW[1]["c"]
-        long_ = L.line([0, 1], [1, 0], INK2, 4)
-        short = L.line([0, fr], [1, 0], ORANGE, 5)
+        fr, lr0 = SW[0]["c"] / SW[1]["c"], D["miss"]["lr_end_sweep"]
+        long_ = L.line([0, 1], [1, lr0], INK2, 4)
+        short = L.line([0, fr], [1, lr0], ORANGE, 5)
         mark = L.vline(fr, MUTED, 2, 0, 1.1)
-        mdot = dot(L.p(fr, 1 - fr), INK2, 0.08)
-        ml = lab(f"still {1 - fr:.0%}", 19, INK2).next_to(mdot, UP + RIGHT, buff=0.08)
+        mdot = dot(L.p(fr, 1 - fr * (1 - lr0)), INK2, 0.08)
+        ml = lab(f"still {1 - fr * (1 - lr0):.0%}", 19, INK2).next_to(
+            mdot, UP + RIGHT, buff=0.08
+        )
         ll = VGroup(lab("short run", 19, ORANGE, "SEMIBOLD").next_to(L.p(fr, 0.12), RIGHT, buff=0.1),
                     lab("long run", 19, INK2, "SEMIBOLD").next_to(L.p(0.8, 0.2), UP + RIGHT, buff=0.04))  # fmt: skip
         self.play(
@@ -793,7 +813,9 @@ class S3(Scene):
             Create(long_),
             Create(short),
             FadeIn(ll),
-            *cap("Each run decays its learning rate to zero at its own end."),
+            *cap(
+                f"Each run decays its learning rate to {lr0:.0%} of its peak at its own end."
+            ),
         )
         cap.hold()
         self.play(
@@ -801,7 +823,7 @@ class S3(Scene):
             FadeIn(mdot),
             FadeIn(ml),
             *cap(
-                "A run passing by mid-schedule hasn't annealed yet: its loss sits too high."
+                "A run passing by mid-schedule hasn't decayed yet: its loss sits too high."
             ),
         )
         cap.hold()
@@ -835,7 +857,9 @@ class S3(Scene):
             FadeIn(gl),
             FadeIn(dot(a, ORANGE, 0.09)),
             FadeIn(dot(b, col[A1["curves"][pair[0]]["n"]], 0.09)),
-            FadeIn(lab("finished", 20, INK2).next_to(a, LEFT, buff=0.18).shift(0.12 * DOWN)),
+            FadeIn(
+                lab("finished", 20, INK2).next_to(a, LEFT, buff=0.18).shift(0.12 * DOWN)
+            ),
             FadeIn(lab("still decaying", 20, INK2).next_to(b, UP + RIGHT, buff=0.08)),
         )
         cap.hold()
@@ -1226,11 +1250,20 @@ class S7(Scene):
         cap.hold()
 
         st = star(P.p(c20, 1.345))
-        self.play(FadeIn(st), *cap(f"Allie 2.0's main run, before its final anneal, scored {M['Y20']:.3f}."))
+        self.play(
+            FadeIn(st),
+            *cap(
+                f"Allie 2.0's big run, before its second anneal, scored {M['Y20']:.3f}."
+            ),
+        )
         self.play(
             st.animate.move_to(P.p(c20, M["Y20"])), run_time=1.2, rate_func=smooth
         )
-        sl = lab(f"actual: {M['Y20']:.3f}", 26, INK, "SEMIBOLD").next_to(st, LEFT, buff=0.2).shift(0.22 * UP)
+        sl = (
+            lab(f"actual: {M['Y20']:.3f}", 26, INK, "SEMIBOLD")
+            .next_to(st, LEFT, buff=0.2)
+            .shift(0.22 * UP)
+        )
         self.play(FadeIn(sl))
         cap.hold()
         y20 = P.p(c20, M["Y20"])[1]
@@ -1251,7 +1284,11 @@ class S7(Scene):
             stroke_width=4,
             tip_length=0.13,
         )
-        ul = lab(f"+{LAW['f20'] - M['Y20']:.3f}", 22, ORANGE, "SEMIBOLD").next_to(up, RIGHT, buff=0.1).shift(0.16 * DOWN)
+        ul = (
+            lab(f"+{LAW['f20'] - M['Y20']:.3f}", 22, ORANGE, "SEMIBOLD")
+            .next_to(up, RIGHT, buff=0.1)
+            .shift(0.16 * DOWN)
+        )
         dl = lab(f"−{M['Y20'] - A2['pow20']:.3f}", 22, BLUE, "SEMIBOLD").next_to(
             dn, RIGHT, buff=0.1
         )
@@ -1269,12 +1306,16 @@ class S7(Scene):
         half = (hi - lo) / 2
         xc = x20 - 0.24
         ya, yb = P.p(c20, lo)[1], P.p(c20, hi)[1]
-        ci = VGroup(Line([xc, ya, 0], [xc, yb, 0]), Line([xc - 0.08, ya, 0], [xc + 0.08, ya, 0]), Line([xc - 0.08, yb, 0], [xc + 0.08, yb, 0]))
+        ci = VGroup(
+            Line([xc, ya, 0], [xc, yb, 0]),
+            Line([xc - 0.08, ya, 0], [xc + 0.08, ya, 0]),
+            Line([xc - 0.08, yb, 0], [xc + 0.08, yb, 0]),
+        )
         ci.set_stroke(ORANGE, 4)
         self.play(
             GrowFromCenter(ci),
             *cap(
-                f"The law's miss is {(LAW['f20'] - M['Y20']) / half:.0f}× its own error bar: not noise, but the law's form."
+                f"The law's miss is {(LAW['f20'] - M['Y20']) / half:.0f}× its own error bar: not noise, something systematic."
             ),
         )
         cap.hold()
@@ -1414,14 +1455,309 @@ class S8(Scene):
             .align_to([x0, 0, 0], RIGHT)
         )
         al = (
-            lab(f"Allie 2.0, before its anneal: {M['Y20']:.3f}", 20, INK, "SEMIBOLD")
+            lab(f"Allie 2.0's big run: {M['Y20']:.3f}", 20, INK, "SEMIBOLD")
             .next_to(a20, DOWN, buff=0.06)
             .align_to([x0, 0, 0], RIGHT)
         )
         self.play(bt.animate.set_value(B["free_ls"]), FadeIn(band), FadeIn(bl), Create(a20), FadeIn(al), run_time=1.6,
-                  *cap("The floor is pinned too, and every allowed floor sits above Allie 2.0."))  # fmt: skip
+                  *cap("Within this law the floor is pinned too, and every allowed floor sits above Allie 2.0."))  # fmt: skip
         cap.hold()
-        self.play(*cap("No exponent or floor fixes it: the miss is in the law's form."))
+        self.play(
+            *cap("No exponent or floor in this law fits both the sweep and Allie 2.0.")
+        )
+        cap.hold(0.6)
+        outro(self)
+
+
+# ------------------------------------------------------------------ 8b. why the law missed Allie 2.0
+
+W = D["miss"]
+
+
+def signed(v, d=3):
+    return f"{v:+.{d}f}".replace("-", "−")
+
+
+def how(r):
+    return f"{'2' if '+' in r['fit'] else '3'} budgets → {'Allie 2.0' if 'Allie' in r['target'] else 'the 3rd'}"
+
+
+class M1(Scene):
+    def construct(self):
+        paper(self)
+        cap = Cap(self)
+        k = kicker("Why the law missed")
+        bt = W["backtest"]
+        P = Plot((1.0, 300), (-0.08, 0.046), 10.4, 4.0, (0.7, 0.45),
+                 xt=[(r["dist"], f"{r['dist']:.1f}×".replace(".0×", "×") if r["dist"] < 10 else f"{r['dist']:.0f}×") for r in bt["law"]],
+                 yt=[(y, "0" if y == 0 else signed(y, 2)) for y in (0.04, 0.02, 0, -0.02, -0.04, -0.06)],
+                 xl="how far out: target compute ÷ largest compute fitted", yl="forecast − actual (nats)")  # fmt: skip
+        zero = Line(P.p(1.0, 0), P.p(300, 0), color=INK2, stroke_width=2)
+        hows = VGroup(
+            *[
+                lab(how(r), 19, MUTED).next_to(t, DOWN, buff=0.06)
+                for r, t in zip(bt["law"], P.xt)
+            ]
+        )
+        P.xl.next_to(hows, DOWN, buff=0.12).set_x(P.ax.get_center()[0])
+        self.play(
+            FadeIn(k),
+            FadeIn(P),
+            Create(zero),
+            *cap("Why did the law miss? First: could a backtest have warned us?"),
+        )
+        cap.hold()
+
+        series = (("law", bt["law"], ORANGE), ("troughs", bt["troughs"], BLUE))
+        first = VGroup()
+        for name, rows, col in series:
+            r = rows[0]
+            d0 = dot(P.p(r["dist"], r["err"]), col, 0.11)
+            t0 = lab(
+                f"{name}  {signed(r['err'], 4 if abs(r['err']) < 0.001 else 3)}",
+                22,
+                col,
+                "SEMIBOLD",
+            ).next_to(d0, (UP if name == "law" else DOWN) + LEFT, buff=0.06)
+            first.add(VGroup(d0, t0))
+        self.play(FadeIn(hows[0]), LaggedStart(*[FadeIn(g, scale=0.8) for g in first], lag_ratio=0.3),
+                  *cap(f"Fit two budgets and predict the third, {bt['law'][0]['dist']:.1f}× out: the law is nearly exact."))  # fmt: skip
+        cap.hold()
+        lines, ends = VGroup(), VGroup()
+        for name, rows, col in series:
+            lines.add(
+                P.line([r["dist"] for r in rows], [r["err"] for r in rows], col, 4)
+            )
+            for r in rows[1:]:
+                d = dot(P.p(r["dist"], r["err"]), col, 0.11)
+                ends.add(
+                    VGroup(
+                        d,
+                        lab(signed(r["err"]), 22, col, "SEMIBOLD").next_to(
+                            d, UP if r["err"] > 0 else DOWN, buff=0.12
+                        ),
+                    )
+                )
+        self.bring_to_back(lines)
+        self.play(Create(lines), FadeIn(hows[1:]), LaggedStart(*[FadeIn(e) for e in ends], lag_ratio=0.15), run_time=2.0,
+                  *cap(f"At Allie 2.0, {bt['law'][1]['dist']:.0f}× out, the law is {bt['law'][1]['err']:.3f} too high. Its backtest gave no warning."))  # fmt: skip
+        cap.hold()
+
+        R = W["ruled_out"]
+        chips = VGroup()
+        for title, body in (("Same eval", f"identical positions,\n{R['eval_moves']:,} moves"),
+                            ("Parameter counting", f"moves the forecast\nby under {R['nparams_max']:.4f}"),
+                            ("Training recipe", f"2.0's recipe is {R['recipe_cost'][0]:.3f}–{R['recipe_cost'][1]:.3f}\nworse at sweep scale:\nit widens the gap")):  # fmt: skip
+            g = VGroup(text("RULED OUT", 20, MUTED, weight="SEMIBOLD"), text(title, 32, INK, weight="SEMIBOLD"),
+                       text(body, 25, INK2, line_spacing=0.9)).arrange(DOWN, buff=0.22)  # fmt: skip
+            box = RoundedRectangle(
+                corner_radius=0.18,
+                width=4.0,
+                height=3.2,
+                fill_color=PANEL,
+                fill_opacity=1,
+                stroke_width=0,
+            )
+            chips.add(VGroup(box, g.move_to(box)))
+        chips.arrange(RIGHT, buff=0.4).move_to([0, 0.2, 0])
+        self.play(
+            FadeOut(VGroup(P, zero, hows, first, lines, ends)),
+            *cap("Not the cause: the eval, how parameters are counted, or the recipe."),
+        )
+        self.play(
+            LaggedStart(*[FadeIn(c, shift=0.2 * UP) for c in chips], lag_ratio=0.3),
+            run_time=1.2,
+        )
+        cap.hold(0.8)
+        outro(self)
+
+
+class M2(Scene):
+    def construct(self):
+        paper(self)
+        cap = Cap(self)
+        k = kicker("Why the law missed")
+        w, y20 = W["waterfall"], M["Y20"]
+        P = Plot((0, 3.6), (1.246, 1.292), 5.3, 4.2, (-3.35, 0.3), logx=False,
+                 yt=[(y, f"{y:.2f}") for y in (1.25, 1.26, 1.27, 1.28, 1.29)], yl="loss (nats)")  # fmt: skip
+        top = DashedLine(
+            P.p(0, w[0]),
+            P.p(3.6, w[0]),
+            color=ORANGE,
+            stroke_width=2.5,
+            dash_length=0.1,
+        )
+        bot = DashedLine(
+            P.p(0, y20), P.p(3.6, y20), color=INK, stroke_width=2.5, dash_length=0.1
+        )
+        tl = lab(f"law {w[0]:.3f}", 21, ORANGE, "SEMIBOLD").next_to(
+            P.p(0.05, w[0]), UP, buff=0.06, aligned_edge=LEFT
+        )
+        bl = lab(f"Allie 2.0 {y20:.3f}", 21, INK, "SEMIBOLD").next_to(
+            P.p(0.05, y20), DOWN, buff=0.06, aligned_edge=LEFT
+        )
+        y0, y1 = P.p(0, W["forms_lo"])[1], P.p(0, W["forms_hi"])[1]
+        forms = Rectangle(
+            width=P.ax.width,
+            height=y1 - y0,
+            fill_color=ORANGE,
+            fill_opacity=0.13,
+            stroke_width=0,
+        )
+        forms.move_to([P.ax.get_center()[0], (y0 + y1) / 2, 0])
+        fl = (
+            lab("every law form that fits the sweep", 20, ORANGE)
+            .move_to(forms.get_corner(DOWN + RIGHT), aligned_edge=DOWN + RIGHT)
+            .shift(0.08 * UP + 0.1 * LEFT)
+        )
+        self.add(forms)
+        self.play(FadeIn(k), FadeIn(P), Create(top), Create(bot), FadeIn(tl), FadeIn(bl), FadeIn(forms), FadeIn(fl),
+                  *cap(f"Every law form that fits all {M['moe_runs']} runs says {W['forms_lo']:.3f}–{W['forms_hi']:.3f}. Allie 2.0 scored {y20:.3f}."))  # fmt: skip
+        cap.hold()
+
+        Z = W["decay"]
+        Q = Plot((800, 2.2e5), (-0.016, 0.0015), 4.7, 3.6, (3.75, 0.1), xt=[(1e3, "1K"), (1e4, "10K"), (1e5, "100K")],
+                 yt=[(v, "0" if v == 0 else signed(v)) for v in (0, -0.005, -0.01)], xl="training steps",
+                 yl=f"loss change from ending at {W['lr_end_20']:.1%}, not {W['lr_end_sweep']:.0%}", px=20)  # fmt: skip
+        sx0, sx1 = Q.p(Z["sweep_steps"][0], 0)[0], Q.p(Z["sweep_steps"][1], 0)[0]
+        sw = Rectangle(
+            width=sx1 - sx0,
+            height=Q.ax.height,
+            fill_color=BUD[0],
+            fill_opacity=0.16,
+            stroke_width=0,
+        )
+        sw.move_to([(sx0 + sx1) / 2, Q.ax.get_center()[1], 0])
+        swl = lab("sweep runs", 20, BUD[2], "SEMIBOLD").next_to(sw, DOWN, buff=-0.45)
+        qz = Line(Q.p(800, 0), Q.p(2.2e5, 0), color=INK2, stroke_width=2)
+        self.play(FadeOut(forms), FadeOut(fl), FadeIn(Q), FadeIn(qz), FadeIn(sw), FadeIn(swl),
+                  *cap(f"The sweep runs decay the learning rate to {W['lr_end_sweep']:.0%} of peak; Allie 2.0 went to {W['lr_end_20']:.1%}."))  # fmt: skip
+        cap.hold()
+        st = np.logspace(np.log10(Z["s0"]), np.log10(W["steps20"]), 60)
+        curve = Q.line(st, Z["k"] * np.log(st / Z["s0"]), INK, 4)
+        meas = VGroup(
+            *[dot(Q.p(s, g), ORANGE, 0.1) for s, g in zip(Z["steps"], Z["gain"])]
+        )
+        ml = lab(f"Allie 2.0: {signed(Z['gain'][-1])}", 20, ORANGE, "SEMIBOLD").next_to(
+            meas[-1], DOWN + LEFT, buff=0.1
+        )
+        b1 = self.bar(P, 1, w[0], w[1], INK2)
+        self.play(
+            Create(curve),
+            FadeIn(meas),
+            FadeIn(ml),
+            *cap(
+                f"That last stretch pays more the longer the run: {signed(w[1] - w[0])} at Allie 2.0's length."
+            ),
+        )
+        self.play(GrowFromEdge(b1[0], UP), FadeIn(b1[1:]))
+        cap.hold()
+        b2 = self.bar(P, 2, w[1], w[2], ORANGE, tentative=True)
+        self.play(
+            GrowFromEdge(b2[0], UP),
+            FadeIn(b2[1:]),
+            *cap(
+                f"Tentatively {signed(w[2] - w[1])}: token-starved runs on the U's steep side set the law's floor."
+            ),
+        )
+        cap.hold()
+        lo, hi = W["rest_range"]
+        b3 = self.bar(P, 3, w[2], w[3], GREY, sub=f"({signed(-lo)} to {signed(-hi)})")
+        self.play(
+            GrowFromEdge(b3[0], UP),
+            FadeIn(b3[1:]),
+            *cap(
+                f"About {w[2] - w[3]:.3f} is left that nothing the sweep measured explains."
+            ),
+        )
+        cap.hold(0.6)
+        outro(self)
+
+    @staticmethod
+    def bar(P, x, a, b, color, tentative=False, sub=""):
+        names = {1: f"decay to {W['lr_end_20']:.1%}", 2: "floor", 3: "unexplained"}
+        x0, x1 = P.p(x - 0.33, a)[0], P.p(x + 0.33, a)[0]
+        ya, yb = P.p(0, a)[1], P.p(0, b)[1]
+        r = Rectangle(width=x1 - x0, height=ya - yb, fill_color=color, fill_opacity=0.35 if tentative else 0.85,
+                      stroke_color=color, stroke_width=2.5 if tentative else 0).move_to([(x0 + x1) / 2, (ya + yb) / 2, 0])  # fmt: skip
+        if tentative:
+            r = VGroup(
+                r.set_stroke(width=0),
+                DashedVMobject(
+                    r.copy().set_fill(opacity=0).set_stroke(color, 2.5), num_dashes=24
+                ),
+            )
+        v = lab(signed(b - a), 22, INK, "SEMIBOLD").next_to(r, DOWN, buff=0.1)
+        if sub:
+            v = (
+                VGroup(v, lab(sub, 18, MUTED))
+                .arrange(DOWN, buff=0.06)
+                .next_to(r, DOWN, buff=0.1)
+            )
+        n = lab(names[x] + ("\n(tentative)" if tentative else ""), 20, INK2).next_to(
+            P.p(x, 1.246), DOWN, buff=0.12
+        )
+        return VGroup(r, v, n)
+
+
+class M3(Scene):
+    def construct(self):
+        paper(self)
+        cap = Cap(self)
+        k = kicker("Why the law missed")
+        Bd = W["band"]
+        c = np.array(Bd["c"])
+        P = Plot((4e17, 1.5e21), (1.22, 1.40), 11.0, 4.5, (-0.3, 0.2), xt=[(10.0**e, f"10<sup>{e}</sup>") for e in (18, 19, 20, 21)],
+                 yt=[(y, f"{y:.2f}") for y in (1.25, 1.30, 1.35)], xl="training compute (FLOPs)", yl="loss at the best size (nats)")  # fmt: skip
+        td = trough_dots(P)
+        cis = VGroup(
+            *[
+                Line(P.p(s["c"], lo), P.p(s["c"], hi), color=BUD[b], stroke_width=4)
+                for b, (s, (lo, hi)) in enumerate(zip(SW, W["trough_ci"]))
+            ]
+        )
+        lf = P.line(c, Bd["law"], ORANGE, 4)
+        pl = P.line(c, Bd["troughs"], BLUE, 3, dash=40)
+        ll = lab("the law", 21, ORANGE, "SEMIBOLD").next_to(
+            P.p(1e21, Bd["law"][-1]), UP, buff=0.1
+        )
+        pll = lab("troughs", 21, BLUE, "SEMIBOLD").next_to(
+            P.p(3e19, float(np.interp(np.log(3e19), np.log(c), Bd["troughs"]))),
+            DOWN + LEFT,
+            buff=0.1,
+        )
+        self.play(FadeIn(k), FadeIn(P), FadeIn(td), FadeIn(cis), Create(lf), Create(pl), FadeIn(ll), FadeIn(pll),
+                  *cap("Skip the steep sides: fit only the three troughs, with the floor left free."))  # fmt: skip
+        cap.hold()
+        lt = ValueTracker(np.log10(c[0]) + 0.3)
+
+        def band():
+            m = c <= 10 ** lt.get_value()
+            pts = [P.p(x, y) for x, y in zip(c[m], np.array(Bd["lo"])[m])] + [
+                P.p(x, y) for x, y in zip(c[m][::-1], np.array(Bd["hi"])[m][::-1])
+            ]
+            return Polygon(*pts, fill_color=BLUE, fill_opacity=0.16, stroke_width=0)
+
+        bd = always_redraw(band)
+        self.add(bd)
+        self.bring_to_back(bd)
+        self.play(lt.animate(rate_func=linear).set_value(np.log10(c[-1])), run_time=3.0,
+                  *cap("Every curve in this band fits them within noise. It fans out fast."))  # fmt: skip
+        bd.clear_updaters()
+        cap.hold()
+        st = star(P.p(M["C20"], M["Y20"] - W["pen20"]), 0.2)
+        sl = lab("Allie 2.0", 21, INK, "SEMIBOLD").next_to(st, UP, buff=0.1)
+        self.play(
+            FadeIn(st, scale=0.5),
+            FadeIn(sl),
+            *cap("Allie 2.0 sits inside it: three troughs cannot pin the floor."),
+        )
+        cap.hold()
+        self.play(
+            *cap(
+                "The sweep pins how to grow the model; it cannot pin how low the loss goes."
+            )
+        )
         cap.hold(0.6)
         outro(self)
 
@@ -1504,7 +1840,7 @@ class S9(Scene):
 
         card = VGroup(lab("Allie 2.1 forecast", 24, INK2), lab(f"{F['central']:.3f}", 58, INK, "SEMIBOLD"),
                       lab(f"range {F['lo']:.3f} – {F['hi']:.3f}", 24, INK2), lab(f"Allie 2.0: {M['Y20']:.3f}", 24, INK2),
-                      lab("both before the final anneal", 18, MUTED)).arrange(DOWN, buff=0.14)  # fmt: skip
+                      lab("both big runs, before any second anneal", 18, MUTED)).arrange(DOWN, buff=0.14)  # fmt: skip
         box = RoundedRectangle(
             corner_radius=0.15,
             width=card.width + 0.7,
@@ -1517,7 +1853,7 @@ class S9(Scene):
         self.play(
             FadeIn(cg, shift=0.15 * UP),
             *cap(
-                f"Forecast, before the final anneal: Allie 2.1 ≈ {F['central']:.3f}, {M['Y20'] - F['central']:.3f} below Allie 2.0."
+                f"Forecast for Allie 2.1's big run: {F['central']:.3f}, {M['Y20'] - F['central']:.3f} below Allie 2.0's."
             ),
         )
         cap.hold()
