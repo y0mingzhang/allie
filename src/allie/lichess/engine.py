@@ -295,7 +295,7 @@ def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
     sampled at temperature 1 from the policy, or from the distribution its cell's searcher gives,
     the search no longer than the think time drawn for the move (the bot keeps a human pace).
-    search: {"coverage": tree.Coverage(), "lookahead": tree.Lookahead()}."""
+    search: {"coverage": tree.Coverage(), "lookahead": tree.Lookahead(), "kl": tree.KL()}."""
     start = monotonic()
     legal, p, wdl, time = game.position()
     think = game.think(play, clock, time)

@@ -10,7 +10,8 @@
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output=/data/group_data/dei-group/yimingz3/allie/results/recipe10x/elo-strength/search-eff/pikl/logs/%x-%j.log
-# run-kl.sbatch OUT [gpu_kl.py args]: gpu_kl.py on every GPU of the job, one shard each, annealed Allie 2.0 (ann-all-p05-t1907)
+# run-kl.sbatch OUT [gpu_kl.py args]: gpu_kl.py on every GPU of the job, one shard each (SHARD0.. of SHARDS, default
+# all of the GPU count), annealed Allie 2.0 (ann-all-p05-t1907)
 set -uo pipefail
 R=/home/yimingz3/src/allie
 SRC=$R/results/recipe10x/distill-v2/source3
@@ -25,7 +26,7 @@ H=/home/yimingz3/src/allie-wt-pikl/analysis/search_kl
 L=/data/group_data/dei-group/yimingz3/allie/results/recipe10x/elo-strength/search-eff/pikl/logs
 G=$(nvidia-smi -L | wc -l)
 for i in $(seq 0 $((G - 1))); do
-  CUDA_VISIBLE_DEVICES=$i $PY $H/gpu_kl.py "$1" --shard $i --shards $G --checkpoint $CKPT --source $SRC "${@:2}" \
+  CUDA_VISIBLE_DEVICES=$i $PY $H/gpu_kl.py "$1" --shard $((${SHARD0:-0} + i)) --shards ${SHARDS:-$G} --checkpoint $CKPT --source $SRC "${@:2}" \
     > $L/${SLURM_JOB_NAME}-${SLURM_JOB_ID}-gpu$i.log 2>&1 &
 done
 wait

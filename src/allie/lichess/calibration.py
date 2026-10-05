@@ -48,8 +48,10 @@ CELLS = {
     ("classical", 2600): ("coverage", {1024: 16.0, 256: 16.0, 128: 16.0, 32: 16.0, 8: 16.0}),  # -188 / -304, -0.0466
 }
 # fmt: on
-LADDER = dict(coverage=(8, 32, 128, 256, 1024), lookahead=(1, 2, 4, 8, 16))
-COST = dict(coverage=0.015, lookahead=0.35)  # seconds a simulation or call (6-cpu load test, 10 games)
+LADDER = dict(coverage=(8, 32, 128, 256, 1024), lookahead=(1, 2, 4, 8, 16), kl=(8, 32, 128, 256, 512, 1024))
+# seconds a simulation or call (6-cpu load test, 10 games); kl a leaf, coverage's until a load test (alone on 4
+# cpus 9.5 ms)
+COST = dict(coverage=0.015, lookahead=0.35, kl=0.015)
 
 
 def cell(rating, speed):

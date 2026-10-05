@@ -37,6 +37,7 @@ def main():
     p.add_argument("--root", type=float, default=0.0, help="kl.grow root: the output tilt beta that steers root weights")
     p.add_argument("--full", action="store_true", help="kl.grow full: every root move first")
     p.add_argument("--floor", type=float, default=0.0, help="kl.grow floor: the human policy's share of reach")
+    p.add_argument("--squash", type=float, default=0.0, help="kl.grow squash: log-odds values")
     p.add_argument("--prior", default="", help="a view (e.g. 0) read at the roots only, for their policy and heads")
     p.add_argument("--k", type=int, default=8)
     p.add_argument("--g", type=float, default=0.125)
@@ -90,7 +91,7 @@ def main():
                 policy,
                 prior=prior,
             )
-            kl.grow(F, a.budget, a.own, a.opp, a.soft, a.kappa, a.k, a.g, a.width, a.root, a.full, a.floor)
+            kl.grow(F, a.budget, a.own, a.opp, a.soft, a.kappa, a.k, a.g, a.width, a.root, a.full, a.floor, a.squash)
             parts.append(F.dump())
         n0 = np.cumsum([0] + [len(d["parent"]) for d in parts])
         r0 = np.cumsum([0] + [len(d["calls"]) for d in parts])

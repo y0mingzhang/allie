@@ -21,7 +21,7 @@ def restrict(res, sel):
     """Harness chunk arrays for the roots in `sel` only."""
     off = res["offsets"]
     moves = np.repeat(sel, np.diff(off))
-    out = {k: (v[sel] if k in ("index", "heads") or k.startswith("leaves") else v[moves] if k in ("legal", "prior", "prior_v") or k.startswith("q") else v)
+    out = {k: (v[sel] if k in ("index", "heads") or k.startswith("leaves") else v[moves] if k in ("legal", "prior", "prior_v") or k.startswith(("q", "cov_")) else v)
            for k, v in res.items()}  # fmt: skip
     out["offsets"] = np.r_[0, np.cumsum(np.diff(off)[sel])]
     return out
@@ -39,6 +39,7 @@ def main():
     )
     p.add_argument("--budgets", default="8,16,32,64,128,256,512,1024,2048,4096")
     p.add_argument("--subset", default="", help="keep only these positions (an index .npy)")
+    p.add_argument("--calib", action="store_true", help="calib_cells.py's chunk keys (legal, prior, heads, cov_q{b}k)")
     a = p.parse_args()
     budgets = [int(b) for b in a.budgets.split(",")]
     run, out = Path(a.run), Path(a.out)
@@ -70,9 +71,17 @@ def main():
             keep = z["cost" if "cost" in z else "tag"] <= b
             V = soft_backup(z, keep) if a.backup == "cov" else kl.backup(z, keep, **parse(a.backup))[0]
             live = (kid >= 0) & keep[np.maximum(kid, 0)]
-            res[f"q{b}"] = np.where(live, -V[np.maximum(kid, 0)], np.nan).astype(
-                np.float32
-            )
+            q = np.where(live, -V[np.maximum(kid, 0)], np.nan)
+            if a.backup != "cov" and parse(a.backup)["squash"]:  # unsearched at the root's own value, on the same scale
+                x = parse(a.backup)["squash"] * np.clip(z["wdl"][roots, 0] - z["wdl"][roots, 2], -1, 1)
+                q = np.where(live, q, np.repeat(np.arctanh(x), z["root_len"]))
+            if a.calib:  # calib_cells' chunks: Q in W - L units (cov_q) and on the backup's log-odds scale (cov_x)
+                s = parse(a.backup)["squash"]
+                res[f"cov_x{b}k"] = q.astype(np.float32)
+                q = np.clip(np.tanh(q) / s, -1, 1) if s else q
+                res[f"cov_q{b}k"] = q.astype(np.float32)
+                continue
+            res[f"q{b}"] = q.astype(np.float32)
             leaves = np.bincount(
                 z["owner"][keep & ~z["terminal"] & (z["parent"] >= 0)], minlength=n
             )

@@ -142,15 +142,18 @@ class Forest:
                     root_len=self.count[:self.n].copy()) | ({} if len(self.bridges) == 1 else dict(wdlv=self.wdlv[s].astype(np.float32))) | ({} if len(self.bridges) == 1 and self.prior_logits is None else dict(root_probs_v=self.rootpv.astype(np.float32)))  # fmt: skip
 
 
-def backup(F, keep=None, own=0.0, opp=0.0, soft=False, kappa=0.0):
+def backup(F, keep=None, own=0.0, opp=0.0, soft=False, kappa=0.0, squash=0.0):
     """Values (side to move) of the nodes in `keep` (default all) of a forest's view() or dump: each
     node's policy p tilted by beta (own at even depths, opp at odd), times (1 + (subtree - 1) / 16)^kappa
     (kappa 0.5: KL weight falling as 1 / sqrt(subtree), as allie.search's soft backup sharpens), its
-    unexpanded moves at its own value. Returns (V, sigma, rest): each child's probability under its parent's tilted policy and each
+    unexpanded moves at its own value. squash > 0: values on the log-odds scale, arctanh(squash (W - L)).
+    Returns (V, sigma, rest): each child's probability under its parent's tilted policy and each
     node's tilted probability per unit prior of an unexpanded move."""
     par, d = F["parent"], np.asarray(F["depth"], np.int64)
     w = np.asarray(F["wdl"], float)
     v, prior = w[:, 0] - w[:, 2], np.asarray(F["prior"], float)
+    if squash:
+        v = np.arctanh(squash * np.clip(v, -1, 1))
     n = len(par)
     keep = np.ones(n, bool) if keep is None else keep
     levels = [np.flatnonzero(keep & (d == k)) for k in range(d.max() + 1)]
@@ -188,25 +191,27 @@ def root_weights(p):
     return w / max(w.sum(), 1e-300)
 
 
-def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0, full=False, floor=0.0):
+def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0, full=False, floor=0.0, squash=0.0):
     """Best-first by reach until each root has `budget` network evaluations (or nothing to expand): each
     call takes per root its max(k, g * evaluations so far) unexpanded moves of largest reach, below the
     root at most `width` of them from one node. root > 0: the root's move weights are the mean of
     sqrt(p (1 - p)) and sqrt(pi (1 - pi)), pi ~ p exp(root Q) the output tilt (unexpanded moves at the
     root's value), each normalized: the search follows where the tilted output is uncertain. full: every
     root move is evaluated before any deeper node. floor: below the root, reach follows the tilted policy
-    mixed with the share `floor` of the human policy itself (breadth where the tilt is sure)."""
+    mixed with the share `floor` of the human policy itself (breadth where the tilt is sure). squash: as
+    backup's."""
     n, E = F.n, len(F.rootw)
     top = np.repeat(np.arange(n), F.count[:n])
     cov = F.rootw.copy()
     while True:
         need = np.where(F.count[:n] > 1, budget - F.spent, 0)
         size = F.size
-        V, sigma, rest = backup(F.view(), own=own, opp=opp, soft=soft, kappa=kappa)
+        V, sigma, rest = backup(F.view(), own=own, opp=opp, soft=soft, kappa=kappa, squash=squash)
         sigma, rest = (1 - floor) * sigma + floor * F.prior[:size], (1 - floor) * rest + floor
         if root:
             kid = F.ekid[:E]
-            z = np.log(np.maximum(F.ep[:E], 1e-300)) + root * np.where(kid >= 0, -V[np.maximum(kid, 0)], F.value[top])
+            v0 = np.arctanh(squash * np.clip(F.value[top], -1, 1)) if squash else F.value[top]
+            z = np.log(np.maximum(F.ep[:E], 1e-300)) + root * np.where(kid >= 0, -V[np.maximum(kid, 0)], v0)
             z = np.exp(z - np.maximum.reduceat(z, F.start[:n])[top])
             pi = z / np.add.reduceat(z, F.start[:n])[top]
             w = np.sqrt(pi * (1 - pi))

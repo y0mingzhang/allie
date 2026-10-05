@@ -27,10 +27,12 @@ CELLS = [(3, 2400), (3, 2600), (2, 2600), (1, 2400)]
 
 
 def parse(s):
-    """'own:opp[:s][:kKAPPA]' -> kl.backup keywords (s: the soft objective)."""
+    """'own:opp[:s][:kKAPPA][:xSQUASH]' -> kl.backup keywords (s: the soft objective; x: log-odds values)."""
     own, opp, *flags = s.split(":")
     kappa = [float(x[1:]) for x in flags if x.startswith("k")]
-    return dict(own=float(own), opp=float(opp), soft="s" in flags, kappa=kappa[0] if kappa else 0.0)
+    squash = [float(x[1:]) for x in flags if x.startswith("x")]
+    return dict(own=float(own), opp=float(opp), soft="s" in flags, kappa=kappa[0] if kappa else 0.0,
+                squash=squash[0] if squash else 0.0)
 
 
 def row(R_):
