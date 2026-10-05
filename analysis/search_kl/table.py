@@ -19,6 +19,7 @@ def main():
         "--curves", default=f"{R}/pikl/curves.jsonl,{R}/scaling/curves.jsonl"
     )
     p.add_argument("--names", default="")
+    p.add_argument("--elo", action="store_true", help="also the accuracy Elo gap at the CE-optimal tilt")
     a = p.parse_args()
     rows = {}
     for f in [x for x in a.curves.split(",") if Path(x).exists()]:
@@ -42,9 +43,8 @@ def main():
             cols.append(
                 ""
                 if r is None
-                else f"{r['ce_match']:+.4f}"
-                if r["ce_match"] is not None
-                else f"x{r['reach']:+.0f}"
+                else (f"{r['ce_match']:+.4f}" if r["ce_match"] is not None else f"x{r['reach']:+.0f}")
+                + (f" {r['elo_acc_opt']:+.0f}" if a.elo else "")
             )
         print(
             f"{name[:44]:44s} {b:6d} {leaves:6.0f}  "
