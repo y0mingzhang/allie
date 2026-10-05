@@ -1111,7 +1111,8 @@ def clean(text):
         r"(?<=[a-z][.!?])(?=[A-Z][a-z])", " ", text
     )  # "game.Looks": two sentences
     text = text.strip("\"'\u201c\u201d{}")
-    return "" if re.search(r"https?://|www\.", text) else text
+    link = r"https?://|www\.|\b[a-z0-9-]+\.(?:org|com|net|io|gg|tv|me|co)\b"
+    return "" if re.search(link, text, re.IGNORECASE) else text
 
 
 def recase(text, board):

@@ -103,6 +103,7 @@ def test_clean_and_played():
     assert clean("May the best pawn win.</text>") == "May the best pawn win."
     assert clean("A calm game.<br>Looks solid.") == "A calm game. Looks solid."
     assert clean("A quiet game.Looks calm.") == "A quiet game. Looks calm."
+    assert clean("see lichess.org/abc") == "" and clean("Nice game. Looks fun") != ""
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
     for t in (
         "why did you say gg?",
