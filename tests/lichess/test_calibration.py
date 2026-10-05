@@ -132,9 +132,10 @@ def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
     game.update(random_game(3, 20), 590, 585)
     sim = calibration.COST["coverage"]
     for think, rung, move in ((256 * sim, 256, -1), (256 * sim - 0.01, 32, 0), (32 * sim - 0.01, None, None)):
-        monkeypatch.setattr(game, "think", lambda play, clock, time, t=think: t)
+        draws = iter([think, 1e3])  # a second draw would wait 1,000 s
+        monkeypatch.setattr(game, "think", lambda play, clock, time, d=draws: next(d))
         d = game.decide(play, search, 590)
-        assert d.think == think
+        assert d.think == think  # drawn once, before the search
         if rung is None:
             assert search["coverage"].budgets == [256, 32]  # no rung fits: the policy
         else:

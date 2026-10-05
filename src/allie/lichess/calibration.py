@@ -8,8 +8,8 @@ exp(beta Q), after a fixed number of coverage simulations or lookahead calls.
 The move's think time is drawn first (behaviour.think) and caps the search with a tenth of the clock
 left above the reserve, at COST seconds a simulation or call: the largest of the cell's rungs that
 fits is searched, with its beta, and the policy plays when none fits. So the bot keeps a human pace,
-searching most on the moves a human would think longest about (1,024 simulations take 15.4 s at
-COST, their median in a 6-CPU load test of 10 games). A search still running at a fifth of the clock
+searching most on the moves a human would think longest about (COST: 15 ms a simulation, about the
+median of 1,024-simulation searches in a 6-CPU load test of 10 games, 14.3-14.6 s). A search still running at a fifth of the clock
 stops, and the policy plays.
 
 Chosen for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (up to 5,000
