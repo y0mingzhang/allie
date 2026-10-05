@@ -814,6 +814,68 @@ def rating():
     )
 
 
+def calibrated():
+    """The strength of Allie 2.0's move distribution minus the humans' at their rating, in Elo: the mean of move
+    accuracy's and blunder rate's gaps (Stockfish on every legal move) read through the human curves, per time
+    control and 200-point bin, for the policy and for the Lichess bot's calibrated play
+    (analysis/elo_strength/calib_cells.py; its picks are allie.lichess.calibration.CELLS). Calibrated play is
+    cross-checked: settings chosen on half of the games, scored on the other half, both ways averaged."""
+    cells = jload(X / "elo-strength/calib/cells-ann2c-cov-clustered.json")
+    gap = lambda s: (s["elo_accuracy"] + s["elo_blunder"]) / 2
+    half = lambda s: np.hypot(s["se_accuracy"], s["se_blunder"]) / 2
+    formats = ("blitz", "rapid", "classical")
+    bins = range(800, 2601, 200)
+    pts, n = [], sum(cells[f"{f}/{b}"]["n"] for f in formats for b in bins)
+    for f in formats:
+        for b in bins:
+            c = cells[f"{f}/{b}"]
+            d = np.mean([gap(h["stats"]) for h in c["cv"]])
+            e = 1.96 * np.hypot(*[half(h["stats"]) for h in c["cv"]]) / 2
+            pts += [{"f": f, "x": b, "s": "Policy", "d": gap(c["raw"])},
+                    {"f": f, "x": b, "s": "Calibrated", "d": d, "lo": d - e, "hi": d + e, "search": c["kind"] != "raw"}]  # fmt: skip
+    sx, sy = (
+        alt.Scale(domain=[700, 2700], nice=False),
+        alt.Scale(domain=[-640, 330], nice=False),
+    )
+    panels = []
+    for i, f in enumerate(formats):
+        b = values([p for p in pts if p["f"] == f])
+        cal = b.transform_filter(alt.datum.s == "Calibrated")
+        x = alt.X("x:Q", scale=sx, title="Rating" if i == 1 else None,
+                  axis=alt.Axis(values=[800, 1400, 2000, 2600], grid=False, format="d"))  # fmt: skip
+        y = alt.Y("d:Q", scale=sy, title="Elo vs humans" if i == 0 else None,
+                  axis=alt.Axis(values=[-600, -400, -200, 0, 200], grid=True, labels=i == 0, labelExpr=signed_axis(0)))  # fmt: skip
+        layers = [
+            values([{"d": 0}]).mark_rule(color=INK, strokeWidth=1.4).encode(y=y),
+            cal.mark_area(color=ALLIE, opacity=0.15).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q"),
+            b.transform_filter(alt.datum.s == "Policy").mark_line(color=NEUTRAL_DARK, strokeWidth=2).encode(x=x, y=y),
+            cal.mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y),
+            cal.transform_filter(alt.datum.search).mark_point(color=ALLIE, filled=True, size=46, opacity=1).encode(x=x, y=y),
+        ]  # fmt: skip
+        if i == 0:
+            lab = values([{"x": 720, "d": 45, "t": "Humans", "c": INK2}, {"x": 1180, "d": -330, "t": "Policy", "c": NEUTRAL_DARK},
+                          {"x": 1700, "d": 150, "t": "Calibrated", "c": ALLIE}])  # fmt: skip
+            layers.append(lab.mark_text(align="left", fontWeight=600).encode(x=x, y=y, text="t:N", color=alt.Color("c:N", scale=None)))  # fmt: skip
+        panels.append(
+            alt.layer(*layers).properties(
+                width=178, height=250, title=panel_title(f.capitalize())
+            )
+        )
+    chart = alt.hconcat(*panels, spacing=18).properties(title=title(
+        "Calibrated play narrows the gap to human strength",
+        "Expected strength of the bot's moves minus that of humans at the same rating and time control, in Elo",
+        f"(move accuracy and blunder rate, scored by Stockfish), on {n:,} positions from July 2026 games.",
+        "Policy: moves sampled straight from the model. Calibrated: chosen on half of the games, scored on the",
+        "other half (band: 95% interval); dots mark where it searches. In bullet it never searches."))  # fmt: skip
+    save(chart, "calibrated")
+    for f in formats:
+        for s in ("Policy", "Calibrated"):
+            d = np.array([p["d"] for p in pts if p["f"] == f and p["s"] == s])
+            print(
+                f"  {f:9s} {s:10s} RMS {np.sqrt((d**2).mean()):4.0f} Elo  mean {signed(d.mean(), 0)}"
+            )
+
+
 def binned(values_):
     """values_ (rating-set order) averaged per 100-point game-rating bin, weighted to the natural mover mix."""
     with np.load(DATA / "maia3-bench/rating/games.npz") as z:
@@ -837,6 +899,7 @@ FIGS = {
     "protocol": protocol,
     "versatility": versatility,
     "rating": rating,
+    "calibrated": calibrated,
 }
 
 if __name__ == "__main__":
