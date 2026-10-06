@@ -243,7 +243,8 @@ noise, or faster (C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's re
   without the engine installed the model runs the PyTorch reference, with a warning. `ALLIE_NUMA=0` leaves
   the weights' memory where it is.
 - **Search.** The searches run in the engine too: tree, leaf evaluations and their batching, with no Python
-  per leaf. A search leaf costs about 2.2 ms on a 16-core EPYC 7763 serving 10 games at once.
+  per leaf. A KL search leaf costs about 3-4 ms on a 16-core EPYC 7763 when one game searches, and about
+  8 ms each when three games search at once.
 - **First move.** It also reads the 11-token header.
 - **How.** The Rust engine runs a whole step (input embedding, board CNN, 24 blocks, head) in one call on a
   pool of threads that stays alive between steps. Matrices are read in place, int8 rows

@@ -26,10 +26,10 @@ blitz, rapid and classical bins, with every bin's human-move cross-entropy at or
 95%, DELTA from 0, 0.25, 0.5, 0.75, 1 and 1.5. Each game half's fit picks these same values. Held out
 (each half scored by the other's fit), RMS Elo error bullet 0, blitz 0, rapid 55, classical 0 (debiased:
 within the noise); cross-entropy against the policy's bullet -0.0002, blitz -0.0038, rapid -0.0071,
-classical -0.0101 nats, no bin above it at 95%. Outside the strength noise at 95% (about 4 of the 80
-tests expected by chance), Elo on accuracy / blunder rate: bullet 2600 +115 / +219, blitz 2600 +112 /
-+91, rapid 2200 +87 / +123, rapid 2600 +39 / +158, classical 1800 +76 / +38, and bullet 1200 -431 /
--334, where the human curve is flat. Classical 2600 plays -34 / -50 (the coverage rule this replaces:
+classical -0.0101 nats, no bin above it at 95%. 8 of the 80 strength tests (accuracy and blunder rate
+per bin) fall outside the noise at 95%, about 4 expected by chance, in 6 bins (Elo on accuracy / blunder
+rate): bullet 2600 +115 / +219, blitz 2600 +112 / +91, rapid 2200 +87 / +123, rapid 2600 +39 / +158,
+classical 1800 +76 / +38, and bullet 1200 -431 / -334, where the human curve is flat. Classical 2600 plays -34 / -50 (the coverage rule this replaces:
 -135 / -235).
 """
 
@@ -41,7 +41,7 @@ READ = dict(own=8.0, opp=8.0, soft=True, squash=0.98)
 VIEWS = ("r3000/tc1800+20/noclock",)
 LADDER = (8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096)
 COST = 0.004  # seconds a KL leaf (16 cpus, 12 threads, a lone search of 128 leaves; larger ones cost less)
-MEASURED = 128  # searches of fewer leaves cost more a leaf (each call's fixed costs) and leave the price be
+MEASURED = 128  # searches of fewer leaves evaluated cost more a leaf (each call's fixed costs) and leave the price be
 MARGIN = 0.3  # seconds a search ends before the think time (10-game load tests: a late request and the move's own work)
 _BINS = np.arange(63)
 SECONDS = np.where(

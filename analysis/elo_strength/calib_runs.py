@@ -91,7 +91,9 @@ def main():
             ok = [r for r in rows if r[name][4] - 1.96 * r[name][5] <= 0]
             best = max(ok, key=lambda r: r[name][0]) if ok else None
             reach = max(rows, key=lambda r: r[name][0])
-            print(f"{cf.FORMATS[f]}/{b} {name}: strongest under the CE bar b{best['beta']:.2f} {best[name][0]:+.0f}/{best[name][2]:+.0f} (+-{1.96 * best[name][1]:.0f}/{1.96 * best[name][3]:.0f}) ce {best[name][4]:+.4f}+-{1.96 * best[name][5]:.4f}"
+            under = (f"b{best['beta']:.2f} {best[name][0]:+.0f}/{best[name][2]:+.0f} (+-{1.96 * best[name][1]:.0f}/{1.96 * best[name][3]:.0f}) ce {best[name][4]:+.4f}+-{1.96 * best[name][5]:.4f}"
+                     if best else "none")  # fmt: skip
+            print(f"{cf.FORMATS[f]}/{b} {name}: strongest under the CE bar {under}"
                   f" | strongest at any beta b{reach['beta']:.2f} {reach[name][0]:+.0f}/{reach[name][2]:+.0f} ce {reach[name][4]:+.4f}")  # fmt: skip
     (d / a.out).write_text(json.dumps(dict(budgets=budgets, cells=out)) + "\n")
 

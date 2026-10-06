@@ -343,7 +343,7 @@ def calibrated(game, play, search, clock):
             searched, stopped = monotonic() - t, found is None
             sims = n if stopped else game.last_search.get("evaluated", n)
             cut = not stopped and game.last_search.get("late", False)
-            if n >= calibration.MEASURED and not stopped and sims:
+            if sims >= calibration.MEASURED and not stopped:
                 e.sim_cost += 0.3 * (searched / sims - e.sim_cost)
             if found is not None:
                 beta = calibration.beta(game.elo[len(game.moves) % 2], time)

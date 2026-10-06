@@ -266,8 +266,8 @@ def main():
     p.add_argument("dir")
     p.add_argument("--ladder", required=True)
     p.add_argument("--extra", nargs="*", default=[])
-    p.add_argument("--sim", type=float, default=0.008, help="seconds a simulation (allie.lichess.calibration.COST)")
-    p.add_argument("--margin", type=float, default=0.2, help="seconds a search ends before the think time (calibration.MARGIN)")
+    p.add_argument("--sim", type=float, default=0.004, help="seconds a leaf (allie.lichess.calibration.COST)")
+    p.add_argument("--margin", type=float, default=0.3, help="seconds a search ends before the think time (calibration.MARGIN)")
     p.add_argument("--ce", choices=["mean", "cells"], default="mean", help="the cross-entropy bar: on the cells' mean or on every cell")
     p.add_argument("--ce-z", type=float, default=0.0, help="--ce cells: each cell's gap less this many standard errors")
     p.add_argument(

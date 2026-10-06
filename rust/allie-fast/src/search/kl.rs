@@ -336,6 +336,9 @@ impl Forest {
     /// (unexpanded moves at the root's own value); its sums np.add.reduceat's, a[0] + pairwise(a[1..]).
     fn tilted_root(&self, v: &[f64], root: f64, squash: f64) -> Vec<f64> {
         let r = &self.nodes[0];
+        if r.count == 0 {
+            return Vec::new();
+        }
         let own = squashed(r.value, squash);
         let z: Vec<f64> = self.edges[r.start..r.start + r.count]
             .iter()
