@@ -22,6 +22,16 @@ import torch
 from .fast import LAYER, PHASES, SCALED, cpu_order, cpus, threads_default
 
 
+ERRORS = {  # the engine's error codes: 1-4 a bad request (ValueError), else RuntimeError
+    1: "token outside the vocabulary",
+    2: "board state out of range",
+    3: "tokens, paths or slots past the cache, the tree or the context",
+    4: "items alias: a write overlaps a read or another write",
+    5: "the engine failed (a panic in the step)",
+    -1: "the server has stopped",
+}
+
+
 class Leaf(NamedTuple):
     """A search node evaluated in place (the engine's path item): the token `ids` [1] at position cache.n +
     len(path) attends to the cache's rows and then to the slots `path` (its ancestors below the root, in order)
@@ -253,9 +263,7 @@ class RustFast:
         err = self.handle.step(lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
                                meta, caches, paths, out.data_ptr())  # fmt: skip
         if err:
-            raise ValueError(("token outside the vocabulary", "board state out of range",
-                              "tokens, paths or slots past the cache, the tree or the context",
-                              "items alias: a write overlaps a read or another write")[err - 1])  # fmt: skip
+            raise (ValueError if 0 < err < 5 else RuntimeError)(ERRORS.get(err, f"engine error {err}"))
         for item in items:
             if not isinstance(item, Leaf):
                 item[0].n += len(item[1])

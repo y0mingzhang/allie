@@ -8,14 +8,15 @@ policy is allie.search.policy's with the same calibration.
 Tree reuse (reuse=True, native only): a game keeps each searcher's last tree (`game.trees`); at its next turn,
 if the two plies since form a path in it, the search starts from that grandchild's subtree (allie_fast's
 reroot: nodes, visits, values and slot rows kept) and evaluates only the budget's remaining leaves. The kept
-leaves were evaluated under the clocks the search predicted for the two plies (coverage's "predicted" rule)
-while the cache now holds the real ones: an approximation inherent to reuse, which the calibration refits for;
-KL's "zero" rule has no such gap. There is no evaluation cache keyed by position: the model's output depends on
-the move sequence and the clocks, not on the position alone, so one would change the outputs. Every search
-leaves its counts in `game.last_search` (reused, evaluated, ...).
+leaves were evaluated under the clocks the search assumed for the two plies (predicted think times under
+"predicted", none under KL's "zero") while the cache now holds the real ones: an approximation inherent to
+reuse under either rule, which the calibration refits for. There is no evaluation cache keyed by position: the
+model's output depends on the move sequence and the clocks, not on the position alone, so one would change the
+outputs. Every search leaves its counts in `game.last_search` (reused, evaluated, ...).
 """
 
 import json
+import logging
 from time import monotonic
 
 import allie_fast
@@ -26,8 +27,10 @@ from allie.search.policy import policy
 
 from . import tree
 from .fastrs import RustFast
-from .tokens import MOVE_START, MOVES
+from .tokens import CONTEXT, MOVE_START, MOVES
 from .tree import CALIBRATION, POLICY, WDL, Late, Mixed, Tree, View
+
+log = logging.getLogger(__name__)
 
 
 def server(game):
@@ -95,6 +98,8 @@ class Coverage:
         self.reuse, self.merged = reuse, merged
 
     def __call__(self, game, simulations, deadline=np.inf):
+        if len(game.tokens) >= CONTEXT:  # no room for a node: the policy plays
+            return None
         games, zs = games_of(self, game)
         if (
             self.views != ("true",) and monotonic() > deadline
@@ -112,7 +117,7 @@ class Coverage:
             if srv is None:
                 cov, root = self.handles(game, games, zs, z, own, budget, deadline)
             else:
-                root = z.double().numpy() if len(games) == 1 else mixed_root(zs, z)
+                root = z.double().numpy() if self.views == ("true",) else mixed_root(zs, z)
                 cov = self.native(srv, game, games, root, feats, budget, deadline)
         except Late:
             return None
@@ -178,10 +183,11 @@ class Coverage:
                 list(game.tokens),
                 root,
                 feats[0],
-                increment(game),
+                increment(games[0]),
                 budget,
                 self.parameters["cpuct"],
                 "predicted",
+                self.views != ("true",),
             )
             for g, f in zip(games[1:], feats[1:]):
                 cov.add_view(f, increment(g))
@@ -233,8 +239,8 @@ def mixed_root(zs, own):
 class KL:
     """search(game, leaves, deadline) -> (legal moves by falling prior, their prior, their searched values for the
     mover), or None past the deadline: tree.KL on the Rust forest (allie_fast.KL: kl.py's Forest, grow, backup and
-    root_q), the nodes evaluated under each view. reuse and merged as Coverage's; a reused forest keeps its first
-    search's node capacity (2 leaves + 256)."""
+    root_q), the nodes evaluated under each view. reuse and merged as Coverage's; every search, reused or not, has
+    room for 2 leaves + 256 nodes (a cut is logged and left in `game.last_search["full"]`)."""
 
     GROW, READ = tree.KL.GROW, tree.KL.READ
 
@@ -258,6 +264,8 @@ class KL:
         )
 
     def __call__(self, game, leaves, deadline=np.inf):
+        if len(game.tokens) >= CONTEXT:
+            return None
         games, zs = games_of(self, game)
         if (
             self.views != ("true",) and monotonic() > deadline
@@ -284,6 +292,8 @@ class KL:
             return None
         if forest is None:
             return None
+        if forest.full:
+            log.warning("a kl search of %d leaves filled its %d nodes after %d", leaves, cap, forest.spent)
         moves, p, q = forest.root_q(**self.read)
         return [MOVES[t - MOVE_START] for t in moves], p, q
 
@@ -317,6 +327,7 @@ class KL:
                 evaluated=forest.spent,
                 nodes=forest.size,
                 late=False,
+                full=forest.full,
             )
             return forest
 
@@ -327,7 +338,7 @@ class KL:
         forest = reusable(game, games, key, self.reuse)
         if (
             forest is not None
-            and forest.reroot(game.tokens[-2:], roots, prior, feats) is None
+            and forest.reroot(game.tokens[-2:], roots, prior, feats, cap) is None
         ):
             forest = None
         if forest is None:
@@ -351,7 +362,7 @@ class KL:
             **self.grow,
         )
         game.last_search = dict(searcher="kl", budget=leaves, reused=forest.reused, evaluated=forest.spent - forest.reused,
-                                nodes=forest.size, late=not done)  # fmt: skip
+                                nodes=forest.size, late=not done, full=forest.full)  # fmt: skip
         if done and self.reuse:
             keep(game, games, key, forest)
         return forest if done else None

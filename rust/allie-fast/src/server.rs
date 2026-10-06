@@ -103,6 +103,8 @@ struct State {
     stop: bool,
     /// requests in the last step: the gather window waits for as many
     expected: usize,
+    /// a batch is gathering or running
+    busy: bool,
 }
 
 /// max_items: the most items merged into a step; min_items: a batch this large runs at once; gather: the
@@ -221,6 +223,7 @@ impl Inner {
             }
             st = self.cv.wait(st).unwrap();
         }
+        st.busy = true;
         self.engine.lock().unwrap_or_else(PoisonError::into_inner).pool.wake(); // the workers spin while the batch gathers
         if pol.moves_first && pol.chunk == 0 && st.queue.iter().any(|p| p.req.plain()) {
             let (mut batch, mut items, mut rest) = (Vec::new(), 0, VecDeque::new());
@@ -313,6 +316,7 @@ impl Inner {
                     let err = (0..n).step_by(chunk).map(|a| self.step(&[(&p.req, a..n.min(a + chunk))], &mut out)).find(|&e| e != 0);
                     p.reply.set(err.unwrap_or(0));
                 }
+                self.idle();
                 continue;
             }
             let parts: Vec<Part> = batch.iter().map(|p| (&p.req, 0..p.req.items())).collect();
@@ -321,7 +325,13 @@ impl Inner {
                 // a bad request fails only its own caller: the rest run alone
                 p.reply.set(if err != 0 && batch.len() > 1 { self.step(&[part], &mut out) } else { err });
             }
+            self.idle();
         }
+    }
+
+    fn idle(&self) {
+        self.state.lock().unwrap().busy = false;
+        self.cv.notify_all();
     }
 }
 
@@ -392,13 +402,18 @@ impl PyServer {
         py.allow_threads(move || inner.engine.lock().unwrap_or_else(PoisonError::into_inner).pool.wake())
     }
 
-    /// on: no step starts until every pause is lifted; requests queue up and merge.
-    fn pause(&self, on: bool) {
-        {
-            let mut st = self.inner.state.lock().unwrap();
+    /// on: no step starts until every pause is lifted (requests queue up and merge), and none is running once
+    /// this returns (it waits, the GIL released, for the batch gathering or in flight).
+    fn pause(&self, py: Python<'_>, on: bool) {
+        let inner = self.inner.clone();
+        py.allow_threads(move || {
+            let mut st = inner.state.lock().unwrap();
             st.paused = if on { st.paused + 1 } else { st.paused.saturating_sub(1) };
-        }
-        self.inner.cv.notify_all();
+            inner.cv.notify_all();
+            while on && st.busy && !st.stop {
+                st = inner.cv.wait(st).unwrap();
+            }
+        })
     }
 
     #[getter]

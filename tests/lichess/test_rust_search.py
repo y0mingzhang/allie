@@ -374,10 +374,11 @@ def grandchild(cov):
     return (k1, k2), [int(c["move"][k1]) + 378, int(c["move"][k2]) + 378]
 
 
-@pytest.mark.parametrize("views", [("true",), ("true", "r2800")])
+@pytest.mark.parametrize("views", [("true",), ("true", "r2800"), ("r2800",), ("tc60+0", "true")])
 def test_native_coverage_matches_handles(tiny_path, views):
     """On the Rust backend treers.Coverage runs natively (no Python per leaf): with one step per call and view
-    (merged=False) its outputs are bitwise the handle-driven tree.Coverage's; with the views' leaves merged into one
+    (merged=False) its outputs are bitwise the handle-driven tree.Coverage's, a lone view other than the game's
+    read as Mixed reads it and a first view's clocks on its own increment; with the views' leaves merged into one
     step the kernels' sums round differently (same moves, close values)."""
     engine = Engine(rust_model(tiny_path))
     for seed, plies, budget in ((5, 14, 32), (6, 23, 128)):
@@ -445,8 +446,9 @@ def test_native_searches_merge_across_games(tiny_path, searcher):
         engine.widest > 8
         and after["requests"] - before["requests"] > after["steps"] - before["steps"]
     )
-    for a, b in zip(alone, together):
+    for a, b in zip(alone, together):  # coverage's probabilities, kl's prior; then the searched values
         assert a[0] == b[0] and np.abs(np.asarray(a[1]) - np.asarray(b[1])).max() < 5e-3
+        assert np.abs(np.asarray(a[-1]) - np.asarray(b[-1])).max() < 5e-2
 
 
 def test_native_deadline(tiny_path):
@@ -486,6 +488,62 @@ def test_native_deadline(tiny_path):
     assert out is not None and sorted(out[0]) == sorted(
         m.uci() for m in game.board.legal_moves
     )
+
+
+def test_context_end_plays_the_policy(tiny_path, monkeypatch):
+    """A root with no room for a node below it (the model's context full) is not searched: None, the policy plays."""
+    engine = Engine(rust_model(tiny_path))
+    game = setup(engine, 7, 14)
+    monkeypatch.setattr(treers, "CONTEXT", len(game.tokens))
+    assert treers.Coverage()(game, 8) is None and treers.KL()(game, 8) is None
+
+
+def test_pause_waits_for_the_step_in_flight(tiny_path):
+    """Engine.run(fn) on the Rust backend: no step runs during fn, not even the one in flight when it was called."""
+    import threading
+
+    engine = Engine(rust_model(tiny_path))
+    game, srv = setup(engine, 5, 14), engine.server
+    search = threading.Thread(target=treers.Coverage(), args=(game, 1024))
+    search.start()
+    while srv.stats()["steps"] < 3:
+        time.sleep(0.001)
+
+    def held():
+        a = srv.stats()["steps"]
+        time.sleep(0.2)
+        return srv.stats()["steps"] - a
+
+    assert engine.run(held) == 0
+    search.join()
+    assert not game.last_search["late"]
+
+
+def test_kl_reroot_takes_the_new_capacity():
+    """A forest built for 16 leaves re-rooted for 512 reaches 512 evaluations; re-rooted at its old capacity it
+    stops short and says so (full)."""
+    rng = np.random.default_rng(0)
+    toks = [2348, 199, 12, 1, 5, 0, 0, 1, 5, 0, 0] + [
+        378 + allie_fast.moves().index(m) for m in random_game(3, 20)
+    ]
+    feats = np.full((len(toks), 3), -1, np.float32)
+    feats2 = np.full((len(toks) + 2, 3), -1, np.float32)
+
+    def grow(f, budget, seen):
+        while (h := f.select(budget, **treers.KL.GROW)) is not None:
+            seen.extend(h.tolist())
+            if len(h):
+                f.update([rng.normal(0, 2, (len(h), 2432))])
+
+    for cap, short in ((2 * 512 + 256, False), (2 * 16 + 256, True)):
+        f, seen = allie_fast.KL(toks, [rng.normal(0, 2, 2432)], None, feats, -1, 2 * 16 + 256), []
+        grow(f, 16, seen)
+        ids = {r[0]: r for r in seen}
+        g = next(r for r in seen if r[1] in ids and ids[r[1]][1] == 0)  # an evaluated grandchild
+        moves = [ids[g[1]][2], g[2]]
+        assert f.reroot(moves, [rng.normal(0, 2, 2432)], None, [feats2], cap) is not None and not f.full
+        grow(f, 512, [])
+        assert (f.spent == 512, f.full) == (not short, short)
 
 
 def test_reroot_keeps_the_grandchilds_subtree(tiny_path):
@@ -708,3 +766,46 @@ def test_native_errors_raise(tiny_path):
     )
     out = treers.Coverage()(game, 8)
     assert out is not None and engine.server.stats()["queued"] == 0
+    handled = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 32, 2.5)
+    handled.select()
+    with pytest.raises(RuntimeError, match="select"):  # its nodes have no slot rows
+        handled.run(engine.server, [treers.ref(game.cache)])
+    native = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 8, 2.5)
+    assert native.run(engine.server, [treers.ref(game.cache)])
+    with pytest.raises(RuntimeError, match="run"):
+        native.select()
+    fast, real = engine.model.fast, engine.model.fast.handle
+    item = (game.cache, torch.tensor([400]), torch.zeros(1, 3), torch.zeros(1, 68, dtype=torch.uint8))
+    for code, kind, why in ((4, ValueError, "alias"), (5, RuntimeError, "panic"), (-1, RuntimeError, "stopped")):
+        fast.handle = type("Stub", (), {"step": lambda self, *a, c=code: c})()
+        try:
+            with pytest.raises(kind, match=why):
+                fast._step([item])
+        finally:
+            fast.handle = real
+
+
+def test_cli_picks_the_native_searcher(tiny_path, monkeypatch):
+    """The bot's searcher on the Rust backend is treers.Coverage, and it searches without the C++ tree; on torch
+    tree.Coverage."""
+    from allie.lichess import cli
+    from allie.lichess.config import Config, Play
+
+    import allie.search.native as cpp
+
+    def refuse(kind):
+        raise AssertionError(f"the C++ {kind} module was loaded")
+
+    c = Config(model=str(tiny_path), threads=2, backend="rust", play=Play(mode="calibrated"))
+    assert isinstance(cli.coverage(c, Model(tiny_path, backend="torch")), tree.Coverage)
+    before = torch.get_num_threads()
+    try:
+        m = cli.model(c)
+    finally:
+        torch.set_num_threads(before)
+    search = cli.coverage(c, m)
+    assert isinstance(search, treers.Coverage)
+    monkeypatch.setattr(cpp, "_load", refuse)
+    game = setup(Engine(m), 5, 14)
+    assert search(game, 32) is not None and not game.last_search["late"]
+

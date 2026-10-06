@@ -30,11 +30,16 @@ def model(c):
     return m
 
 
-def coverage(c):
-    """The searcher play.mode uses: coverage, for calibrated and for strongest with search."""
+def coverage(c, m):
+    """The searcher play.mode uses: coverage, for calibrated and for strongest with search; on model m's Rust
+    backend the native one (treers: the whole search in Rust, no C++ tree)."""
     if c.play.mode == "calibrated" or c.play.mode == "strongest" and c.play.search:
-        from .tree import Coverage
+        from .fastrs import RustFast
 
+        if isinstance(m.fast, RustFast):
+            from .treers import Coverage
+        else:
+            from .tree import Coverage
         return Coverage()
     return None
 
@@ -117,7 +122,8 @@ def run_command(a):
         token = os.environ.get("LICHESS_TOKEN")
         if not token:
             sys.exit("set LICHESS_TOKEN to the bot account's API token (bot:play)")
-        bot = Bot(c, Lichess(token, c.url), Engine(model(c)), coverage(c))
+        m = model(c)
+        bot = Bot(c, Lichess(token, c.url), Engine(m), coverage(c, m))
         if a.drain_file:
             threading.Thread(target=watch, args=(bot, a.drain_file), daemon=True).start()
         signal.signal(signal.SIGUSR1, lambda *_: bot.drain())
@@ -126,12 +132,13 @@ def run_command(a):
         return
     from .selfplay import bench, selfplay
 
+    m = model(c)
     if a.command == "selfplay":
         args = (a.games, a.opponent, a.base, a.increment)
-        out = selfplay(c, model(c), coverage(c), *args)
+        out = selfplay(c, m, coverage(c, m), *args)
         print(json.dumps(out["summary"], indent=1))
     else:
-        out = bench(c, model(c), coverage(c), a.moves, a.concurrent)
+        out = bench(c, m, coverage(c, m), a.moves, a.concurrent)
         print(json.dumps(out, indent=1))
     dump(out, a.out)
 

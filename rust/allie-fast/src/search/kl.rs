@@ -5,7 +5,9 @@
 //! Nodes keeps (clock rule "zero" by default: the clocks do not advance). Python sees `allie_fast.KL`, driven by
 //! handles (`select` / `update`) or natively (`run`: every call's leaves evaluated through the `Server` on the
 //! game's cache and the forest's own slot buffers). Tree reuse (`reroot`) keeps the grandchild's subtree as
-//! coverage.rs describes; under the "zero" clock rule the kept leaves' clocks are the real ones.
+//! coverage.rs describes, with the same approximation under either clock rule: the kept nodes' clocks (and the
+//! evaluations made under them) descend from the old root's, which assumed the two plies' think times (zero
+//! under "zero", predicted under "predicted"), not the real ones.
 
 use numpy::{PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -144,6 +146,10 @@ pub struct Forest {
     top: u32,
     /// re-root: the evaluated leaves kept
     reused: i64,
+    /// the capacity cut a call's quota: the budget may not be reached
+    full: bool,
+    /// driven by `select` / `update`: its nodes have no slot rows, so `run` refuses it
+    by_handles: bool,
 }
 
 impl Forest {
@@ -180,7 +186,7 @@ impl Forest {
             elapsed: 0.,
             slot: NONE,
         };
-        let mut f = Forest { nodes: vec![root], edges: Vec::new(), views: roots.len(), cap, calls: 0, spent: 0, rootw: Vec::new(), pending: Vec::new(), clocks: vec![Clocks::new(features, increment)], predicted, slots: Vec::new(), free: Vec::new(), top: 1, reused: 0 };
+        let mut f = Forest { nodes: vec![root], edges: Vec::new(), views: roots.len(), cap, calls: 0, spent: 0, rootw: Vec::new(), pending: Vec::new(), clocks: vec![Clocks::new(features, increment)], predicted, slots: Vec::new(), free: Vec::new(), top: 1, reused: 0, full: false, by_handles: false };
         f.set(0, prior.unwrap_or(roots[0]), roots);
         f.rootw = root_weights(&f.edges.iter().map(|e| e.p).collect::<Vec<_>>());
         Ok(f)
@@ -307,7 +313,9 @@ impl Forest {
         }
         cand.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap().then(a.1.cmp(&b.1)));
         let quota = ((g.g * self.spent as f64).ceil() as i64).max(g.k).min(need).max(0) as usize;
-        let take = quota.min(self.cap - size);
+        let room = self.cap.saturating_sub(size);
+        self.full |= quota.min(cand.len()) > room;
+        let take = quota.min(room);
         if take == 0 || cand.is_empty() {
             return Ok(None);
         }
@@ -388,7 +396,8 @@ impl Forest {
 
     /// The native loop: kl.grow's calls toward `budget` evaluations, each call's new nodes evaluated through
     /// the server under every view (one request when `merged`, else one per view), until nothing is left to
-    /// expand. false: the deadline (time.monotonic seconds) passed before a call.
+    /// expand. false: the deadline (time.monotonic seconds) passed before a call with network evaluations (that
+    /// call's nodes stay pending, uncounted in `spent`).
     pub fn native(&mut self, server: &Inner, caches: &[CacheRef], deadline: f64, budget: i64, g: Grow, merged: bool) -> Result<bool, String> {
         if caches.len() != self.clocks.len() {
             return Err("one cache per view".into());
@@ -401,12 +410,13 @@ impl Forest {
             self.slots = caches.iter().map(|_| Slots::new(server.dims, cap)).collect();
         }
         loop {
-            if monotonic() > deadline {
-                return Ok(false);
-            }
             let Some(pending) = self.step(budget, g)?.map(|p| p.to_vec()) else { break };
             if pending.is_empty() {
                 continue;
+            }
+            if monotonic() > deadline {
+                self.spent -= pending.len() as i64;
+                return Ok(false);
             }
             let zs = self.evaluate(server, caches, &pending, merged)?;
             self.apply(&zs.iter().map(Vec::as_slice).collect::<Vec<_>>())?;
@@ -441,8 +451,9 @@ impl Forest {
     /// evaluated: its subtree kept (ids remapped in order, depths less two), the root set from the game's new
     /// logits (`roots` per view, `prior` as `build`) with its kept children by token (their priors the new
     /// ones), every view's clocks restarted from `features` (the game's, two plies longer) for the root, the
-    /// evaluations spent those of the kept leaves. The kept nodes' old ids, or None when nothing can be kept.
-    pub fn rebase(&mut self, moves: &[i64], roots: &[&[f64]], prior: Option<&[f64]>, features: &[Vec<[f32; 3]>]) -> Result<Option<Vec<usize>>, &'static str> {
+    /// evaluations spent those of the kept leaves, the capacity `cap` nodes (as `build`'s, for the next budget).
+    /// The kept nodes' old ids, or None when nothing can be kept.
+    pub fn rebase(&mut self, moves: &[i64], roots: &[&[f64]], prior: Option<&[f64]>, features: &[Vec<[f32; 3]>], cap: usize) -> Result<Option<Vec<usize>>, &'static str> {
         if !self.pending.is_empty() {
             return Err("update pending predictions first");
         }
@@ -514,6 +525,8 @@ impl Forest {
         self.spent = self.nodes[1..].iter().filter(|x| !x.terminal).count() as i64;
         self.reused = self.spent;
         self.calls = 0;
+        self.cap = cap.max(self.nodes.len());
+        self.full = false;
         Ok(Some(kept))
     }
 
@@ -596,6 +609,10 @@ impl Forest {
         if root != 0. {
             return Err(invalid("the root tilt is not ported"));
         }
+        if !self.slots.is_empty() {
+            return Err(PyRuntimeError::new_err("a forest run natively continues with run()"));
+        }
+        self.by_handles = true;
         let grow = Grow { read: Read { own, opp, soft, kappa, squash }, k, g, width, full, floor };
         if self.step(budget, grow).map_err(PyRuntimeError::new_err)?.is_none() {
             return Ok(None);
@@ -615,6 +632,9 @@ impl Forest {
         if root != 0. {
             return Err(invalid("the root tilt is not ported"));
         }
+        if self.by_handles {
+            return Err(PyRuntimeError::new_err("a forest driven by select() has no slot rows to run natively"));
+        }
         let grow = Grow { read: Read { own, opp, soft, kappa, squash }, k, g, width, full, floor };
         let inner = server.inner.clone();
         let caches: Vec<CacheRef> = caches.into_iter().map(CacheRef::from).collect();
@@ -623,19 +643,26 @@ impl Forest {
 
     /// Tree reuse: re-root at the grandchild reached by `moves` (two move tokens) with the game's new logits
     /// (roots per view, prior as the constructor's) and clock features (one [n, 3] per view, n the new prefix
-    /// length); the kept nodes' old ids, or None when the grandchild was not evaluated (start fresh).
-    #[pyo3(signature = (moves, roots, prior, features))]
-    fn reroot(&mut self, moves: Vec<i64>, roots: Vec<PyReadonlyArray1<f64>>, prior: Option<PyReadonlyArray1<f64>>, features: Vec<PyReadonlyArray2<f32>>) -> PyResult<Option<Vec<usize>>> {
+    /// length), at most `cap` nodes from now on (the constructor's for the next budget); the kept nodes' old ids,
+    /// or None when the grandchild was not evaluated (start fresh).
+    #[pyo3(signature = (moves, roots, prior, features, cap))]
+    fn reroot(&mut self, moves: Vec<i64>, roots: Vec<PyReadonlyArray1<f64>>, prior: Option<PyReadonlyArray1<f64>>, features: Vec<PyReadonlyArray2<f32>>, cap: usize) -> PyResult<Option<Vec<usize>>> {
         let roots: Vec<Vec<f64>> = roots.iter().map(|z| z.as_array().iter().copied().collect()).collect();
         let prior: Option<Vec<f64>> = prior.map(|z| z.as_array().iter().copied().collect());
         let feats = features.iter().map(rows3).collect::<PyResult<Vec<_>>>()?;
-        self.rebase(&moves, &roots.iter().map(Vec::as_slice).collect::<Vec<_>>(), prior.as_deref(), &feats).map_err(invalid)
+        self.rebase(&moves, &roots.iter().map(Vec::as_slice).collect::<Vec<_>>(), prior.as_deref(), &feats, cap).map_err(invalid)
     }
 
     /// Evaluated leaves kept by the last re-root.
     #[getter]
     fn reused(&self) -> i64 {
         self.reused
+    }
+
+    /// The node capacity cut a call short since the forest was built or re-rooted: the budget may be unmet.
+    #[getter]
+    fn full(&self) -> bool {
+        self.full
     }
 
     /// The pending nodes' logits under each view, [n, 2432] float64 each.
@@ -779,7 +806,7 @@ mod tests {
         let moves = [f.nodes[f.nodes[g].parent as usize].token, f.nodes[g].token];
         let q = [p.clone(), moves.to_vec()].concat();
         let longer: Vec<[f32; 3]> = feats.iter().copied().chain([[170., 160., 3.], [150., 160., 8.]]).collect();
-        assert_eq!(f.rebase(&moves, &[&fake(&q)], None, &[longer.clone()]), Ok(Some(kept.clone())));
+        assert_eq!(f.rebase(&moves, &[&fake(&q)], None, &[longer.clone()], 400), Ok(Some(kept.clone())));
         assert_eq!((f.nodes.len(), f.nodes[0].length as usize, f.calls), (kept.len(), q.len(), 0));
         let (v2, sigma2, _) = f.backup(read);
         for (k, &i) in kept.iter().enumerate().skip(1) {
@@ -807,8 +834,28 @@ mod tests {
             if let Some(e) = (x.start..x.start + x.count).find(|&e| f.edges[e].kid < 0) {
                 let t = [f.nodes[c1 as usize].token, f.edges[e].token];
                 let lon: Vec<[f32; 3]> = longer.iter().copied().chain([[1.; 3], [1.; 3]]).collect();
-                assert_eq!(f.rebase(&t, &[&fake(&q)], None, &[lon]), Ok(None));
+                assert_eq!(f.rebase(&t, &[&fake(&q)], None, &[lon], 400), Ok(None));
             }
+        }
+    }
+
+    #[test]
+    fn reroot_grows_the_capacity() {
+        // a forest built for 16 leaves (288 nodes), re-rooted for 512: the capacity follows the new budget;
+        // re-rooted at the old capacity, the cut is flagged
+        let p: Vec<i64> = [vec![2348, 199, 12, 1, 5, 0, 0, 1, 5, 0, 0], ["d2d4", "d7d5"].iter().map(|m| token(m)).collect()].concat();
+        let feats: Vec<[f32; 3]> = vec![[-1.; 3]; p.len()];
+        let longer: Vec<[f32; 3]> = vec![[-1.; 3]; p.len() + 2];
+        for (cap, short) in [(2 * 512 + 256, false), (2 * 16 + 256, true)] {
+            let mut f = Forest::build(&p, &[&fake(&p)], None, &feats, -1, 2 * 16 + 256, false).unwrap();
+            grow(&mut f, &p, 16);
+            let g = (1..f.nodes.len()).find(|&i| f.nodes[i].depth == 2 && !f.nodes[i].terminal).unwrap();
+            let moves = [f.nodes[f.nodes[g].parent as usize].token, f.nodes[g].token];
+            let q = [p.clone(), moves.to_vec()].concat();
+            assert!(f.rebase(&moves, &[&fake(&q)], None, &[longer.clone()], cap).unwrap().is_some());
+            assert!(!f.full);
+            grow(&mut f, &q, 512);
+            assert_eq!((f.spent == 512, f.full), (!short, short), "capacity {cap}");
         }
     }
 

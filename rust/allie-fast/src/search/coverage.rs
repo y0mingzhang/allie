@@ -15,8 +15,8 @@
 //! positions are absolute: the two plies' rows are now the cache's), the pull schedule is rebuilt with the
 //! kept visits as pulls already made, and the root is re-expanded from the game's real logits. The kept
 //! leaves were evaluated under the clocks the search predicted for those two plies while the cache rows now
-//! carry the real clocks: an approximation inherent to reuse (the calibration refits for it); KL's "zero"
-//! clock rule has no such gap.
+//! carry the real clocks: an approximation inherent to reuse (the calibration refits for it). KL's "zero" rule
+//! has the same gap: its kept clocks assumed no think time for the two plies.
 
 use numpy::{PyArray1, PyArray2, PyArray3, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -128,10 +128,14 @@ pub struct Coverage {
     /// slots freed by a re-root, and the slots ever allocated
     free: Vec<u32>,
     top: u32,
+    /// the leaves' W/D/L the views' mean (tree.py `Mixed`) even under one view
+    mix: bool,
+    /// driven by `select` / `update`: its nodes have no slot rows, so `run` refuses it
+    by_handles: bool,
 }
 
 impl Coverage {
-    pub fn build(prefix: &[i64], root: &[f64], features: &[[f32; 3]], increment: i64, budget: i32, cpuct: f64, predicted: bool) -> Result<Coverage, &'static str> {
+    pub fn build(prefix: &[i64], root: &[f64], features: &[[f32; 3]], increment: i64, budget: i32, cpuct: f64, predicted: bool, mix: bool) -> Result<Coverage, &'static str> {
         if root.len() != VOCAB {
             return Err("root dimensions");
         }
@@ -171,6 +175,8 @@ impl Coverage {
             slots: Vec::new(),
             free: Vec::new(),
             top: 1,
+            mix,
+            by_handles: false,
         };
         cov.expand(0, &z)?;
         cov.nodes[0].elapsed = if predicted { predicted_seconds(&z) } else { 0. };
@@ -326,7 +332,6 @@ impl Coverage {
         if !self.pending.is_empty() {
             self.stats.requests += 1;
         }
-        self.stats.evaluated += self.pending.len() as i64;
         Ok(&self.pending)
     }
 
@@ -344,6 +349,7 @@ impl Coverage {
                 self.nodes[id].elapsed = predicted_seconds(row);
             }
         }
+        self.stats.evaluated += self.pending.len() as i64;
         for (&id, &v) in std::mem::take(&mut self.pending).iter().zip(&values) {
             self.backup(id, v);
         }
@@ -399,7 +405,7 @@ impl Coverage {
 
     /// The native loop: every call's pending leaves evaluated through the server (all views' items in one
     /// request when `merged`, else one request per view), their logits applied, until done. false: the
-    /// deadline (time.monotonic seconds) passed before a call.
+    /// deadline (time.monotonic seconds) passed before a call with network evaluations (its leaves stay pending).
     pub fn native(&mut self, server: &Inner, caches: &[CacheRef], deadline: f64, merged: bool) -> Result<bool, String> {
         if caches.len() != self.clocks.len() {
             return Err("one cache per view".into());
@@ -412,12 +418,12 @@ impl Coverage {
             self.slots = caches.iter().map(|_| Slots::new(server.dims, cap)).collect();
         }
         while !self.is_done() {
-            if monotonic() > deadline {
-                return Ok(false);
-            }
             let pending = self.next()?.to_vec();
             if pending.is_empty() {
                 continue;
+            }
+            if monotonic() > deadline {
+                return Ok(false);
             }
             let z = self.evaluate(server, caches, &pending, merged)?;
             self.apply(&z)?;
@@ -447,7 +453,7 @@ impl Coverage {
         };
         let mut z = Vec::with_capacity(n * VOCAB);
         for k in 0..n {
-            if views == 1 {
+            if views == 1 && !self.mix {
                 z.extend(row(0, k).iter().map(|&x| x as f64));
             } else {
                 let rows: Vec<&[f32]> = (0..views).map(|v| row(v, k)).collect();
@@ -549,10 +555,12 @@ impl Coverage {
 impl Coverage {
     /// prefix: the root's tokens (11 header tokens, then moves); root: its logits [2432]; features: the
     /// game's clock features at every prefix token [len(prefix), 3]; increment: seconds, -1 without a clock;
-    /// clock_rule: "predicted" (nodes' clocks advance by their parents' predicted think times) or "zero".
+    /// clock_rule: "predicted" (nodes' clocks advance by their parents' predicted think times) or "zero";
+    /// mixed: the native loop's leaves read as tree.py's `Mixed` reads them (W/D/L the log of the views' mean
+    /// probabilities) even under one view, as tree.Coverage does for any views but ("true",).
     #[new]
-    #[pyo3(signature = (prefix, root, features, increment, budget, cpuct, clock_rule="predicted"))]
-    fn new(prefix: Vec<i64>, root: PyReadonlyArray1<f64>, features: PyReadonlyArray2<f32>, increment: i64, budget: i32, cpuct: f64, clock_rule: &str) -> PyResult<Self> {
+    #[pyo3(signature = (prefix, root, features, increment, budget, cpuct, clock_rule="predicted", mixed=false))]
+    fn new(prefix: Vec<i64>, root: PyReadonlyArray1<f64>, features: PyReadonlyArray2<f32>, increment: i64, budget: i32, cpuct: f64, clock_rule: &str, mixed: bool) -> PyResult<Self> {
         let predicted = match clock_rule {
             "predicted" => true,
             "zero" => false,
@@ -560,7 +568,7 @@ impl Coverage {
         };
         let feats = rows3(&features)?;
         let root = root.as_array();
-        Coverage::build(&prefix, &root.iter().copied().collect::<Vec<_>>(), &feats, increment, budget, cpuct, predicted).map_err(invalid)
+        Coverage::build(&prefix, &root.iter().copied().collect::<Vec<_>>(), &feats, increment, budget, cpuct, predicted, mixed).map_err(invalid)
     }
 
     /// Another view's clocks (its features and increment), before the search starts; `feats(ids, view)`.
@@ -578,6 +586,10 @@ impl Coverage {
 
     /// The next pending nodes' handles [n, 4]: id, parent, move token, prefix length.
     fn select<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<i64>>> {
+        if !self.slots.is_empty() {
+            return Err(PyRuntimeError::new_err("a tree run natively continues with run()"));
+        }
+        self.by_handles = true;
         self.next().map_err(PyRuntimeError::new_err)?;
         let rows: Vec<i64> = self.handles().into_iter().flatten().collect();
         PyArray1::from_vec_bound(py, rows).reshape([self.pending.len(), 4])
@@ -602,6 +614,9 @@ impl Coverage {
     /// merged: all views' items of a call in one request (else one per view). The GIL is released.
     #[pyo3(signature = (server, caches, deadline=f64::INFINITY, merged=true))]
     fn run(&mut self, py: Python<'_>, server: PyRef<'_, PyServer>, caches: Vec<(usize, usize, usize, usize, usize)>, deadline: f64, merged: bool) -> PyResult<bool> {
+        if self.by_handles {
+            return Err(PyRuntimeError::new_err("a tree driven by select() has no slot rows to run natively"));
+        }
         let inner = server.inner.clone();
         let caches: Vec<CacheRef> = caches.into_iter().map(CacheRef::from).collect();
         py.allow_threads(move || self.native(&inner, &caches, deadline, merged)).map_err(PyRuntimeError::new_err)
@@ -777,7 +792,7 @@ mod tests {
         let mut z = vec![0.; VOCAB];
         z[token("d8h4") as usize] = 30.;
         let feats = vec![[-1f32; 3]; p.len()];
-        let mut cov = Coverage::build(&p, &z, &feats, -1, 1, 2.5, true).unwrap();
+        let mut cov = Coverage::build(&p, &z, &feats, -1, 1, 2.5, true, false).unwrap();
         assert!(cov.next().unwrap().is_empty()); // the mate backs up without an evaluation
         assert!(cov.is_done() && cov.evals == 0 && cov.stats.terminal_visits == 1);
         let (mate, root) = (&cov.nodes[1], &cov.nodes[0]);
@@ -794,7 +809,7 @@ mod tests {
     fn search_and_grow() {
         let p = prefix(&["e2e4", "e7e5", "g1f3"]);
         let feats: Vec<[f32; 3]> = (0..p.len()).map(|i| if i < 11 { [-1.; 3] } else { [180. - i as f32, 181. - i as f32, -1.] }).collect();
-        let mut a = Coverage::build(&p, &fake(&p), &feats, 2, 24, 2.5, true).unwrap();
+        let mut a = Coverage::build(&p, &fake(&p), &feats, 2, 24, 2.5, true, false).unwrap();
         let calls = run(&mut a, &p);
         assert!(calls > 1 && a.nodes.len() <= 25 && a.nodes[0].n == 24);
         assert_eq!(a.evals + a.stats.terminal_visits + a.stats.depth_visits, 24);
@@ -811,7 +826,7 @@ mod tests {
         assert_eq!(a.clocks[0].feats[child], [feats[p.len() - 1][1] as f64, feats[p.len() - 1][0] as f64 - spent + 2., 2.]);
         assert_eq!(a.nodes[child].board, { let mut b = a.nodes[0].board; chess::advance(&mut b, a.nodes[child].token).unwrap(); b });
         // grown from 24 to 64, the tree equals a fresh 64's under the same evaluator (ids differ, values not)
-        let mut b = Coverage::build(&p, &fake(&p), &feats, 2, 64, 2.5, true).unwrap();
+        let mut b = Coverage::build(&p, &fake(&p), &feats, 2, 64, 2.5, true, false).unwrap();
         run(&mut b, &p);
         a.extend(64).unwrap();
         assert!(!a.is_done());
@@ -828,7 +843,7 @@ mod tests {
     fn reroots_at_the_played_grandchild() {
         let p = prefix(&["e2e4", "e7e5", "g1f3"]);
         let feats: Vec<[f32; 3]> = (0..p.len()).map(|i| if i < 11 { [-1.; 3] } else { [180. - i as f32, 181. - i as f32, -1.] }).collect();
-        let mut a = Coverage::build(&p, &fake(&p), &feats, 2, 48, 2.5, true).unwrap();
+        let mut a = Coverage::build(&p, &fake(&p), &feats, 2, 48, 2.5, true, false).unwrap();
         run(&mut a, &p);
         // the most visited root child, then its most visited expanded child
         let kid = |a: &Coverage, id: usize| a.nodes[id].children.iter().filter(|e| e.child >= 0 && !a.nodes[e.child as usize].children.is_empty()).max_by_key(|e| a.nodes[e.child as usize].n).map(|e| e.child as usize).unwrap();
@@ -861,7 +876,7 @@ mod tests {
         // a reply missing from the tree: nothing kept; a feature length off: an error
         let miss = a.nodes[0].children.iter().find(|e| e.child < 0).map(|e| e.token);
         if let Some(t) = miss {
-            let mut b = Coverage::build(&q, &fake(&q), &longer, 2, 8, 2.5, true).unwrap();
+            let mut b = Coverage::build(&q, &fake(&q), &longer, 2, 8, 2.5, true, false).unwrap();
             run(&mut b, &q);
             let lon: Vec<[f32; 3]> = longer.iter().copied().chain([[1.; 3], [1.; 3]]).collect();
             assert_eq!(b.rebase(&[t, t], &fake(&q), &[lon], 8), Ok(None));
@@ -873,11 +888,11 @@ mod tests {
     fn rejects_bad_roots() {
         let p = prefix(&["f2f3", "e7e5", "g2g4", "d8h4"]);
         let feats = vec![[-1f32; 3]; p.len()];
-        assert_eq!(Coverage::build(&p, &vec![0.; VOCAB], &feats, -1, 8, 2.5, true).err(), Some("terminal root"));
+        assert_eq!(Coverage::build(&p, &vec![0.; VOCAB], &feats, -1, 8, 2.5, true, false).err(), Some("terminal root"));
         let p = prefix(&["e2e4"]);
-        assert_eq!(Coverage::build(&p, &vec![0.; 10], &vec![[-1f32; 3]; p.len()], -1, 8, 2.5, true).err(), Some("root dimensions"));
-        assert_eq!(Coverage::build(&p, &vec![0.; VOCAB], &vec![[-1f32; 3]; p.len()], -1, -1, 2.5, true).err(), Some("no search context or negative budget"));
-        let mut cov = Coverage::build(&p, &vec![0.; VOCAB], &vec![[-1f32; 3]; p.len()], -1, 0, 2.5, false).unwrap();
+        assert_eq!(Coverage::build(&p, &vec![0.; 10], &vec![[-1f32; 3]; p.len()], -1, 8, 2.5, true, false).err(), Some("root dimensions"));
+        assert_eq!(Coverage::build(&p, &vec![0.; VOCAB], &vec![[-1f32; 3]; p.len()], -1, -1, 2.5, true, false).err(), Some("no search context or negative budget"));
+        let mut cov = Coverage::build(&p, &vec![0.; VOCAB], &vec![[-1f32; 3]; p.len()], -1, 0, 2.5, false, false).unwrap();
         assert!(cov.is_done() && cov.nodes[0].elapsed == 0.);
         assert_eq!(cov.next(), Err("already finished"));
     }

@@ -40,13 +40,15 @@ class Engine:
     def __init__(self, model, max_batch=32, max_items=64):
         behaviour.check()
         self.model, self.max_batch, self.max_items = model, max_batch, max_items
-        self.server = getattr(model.fast, "server", None)
         self._forwards = self._tokens = self._widest = 0  # widest: most items in one forward
         self.sim_cost = calibration.COST  # seconds a search simulation took lately (moving average)
         if self.server is None:
             self.requests = queue.SimpleQueue()
             self.thread = threading.Thread(target=self._loop, daemon=True, name="inference")
             self.thread.start()
+
+    # read at each call: after a fork, RustFast's server is a new one
+    server = property(lambda self: getattr(self.model.fast, "server", None))
 
     def close(self):
         if self.server is None:

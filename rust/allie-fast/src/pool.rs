@@ -1,9 +1,11 @@
 //! The C++ `Pool`: workers pinned to CPUs stay alive between steps, spin briefly for work, then sleep on a
 //! condvar until woken; a barrier whose arrivals are counted per group of threads sharing a last-level
-//! cache, then once per group.
+//! cache, then once per group. A panic on any thread abandons the job: the others leave it at their next
+//! barrier, and `run` re-raises it on the caller once every thread is out.
 
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop, clippy::missing_safety_doc)]
 
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering::*};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
@@ -31,6 +33,8 @@ struct Inner {
     gen: Padded<AtomicU32>,
     pokes: AtomicU32,
     stop: AtomicBool,
+    /// a thread panicked in the current job
+    abandoned: AtomicBool,
     mu: Mutex<()>,
     cv: Condvar,
     job: Padded<std::cell::UnsafeCell<Option<*const Job<'static>>>>,
@@ -92,7 +96,9 @@ impl Inner {
                 return;
             }
             let job = unsafe { (*self.job.0.get()).unwrap() };
-            unsafe { (*job)(t) };
+            if catch_unwind(AssertUnwindSafe(|| unsafe { (*job)(t) })).is_err() {
+                self.abandoned.store(true, Release);
+            }
             self.left.0.fetch_sub(1, Release);
         }
     }
@@ -128,6 +134,7 @@ impl Pool {
             gen: Padded(AtomicU32::new(0)),
             pokes: AtomicU32::new(0),
             stop: AtomicBool::new(false),
+            abandoned: AtomicBool::new(false),
             mu: Mutex::new(()),
             cv: Condvar::new(),
             job: Padded(std::cell::UnsafeCell::new(None)),
@@ -145,7 +152,8 @@ impl Pool {
         self.inner.n
     }
 
-    /// f(t) on thread 0 (the caller, pinned for the call) and on every worker; returns when all are done.
+    /// f(t) on thread 0 (the caller, pinned for the call) and on every worker; returns when all are done, or
+    /// panics once all are out if any of them panicked.
     pub fn run(&self, f: &Job<'_>) {
         let p = &*self.inner;
         let old = p.cpus.as_ref().and_then(|_| unsafe {
@@ -164,12 +172,26 @@ impl Pool {
             p.epoch.0.fetch_add(1, Release);
         }
         p.cv.notify_all();
-        f(0);
+        let own = catch_unwind(AssertUnwindSafe(|| f(0)));
+        if own.is_err() {
+            p.abandoned.store(true, Release);
+        }
         while p.left.0.load(Acquire) > 0 {
             std::hint::spin_loop();
         }
         if let Some(set) = old {
             unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) };
+        }
+        if p.abandoned.swap(false, Acquire) {
+            // the abandoned barrier's arrivals: the next job starts from none
+            for g in &p.groups {
+                g.count.store(0, Relaxed);
+            }
+            p.top.0.store(0, Relaxed);
+            match own {
+                Err(e) => resume_unwind(e),
+                Ok(()) => panic!("a pool worker panicked"),
+            }
         }
     }
 
@@ -200,6 +222,9 @@ impl Pool {
             }
         }
         while p.gen.0.load(Acquire) == g {
+            if p.abandoned.load(Relaxed) {
+                resume_unwind(Box::new(())); // leave the job without the panic hook's message
+            }
             std::hint::spin_loop();
         }
     }
@@ -247,6 +272,41 @@ mod tests {
             tx.send(()).unwrap();
         });
         rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the barrier must not hang on a renumbered group");
+    }
+
+    #[test]
+    fn a_panic_leaves_no_thread_waiting() {
+        // one worker panics before a barrier the others wait at: run panics on the caller, and the pool still runs
+        let p = std::sync::Arc::new(Pool::new(4, None, Some(vec![0, 0, 1, 1]), 0.001));
+        if p.n() < 2 {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let q = p.clone();
+        std::thread::spawn(move || {
+            let hits = AtomicUsize::new(0);
+            for round in 0..3 {
+                let r = catch_unwind(AssertUnwindSafe(|| {
+                    q.run(&|t| {
+                        if t == 1 && round != 1 {
+                            panic!("worker");
+                        }
+                        q.barrier(t);
+                        hits.fetch_add(1, SeqCst);
+                        q.barrier(t);
+                    })
+                }));
+                tx.send((r.is_err(), hits.swap(0, SeqCst))).unwrap();
+            }
+        });
+        let n = p.n();
+        for want in [(true, None), (false, Some(n)), (true, None)] {
+            let (failed, hits) = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("run must not hang on a panic");
+            assert_eq!(failed, want.0);
+            if let Some(h) = want.1 {
+                assert_eq!(hits, h);
+            }
+        }
     }
 
     #[test]
