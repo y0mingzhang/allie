@@ -321,9 +321,9 @@ def strongest(game, play, search, clock):
 
 def calibrated(game, play, search, clock):
     """Moves of the quality humans of the bot's rating make at this time control (calibration.py):
-    sampled at temperature 1 from the policy tilted by coverage search's values. The search stops
-    calibration.MARGIN before the think time drawn for the move (the bot keeps a human pace); a
-    stopped search plays the policy."""
+    sampled at temperature 1 from the policy tilted by the search's values. The search ends
+    calibration.MARGIN before the think time drawn for the move (the bot keeps a human pace) with the
+    leaves it has evaluated by then; one that evaluated none plays the policy."""
     start = monotonic()
     legal, p, wdl, time = game.position()
     think = game.think(play, clock, time)
@@ -337,10 +337,12 @@ def calibrated(game, play, search, clock):
         e = game.engine
         n = calibration.affordable(left, reserve, stop - now, min(max(calibration.COST, e.sim_cost), 4 * calibration.COST))
         if n:
-            t = monotonic()
+            t, game.last_search = monotonic(), {}
             found = search(game, n, min(t + calibration.limit(left, reserve), stop))
-            sims, searched, stopped = n, monotonic() - t, found is None
-            e.sim_cost += 0.3 * (searched / n - e.sim_cost)
+            searched, stopped = monotonic() - t, found is None
+            sims = n if stopped else game.last_search.get("evaluated", n)  # one cut at the think time: fewer
+            if n >= calibration.MEASURED and not stopped:
+                e.sim_cost += 0.3 * (searched / sims - e.sim_cost)
             if found is not None:
                 beta = calibration.beta(game.elo[len(game.moves) % 2], time)
                 s = np.zeros(len(legal))

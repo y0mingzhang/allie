@@ -22,6 +22,9 @@ use crate::server::{Inner, PyServer};
 const WDL: usize = 2413;
 /// unexpanded prior mass below this is rounding: the node is fully expanded
 const TINY: f64 = 1e-5;
+/// the most nodes a native request evaluates: a call's nodes go in requests this size, so a deadline is checked
+/// between them and other games' requests merge into the same steps
+const CHUNK: usize = 32;
 
 #[link(name = "m")]
 extern "C" {
@@ -125,6 +128,7 @@ pub struct Grow {
     pub k: i64,
     pub g: f64,
     pub width: usize,
+    pub root: f64,
     pub full: bool,
     pub floor: f64,
 }
@@ -150,6 +154,8 @@ pub struct Forest {
     full: bool,
     /// driven by `select` / `update`: its nodes have no slot rows, so `run` refuses it
     by_handles: bool,
+    /// seconds the native loop's last request took (smoothed)
+    lag: f64,
 }
 
 impl Forest {
@@ -186,7 +192,7 @@ impl Forest {
             elapsed: 0.,
             slot: NONE,
         };
-        let mut f = Forest { nodes: vec![root], edges: Vec::new(), views: roots.len(), cap, calls: 0, spent: 0, rootw: Vec::new(), pending: Vec::new(), clocks: vec![Clocks::new(features, increment)], predicted, slots: Vec::new(), free: Vec::new(), top: 1, reused: 0, full: false, by_handles: false };
+        let mut f = Forest { nodes: vec![root], edges: Vec::new(), views: roots.len(), cap, calls: 0, spent: 0, rootw: Vec::new(), pending: Vec::new(), clocks: vec![Clocks::new(features, increment)], predicted, slots: Vec::new(), free: Vec::new(), top: 1, reused: 0, full: false, by_handles: false, lag: 0. };
         f.set(0, prior.unwrap_or(roots[0]), roots);
         f.rootw = root_weights(&f.edges.iter().map(|e| e.p).collect::<Vec<_>>());
         Ok(f)
@@ -287,7 +293,9 @@ impl Forest {
         let root = &self.nodes[0];
         let need = if root.count > 1 { budget - self.spent } else { 0 };
         let (size, n) = (self.nodes.len(), 1);
-        let (_, mut sigma, mut rest) = self.backup(g.read);
+        let (v, mut sigma, mut rest) = self.backup(g.read);
+        let tilted = if g.root != 0. { self.tilted_root(&v, g.root, g.read.squash) } else { Vec::new() };
+        let rootw = if g.root != 0. { &tilted } else { &self.rootw };
         for i in 0..size {
             sigma[i] = (1. - g.floor) * sigma[i] + g.floor * self.nodes[i].prior;
             rest[i] = (1. - g.floor) * rest[i] + g.floor;
@@ -295,12 +303,12 @@ impl Forest {
         let mut reach = vec![1.; size];
         for i in n..size {
             let x = &self.nodes[i];
-            reach[i] = if x.depth == 1 { self.rootw[x.edge as usize] } else { reach[x.parent as usize] * sigma[i] };
+            reach[i] = if x.depth == 1 { rootw[x.edge as usize] } else { reach[x.parent as usize] * sigma[i] };
         }
         // candidates: the root's unexpanded moves, then each expandable node's next `width` moves
         let mut cand: Vec<(usize, usize, f64)> = Vec::new();
         if need > 0 && (root.length as usize) < CONTEXT {
-            cand.extend((0..root.count).filter(|&e| self.edges[root.start + e].kid < 0).map(|e| (0, e, self.rootw[e] + g.full as i64 as f64)));
+            cand.extend((0..root.count).filter(|&e| self.edges[root.start + e].kid < 0).map(|e| (0, e, rootw[e] + g.full as i64 as f64)));
         }
         for i in n..size {
             let x = &self.nodes[i];
@@ -322,6 +330,19 @@ impl Forest {
         let pairs: Vec<(usize, usize)> = cand.iter().take(take).map(|c| (c.0, c.1)).collect();
         self.expand(&pairs);
         Ok(Some(&self.pending))
+    }
+
+    /// kl.grow's root tilt: the mean of the coverage weights and sqrt(pi (1 - pi)) normalized, pi ~ p exp(root Q)
+    /// (unexpanded moves at the root's own value).
+    fn tilted_root(&self, v: &[f64], root: f64, squash: f64) -> Vec<f64> {
+        let r = &self.nodes[0];
+        let own = squashed(r.value, squash);
+        let z: Vec<f64> = self.edges[r.start..r.start + r.count]
+            .iter()
+            .map(|e| e.p.max(1e-300).ln() + root * if e.kid >= 0 { -v[e.kid as usize] } else { own })
+            .collect();
+        let w = root_weights(&softmax(&z));
+        self.rootw.iter().zip(&w).map(|(c, w)| 0.5 * c + 0.5 * w).collect()
     }
 
     /// kl.Forest.expand: one child per (node, j) pair, in order; the nonterminal ones pending.
@@ -395,9 +416,11 @@ impl Forest {
     }
 
     /// The native loop: kl.grow's calls toward `budget` evaluations, each call's new nodes evaluated through
-    /// the server under every view (one request when `merged`, else one per view), until nothing is left to
-    /// expand. false: the deadline (time.monotonic seconds) passed before a call with network evaluations (that
-    /// call's nodes stay pending, uncounted in `spent`).
+    /// the server under every view (one request when `merged`, else one per view) CHUNK nodes at a time, until
+    /// nothing is left to expand. A request goes only if one as slow as the last (`lag` seconds; the caller's
+    /// estimate before the first) ends by the deadline (time.monotonic seconds); else the call's unevaluated nodes
+    /// are dropped and the search ends: false, the tree that of the smaller budget spent (a larger tree cut at
+    /// that cost).
     pub fn native(&mut self, server: &Inner, caches: &[CacheRef], deadline: f64, budget: i64, g: Grow, merged: bool) -> Result<bool, String> {
         if caches.len() != self.clocks.len() {
             return Err("one cache per view".into());
@@ -411,17 +434,41 @@ impl Forest {
         }
         loop {
             let Some(pending) = self.step(budget, g)?.map(|p| p.to_vec()) else { break };
-            if pending.is_empty() {
-                continue;
+            self.pending.clear();
+            for (k, part) in pending.chunks(CHUNK).enumerate() {
+                if monotonic() + self.lag > deadline {
+                    self.calls -= (k == 0) as i64;
+                    self.cut(part[0]);
+                    return Ok(false);
+                }
+                let t = monotonic();
+                let zs = self.evaluate(server, caches, part, merged)?;
+                for (j, &c) in part.iter().enumerate() {
+                    let rows: Vec<&[f64]> = zs.iter().map(|z| &z[j * VOCAB..(j + 1) * VOCAB]).collect();
+                    self.set(c, rows[0], &rows);
+                }
+                let lag = monotonic() - t;
+                self.lag = lag.max(0.5 * (self.lag + lag));
             }
-            if monotonic() > deadline {
-                self.spent -= pending.len() as i64;
-                return Ok(false);
-            }
-            let zs = self.evaluate(server, caches, &pending, merged)?;
-            self.apply(&zs.iter().map(Vec::as_slice).collect::<Vec<_>>())?;
         }
         Ok(true)
+    }
+
+    /// Drop nodes `c` on (a call's unevaluated tail, with the terminal children expanded after it).
+    fn cut(&mut self, c: usize) {
+        while self.nodes.len() > c {
+            let x = self.nodes.pop().unwrap();
+            self.edges[x.edge as usize].kid = -1;
+            self.nodes[x.parent as usize].done -= 1;
+            if !x.terminal {
+                self.spent -= 1;
+                self.free.push(x.slot);
+            }
+        }
+        for cl in &mut self.clocks {
+            cl.feats.truncate(c);
+            cl.other.truncate(c);
+        }
     }
 
     /// The pending nodes' logits under every view: f64 rows [n, 2432] per view, `pending`'s order.
@@ -601,19 +648,15 @@ impl Forest {
     }
 
     /// One kl.grow call toward `budget` network evaluations (kl.grow's keywords): the new nonterminal nodes'
-    /// handles [n, 4] (id, parent, token, prefix length), or None when nothing is left to expand. root (the
-    /// output tilt of the root's weights) is not ported.
+    /// handles [n, 4] (id, parent, token, prefix length), or None when nothing is left to expand.
     #[pyo3(signature = (budget, own=0., opp=0., soft=false, kappa=0., k=8, g=0.125, width=4, root=0., full=false, floor=0., squash=0.))]
     #[allow(clippy::too_many_arguments)]
     fn select<'py>(&mut self, py: Python<'py>, budget: i64, own: f64, opp: f64, soft: bool, kappa: f64, k: i64, g: f64, width: usize, root: f64, full: bool, floor: f64, squash: f64) -> PyResult<Option<Bound<'py, PyArray2<i64>>>> {
-        if root != 0. {
-            return Err(invalid("the root tilt is not ported"));
-        }
         if !self.slots.is_empty() {
             return Err(PyRuntimeError::new_err("a forest run natively continues with run()"));
         }
         self.by_handles = true;
-        let grow = Grow { read: Read { own, opp, soft, kappa, squash }, k, g, width, full, floor };
+        let grow = Grow { read: Read { own, opp, soft, kappa, squash }, k, g, width, root, full, floor };
         if self.step(budget, grow).map_err(PyRuntimeError::new_err)?.is_none() {
             return Ok(None);
         }
@@ -623,19 +666,18 @@ impl Forest {
 
     /// The whole search natively through `server` toward `budget` evaluations (kl.grow's keywords as `select`):
     /// caches, one per view, as (k, v, e pointers, capacity, rows) of the game's (its views') cache, kept alive
-    /// and untouched by the caller until this returns; deadline: time.monotonic() seconds past which the search
-    /// stops before its next call, giving False; merged: all views' items of a call in one request. The GIL is
-    /// released.
-    #[pyo3(signature = (server, caches, budget, deadline=f64::INFINITY, merged=true, own=0., opp=0., soft=false, kappa=0., k=8, g=0.125, width=4, root=0., full=false, floor=0., squash=0.))]
+    /// and untouched by the caller until this returns; deadline: time.monotonic() seconds by which the search
+    /// ends, its last call cut to the requests that fit, giving False (the tree a smaller budget's); lag: the
+    /// seconds a request is expected to take before this search times one (then `lag` reads its estimate);
+    /// merged: all views' items of a request in one. The GIL is released.
+    #[pyo3(signature = (server, caches, budget, deadline=f64::INFINITY, merged=true, lag=0., own=0., opp=0., soft=false, kappa=0., k=8, g=0.125, width=4, root=0., full=false, floor=0., squash=0.))]
     #[allow(clippy::too_many_arguments)]
-    fn run(&mut self, py: Python<'_>, server: PyRef<'_, PyServer>, caches: Vec<(usize, usize, usize, usize, usize)>, budget: i64, deadline: f64, merged: bool, own: f64, opp: f64, soft: bool, kappa: f64, k: i64, g: f64, width: usize, root: f64, full: bool, floor: f64, squash: f64) -> PyResult<bool> {
-        if root != 0. {
-            return Err(invalid("the root tilt is not ported"));
-        }
+    fn run(&mut self, py: Python<'_>, server: PyRef<'_, PyServer>, caches: Vec<(usize, usize, usize, usize, usize)>, budget: i64, deadline: f64, merged: bool, lag: f64, own: f64, opp: f64, soft: bool, kappa: f64, k: i64, g: f64, width: usize, root: f64, full: bool, floor: f64, squash: f64) -> PyResult<bool> {
+        self.lag = lag;
         if self.by_handles {
             return Err(PyRuntimeError::new_err("a forest driven by select() has no slot rows to run natively"));
         }
-        let grow = Grow { read: Read { own, opp, soft, kappa, squash }, k, g, width, full, floor };
+        let grow = Grow { read: Read { own, opp, soft, kappa, squash }, k, g, width, root, full, floor };
         let inner = server.inner.clone();
         let caches: Vec<CacheRef> = caches.into_iter().map(CacheRef::from).collect();
         py.allow_threads(move || self.native(&inner, &caches, deadline, budget, grow, merged)).map_err(PyRuntimeError::new_err)
@@ -651,6 +693,12 @@ impl Forest {
         let prior: Option<Vec<f64>> = prior.map(|z| z.as_array().iter().copied().collect());
         let feats = features.iter().map(rows3).collect::<PyResult<Vec<_>>>()?;
         self.rebase(&moves, &roots.iter().map(Vec::as_slice).collect::<Vec<_>>(), prior.as_deref(), &feats, cap).map_err(invalid)
+    }
+
+    /// Seconds the native loop's last request took (smoothed: rising at once, falling halfway).
+    #[getter]
+    fn lag(&self) -> f64 {
+        self.lag
     }
 
     /// Evaluated leaves kept by the last re-root.
@@ -778,7 +826,7 @@ mod tests {
     }
 
     fn grow(f: &mut Forest, root: &[i64], budget: i64) {
-        let g = Grow { read: Read { own: 5., opp: 5., soft: true, kappa: 0.5, squash: 0. }, k: 8, g: 0.125, width: 4, full: false, floor: 0. };
+        let g = Grow { read: Read { own: 5., opp: 5., soft: true, kappa: 0.5, squash: 0. }, k: 8, g: 0.125, width: 4, root: 0., full: false, floor: 0. };
         while let Some(p) = f.step(budget, g).unwrap().map(|p| p.to_vec()) {
             let z: Vec<f64> = p.iter().flat_map(|&c| fake(&line(f, root, c))).collect();
             f.apply(&[&z]).unwrap();

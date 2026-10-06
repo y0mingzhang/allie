@@ -224,7 +224,16 @@ def test_deadline(tiny, monkeypatch):
     assert abs(out[1].sum() - 1) < 1e-9 and abs(out[2].sum() - 1) < 1e-9
 
 
-def test_kl_forests_agree_call_by_call(tiny):
+# the calibrated mode's: a value-steered root, log-odds values
+TILTED = (
+    dict(own=8.0, opp=8.0, soft=True, squash=0.95, root=8.0),
+    dict(own=8.0, opp=8.0, soft=True, squash=0.98),
+)
+SHIP = dict(grow=TILTED[0], read=TILTED[1], views=("r3000/tc1800+20/noclock",))
+
+
+@pytest.mark.parametrize("grow,read", [(treers.KL.GROW, treers.KL.READ), TILTED])
+def test_kl_forests_agree_call_by_call(tiny, grow, read):
     """One evaluator feeds both forests (the Rust one and kl.py's): the same handles at every call, then the same
     values, moves and priors, boards and clocks."""
     from allie.search import kl
@@ -242,11 +251,11 @@ def test_kl_forests_agree_call_by_call(tiny):
         seen = []
 
         def bridge(h, nodes=nodes, rs=rs, seen=seen, budget=budget):
-            want = rs.select(budget, **treers.KL.GROW)
+            want = rs.select(budget, **grow)
             while want is not None and not len(
                 want
             ):  # a call of terminal children only: no evaluation
-                want = rs.select(budget, **treers.KL.GROW)
+                want = rs.select(budget, **grow)
             np.testing.assert_array_equal(h, want)
             zz = nodes(h)
             rs.update([zz])
@@ -257,9 +266,9 @@ def test_kl_forests_agree_call_by_call(tiny):
         F = kl.Forest(
             bridge, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], cap
         )
-        kl.grow(F, budget, **treers.KL.GROW)
+        kl.grow(F, budget, **grow)
         while (
-            h := rs.select(budget, **treers.KL.GROW)
+            h := rs.select(budget, **grow)
         ) is not None:  # whatever kl.grow still took (terminal children)
             assert not len(h)
         assert (
@@ -267,14 +276,14 @@ def test_kl_forests_agree_call_by_call(tiny):
             and F.size == rs.size
             and F.calls == rs.calls
         )
-        V, sigma, rest = kl.backup(F.view(), **treers.KL.READ)
-        for mine, theirs in zip(rs.values(**treers.KL.READ), (V, sigma, rest)):
+        V, sigma, rest = kl.backup(F.view(), **read)
+        for mine, theirs in zip(rs.values(**read), (V, sigma, rest)):
             np.testing.assert_array_equal(mine, theirs)
         moves, prior, q = kl.root_q(F, V, 0)
-        m2, p2, q2 = rs.root_q(**treers.KL.READ)
+        m2, p2, q2 = rs.root_q(**read)
         np.testing.assert_array_equal(m2, moves)
         np.testing.assert_array_equal(p2, prior)
-        fill = np.arctanh(0.95 * np.clip(F.value[0], -1, 1))
+        fill = np.arctanh(read["squash"] * np.clip(F.value[0], -1, 1))
         np.testing.assert_array_equal(q2, np.where(np.isnan(q), fill, q))
         ids = [0, *np.concatenate(seen)[:, 0].tolist()]
         np.testing.assert_array_equal(
@@ -295,27 +304,20 @@ def test_kl_matches_python_torch_backend(tiny, leaves):
 
 
 @pytest.mark.parametrize(
-    "views", [("r3000/noclock",), ("r3000/tc1800+20/noclock", "true"), ("true", "true")]
+    "kw",
+    [
+        dict(views=("r3000/noclock",)),
+        dict(views=("r3000/tc1800+20/noclock", "true")),
+        dict(views=("true", "true")),
+        SHIP,
+    ],
 )
-def test_kl_views_match_python(tiny, views):
+def test_kl_views_match_python(tiny, kw):
     game = setup(Engine(tiny), 9, 14, base=1800, inc=10)
-    same(treers.KL(views=views)(game, 16), tree.KL(views=views)(game, 16))
+    same(treers.KL(**kw)(game, 16), tree.KL(**kw)(game, 16))
 
 
 # --- the native loop: the trees evaluating their leaves through the Server (allie_fast.Server) ---
-
-
-def test_kl_root_tilt_not_ported(tiny):
-    game = setup(Engine(tiny), 5, 14)
-    with pytest.raises(ValueError):
-        allie_fast.KL(
-            list(game.tokens),
-            [game.sync().double().numpy()],
-            None,
-            np.array(game.features(), np.float32),
-            20,
-            300,
-        ).select(8, root=1.0)
 
 
 def rust_model(tiny_path, threads=3):
@@ -362,15 +364,17 @@ def test_native_coverage_matches_handles(tiny_path, views):
         assert got[0] == want[0] and np.abs(got[1] - want[1]).max() < 5e-3
 
 
-@pytest.mark.parametrize("views", [("true",), ("r3000/noclock", "true")])
-def test_native_kl_matches_handles(tiny_path, views):
+@pytest.mark.parametrize(
+    "kw", [dict(views=("true",)), dict(views=("r3000/noclock", "true")), SHIP]
+)
+def test_native_kl_matches_handles(tiny_path, kw):
     engine = Engine(rust_model(tiny_path))
     for seed, plies, leaves in ((5, 14, 16), (6, 23, 48)):
         game = setup(engine, seed, plies)
-        want = tree.KL(views=views)(game, leaves)
-        same(treers.KL(views=views, merged=False)(game, leaves), want)
+        want = tree.KL(**kw)(game, leaves)
+        same(treers.KL(**kw, merged=False)(game, leaves), want)
         assert game.last_search["evaluated"] == leaves
-        got = treers.KL(views=views)(game, leaves)
+        got = treers.KL(**kw)(game, leaves)
         assert (
             got[0] == want[0]
             and np.array_equal(got[1], want[1])
@@ -456,6 +460,35 @@ def test_native_deadline(tiny_path):
     assert out is not None and sorted(out[0]) == sorted(
         m.uci() for m in game.board.legal_moves
     )
+
+
+def test_native_kl_ends_by_its_deadline(tiny_path):
+    """A KL search falling behind its deadline cuts its last call to the leaves that fit and gives the values of
+    the smaller tree it has: those of a search of that many leaves."""
+    import threading
+
+    engine = Engine(rust_model(tiny_path))
+    game = setup(engine, 7, 14)
+    search = treers.KL(**SHIP)
+    search(game, 8)  # the view's cache synced: the search's first call is the one held
+    release = threading.Event()
+    blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
+    blocker.start()
+    out = [None]
+    t = threading.Thread(target=lambda: out.__setitem__(0, search(game, 256, deadline=time.monotonic() + 0.3)))
+    t.start()
+    time.sleep(0.5)  # the first call's reply comes past the deadline: nothing more fits
+    release.set()
+    for x in (blocker, t):
+        x.join()
+    s = game.last_search
+    assert out[0] is not None and s["late"] and 0 < s["evaluated"] < 256
+    want = search(game, s["evaluated"])
+    assert game.last_search["evaluated"] == s["evaluated"] and not game.last_search["late"]
+    assert out[0][0] == want[0] and np.abs(out[0][2] - want[2]).max() < 5e-2
+    start = time.monotonic()
+    got = search(game, 1 << 14, deadline=start + 0.5)  # more than fits: it ends by the deadline
+    assert got is not None and game.last_search["late"] and time.monotonic() - start < 0.5 + 0.2
 
 
 def test_context_end_plays_the_policy(tiny_path, monkeypatch):
@@ -762,9 +795,9 @@ def test_native_errors_raise(tiny_path):
 
 
 def test_cli_picks_the_native_searcher(tiny_path, monkeypatch):
-    """The bot's searcher on the Rust backend is treers.Coverage, and it searches without the C++ tree; on torch
-    tree.Coverage."""
-    from allie.lichess import cli
+    """The calibrated bot's searcher on the Rust backend is calibration.py's treers.KL, and it searches without the
+    C++ tree; strongest searches with treers.Coverage there and tree.Coverage on torch."""
+    from allie.lichess import calibration, cli
     from allie.lichess.config import Config, Play
 
     import allie.search.native as cpp
@@ -783,7 +816,8 @@ def test_cli_picks_the_native_searcher(tiny_path, monkeypatch):
     finally:
         torch.set_num_threads(before)
     search = cli.coverage(c, m)
-    assert isinstance(search, treers.Coverage)
+    assert isinstance(search, treers.KL) and search.views == calibration.VIEWS
+    assert isinstance(cli.coverage(strongest, m), treers.Coverage)
     monkeypatch.setattr(cpp, "_load", refuse)
     game = setup(Engine(m), 5, 14)
     assert search(game, 32) is not None and not game.last_search["late"]

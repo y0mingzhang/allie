@@ -3,7 +3,7 @@ each searching mid-game positions of live PGNs with a fixed budget; the time per
 batch sizes.
 
 usage: search_load.py --model DIR --pgns 'GLOB' [--games 10] [--rounds 3] [--budget 128] [--searcher coverage|kl]
-       [--threads 4] [--torch-threads 1] [--ply 30] [--backend fast|rust] [--native] [--max-items N] [--min-items N]
+       [--kw JSON] [--threads 4] [--torch-threads 1] [--ply 30] [--backend fast|rust] [--native] [--max-items N] [--min-items N]
        [--gather SECONDS] [--moves-first 0|1] [--out FILE]
 --native: the all-Rust loop (treers through the model's Server, Rust backend); --max-items / --min-items / --gather set
 the Server's merge policy; the Server's gather statistics are reported. Also the plain-move latency a game sees under
@@ -49,6 +49,7 @@ def main():
     p.add_argument("--rounds", type=int, default=3)
     p.add_argument("--budget", type=int, default=128)
     p.add_argument("--searcher", default="coverage")
+    p.add_argument("--kw", default="{}", help="the searcher's keywords (JSON), e.g. views, grow, read")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument(
         "--backend",
@@ -89,7 +90,8 @@ def main():
             break
     assert len(games) == a.games, f"{len(games)} usable positions"
     mod = treers if a.native else tree
-    searcher = mod.Coverage() if a.searcher == "coverage" else mod.KL()
+    kw = json.loads(a.kw)
+    searcher = mod.Coverage(**kw) if a.searcher == "coverage" else mod.KL(**kw)
     leaves, inner = [], tree.Nodes.__call__
 
     def counted(self_, handles):
@@ -161,7 +163,7 @@ def main():
             gather_s=srv.gather,
             moves_first=srv.moves_first,
         )
-    row = dict(model=str(a.model), backend=a.backend, native=a.native, searcher=a.searcher, budget=a.budget, games=a.games, rounds=a.rounds,
+    row = dict(model=str(a.model), backend=a.backend, native=a.native, searcher=a.searcher, kw=kw, budget=a.budget, games=a.games, rounds=a.rounds,
                threads=m.fast.threads, torch_threads=torch.get_num_threads(), server=gather,
                move_ms=dict(n=len(move_ms), median=round(float(np.median(move_ms)), 1), p90=round(float(np.percentile(move_ms, 90)), 1)) if move_ms else None,
                peak_rss_mb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss >> 10,

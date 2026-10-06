@@ -40,13 +40,9 @@ def test_the_clock_caps_the_budget():
 def test_tilt():
     prior = np.array([0.5, 0.3, 0.2])
     assert calibration.tilt(prior, np.array([-1.0, 0.0, 1.0]), 0.0) == pytest.approx(prior)
-    p = calibration.tilt(prior, np.array([-0.5, 0.0, 0.5]), 2.0)  # log-odds of 0.99 Q
-    assert p.sum() == pytest.approx(1) and p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.495)))
-    assert np.isfinite(calibration.tilt(prior, np.array([-1.0, 0.0, 1.0]), 2.0)).all()  # Q = +-1 stays finite
-    p = calibration.tilt(prior, np.array([-1.5, 0.0, 1.5]), 2.0)  # clipped to +-1
-    assert p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(4 * np.arctanh(0.99)))
-    p = calibration.tilt(np.array([0.9, 0.1]), np.array([0.9, 1.0]), 4.0)  # the log-odds tilt prefers the clearer win
-    assert p.argmax() == 1
+    p = calibration.tilt(prior, np.array([-0.5, 0.0, 0.5]), 2.0)  # log odds, tilted as given
+    assert p.sum() == pytest.approx(1) and p[2] / p[0] == pytest.approx(0.2 / 0.5 * np.exp(2.0))
+    assert np.isfinite(calibration.tilt(prior, np.array([-5.0, 0.0, 5.0]), 64.0)).all()  # clear wins stay finite
 
 
 class Search:
