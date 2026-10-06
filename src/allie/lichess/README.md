@@ -215,8 +215,8 @@ involved.
 steps of a game, `analysis/lichess/speed.py`). The bot appends its own move while the opponent thinks, so
 each decision reads one new token; a step of 16 games reads one token for each. CPU: int8 weights, the
 Rust engine (the default) unless noted. The EPYC 7763 row is the Rust engine's; the others were measured on
-the C++ kernels it replaced, whose logits it reproduces bit for bit and whose speed it matched or beat on the 7763
-(C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's resident size.
+the C++ kernels it replaced, whose logits it reproduces bit for bit; on the 7763 it was as fast within run-to-run
+noise, or faster (C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's resident size.
 
 | Device | Threads | 1 game: ms per move | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|
@@ -225,7 +225,7 @@ the C++ kernels it replaced, whose logits it reproduces bit for bit and whose sp
 | AMD EPYC 9755, PyTorch reference (`backend = "torch"`) | 8 | 19.5 | 185 | | 6.4 GB |
 | AMD EPYC 9755, AVX2 only (`ALLIE_RUST_ISA=avx2`) | 4 / 8 | 11.7 / 6.7 | 93 / 48 | | 6.4 GB |
 | AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 7.6 / 5.0 / 4.4 | 51 / 30 / 20 | 165 / 93 / 56 | 6.4 GB |
-| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 10.3 / 8.3 | 65 / 41 | 221 / 132 | 6.4 GB |
+| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 9.5 / 8.0 | 64 / 41 | 222 / 132 | 6.4 GB |
 | AMD EPYC 9755, BF16 weights | 16 | 7.8 | 30 | | 11 GB |
 | GPU (NVIDIA RTX A6000), CUDA graphs, BF16 | | 7.3 | 25 | | 11 GB |
 | GPU (RTX A6000), PyTorch reference | | 46.5 | 186 | | 11 GB |
