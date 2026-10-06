@@ -821,7 +821,7 @@ def calibrated():
     plays it (allie.lichess.calibration: per position, its search rungs mixed by the think times the bot draws;
     analysis/elo_strength/calib_unified.py --params --plot), Maia-3 79M (its most likely move, or sampled) and the
     original Allie (blitz only: its time-control token covers only blitz), with 95% intervals clustered by game."""
-    kl = jload(X / "elo-strength/calib-sept/plot-kl-sept-m03.json")
+    kl = jload(X / "elo-strength/calib-sept/plot-kl-sept-thinkx-m03.json")
     base = X / "elo-strength/calib/klcal/baselines/sept"
     maia, orig = jload(base / "maia3-79m.json")["cells"], jload(base / "allie1.json")["cells"]
     formats = ("bullet", "blitz", "rapid", "classical")

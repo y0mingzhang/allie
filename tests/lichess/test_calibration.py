@@ -17,7 +17,7 @@ def test_beta_grows_with_rating_and_think_time():
     b = calibration.beta
     assert b(1700, quick) < b(1700, slow) and b(1200, slow) < b(1700, slow) < b(2400, slow)
     t = float(calibration.SECONDS[30])
-    assert b(2700, slow) == pytest.approx(calibration.BETA0 * np.exp(calibration.GAMMA) * (t / 10) ** calibration.DELTA)
+    assert b(2700, slow) == pytest.approx(calibration.BETA0 * np.exp(calibration.GAMMA) * (t / 10) ** (calibration.DELTA + calibration.ETA))
 
 
 def test_the_clock_caps_the_budget():
