@@ -284,6 +284,7 @@ def main():
     floats = lambda x: tuple(float(v) for v in x.split(","))  # noqa: E731
     p.add_argument("--deltas", type=floats, help="think form: the deltas to try")
     p.add_argument("--kappas", type=floats, help="clock and est forms: the kappas to try; thinkx: the etas")
+    p.add_argument("--gammas", type=floats, help="thinkx: the gammas to try")
     p.add_argument("--params", type=floats, help="score these parameters (--forms' first form, default think), no fit")
     p.add_argument("--plot", help="with --params: write per-cell metrics and slopes here (calib_plotdata.py's format)")
     p.add_argument("--loss", choices=["elo", "z"], default="elo", help="squared gaps in Elo or in standard errors")
@@ -324,7 +325,7 @@ def main():
     for f in ("clock", "est"):
         grids[f] = [(b, g, dl, k) for b in np.exp(np.linspace(np.log(0.05), np.log(16), 17)) for g in (2, 2.5, 3, 3.5, 4)
                     for dl in (a.deltas or (0.25, 0.5, 0.625, 0.75, 1.0)) for k in (a.kappas or (-0.25, 0, 0.25, 0.5, 0.75, 1))]  # fmt: skip
-    grids["thinkx"] = [(b, g, dl, k) for b in np.exp(np.linspace(np.log(0.1), np.log(0.6), 11)) for g in (2.5, 3, 3.5)
+    grids["thinkx"] = [(b, g, dl, k) for b in np.exp(np.linspace(np.log(0.1), np.log(0.6), 11)) for g in (a.gammas or (2.5, 3, 3.5))
                        for dl in (a.deltas or (0.5, 0.75, 1.0)) for k in (a.kappas or (-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1.0))]  # fmt: skip
     if a.forms:
         grids = {k: v for k, v in grids.items() if k in a.forms.split(",")}
