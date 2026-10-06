@@ -815,28 +815,42 @@ def rating():
 
 
 def calibrated():
-    """Move accuracy and blunder rate (Stockfish on every legal move) against rating, per time control: the humans'
-    own moves (line, 95% band), and the expected values of the move distributions the Lichess bot plays at that
-    rating, sampled straight from the policy or calibrated as shipped (allie.lichess.calibration: per position,
-    its search rungs mixed by the think times the bot draws), with 95% intervals clustered by game
-    (analysis/elo_strength/calib_unified.py --params --plot)."""
-    data = jload(X / "elo-strength/calib/plot-unified.json")
+    """Move accuracy and blunder rate (Stockfish on every legal move) against rating, per time control, on September
+    2026 games (the rule is fitted on July): the humans' own moves (line, 95% band) and the expected values of the
+    move distributions played at that rating, Allie 2.0 sampled straight from the policy or calibrated as the bot
+    plays it (allie.lichess.calibration: per position, its search rungs mixed by the think times the bot draws;
+    analysis/elo_strength/calib_unified.py --params --plot), Maia-3 79M (its most likely move, or sampled) and the
+    original Allie (blitz only: its time-control token covers only blitz), with 95% intervals clustered by game."""
+    kl = jload(X / "elo-strength/calib-sept/plot-kl-sept-m03.json")
+    base = X / "elo-strength/calib/klcal/baselines/sept"
+    maia, orig = jload(base / "maia3-79m.json")["cells"], jload(base / "allie1.json")["cells"]
     formats = ("bullet", "blitz", "rapid", "classical")
-    who = ("Humans", "Allie (raw policy)", "Allie (calibrated)")
+    series = (  # label, cells (None: the calibration's), source, color, shape
+        ("Humans", None, "human", INK2, "stroke"),
+        ("Allie 2.0 (raw policy)", None, "raw", NEUTRAL, "circle"),
+        ("Allie 2.0 (calibrated)", None, "calibrated", ALLIE, "diamond"),
+        ("Allie (original)", orig, "sampled", "#13906a", "cross"),
+        ("Maia-3 (argmax)", maia, "argmax", "#a23b72", "triangle-up"),
+        ("Maia-3 (sampled)", maia, "sampled", "#a23b72", "triangle-down"),
+    )
+    who = [w for w, *_ in series]
+    dx = dict(zip(who[1:], np.linspace(-80, 80, len(who) - 1)))
     pts, n = [], 0
-    for key, c in data["cells"].items():
+    for key, c in kl["cells"].items():
         f, b = key.split("/")
         if f not in formats or not 800 <= int(b) <= 2600:
             continue
         n += c["n"]
-        for w, src, dx in ((who[0], "human", 0), (who[1], "raw", -30), (who[2], "calibrated", 30)):
+        for w, cells, src, *_ in series:
+            if (cell := c if cells is None else cells.get(key)) is None:
+                continue
             for metric, scale in (("accuracy", 1), ("blunder", 100)):
-                v, e = c[src][metric] * scale, 1.96 * c[src][metric + "_se"] * scale
-                pts.append({"f": f, "x": int(b) + dx, "s": w, "m": metric, "v": v, "lo": v - e, "hi": v + e})  # fmt: skip
-    color = alt.Color("s:N", title=None, scale=alt.Scale(domain=list(who), range=[INK2, NEUTRAL_DARK, ALLIE]),
+                v, e = cell[src][metric] * scale, 1.96 * cell[src][metric + "_se"] * scale
+                pts.append({"f": f, "x": int(b) + dx.get(w, 0), "s": w, "m": metric, "v": v, "lo": v - e, "hi": v + e})  # fmt: skip
+    color = alt.Color("s:N", title=None, scale=alt.Scale(domain=who, range=[s[3] for s in series]),
                       legend=alt.Legend(orient="top", direction="horizontal", labelFontSize=15, symbolSize=160,
-                                        symbolStrokeWidth=2.5, columnPadding=28, offset=12))  # fmt: skip
-    shape = alt.Shape("s:N", scale=alt.Scale(domain=list(who), range=["stroke", "circle", "diamond"]), legend=None)  # fmt: skip
+                                        symbolStrokeWidth=2.5, columnPadding=28, offset=12, rowPadding=8, columns=3))  # fmt: skip
+    shape = alt.Shape("s:N", scale=alt.Scale(domain=who, range=[s[4] for s in series]), legend=None)
     big = {"labelFontSize": 14, "titleFontSize": 15, "titleFontWeight": 600, "titleColor": INK}  # fmt: skip
     rows = []
     for r, (metric, label, dom, log, ticks) in enumerate((
@@ -857,9 +871,9 @@ def calibrated():
                 hum.mark_area(color=INK2, opacity=0.12, clip=True).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q"),
                 hum.mark_line(strokeWidth=2.5).encode(x=x, y=y, color=color),
                 dots.mark_rule(strokeWidth=1.4, clip=True).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q", color=color),
-                dots.mark_point(filled=True, size=70, opacity=1).encode(x=x, y=y, color=color, shape=shape),
+                dots.mark_point(filled=True, size=55, opacity=1).encode(x=x, y=y, color=color, shape=shape),
             ]  # fmt: skip
-            panel = alt.layer(*layers).properties(width=150, height=180)
+            panel = alt.layer(*layers).properties(width=190, height=200)
             t = alt.TitleParams(f.capitalize(), anchor="middle", fontSize=16, fontWeight=600, color=INK, offset=8)  # fmt: skip
             panels.append(panel.properties(title=t) if r == 0 else panel)
         rows.append(alt.hconcat(*panels, spacing=12))
@@ -867,7 +881,7 @@ def calibrated():
     save(chart, "calibrated")
     print(f"  {n:,} positions")
     for f in formats:
-        sl = data["slopes"][f]
+        sl = kl["slopes"][f]
         print(f"  {f:9s} slope vs humans: accuracy policy {sl['accuracy']['raw']['ratio']:.2f}x, calibrated "
               f"{sl['accuracy']['calibrated']['ratio']:.2f}x; blunder policy {sl['blunder']['raw']['ratio']:.2f}x, "
               f"calibrated {sl['blunder']['calibrated']['ratio']:.2f}x")  # fmt: skip

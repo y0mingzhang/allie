@@ -40,7 +40,7 @@ def tilt_metrics(lp, v, mm, h):
 
 
 def load(d, ladder, extras, sim):
-    """Per position: cell, rating, half, game, human metrics, the policy's metrics, ce0 = -log P(human
+    """Per position: its index (pos), cell, rating, half, game, human metrics, the policy's metrics, ce0 = -log P(human
     move) under the policy, the rungs' metrics on G [K, G, 3] and their think-time weights [K + 1]."""
     meta = np.load(d / "positions-human.npz")["meta"]
     z = np.load(d / "positions-human.npz")
@@ -68,6 +68,7 @@ def load(d, ladder, extras, sim):
             "think",
             "clock",
             "est",
+            "pos",
         )
     }
     for i, dd in dists.items():
@@ -121,6 +122,7 @@ def load(d, ladder, extras, sim):
             if not have[k]:
                 w[k] += w[k + 1]
                 w[k + 1] = 0.0
+        out["pos"].append(i)
         out["f"].append(int(m[2]))
         out["bin"].append(int(m[3]))
         out["elo"].append(float(m[4]))

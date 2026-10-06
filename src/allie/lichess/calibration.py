@@ -16,18 +16,33 @@ game's own); it grows best-first on log-odds values, its root steered toward the
 is unsure of, and its values v are log odds, arctanh(0.98 (W - L)). A search ends by the think time less
 MARGIN (or a fifth of the clock) with the tree it has, its last call cut to the leaves that fit: no search
 runs past the drawn think time.
+
+Fitted for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (198,794 positions,
+up to 5,000 per time control and 200-point bin, 800-2600; analysis/elo_strength/calib_unified.py on the
+GPU export of this search at every rung up to each position's largest affordable one), scoring each
+position as the bot plays it (its rungs mixed by the think-time draws, MARGIN included): the debiased
+squared Elo error of move accuracy and blunder rate (Stockfish on every legal move) summed over the
+blitz, rapid and classical bins, with every bin's human-move cross-entropy at or below the policy's at
+95%, DELTA from 0, 0.25, 0.5, 0.75, 1 and 1.5. Each game half's fit picks these same values. Held out
+(each half scored by the other's fit), RMS Elo error bullet 0, blitz 0, rapid 55, classical 0 (debiased:
+within the noise); cross-entropy against the policy's bullet -0.0002, blitz -0.0038, rapid -0.0071,
+classical -0.0101 nats, no bin above it at 95%. Outside the strength noise at 95% (about 4 of the 80
+tests expected by chance), Elo on accuracy / blunder rate: bullet 2600 +115 / +219, blitz 2600 +112 /
++91, rapid 2200 +87 / +123, rapid 2600 +39 / +158, classical 1800 +76 / +38, and bullet 1200 -431 /
+-334, where the human curve is flat. Classical 2600 plays -34 / -50 (the coverage rule this replaces:
+-135 / -235).
 """
 
 import numpy as np
 
-BETA0, GAMMA, DELTA = 0.297, 3.0, 0.625
+BETA0, GAMMA, DELTA = 0.206, 3.0, 0.75
 GROW = dict(own=8.0, opp=8.0, soft=True, squash=0.95, root=8.0)
 READ = dict(own=8.0, opp=8.0, soft=True, squash=0.98)
 VIEWS = ("r3000/tc1800+20/noclock",)
 LADDER = (8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096)
 COST = 0.004  # seconds a KL leaf (16 cpus, 12 threads, a lone search of 128 leaves; larger ones cost less)
 MEASURED = 128  # searches of fewer leaves cost more a leaf (each call's fixed costs) and leave the price be
-MARGIN = 0.2  # seconds a search ends before the think time (an engine step under load is <= 0.17 s)
+MARGIN = 0.3  # seconds a search ends before the think time (10-game load tests: a late request and the move's own work)
 _BINS = np.arange(63)
 SECONDS = np.where(
     _BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06)
