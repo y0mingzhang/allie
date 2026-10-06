@@ -266,6 +266,7 @@ def planned(w, r):
     if w["pin"]:
         pin = json.loads(w["pin"].read_text())
         r = r | dict(months=pin["months"], stores=pin["stores"])
+        r |= {"exclusions": pin["exclusions"]} if "exclusions" in pin else {}
     return (
         r
         | dict(
@@ -677,7 +678,10 @@ def train_args(study, r):
         "--wsd-schedule", json.dumps(r["schedule"], sort_keys=True),
         "--wsd-end-step", r.get("end_step", r["steps"]), "--wsd-decay-start", r["decay_start"],
     ]  # fmt: skip
-    args += ["--mix-history", history(study, r)] * bool(r.get("history"))
+    if r.get("history"):
+        args += ["--mix-history", own(study, r, "history-counts.json", "mix_history")]
+    if r.get("exclusions"):
+        args += ["--mix-exclusions", own(study, r, "data-pin.json", "mix_exclusions")]
     if r.get("fork_steps"):  # a stable mainline's checkpoints kept for decay branches
         args += ["--wsd-fork-steps", ",".join(map(str, r["fork_steps"]))]
     for k, flag in DATA_FLAGS.items():
@@ -686,22 +690,23 @@ def train_args(study, r):
     return args + r.get("extra_args", [])  # e.g. --attn-kernel, --ckpt eager
 
 
-def history(study, r):
-    """The history-counts file; a fork trains on its mainline's copy (the trainer compares paths)."""
-    own = study / "history-counts.json"
+def own(study, r, name, key):
+    """The study's copy of a run input (history counts, pin); a fork trains on its mainline's
+    copy (the trainer compares paths)."""
+    path = study / name
     if "fork" not in r:
-        return own
+        return path
     cfg = ROOT / "results/pretrain" / r["fork"]["parent"] / "config.json"
-    path = json.loads(cfg.read_text())["args"]["mix_history"]
-    assert sha(path) == sha(own), "a fork's history counts differ from its mainline's"
-    return path
+    theirs = json.loads(cfg.read_text())["args"][key]
+    assert sha(theirs) == sha(path), f"a fork's {name} differs from its mainline's"
+    return theirs
 
 
 # train.trainer arguments that change what a run computes, with the defaults of absent ones
 NUMERIC = dict(
     width=None, layers=None, head_dim=None, steps=None, initial_batch_rows=None,
     micro_batch=None, lr_scale=None, deterministic=False, mix=None, mix_stores=None,
-    mix_pool_frac=None, mix_months=None, mix_history="", clock_feats=0,
+    mix_pool_frac=None, mix_months=None, mix_history="", mix_exclusions="", clock_feats=0,
     input_lr_mul=75.0, aux_time=0.0, aux_wdl=0.0, wsd_schedule=None, wsd_end_step=None,
     wsd_decay_start=None, arch="{}", attn_kernel=False,
 )  # fmt: skip
@@ -712,7 +717,7 @@ def numerics(args):
     out = {}
     for k, default in NUMERIC.items():
         v = args.get(k, default)
-        if k == "mix_history":
+        if k in ("mix_history", "mix_exclusions"):
             v = sha(v) if v else ""
         elif k == "arch":
             v = json.dumps(json.loads(v) if isinstance(v, str) else v, sort_keys=True)

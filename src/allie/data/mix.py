@@ -510,16 +510,34 @@ def month(path):
     return Path(path).parents[2].name
 
 
-class Shard:
-    """The resident shard of one bucket plus its policy outputs for the current phase."""
+def listed(month, spec=None):
+    """A month's buckets.json entries but those of the format ids its exclusion spec drops."""
+    drop = (spec or {}).get("formats", ())
+    return [
+        b
+        for b in json.loads((Path(month) / "buckets.json").read_text())
+        if b["code"] // 10000 % 10 - 1 not in drop
+    ]
 
-    def __init__(self, path, aux=False, feats=False):
+
+def masked(spec):
+    """The sorted token hashes of an exclusion spec, checked against the pin's sha256."""
+    raw = Path(spec["hashes"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == spec["hashes_sha256"], spec["hashes"]
+    return np.frombuffer(raw, "<u8")
+
+
+class Shard:
+    """The resident shard of one bucket plus its policy outputs for the current phase. Games whose
+    token_hash is in drop are never accepted, like validation leaks."""
+
+    def __init__(self, path, aux=False, feats=False, drop=None):
         cols = COLUMNS + CLOCK_COLUMNS * (aux or feats) + AUX_COLUMNS * aux
-        self.path, self.g, self.phase = (
-            path,
-            Games(read(path, cols), aux=aux, feats=feats),
-            None,
-        )
+        cols += ["token_hash"] * (drop is not None and not (aux or feats))
+        t = read(path, cols)
+        self.path, self.g, self.phase = path, Games(t, aux=aux, feats=feats), None
+        if drop is not None:
+            self.g.leak = self.g.leak | np.isin(t.column("token_hash").to_numpy(), drop)
         self.g.code = int(Path(path).parent.name[1:])
         self.g.src = self.g.code // 100000  # 0 lichess, else ext source
         self.g.month = month(path)
@@ -551,6 +569,7 @@ class Sampler:
         feats=False,
         months=None,
         row=ROW,
+        exclusions=None,
     ):
         self.init = {
             k: v for k, v in locals().items() if k != "self"
@@ -579,24 +598,28 @@ class Sampler:
             months,
             pool_frac,
             history and json.loads(Path(history).read_text())["counts"],
+            exclusions,
         )
         self.rng = np.random.default_rng(seed)
         self.cursor = {}  # code -> [epoch seed, shard position, row position]
         self.seen = 0
         self.pool = []  # accepted, tokenized games not yet packed, in pop order
 
-    def _index(self, months, pool_frac, history=None):
+    def _index(self, months, pool_frac, history=None, exclusions=None):
         """Shards per bucket as (path, rows used). Bucket weights keep the full game counts;
         pool_frac only shrinks each month-bucket to its first pool_frac of pre-shuffled games.
         With history ({code: all-history games}), weights use those counts and each bucket keeps
         pool_frac of its all-history count, spread over its months; buckets whose target exceeds
-        the games on disk keep them all and are listed in self.infeasible."""
+        the games on disk keep them all and are listed in self.infeasible. Exclusions ({month dir:
+        spec}, data.pin) drop a month's buckets of the spec's formats and never accept its games
+        whose token_hash is in the spec's hashes."""
         self.months, self.pool_frac, self.history = months, pool_frac, history
-        buckets = [
-            (m, b)
-            for m in months
-            for b in json.loads((Path(m) / "buckets.json").read_text())
-        ]
+        self.exclusions = exclusions or {}
+        assert set(self.exclusions) <= set(months), "exclusion of an undrawn month"
+        self.drop = {
+            str(Path(m)): masked(e) for m, e in self.exclusions.items() if "hashes" in e
+        }
+        buckets = [(m, b) for m in months for b in listed(m, self.exclusions.get(m))]
         games = {}
         for _, b in buckets:
             games[b["code"]] = games.get(b["code"], 0) + b["games"]
@@ -699,7 +722,11 @@ class Sampler:
     def _load(self, paths):
         """Futures reading shards on a shared thread pool (cold NFS reads are latency-bound)."""
         self.ex = self.ex or ThreadPoolExecutor(32)
-        return {p: self.ex.submit(Shard, p, self.aux, self.feats) for p in paths}
+        return {p: self.ex.submit(self._new, p) for p in paths}
+
+    def _new(self, path):
+        drop = self.drop.get(str(Path(path).parents[2]))
+        return Shard(path, self.aux, self.feats, drop)
 
     def _warm(self):
         """Read the shards the next chunk opens in parallel, reusing reads started ahead of it."""
@@ -710,9 +737,7 @@ class Sampler:
     def _shard(self, k, path):
         code = self.codes[k]
         if code not in self.resident or self.resident[code].path != path:
-            self.resident[code] = self.preload.pop(path, None) or Shard(
-                path, self.aux, self.feats
-            )
+            self.resident[code] = self.preload.pop(path, None) or self._new(path)
         return self.resident[code]
 
     def _accepted(self, p):
@@ -779,6 +804,7 @@ class Sampler:
             cursor=snap["cursor"],
             seen=snap["seen"],
             row=self.row,
+            **({"exclusions": self.exclusions} if self.exclusions else {}),
             pool_lens=[len(g[0]) for g in pool],
             **{
                 f"pool_{k}": np.concatenate([g[j] for g in pool] or [[]]).tolist()
@@ -791,8 +817,13 @@ class Sampler:
             raise ValueError("Checkpoint mixing policy differs")
         if state.get("row", ROW) != self.row:
             raise ValueError("Checkpoint row length differs")
+        if state.get("exclusions", {}) != self.exclusions:
+            raise ValueError("Checkpoint exclusions differ")
         self._index(
-            state["months"], state["pool_frac"], state.get("history")
+            state["months"],
+            state["pool_frac"],
+            state.get("history"),
+            state.get("exclusions"),
         )  # resume on the checkpoint's own pool
         self.rng.bit_generator.state = state["rng"]
         self.cursor, self.seen = copy.deepcopy(state["cursor"]), state["seen"]

@@ -44,6 +44,12 @@ HIST = [
     ),
 ]
 STUDY = [skip(not BASELINE.exists(), reason=f"needs the baseline study {BASELINE}")]
+# a pin with exclusions (July 2026 without blitz or the golden's games) and the same pin before them
+PINS = [
+    BASELINE.parent / "data-recipe-inv5/data-pin.excl.json",
+    BASELINE.parent / "bigrun-v3-24x2048d112ft0-c8s200f0v4/data-pin.json",
+]
+PINNED = [skip(not all(p.exists() for p in PINS), reason="needs the exclusion pins")]
 TRITON36 = [
     skip(
         not triton.__version__.startswith("3.6"),
@@ -78,6 +84,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
         check("moe_shard", env=NOCOMPILE, marks=DATA),
         check("center_switch", env=NOCOMPILE, marks=DATA),
         check("resume_retune", env=NOCOMPILE, marks=DATA),
+        check("datapin_exclusions", *PINS, marks=DATA + PINNED),
         check("moe_remat", env=NOCOMPILE, marks=DATA),
         # Allie 2.0's months, stores and history, with its recipe table
         check(

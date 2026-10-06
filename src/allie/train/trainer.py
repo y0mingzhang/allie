@@ -54,6 +54,7 @@ SAME = (
 )  # fmt: skip
 # later SAME arguments, with the value a checkpoint that predates them ran with
 SAME_SINCE = dict(
+    mix_exclusions="",
     init_from=None,
     moe_remat=False,
     moe_chunks=1,
@@ -374,6 +375,9 @@ def main():
         "--mix-months", default="", help="comma-separated month dirs (else all built)"
     )
     p.add_argument(
+        "--mix-exclusions", default="", help="a data pin whose exclusions to honour"
+    )
+    p.add_argument(
         "--attn-kernel",
         action="store_true",
         help="causal window/game attention as a Triton FlashAttention-2 kernel (model.attention), not FlexAttention",
@@ -586,6 +590,8 @@ def main():
         kw["history"] = a.mix_history
     if a.mix_months:
         kw["months"] = a.mix_months.split(",")
+    if a.mix_exclusions:
+        kw["exclusions"] = json.loads(Path(a.mix_exclusions).read_text())["exclusions"]
     train = Prefetch(
         Sampler(
             a.mix,

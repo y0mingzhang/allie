@@ -9,6 +9,9 @@ inventory PIN OUT_DIR [TOKEN_MONTH ...]
     by games (unbuilt months are assumed to share the pinned per-bucket moments). Writes
     OUT_DIR/inventory.json and OUT_DIR/history-counts.json (the full-pool estimate as the
     sampler's --mix-history file).
+months PIN OUT MONTH ...
+    Games and tokens (12 + plies; as drawn, cut at the row) of pinned months per format x
+    Elo band (stronger player): kept, in buckets the pin drops, in games it masks.
 recipe INVENTORY {disk|full} TOKENS LABEL KIND [KEY=VALUE ...]
     Per-code weights = expected passes over the disk or full pool of a run of TOKENS
     training tokens (packing overshoot included), written content-addressed to
@@ -48,6 +51,8 @@ from allie.data.history import published
 
 EVAL, OTHER = (1, 2, 3, 4), (0, 5)  # bullet..classical; ultrabullet, correspondence
 BANDS = (1400, 2000, 2400)
+LABELS = ("<1400", "1400-2000", "2000-2400", ">=2400")
+FORMATS = ("ultrabullet", "bullet", "blitz", "rapid", "classical", "correspondence")
 
 
 def index(m):
@@ -89,16 +94,20 @@ def inventory(pin, out, *token_months):
     dirs = [Path(m) for m in p["months"]]
     lichess = {d.name: d for d in dirs if not d.name.startswith("20xx")}
     ext = [d for d in dirs if d.name.startswith("20xx")]
-    bucket = {d: json.loads((d / "buckets.json").read_text()) for d in dirs}
+    ex = p.get("exclusions", {})
+    bucket = {d: cm.listed(d, ex.get(str(d))) for d in dirs}
     disk = {d: {b["code"]: b["games"] for b in bucket[d]} for d in dirs}
-    have = {m: disk[d] for m, d in lichess.items()}
+    # whole months' bucket shares, for unbuilt ones
+    have = {
+        m: {b["code"]: b["games"] for b in cm.listed(d)} for m, d in lichess.items()
+    }
     pub = published(sorted({str(d.parent) for d in lichess.values()}))
     pool = sorted(m for m in pub if p["first"] <= m != p["held_out"])
     assert set(lichess) <= set(pool), "pinned months outside the pool"
     games = {}
     for m in pool:
         got = (
-            have[m]
+            disk[lichess[m]]
             if m in have
             else {c: s * pub[m] for c, s in estimate(m, have).items()}
         )
@@ -160,6 +169,46 @@ def inventory(pin, out, *token_months):
         f"disk {inv['disk_games'] / 1e9:.3f}B games / {inv['disk_tokens'] / 1e9:.1f}B tokens; full pool "
         f"{inv['games'] / 1e9:.3f}B / {inv['tokens'] / 1e9:.1f}B ({len(unbuilt)} months interpolated)"
     )
+
+
+def months(pin, out, *names):
+    p = json.loads(Path(pin).read_text())
+    ex = p.get("exclusions", {})
+    jobs = []
+    for d in (d for d in p["months"] if Path(d).name in names):
+        spec = ex.get(d, {})
+        drop = cm.masked(spec) if "hashes" in spec else np.zeros(0, np.uint64)
+        keep = {b["code"] for b in cm.listed(d, spec)}
+        for b in cm.listed(d):
+            jobs += [(d, b["code"] in keep, drop, b, s) for s in b["shards"]]
+
+    def one(job):
+        d, kept, drop, b, rel = job
+        t = cm.read(Path(d) / rel, ["moves", "token_hash"])
+        n = pc.list_value_length(t.column("moves")).to_numpy() + 12
+        hit = np.isin(t.column("token_hash").to_numpy(), drop)
+        band = LABELS[np.searchsorted(BANDS, b["max_elo_bin"], side="right")]
+        key = lambda kind: (Path(d).name, kind, FORMATS[b["format"]], band)
+        if not kept:
+            return [(key("dropped"), np.ones(len(n), bool))], n
+        return [(key("kept"), ~hit)] + [(key("masked"), hit)] * bool(hit.any()), n
+
+    acc = {}
+    with ThreadPoolExecutor(16) as workers:
+        for parts, n in workers.map(one, jobs):
+            for k, m in parts:
+                v = np.array([m.sum(), n[m].sum(), np.minimum(n[m], cm.ROW).sum()])
+                acc[k] = acc.get(k, 0) + v
+    for (month, kind, *_), v in list(acc.items()):
+        acc[month, kind, "all", "all"] = acc.get((month, kind, "all", "all"), 0) + v
+    tree = {}
+    for (month, kind, f, band), (g, t, r) in sorted(acc.items()):
+        cell = {"games": int(g), "tokens": int(t), "drawn_tokens": int(r)}
+        tree.setdefault(month, {}).setdefault(kind, {}).setdefault(f, {})[band] = cell
+        if f == "all":
+            print(f"{month} {kind:8} {g / 1e6:8.3f}M games {t / 1e9:6.3f}B tokens")
+    body = {"pin": str(pin), "pin_digest": p["sha256"], "months": tree}
+    Path(out).write_text(json.dumps(body, indent=1) + "\n")
 
 
 class Pool:
@@ -340,12 +389,10 @@ def summary(pool, w, total):
         otb_share=float(n[pool.otb].sum() / T),
         formats={},
     )
-    names = ("ultrabullet", "bullet", "blitz", "rapid", "classical", "correspondence")
-    labels = ("<1400", "1400-2000", "2000-2400", ">=2400")
-    for k, name in enumerate(names):
+    for k, name in enumerate(FORMATS):
         m = (pool.fmt == k) & ~pool.engine
         cells = {}
-        for b, label in enumerate(labels):
+        for b, label in enumerate(LABELS):
             mb = m & (pool.band == b)
             if pool.supply[mb].sum():
                 cells[label] = dict(
@@ -401,4 +448,4 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
 
 
 if __name__ == "__main__":
-    dict(inventory=inventory, recipe=recipe)[sys.argv[1]](*sys.argv[2:])
+    dict(inventory=inventory, months=months, recipe=recipe)[sys.argv[1]](*sys.argv[2:])
