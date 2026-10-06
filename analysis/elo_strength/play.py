@@ -46,7 +46,7 @@ SF = os.environ.get(
     "STOCKFISH",
     "/data/group_data/dei-group/yimingz3/allie/tools/stockfish/stockfish/stockfish-linux-x86-64-universal",
 )
-MODEL = "/data/group_data/dei-group/yimingz3/allie/lichess/allie-v3.0"
+MODEL = "/data/group_data/dei-group/yimingz3/allie/lichess/allie-2.0-annealed"
 
 
 def sf_depth(elo):
