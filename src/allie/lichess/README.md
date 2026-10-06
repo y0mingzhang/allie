@@ -15,8 +15,9 @@ a time.
 ## Setup
 
 1. **Install.** `uv sync --extra bot --extra fast` in a clone (or `uv tool install "allie[bot] @ git+https://github.com/y0mingzhang/allie"`,
-   without the engine). `fast` builds the Rust engine (it needs [Rust](https://rustup.rs) 1.89 or later); without it the model runs
-   the PyTorch reference, several times slower, and does not search.
+   without the engine). `fast` builds the Rust engine: Linux on x86-64 (AVX-512, AVX2 or neither), with
+   [Rust](https://rustup.rs) 1.89 or later. Without it (or elsewhere) the model runs the PyTorch reference,
+   about three times slower, and `calibrated` mode does not search.
 2. **Weights.** By default the bot downloads [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0)
    from Hugging Face on first start (11 GB). To serve a training checkpoint instead, export it once and set
    `model` to the directory:
@@ -213,8 +214,9 @@ involved.
 **Speed and memory.** One cached step, the time a move takes once the opponent's move arrives (median of 35
 steps of a game, `analysis/lichess/speed.py`). The bot appends its own move while the opponent thinks, so
 each decision reads one new token; a step of 16 games reads one token for each. CPU: int8 weights, the
-Rust engine (the default) unless noted; the rows were measured on the C++ kernels it replaced, whose logits it
-reproduces bit for bit and whose speed it matches or beats (EPYC 7763, 16 threads, one game: 8.0 ms against 8.5). Memory: the process's resident size.
+Rust engine (the default) unless noted. The EPYC 7763 row is the Rust engine's; the others were measured on
+the C++ kernels it replaced, whose logits it reproduces bit for bit and whose speed it matched or beat on the 7763
+(C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's resident size.
 
 | Device | Threads | 1 game: ms per move | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|
@@ -223,7 +225,7 @@ reproduces bit for bit and whose speed it matches or beats (EPYC 7763, 16 thread
 | AMD EPYC 9755, PyTorch reference (`backend = "torch"`) | 8 | 19.5 | 185 | | 6.4 GB |
 | AMD EPYC 9755, AVX2 only (`ALLIE_RUST_ISA=avx2`) | 4 / 8 | 11.7 / 6.7 | 93 / 48 | | 6.4 GB |
 | AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 7.6 / 5.0 / 4.4 | 51 / 30 / 20 | 165 / 93 / 56 | 6.4 GB |
-| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 12.7 / 8.0 | 76 / 42 | 246 / 136 | 6.4 GB |
+| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 10.3 / 8.3 | 65 / 41 | 221 / 132 | 6.4 GB |
 | AMD EPYC 9755, BF16 weights | 16 | 7.8 | 30 | | 11 GB |
 | GPU (NVIDIA RTX A6000), CUDA graphs, BF16 | | 7.3 | 25 | | 11 GB |
 | GPU (RTX A6000), PyTorch reference | | 46.5 | 186 | | 11 GB |

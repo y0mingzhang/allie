@@ -26,7 +26,7 @@ from search_profile import read_pgn
 
 
 def advance(game, g, k):
-    """The game brought to ply k with the PGN's clocks, one move at a time (as search_golden.load_game)."""
+    """The game brought to ply k with the PGN's clocks, one move at a time (as search_profile.load_game)."""
     moves, clocks = g["moves"], g["clocks"]
     for j in range(len(game.moves), k):
         own, other = clocks[j], clocks[j - 1] if j else None

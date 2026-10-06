@@ -45,9 +45,9 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
 - **Device:** `device="cuda"` (the default when a GPU is visible) or `device="cpu"`. On CPU the weights
   default to int8 (6.4 GB, about 1.6 times as fast as BF16); `int8=False` keeps BF16 (11 GB).
   `active_experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
-- **Speed:** on CPU the model runs Allie's Rust engine when it is installed
-  (`pip install "allie[fast] @ git+GITHUB_URL"`), and otherwise the plain PyTorch code, with a warning; on GPU
-  replayed CUDA graphs. `backend="torch"` runs the plain PyTorch reference, `threads=` sets the CPU threads. Calls that extend the previous call's
+- **Speed:** on CPU the model runs Allie's Rust engine when it is installed (Linux on x86-64, with
+  [Rust](https://rustup.rs): `pip install "allie-fast @ git+GITHUB_URL#subdirectory=rust/allie-fast"`), and
+  otherwise the plain PyTorch code, about three times slower, with a warning; on GPU replayed CUDA graphs. `backend="torch"` runs the plain PyTorch reference, `threads=` sets the CPU threads. Calls that extend the previous call's
   game reuse its key-value cache, so following a game move by move costs one new token per call.
 
 | Device | Weights | ms per move | Memory |

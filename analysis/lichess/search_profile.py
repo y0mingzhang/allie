@@ -75,6 +75,19 @@ def read_pgn(path, ply):
     )
 
 
+def load_game(engine, g):
+    """read_pgn's game brought to its ply one move at a time with the PGN's clocks, as the bot sees it."""
+    game = Game(engine, g["white"], g["black"], g["base"], g["inc"], g["speed"])
+    moves, clocks = g["moves"], g["clocks"]
+    for k in range(1, len(moves) + 1):
+        j = k - 1
+        own, other = clocks[j], clocks[j - 1] if j else None
+        wt, bt = (own, other) if j % 2 == 0 else (other, own)
+        game.update(moves[:k], wt, bt)
+    game.sync()
+    return game
+
+
 def setup(model, g):
     engine = Engine(model)
     game = Game(engine, g["white"], g["black"], g["base"], g["inc"], g["speed"])

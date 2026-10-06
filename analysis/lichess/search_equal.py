@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import allie_fast
 import numpy as np
 from scipy.special import softmax
-from search_profile import read_pgn
+from search_profile import load_game, read_pgn
 
 from allie.lichess import tree
 from allie.lichess.engine import Game
@@ -280,7 +280,6 @@ def native(a, f, keys, pgns):
     from allie.lichess import treers
     from allie.lichess.engine import Engine
     from allie.lichess.model import Model
-    from search_golden import load_game
 
     torch.set_num_threads(1)
     m = Model(a.model, "cpu", torch.bfloat16, None, True, "rust", a.threads)

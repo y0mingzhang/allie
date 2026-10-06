@@ -6,8 +6,8 @@
 
 The network, its key-value cache, its fast paths and the chess inputs are api.py, model.py, fast.py,
 fastrs.py and tokens.py, the same files as the allie package's allie.lichess (GITHUB_URL). On CPU it runs
-the PyTorch reference unless the Rust engine is installed (pip install "allie[fast] @ GITHUB_URL"), which
-is several times faster.
+the PyTorch reference unless the Rust engine is installed (Linux on x86-64, with Rust:
+pip install "allie-fast @ git+GITHUB_URL#subdirectory=rust/allie-fast"), about three times faster.
 """
 
 import torch

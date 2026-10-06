@@ -1,6 +1,7 @@
-"""The Rust engine's path items against the golden C++ searches (search_golden.py's .npz): each position's game is
+"""The Rust engine's path items against the golden C++ searches (the .npz search_golden.py wrote before the C++
+path was deleted): each position's game is
 rebuilt, its root logits compared, and every recorded call's handles replayed through tree.Nodes on the Rust backend
-(Nodes.leaves: Leaf items), in today's chunks of 8 nodes a step (the kernels' partial sums depend on the step's token
+(Nodes.leaves: Leaf items), in the golden's chunks of 8 nodes a step (the kernels' partial sums depend on the step's token
 count, so a bitwise match needs the golden's batches); the leaf logits must match bit for bit. --searches: also the
 searches themselves as the bot runs them (every call one step) against the golden's outputs: how many come out
 identical, and the largest difference.
@@ -22,8 +23,7 @@ from allie.lichess.engine import Engine
 from allie.lichess.model import Model
 from allie.lichess.tokens import MOVE_ID
 
-from search_golden import load_game
-from search_profile import read_pgn
+from search_profile import load_game, read_pgn
 
 
 def main():

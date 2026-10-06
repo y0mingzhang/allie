@@ -472,7 +472,8 @@ def test_pause_waits_for_the_step_in_flight(tiny_path):
 
     engine = Engine(rust_model(tiny_path))
     game, srv = setup(engine, 5, 14), engine.server
-    search = threading.Thread(target=treers.Coverage(), args=(game, 4096))
+    out = []
+    search = threading.Thread(target=lambda: out.append(treers.Coverage()(game, 1024)))
     search.start()
     while srv.stats()["steps"] < 3 and search.is_alive():
         time.sleep(0.001)
@@ -485,7 +486,7 @@ def test_pause_waits_for_the_step_in_flight(tiny_path):
     held_during = [engine.run(held) for _ in range(12) if search.is_alive()]
     search.join()
     # a pause landing on a step in flight about half the time: 12 pauses all catch the old behaviour
-    assert len(held_during) >= 8 and not any(held_during) and not game.last_search["late"]
+    assert len(held_during) >= 8 and not any(held_during) and out[0] is not None
 
 
 def test_kl_reroot_takes_the_new_capacity():
@@ -772,7 +773,10 @@ def test_cli_picks_the_native_searcher(tiny_path, monkeypatch):
         raise AssertionError(f"the C++ {kind} module was loaded")
 
     c = Config(model=str(tiny_path), threads=2, backend="rust", play=Play(mode="calibrated"))
-    assert isinstance(cli.coverage(c, Model(tiny_path, backend="torch")), tree.Coverage)
+    reference = Model(tiny_path, backend="torch")
+    assert cli.coverage(c, reference) is None  # calibrated searches only on the engine
+    strongest = Config(model=str(tiny_path), play=Play(mode="strongest", search=8))
+    assert isinstance(cli.coverage(strongest, reference), tree.Coverage)
     before = torch.get_num_threads()
     try:
         m = cli.model(c)

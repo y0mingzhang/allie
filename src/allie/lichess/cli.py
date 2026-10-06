@@ -31,13 +31,17 @@ def model(c):
 
 
 def coverage(c, m):
-    """The searcher play.mode uses: coverage, for calibrated and for strongest with search; on model m's Rust
-    backend the native one (treers: the whole search in Rust, no C++ tree)."""
-    if c.play.mode == "calibrated" or c.play.mode == "strongest" and c.play.search:
-        if m.fast is not None:
-            from .treers import Coverage
-        else:
-            from .tree import Coverage
+    """The searcher play.mode uses: coverage, for calibrated and for strongest with search. On model m's Rust
+    engine the native one (treers: the whole search in Rust); off it only strongest searches (tree.Coverage, on
+    allie.search's C++ tree: --extra search), as calibrated searches only on the engine."""
+    strongest = c.play.mode == "strongest" and c.play.search
+    if m.fast is not None and (strongest or c.play.mode == "calibrated"):
+        from .treers import Coverage
+
+        return Coverage()
+    if strongest:
+        from .tree import Coverage
+
         return Coverage()
     return None
 
