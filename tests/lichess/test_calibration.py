@@ -94,6 +94,7 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     t = time.monotonic()
     search.late = True  # past its deadline: the move comes from the policy
     d = game.decide(play, search, 590)
+    assert d.sims == search.budgets[-1] and d.stopped
     assert search.deadlines[-1] - t == pytest.approx((590 - reserve) / 5, abs=0.5)
     legal, p, _, _ = game.position()
     assert d.probability == pytest.approx(p[legal.index(d.move)])
@@ -112,14 +113,17 @@ def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
         draws = iter([think, 1e3])  # a second draw would wait 1,000 s
         monkeypatch.setattr(game, "think", lambda play, clock, time, d=draws: next(d))
         n, t = len(search.budgets), time.monotonic()
-        assert game.decide(play, search, 590).think == think  # drawn once, before the search
+        d = game.decide(play, search, 590)
+        assert d.think == think  # drawn once, before the search
         assert search.budgets[n:] == ([] if rung is None else [rung])  # no rung fits: the policy
+        assert (d.sims, d.stopped) == (rung or 0, False)
         if rung:  # it stops MARGIN before the think time from the decision's start
             assert t <= search.deadlines[-1] - (think - margin) <= time.monotonic()
     game.engine.sim_cost = 2 * sim  # recent searches measured twice COST (a busy machine)
     monkeypatch.setattr(game, "think", lambda play, clock, time: 256 * sim + margin + 0.05)
     search.seconds = 64 * sim  # a quarter of COST a simulation
-    game.decide(play, search, 590)
+    d = game.decide(play, search, 590)
+    assert (d.sims, d.stopped) == (128, False) and d.searched >= search.seconds
     assert search.budgets[-1] == 128 and game.engine.sim_cost == pytest.approx(0.7 * 2 * sim + 0.3 * sim / 2, rel=0.1)
     game.engine.sim_cost = 1e3  # a stalled search: the price stays at 4 COST, small rungs still search
     monkeypatch.setattr(game, "think", lambda play, clock, time: 32 * 4 * sim + margin + 0.05)

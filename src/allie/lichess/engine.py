@@ -3,7 +3,7 @@
 import queue
 import threading
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 
 import chess
@@ -147,6 +147,9 @@ class Decision:
     probability: float  # of the chosen move
     resign: bool = False
     offer_draw: bool = False
+    sims: int = 0  # the search's simulations (calibrated mode; 0: no search)
+    searched: float = 0.0  # seconds the search took
+    stopped: bool = False  # the search was cut off and the policy played
 
 
 class Game:
@@ -324,7 +327,7 @@ def calibrated(game, play, search, clock):
     start = monotonic()
     legal, p, wdl, time = game.position()
     think = game.think(play, clock, time)
-    s = p
+    s, sims, searched, stopped = p, 0, 0.0, False
     # searches cost what calibration.COST assumes only on the fast CPU backend
     if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
         now = monotonic()
@@ -336,13 +339,15 @@ def calibrated(game, play, search, clock):
         if n:
             t = monotonic()
             found = search(game, n, min(t + calibration.limit(left, reserve), stop))
-            e.sim_cost += 0.3 * ((monotonic() - t) / n - e.sim_cost)
+            sims, searched, stopped = n, monotonic() - t, found is None
+            e.sim_cost += 0.3 * (searched / n - e.sim_cost)
             if found is not None:
                 beta = calibration.beta(game.elo[len(game.moves) % 2], time)
                 s = np.zeros(len(legal))
                 s[[legal.index(m) for m in found[0]]] = calibration.tilt(*found[-2:], beta)
     i = int(game.rng.choice(len(legal), p=s / s.sum()))
-    return game.behave(play, clock, legal[i], s[i], wdl, time, think)
+    d = game.behave(play, clock, legal[i], s[i], wdl, time, think)
+    return replace(d, sims=sims, searched=searched, stopped=stopped)
 
 
 # play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and
