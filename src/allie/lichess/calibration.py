@@ -29,8 +29,12 @@ within the noise); cross-entropy against the policy's bullet -0.0002, blitz -0.0
 classical -0.0101 nats, no bin above it at 95%. 8 of the 80 strength tests (accuracy and blunder rate
 per bin) fall outside the noise at 95%, about 4 expected by chance, in 6 bins (Elo on accuracy / blunder
 rate): bullet 2600 +115 / +219, blitz 2600 +112 / +91, rapid 2200 +87 / +123, rapid 2600 +39 / +158,
-classical 1800 +76 / +38, and bullet 1200 -431 / -334, where the human curve is flat. Classical 2600 plays -34 / -50 (the coverage rule this replaces:
--135 / -235).
+classical 1800 +76 / +38, and bullet 1200 -431 / -334, where the human curve is flat. Classical 2600
+plays -34 / -50 (the coverage rule this replaces: -135 / -235). On September 2026 games (197,191
+positions, none in the fit): RMS Elo error bullet 104, blitz 85, rapid 0, classical 41; cross-entropy
+against the policy's 0.0000, -0.0041, -0.0095 and -0.0103 nats, no bin above it at 95%; 11 of 80
+strength tests outside the noise, in 8 bins, most of them the top of bullet and blitz playing strong
+(bullet 2600 +263 / +232, blitz 2600 +65 / +206).
 """
 
 import numpy as np

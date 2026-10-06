@@ -855,7 +855,7 @@ def calibrated():
     rows = []
     for r, (metric, label, dom, log, ticks) in enumerate((
         ("accuracy", "Move accuracy", [83, 96.6], False, [84, 87, 90, 93, 96]),
-        ("blunder", "Blunder rate", [1, 14], True, [1, 2, 5, 10]),
+        ("blunder", "Blunder rate", [0.6, 14], True, [1, 2, 5, 10]),
     )):  # fmt: skip
         panels = []
         for i, f in enumerate(formats):
