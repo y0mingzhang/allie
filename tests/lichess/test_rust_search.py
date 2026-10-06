@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import torch
 
+from allie.lichess import calibration
 from allie.lichess.engine import Engine, Game
 from allie.lichess.model import Model
 
@@ -224,12 +225,9 @@ def test_deadline(tiny, monkeypatch):
     assert abs(out[1].sum() - 1) < 1e-9 and abs(out[2].sum() - 1) < 1e-9
 
 
-# the calibrated mode's: a value-steered root, log-odds values
-TILTED = (
-    dict(own=8.0, opp=8.0, soft=True, squash=0.95, root=8.0),
-    dict(own=8.0, opp=8.0, soft=True, squash=0.98),
-)
-SHIP = dict(grow=TILTED[0], read=TILTED[1], views=("r3000/tc1800+20/noclock",))
+# the calibrated mode's: a value-steered root, log-odds values, one view
+TILTED = calibration.GROW, calibration.READ
+SHIP = dict(grow=calibration.GROW, read=calibration.READ, views=calibration.VIEWS)
 
 
 @pytest.mark.parametrize("grow,read", [(treers.KL.GROW, treers.KL.READ), TILTED])
@@ -368,8 +366,10 @@ def test_native_coverage_matches_handles(tiny_path, views):
     "kw", [dict(views=("true",)), dict(views=("r3000/noclock", "true")), SHIP]
 )
 def test_native_kl_matches_handles(tiny_path, kw):
+    """The native loop (calls of more than 32 nodes in several requests from 300 leaves on) grows the tree the
+    handles do."""
     engine = Engine(rust_model(tiny_path))
-    for seed, plies, leaves in ((5, 14, 16), (6, 23, 48)):
+    for seed, plies, leaves in ((5, 14, 16), (6, 23, 48), (8, 18, 600)):
         game = setup(engine, seed, plies)
         want = tree.KL(**kw)(game, leaves)
         same(treers.KL(**kw, merged=False)(game, leaves), want)
@@ -484,11 +484,12 @@ def test_native_kl_ends_by_its_deadline(tiny_path):
     s = game.last_search
     assert out[0] is not None and s["late"] and 0 < s["evaluated"] < 256
     want = search(game, s["evaluated"])
-    assert game.last_search["evaluated"] == s["evaluated"] and not game.last_search["late"]
+    r = game.last_search
+    assert (r["evaluated"], r["nodes"], r["late"]) == (s["evaluated"], s["nodes"], False)
     assert out[0][0] == want[0] and np.abs(out[0][2] - want[2]).max() < 5e-2
     start = time.monotonic()
-    got = search(game, 1 << 14, deadline=start + 0.5)  # more than fits: it ends by the deadline
-    assert got is not None and game.last_search["late"] and time.monotonic() - start < 0.5 + 0.2
+    got = search(game, 1 << 16, deadline=start + 0.3)  # more than fits: it ends by the deadline
+    assert got is not None and game.last_search["late"] and time.monotonic() - start < 0.3 + 0.2
 
 
 def test_context_end_plays_the_policy(tiny_path, monkeypatch):

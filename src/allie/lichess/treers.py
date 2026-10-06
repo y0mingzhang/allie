@@ -240,12 +240,14 @@ class KL:
     """search(game, leaves, deadline) -> (legal moves by falling prior, their prior, their searched values for the
     mover), or None past the deadline: tree.KL on the Rust forest (allie_fast.KL: kl.py's Forest, grow, backup and
     root_q), the nodes evaluated under each view. Natively it evaluates in small requests, each sent only if one as
-    slow as the last request (of any search by this searcher: the engine's load) ends by the deadline; a search cut
-    short gives the values of the smaller tree it has (`game.last_search["late"]`), None if it evaluated nothing.
+    slow as the last request (of any search by this searcher: the engine's load; its estimate halves every LAG
+    seconds without a request) ends by the deadline; a search cut short gives the values of the smaller tree it
+    has (`game.last_search["late"]`), None if it evaluated nothing.
     reuse and merged as Coverage's; every search, reused or not, has room for 2 leaves + 256 nodes (a cut is
     logged and left in `game.last_search["full"]`)."""
 
     GROW, READ = tree.KL.GROW, tree.KL.READ
+    LAG = 10.0
 
     def __init__(
         self,
@@ -265,7 +267,7 @@ class KL:
         assert self.views == ("true",) or clock_rule == "zero", (
             "views keep their own clocks only on the zero rule"
         )
-        self.lag = 0.0  # seconds the last native request took, any game's
+        self.lag, self.timed = 0.0, 0.0  # seconds the last native request took (any game's), and when
 
     def __call__(self, game, leaves, deadline=np.inf):
         if len(game.tokens) >= CONTEXT:
@@ -364,12 +366,13 @@ class KL:
             leaves,
             deadline,
             self.merged,
-            self.lag,
+            self.lag * 0.5 ** ((monotonic() - self.timed) / self.LAG),
             **self.grow,
         )
-        self.lag = forest.lag
+        if forest.spent > forest.reused:
+            self.lag, self.timed = forest.lag, monotonic()
         game.last_search = dict(searcher="kl", budget=leaves, reused=forest.reused, evaluated=forest.spent - forest.reused,
                                 nodes=forest.size, late=not done, full=forest.full)  # fmt: skip
         if done and self.reuse:
             keep(game, games, key, forest)
-        return forest if forest.spent > 0 else None
+        return forest if done or forest.spent > forest.reused else None

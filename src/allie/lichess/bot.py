@@ -278,7 +278,7 @@ class Match:
             d = Decision(random.choice(legal).uci(), 0.0, (0, 1, 0), 0.0)
         spent = time.monotonic() - start
         self.stats.append(spent)
-        searched = f" search {d.sims} {1000 * d.searched:.0f} ms{' stopped' if d.stopped else ''}" if d.sims else ""
+        searched = f" search {d.sims} {1000 * d.searched:.0f} ms{' stopped' if d.stopped else ' cut' if d.cut else ''}" if d.sims else ""
         log.info("game %s ply %d: %s p=%.2f wdl=%.2f/%.2f/%.2f %.0f ms think %.1f s%s", self.gid,
                  len(moves), d.move, d.probability, *d.wdl, 1000 * spent, d.think, searched)  # fmt: skip
         if d.resign:

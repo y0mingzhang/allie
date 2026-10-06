@@ -147,9 +147,10 @@ class Decision:
     probability: float  # of the chosen move
     resign: bool = False
     offer_draw: bool = False
-    sims: int = 0  # the search's simulations (calibrated mode; 0: no search)
+    sims: int = 0  # the leaves the search evaluated (calibrated mode; a stopped one's rung; 0: no search)
     searched: float = 0.0  # seconds the search took
     stopped: bool = False  # the search was cut off and the policy played
+    cut: bool = False  # the search ended at the think time with fewer leaves (sims) than its rung
 
 
 class Game:
@@ -327,7 +328,7 @@ def calibrated(game, play, search, clock):
     start = monotonic()
     legal, p, wdl, time = game.position()
     think = game.think(play, clock, time)
-    s, sims, searched, stopped = p, 0, 0.0, False
+    s, sims, searched, stopped, cut = p, 0, 0.0, False, False
     # searches cost what calibration.COST assumes only on the fast CPU backend
     if search is not None and len(legal) > 1 and game.engine.model.fast is not None:
         now = monotonic()
@@ -340,8 +341,9 @@ def calibrated(game, play, search, clock):
             t, game.last_search = monotonic(), {}
             found = search(game, n, min(t + calibration.limit(left, reserve), stop))
             searched, stopped = monotonic() - t, found is None
-            sims = n if stopped else game.last_search.get("evaluated", n)  # one cut at the think time: fewer
-            if n >= calibration.MEASURED and not stopped:
+            sims = n if stopped else game.last_search.get("evaluated", n)
+            cut = not stopped and game.last_search.get("late", False)
+            if n >= calibration.MEASURED and not stopped and sims:
                 e.sim_cost += 0.3 * (searched / sims - e.sim_cost)
             if found is not None:
                 beta = calibration.beta(game.elo[len(game.moves) % 2], time)
@@ -349,7 +351,7 @@ def calibrated(game, play, search, clock):
                 s[[legal.index(m) for m in found[0]]] = calibration.tilt(*found[-2:], beta)
     i = int(game.rng.choice(len(legal), p=s / s.sum()))
     d = game.behave(play, clock, legal[i], s[i], wdl, time, think)
-    return replace(d, sims=sims, searched=searched, stopped=stopped)
+    return replace(d, sims=sims, searched=searched, stopped=stopped, cut=cut)
 
 
 # play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and

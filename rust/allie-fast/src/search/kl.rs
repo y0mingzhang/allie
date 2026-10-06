@@ -333,7 +333,7 @@ impl Forest {
     }
 
     /// kl.grow's root tilt: the mean of the coverage weights and sqrt(pi (1 - pi)) normalized, pi ~ p exp(root Q)
-    /// (unexpanded moves at the root's own value).
+    /// (unexpanded moves at the root's own value); its sums np.add.reduceat's, a[0] + pairwise(a[1..]).
     fn tilted_root(&self, v: &[f64], root: f64, squash: f64) -> Vec<f64> {
         let r = &self.nodes[0];
         let own = squashed(r.value, squash);
@@ -341,8 +341,13 @@ impl Forest {
             .iter()
             .map(|e| e.p.max(1e-300).ln() + root * if e.kid >= 0 { -v[e.kid as usize] } else { own })
             .collect();
-        let w = root_weights(&softmax(&z));
-        self.rootw.iter().zip(&w).map(|(c, w)| 0.5 * c + 0.5 * w).collect()
+        let at = |a: &[f64]| a[0] + np_sum(&a[1..]);
+        let max = z.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let e: Vec<f64> = z.iter().map(|x| (x - max).exp()).collect();
+        let sum = at(&e);
+        let w: Vec<f64> = e.iter().map(|x| x / sum).map(|p| (p * (1. - p)).sqrt()).collect();
+        let s = at(&w).max(1e-300);
+        self.rootw.iter().zip(&w).map(|(c, w)| 0.5 * c + 0.5 * (w / s)).collect()
     }
 
     /// kl.Forest.expand: one child per (node, j) pair, in order; the nonterminal ones pending.
@@ -433,22 +438,29 @@ impl Forest {
             self.slots = caches.iter().map(|_| Slots::new(server.dims, cap)).collect();
         }
         loop {
+            let full = self.full;
             let Some(pending) = self.step(budget, g)?.map(|p| p.to_vec()) else { break };
             self.pending.clear();
             for (k, part) in pending.chunks(CHUNK).enumerate() {
-                if monotonic() + self.lag > deadline {
-                    self.calls -= (k == 0) as i64;
-                    self.cut(part[0]);
-                    return Ok(false);
-                }
                 let t = monotonic();
-                let zs = self.evaluate(server, caches, part, merged)?;
-                for (j, &c) in part.iter().enumerate() {
-                    let rows: Vec<&[f64]> = zs.iter().map(|z| &z[j * VOCAB..(j + 1) * VOCAB]).collect();
-                    self.set(c, rows[0], &rows);
+                match (t + self.lag <= deadline).then(|| self.evaluate(server, caches, part, merged)) {
+                    Some(Ok(zs)) => {
+                        for (j, &c) in part.iter().enumerate() {
+                            let rows: Vec<&[f64]> = zs.iter().map(|z| &z[j * VOCAB..(j + 1) * VOCAB]).collect();
+                            self.set(c, rows[0], &rows);
+                        }
+                        let lag = monotonic() - t;
+                        self.lag = lag.max(0.5 * (self.lag + lag));
+                    }
+                    other => {
+                        // the call ends here: its unevaluated tail dropped, as if the budget had been the leaves spent
+                        if k == 0 {
+                            (self.calls, self.full) = (self.calls - 1, full);
+                        }
+                        self.cut(part[0]);
+                        return other.map_or(Ok(false), |r| r.map(|_| false));
+                    }
                 }
-                let lag = monotonic() - t;
-                self.lag = lag.max(0.5 * (self.lag + lag));
             }
         }
         Ok(true)
@@ -831,6 +843,59 @@ mod tests {
             let z: Vec<f64> = p.iter().flat_map(|&c| fake(&line(f, root, c))).collect();
             f.apply(&[&z]).unwrap();
         }
+    }
+
+    #[test]
+    fn a_cut_call_is_the_larger_tree_cut_at_its_cost() {
+        // a value-steered root on log-odds values, its calls evaluated CHUNK nodes at a time and cut once past 300
+        // leaves: the tree a 600-leaf one keeps at cost <= the leaves spent, and it grows on from there
+        let p: Vec<i64> = [vec![2348, 199, 12, 1, 5, 0, 0, 1, 5, 0, 0], ["e2e4", "e7e5", "g1f3"].iter().map(|m| token(m)).collect()].concat();
+        let feats: Vec<[f32; 3]> = (0..p.len()).map(|i| if i < 11 { [-1.; 3] } else { [180. - i as f32, 181. - i as f32, -1.] }).collect();
+        let g = Grow { read: Read { own: 8., opp: 8., soft: true, kappa: 0., squash: 0.95 }, k: 8, g: 0.125, width: 4, root: 8., full: false, floor: 0. };
+        let eval = |f: &mut Forest, part: &[usize]| {
+            for &c in part {
+                let z = fake(&line(f, &p, c));
+                f.set(c, &z, &[&z]);
+            }
+        };
+        let mut a = Forest::build(&p, &[&fake(&p)], None, &feats, 2, 2000, false).unwrap();
+        while let Some(pending) = a.step(600, g).unwrap().map(|x| x.to_vec()) {
+            a.pending.clear();
+            eval(&mut a, &pending);
+        }
+        let mut b = Forest::build(&p, &[&fake(&p)], None, &feats, 2, 2000, false).unwrap();
+        'grow: while let Some(pending) = b.step(600, g).unwrap().map(|x| x.to_vec()) {
+            b.pending.clear();
+            let mut done = b.spent - pending.len() as i64;
+            for part in pending.chunks(CHUNK) {
+                if done > 300 && part.len() == CHUNK {
+                    b.cut(part[0]);
+                    break 'grow;
+                }
+                eval(&mut b, part);
+                done += part.len() as i64;
+            }
+        }
+        assert!(b.spent > 300 && b.spent < 600);
+        let kept = a.nodes.iter().scan(0, |n, x| {
+            *n += (!x.terminal && x.parent >= 0) as i64;
+            Some(*n <= b.spent)
+        });
+        let kept = kept.take_while(|&k| k).count();
+        assert_eq!(b.nodes.len(), kept);
+        for (x, y) in a.nodes.iter().zip(&b.nodes) {
+            assert_eq!((x.parent, x.token, x.wdl), (y.parent, y.token, y.wdl));
+        }
+        assert!(b.edges.iter().all(|e| e.kid < b.nodes.len() as i32) && b.clocks[0].feats.len() == b.nodes.len());
+        for (i, x) in b.nodes.iter().enumerate() {
+            let kids = b.nodes.iter().filter(|y| y.parent == i as i32).count();
+            assert_eq!(x.done, kids);
+        }
+        while let Some(pending) = b.step(600, g).unwrap().map(|x| x.to_vec()) {
+            b.pending.clear();
+            eval(&mut b, &pending);
+        }
+        assert_eq!(b.spent, 600);
     }
 
     #[test]
