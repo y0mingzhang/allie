@@ -27,11 +27,11 @@ def engine(tiny):
     e.close()
 
 
-def start(engine, mock=None, max_games=4, abort=30, **play):
+def start(engine, mock=None, max_games=4, abort=30, searcher=None, **play):
     mock = mock or MockLichess({"tok": "allie"})
     play = dict(think_time=False, resign=False, draws=False) | play
     config = Config(max_games=max_games, abort=abort, play=Play(**play))
-    bot = Bot(config, Lichess("tok", mock.url, wait=0.1, silence=3), engine)  # mock keepalives: 1 s
+    bot = Bot(config, Lichess("tok", mock.url, wait=0.1, silence=3), engine, searcher)  # mock keepalives: 1 s
     run = threading.Thread(target=bot.run, daemon=True)
     run.start()
     STARTED.append((bot, mock, run))
@@ -253,6 +253,27 @@ def test_game_survives_unexpected_errors(engine, monkeypatch, caplog):
     g2 = list(mock.games.values())[1]
     assert g2.status == "resign" and g2.winner == "black"  # the challenger; the bot was white
     assert sum("giving up" in r.message for r in caplog.records) == 1
+
+
+def test_failed_decision_plays_the_policy(engine, monkeypatch, caplog):
+    """A decision that fails (here its search) plays a move sampled from the raw policy; one whose policy
+    fails too plays a random legal move."""
+    from allie.lichess import engine as enginemod
+
+    class Panic(BaseException):  # as pyo3's PanicException
+        pass
+
+    def broken(game, n, *_):
+        raise Panic("injected")
+
+    said = lambda text: sum(text in r.getMessage() for r in caplog.records)
+    mock, _ = start(engine, searcher=broken, mode="strongest", search=4)
+    mock.challenge("random", "allie", 60, 1, color="black")
+    wait(lambda: said("playing the policy") >= 3)
+    assert not said("playing a random move")
+    monkeypatch.setattr(enginemod.Game, "position", lambda self: 1 / 0)
+    n = said("playing a random move")
+    wait(lambda: said("playing a random move") >= n + 2)
 
 
 def test_errors_on_the_opponents_turn_do_not_resign(engine, monkeypatch, caplog):

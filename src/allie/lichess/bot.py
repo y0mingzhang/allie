@@ -7,6 +7,7 @@ import random
 import threading
 import time
 import urllib.error
+from dataclasses import replace
 
 from .chat import Chatter, split
 from .engine import Decision, Game
@@ -272,10 +273,14 @@ class Match:
         clock = (s["wtime"] if self.white else s["btime"]) / 1000
         try:
             d = game.decide(play, self.bot.search, clock)
-        except Exception:  # keep the game going on a random legal move, loudly
-            log.exception("game %s: decision failed; playing a random move", self.gid)
-            legal = list(game.board.legal_moves)
-            d = Decision(random.choice(legal).uci(), 0.0, (0, 1, 0), 0.0)
+        except BaseException:  # a Rust panic too (pyo3's PanicException): the policy, else a random move, loudly
+            log.exception("game %s: decision failed; playing the policy", self.gid)
+            try:
+                d = game.decide(replace(play, mode="human", temperature=1.0), None, clock)
+            except BaseException:
+                log.exception("game %s: the policy failed too; playing a random move", self.gid)
+                legal = list(game.board.legal_moves)
+                d = Decision(random.choice(legal).uci(), 0.0, (0, 1, 0), 0.0)
         spent = time.monotonic() - start
         self.stats.append(spent)
         searched = f" search {d.sims} {1000 * d.searched:.0f} ms{' stopped' if d.stopped else ' cut' if d.cut else ''}" if d.sims else ""
