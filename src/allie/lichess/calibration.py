@@ -9,35 +9,37 @@ pi ~ prior exp(beta v), with
 
     beta = BETA0 exp(GAMMA x) (t / 10 s)^(DELTA + ETA x),  x = (R - 1700) / 1000,
 
-t the position's expected human think time (the think-time head's mean). Stronger players and harder
-positions get a sharper tilt, fast ones (bullet) little, and the tilt grows with rating more steeply
-where humans think longer. The search reads every node under one fixed view, VIEWS: both players rated
-3000 at a classical header with no clocks (the root's prior stays the game's own); it grows best-first
-on log-odds values, its root steered toward the moves the tilted output is unsure of, and its values v
-are log odds, arctanh(0.98 (W - L)). A search ends by the think time less MARGIN (or a fifth of the
-clock) with the tree it has, its last call cut to the leaves that fit: no search runs past the drawn
-think time.
+t the position's expected human think time (the think-time head's mean). Stronger players and (above
+about 700) harder positions get a sharper tilt, fast ones (bullet) little, and the tilt grows with
+rating more steeply where humans think longer. The search reads every node under one fixed view,
+VIEWS: both players rated 3000 at a classical header with no clocks (the root's prior stays the game's
+own); it grows best-first on log-odds values, its root steered toward the moves the tilted output is
+unsure of, and its values v are log odds, arctanh(0.98 (W - L)). A search ends by the think time less
+MARGIN (or a fifth of the clock) with the tree it has, its last call cut to the leaves that fit: no
+search runs past the drawn think time.
 
 Fitted for the annealed Allie 2.0 on the golden evaluation's July 2026 human games (198,794 positions,
-up to 5,000 per time control and 200-point bin, 800-2600; analysis/elo_strength/calib_unified.py on the
-GPU export of this search at every rung up to each position's largest affordable one), scoring each
-position as the bot plays it (its rungs mixed by the think-time draws, MARGIN included): the debiased
-squared Elo error of move accuracy and blunder rate (Stockfish on every legal move) summed over the
-blitz, rapid and classical bins and bullet from 1800 (below it bullet's flat human curve makes Elo
-noise), with every bin's human-move cross-entropy at or below the policy's at 95%, on a grid of BETA0
-0.1-0.6, GAMMA 2.5-3.5, DELTA 0.5-1 and ETA -0.5-1. Both game halves' fits pick DELTA 0.5 and ETA 0.5
-(BETA0, GAMMA 0.245, 2.5 and 0.205, 3). Held out (each half scored by the other's fit), RMS Elo error
-bullet 0, blitz 0, rapid 56, classical 0 (debiased: within the noise); cross-entropy against the
-policy's bullet -0.0005, blitz -0.0041, rapid -0.0064, classical -0.0050 nats, no bin above it at 95%
-(classical 2600 +0.0145 +- 0.0179, where the halves' fits differ most). 2 of the 80 strength tests
-(accuracy and blunder rate per bin) fall outside the noise at 95%, about 4 expected by chance: rapid
-2200, +76 / +110 Elo on accuracy / blunder rate. Classical 2600 plays -45 / -88. On September 2026 games
-(197,191 positions, none in the fit): RMS Elo error bullet 10, blitz 58, rapid 0, classical 21;
-cross-entropy against the policy's -0.0006, -0.0047, -0.0101 and -0.0114 nats, no bin above it at 95%;
-8 of 80 tests outside the noise, in 6 bins: blitz 2000 -91 / -43, blitz 2400 -66 / -33, rapid 2200
-+54 / +105, rapid 2600 -54 / -37, classical 800 +124 / +142, classical 1800 +17 / +66. Without ETA (the
-previous rule, 0.206 exp(3 x) (t / 10 s)^0.75): 8 tests held out and 11 on September, most of them the
-top of bullet and blitz playing strong (bullet 2600 +263 / +232 on September).
+up to 5,000 per time control and 200-point bin, 800-2600; analysis/elo_strength/calib_unified.py on
+the GPU export of this search at every rung up to each position's largest affordable one), scoring
+each position as the bot plays it (its rungs mixed by the think-time draws, MARGIN included): the
+debiased squared Elo error of move accuracy and blunder rate (Stockfish on every legal move) summed
+over the blitz, rapid and classical bins and bullet from 1800 (below it bullet's flat human curve
+makes Elo noise), with every bin's human-move cross-entropy at or below the policy's at 95%, on a grid
+of BETA0 0.1-0.6, GAMMA 2.5-3.5, DELTA 0.5-1 and ETA -0.5-1. Both game halves' fits pick DELTA 0.5 and
+ETA 0.5 (BETA0, GAMMA 0.245, 2.5 and 0.205, 3); a wider grid (GAMMA from 2, DELTA from 0.25) picks
+DELTA 0.375, 4 tests outside the noise held out instead of 2. Held out (each half scored by the
+other's fit), RMS Elo error bullet 0, blitz 0, rapid 56, classical 0 (debiased: within the noise);
+cross-entropy against the policy's bullet -0.0005, blitz -0.0041, rapid -0.0064, classical -0.0050
+nats, no bin above it at 95% (classical 2600 +0.0145, SE 0.0179, where the halves' fits differ most).
+2 of the 80 strength tests (accuracy and blunder rate per bin) fall outside the noise at 95%, about 4
+expected by chance: rapid 2200, +76 / +110 Elo on accuracy / blunder rate. Classical 2600 plays -45 /
+-88. On September 2026 games (197,191 positions, none in the fit): RMS Elo error bullet 10, blitz 58,
+rapid 0, classical 21; cross-entropy against the policy's -0.0006, -0.0047, -0.0101 and -0.0114 nats,
+no bin above it at 95%; 8 of 80 tests outside the noise, in 6 bins: blitz 2000 -91 / -43, blitz 2400
+-66 / -33, rapid 2200 +54 / +105, rapid 2600 -54 / -37, classical 800 +124 / +142, classical 1800 +17
+/ +66. Without ETA (the previous rule, 0.206 exp(3 x) (t / 10 s)^0.75): 8 tests held out and 11 on
+September, most of them the top of bullet and blitz playing strong (bullet 2600 +263 / +232 on
+September).
 """
 
 import numpy as np
