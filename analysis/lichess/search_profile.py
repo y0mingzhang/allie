@@ -1,6 +1,6 @@
 """Where a search leaf's time goes on the fast CPU backend: allie.lichess.tree's Coverage and KL searches at a
-live game's position, timed around the oracle (tree.Nodes), its per-leaf cache copies (Nodes.fast) and the C++
-step (fast.Fast.step, with its per-phase profile), against plain steps of 1, 8 and 24 independent tokens (the
+live game's position, timed around the oracle (tree.Nodes), its leaf items (Nodes.leaves) and the engine's
+step (with its per-phase profile), against plain steps of 1, 8 and 24 independent tokens (the
 forward's own cost per token at those batch sizes) and the weight bytes a step streams.
 
 usage: search_profile.py --model DIR --pgn FILE [--ply 40] [--threads 4] [--searchers coverage,kl]
@@ -105,13 +105,13 @@ def weight_bytes(m):
 
 
 class Meter:
-    """Wraps the oracle, its cache copies and the C++ step with timers and counters."""
+    """Wraps the oracle, its leaf items and the engine's step with timers and counters."""
 
     def __init__(self, model):
         self.model, self.t = model, dict(oracle=0.0, fast=0.0, step=0.0)
         self.n = dict(calls=0, leaves=0, steps=0, items=0)
         self.sizes = []
-        self._orig = (tree.Nodes.__call__, tree.Nodes.fast, model.fast.step)
+        self._orig = (tree.Nodes.__call__, tree.Nodes.leaves, model.fast.step)
         me = self
 
         def call(self_, handles):
@@ -122,9 +122,9 @@ class Meter:
             me.n["leaves"] += len(handles)
             return z
 
-        def fast(self_, ids, chunk=8):
+        def fast(self_, ids):
             t0 = time.perf_counter()
-            z = me._orig[1](self_, ids, chunk)
+            z = me._orig[1](self_, ids)
             me.t["fast"] += time.perf_counter() - t0
             return z
 
@@ -137,10 +137,10 @@ class Meter:
             me.sizes.append(len(items))
             return z
 
-        tree.Nodes.__call__, tree.Nodes.fast, model.fast.step = call, fast, stp
+        tree.Nodes.__call__, tree.Nodes.leaves, model.fast.step = call, fast, stp
 
     def close(self):
-        tree.Nodes.__call__, tree.Nodes.fast, self.model.fast.step = self._orig
+        tree.Nodes.__call__, tree.Nodes.leaves, self.model.fast.step = self._orig
 
 
 def plain_steps(m, game, batches=(1, 8, 24), reps=5):

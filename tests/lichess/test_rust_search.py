@@ -472,19 +472,20 @@ def test_pause_waits_for_the_step_in_flight(tiny_path):
 
     engine = Engine(rust_model(tiny_path))
     game, srv = setup(engine, 5, 14), engine.server
-    search = threading.Thread(target=treers.Coverage(), args=(game, 1024))
+    search = threading.Thread(target=treers.Coverage(), args=(game, 4096))
     search.start()
-    while srv.stats()["steps"] < 3:
+    while srv.stats()["steps"] < 3 and search.is_alive():
         time.sleep(0.001)
 
     def held():
         a = srv.stats()["steps"]
-        time.sleep(0.2)
+        time.sleep(0.02)
         return srv.stats()["steps"] - a
 
-    assert engine.run(held) == 0
+    held_during = [engine.run(held) for _ in range(12) if search.is_alive()]
     search.join()
-    assert not game.last_search["late"]
+    # a pause landing on a step in flight about half the time: 12 pauses all catch the old behaviour
+    assert len(held_during) >= 8 and not any(held_during) and not game.last_search["late"]
 
 
 def test_kl_reroot_takes_the_new_capacity():
@@ -735,9 +736,15 @@ def test_native_errors_raise(tiny_path):
     out = treers.Coverage()(game, 8)
     assert out is not None and engine.server.stats()["queued"] == 0
     handled = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 32, 2.5)
-    handled.select()
+    h = handled.select()
+    handled.update(np.zeros((len(h), 2432)))
     with pytest.raises(RuntimeError, match="select"):  # its nodes have no slot rows
         handled.run(engine.server, [treers.ref(game.cache)])
+    forest = allie_fast.KL(list(game.tokens), [z], None, feats, game.inc, 300)
+    h = forest.select(16, **treers.KL.GROW)
+    forest.update([np.zeros((len(h), 2432))])
+    with pytest.raises(RuntimeError, match="select"):
+        forest.run(engine.server, [treers.ref(game.cache)], 16, **treers.KL.GROW)
     native = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 8, 2.5)
     assert native.run(engine.server, [treers.ref(game.cache)])
     with pytest.raises(RuntimeError, match="run"):

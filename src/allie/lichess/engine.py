@@ -308,8 +308,8 @@ def human(game, play, search, clock):
 def strongest(game, play, search, clock):
     """The most likely move, or the searched distribution's (play.search simulations)."""
     legal, p, wdl, time = game.position()
-    if search is not None and play.search:
-        moves, q = search(game, play.search)[:2]
+    if search is not None and play.search and (found := search(game, play.search)) is not None:
+        moves, q = found[:2]
         p = np.zeros(len(legal))
         p[[legal.index(m) for m in moves]] = q
     i = int(p.argmax())

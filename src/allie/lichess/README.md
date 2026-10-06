@@ -221,7 +221,7 @@ reproduces bit for bit and whose speed it matches or beats (EPYC 7763, 16 thread
 | AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 6.3 | 32 (500 moves/s) | 101 | 6.4 GB |
 | AMD EPYC 9755 | 32 | 4.6 | 17 (960 moves/s) | 41 (1,570 moves/s) | 6.4 GB |
 | AMD EPYC 9755, PyTorch reference (`backend = "torch"`) | 8 | 19.5 | 185 | | 6.4 GB |
-| AMD EPYC 9755, AVX2 only (`ALLIE_MARCH=-march=haswell`) | 4 / 8 | 11.7 / 6.7 | 93 / 48 | | 6.4 GB |
+| AMD EPYC 9755, AVX2 only (`ALLIE_RUST_ISA=avx2`) | 4 / 8 | 11.7 / 6.7 | 93 / 48 | | 6.4 GB |
 | AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 7.6 / 5.0 / 4.4 | 51 / 30 / 20 | 165 / 93 / 56 | 6.4 GB |
 | AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 12.7 / 8.0 | 76 / 42 | 246 / 136 | 6.4 GB |
 | AMD EPYC 9755, BF16 weights | 16 | 7.8 | 30 | | 11 GB |

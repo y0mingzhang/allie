@@ -92,6 +92,8 @@ def digest(out):
 # digest(replay()) per (isa, int8): the C++ kernels' bits, which the Rust port reproduced on the same ISA (the
 # equality gate, 2026-10-05); a change here changes the model's outputs
 GOLDEN = {
+    ("avx512", False): "395313f798d99c0e",
+    ("avx512", True): "076463256ccb2c30",
     ("avx2", False): "531f923324856ba0",
     ("avx2", True): "3972dd998c02dd04",
     ("scalar", False): "adf623afb91bcb5e",

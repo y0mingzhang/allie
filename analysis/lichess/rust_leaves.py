@@ -1,6 +1,6 @@
 """The Rust engine's path items against the golden C++ searches (search_golden.py's .npz): each position's game is
 rebuilt, its root logits compared, and every recorded call's handles replayed through tree.Nodes on the Rust backend
-(Nodes.fast -> Leaf items), in today's chunks of 8 nodes a step (the kernels' partial sums depend on the step's token
+(Nodes.leaves: Leaf items), in today's chunks of 8 nodes a step (the kernels' partial sums depend on the step's token
 count, so a bitwise match needs the golden's batches); the leaf logits must match bit for bit. --searches: also the
 searches themselves as the bot runs them (every call one step) against the golden's outputs: how many come out
 identical, and the largest difference.
