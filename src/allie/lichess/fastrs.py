@@ -23,6 +23,7 @@ from typing import NamedTuple
 
 import torch
 
+INTERFACE = 2  # allie_fast.INTERFACE this code is written against (rust/allie-fast/src/lib.rs)
 ERRORS = {  # the engine's error codes: 1-4 a bad request (ValueError), else RuntimeError
     1: "token outside the vocabulary",
     2: "board state out of range",
@@ -117,6 +118,8 @@ class RustFast:
             import allie_fast
         except ImportError as e:
             raise ImportError(f"the Rust engine is not installed (allie[fast]; in a clone uv sync --extra fast): {e}") from e
+        if (got := getattr(allie_fast, "INTERFACE", None)) != INTERFACE:
+            raise ImportError(f"the installed Rust engine's interface is {got}, this code's {INTERFACE}: install the engine of this release")
 
         assert model.device.type == "cpu" and model.dtype == torch.bfloat16
         c, w, n = model.config, model.w, model.layers

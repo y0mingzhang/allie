@@ -12,6 +12,10 @@ pub mod search;
 pub mod server;
 pub mod simd;
 
+/// The Python-visible contract (the classes' arguments, the step's cfg and meta layouts): fastrs.py refuses an
+/// engine whose INTERFACE is not its own. Bump both on any change to it.
+pub const INTERFACE: u32 = 2;
+
 #[pyfunction]
 fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -20,6 +24,7 @@ fn version() -> &'static str {
 #[pymodule]
 fn allie_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
+    m.add("INTERFACE", INTERFACE)?;
     chess::register(m)?;
     py::register(m)?;
     search::register(m)?;

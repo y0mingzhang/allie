@@ -31,3 +31,14 @@ def test_without_the_engine(tiny_path, monkeypatch):
     with pytest.warns(UserWarning, match="using PyTorch"):
         m = Model(tiny_path, dtype=torch.bfloat16)
     assert m.fast is None
+
+
+def test_engine_of_another_release(tiny_path, monkeypatch):
+    """An installed engine whose interface is not fastrs's: the default runs the reference, with a warning (as the
+    Hugging Face copy does against whatever engine is installed); backend "rust" refuses."""
+    allie_fast = pytest.importorskip("allie_fast")
+    monkeypatch.setattr(allie_fast, "INTERFACE", -1, raising=False)
+    with pytest.warns(UserWarning, match="interface is -1"):
+        assert Model(tiny_path, dtype=torch.bfloat16).fast is None
+    with pytest.raises(ImportError, match="interface"):
+        Model(tiny_path, dtype=torch.bfloat16, backend="rust")
