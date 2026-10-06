@@ -88,8 +88,8 @@ class Allie:
         """name: a Hugging Face repo or a local directory with config.json and
         model.safetensors. device: default CUDA if available. int8: int8 weights, the default
         on CPU (half the memory, faster). active_experts: route each token through only this many
-        of its 16 experts (faster, slightly less accurate). backend: "fast" (C++ kernels, the CPU
-        default) or "torch" (the PyTorch reference). threads: the fast backend's CPU threads
+        of its 16 experts (faster, slightly less accurate). backend: "rust" (the Rust engine,
+        the CPU default; "fast" too) or "torch" (the PyTorch reference). threads: the Rust engine's threads
         (default torch's count, within one NUMA node). hub: revision, cache_dir, token, ...
         for huggingface_hub.snapshot_download."""
         path = resolve(name, **hub)
@@ -214,7 +214,7 @@ def main(argv=None):
     p.add_argument("--device")
     p.add_argument("--bf16", action="store_true", help="BF16 weights on CPU (default int8)")
     p.add_argument("--active-experts", type=int, help="routed experts per token (default 16)")
-    p.add_argument("--backend", choices=["fast", "torch"], help="CPU: fast (default) or torch")
+    p.add_argument("--backend", choices=["rust", "fast", "torch"], help="CPU: rust (default; fast too) or torch")
     p.add_argument("--threads", type=int, help="CPU threads")
     p.add_argument("--top", type=int, default=5)
     a = p.parse_args(argv)

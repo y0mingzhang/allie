@@ -4,8 +4,10 @@
     model = AutoModel.from_pretrained("yimingzhang/allie-2.0", trust_remote_code=True)
     model.predict(["e2e4", "e7e5", "g1f3"], white_elo=1800, black_elo=1750, time_control="180+2")
 
-The network, its key-value cache, its CPU kernels and the chess inputs are api.py, model.py, fast.py
-and tokens.py, the same files as the allie package's allie.lichess (GITHUB_URL).
+The network, its key-value cache, its fast paths and the chess inputs are api.py, model.py, fast.py,
+fastrs.py and tokens.py, the same files as the allie package's allie.lichess (GITHUB_URL). On CPU it runs
+the PyTorch reference unless the Rust engine is installed (pip install "allie[fast] @ GITHUB_URL"), which
+is several times faster.
 """
 
 import torch
@@ -13,7 +15,8 @@ from transformers import PreTrainedModel
 
 from .api import Allie, resolve
 from .configuration_allie import AllieConfig
-from .fast import Fast  # noqa: F401 - transformers copies only directly imported files
+from .fast import Graphs  # noqa: F401 - transformers copies only directly imported files
+from .fastrs import RustFast  # noqa: F401
 from .model import Model
 from .tokens import (
     HEADER,  # noqa: F401 - transformers copies only directly imported files
@@ -40,9 +43,9 @@ class AllieModel(PreTrainedModel):
         """device (or a single-device device_map): default CUDA if available. dtype /
         torch_dtype: bfloat16 (default) or float32. int8: int8 weights, the CPU default with
         bfloat16 (half the memory, faster). active_experts: route each token through
-        only this many of its 16 experts (faster, slightly less accurate). backend: "fast"
-        (C++ kernels compiled on first use, the CPU default) or "torch" (the PyTorch
-        reference). threads: the fast backend's CPU threads."""
+        only this many of its 16 experts (faster, slightly less accurate). backend: "rust"
+        (the Rust engine, the CPU default when installed; "fast" too) or "torch" (the
+        PyTorch reference). threads: the Rust engine's threads."""
         hub = {k: kwargs[k] for k in ("revision", "cache_dir", "token", "local_files_only",
                                       "force_download") if k in kwargs}  # fmt: skip
         path = resolve(name, **hub)

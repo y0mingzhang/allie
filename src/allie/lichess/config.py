@@ -29,7 +29,7 @@ class Config:
     threads: int = 0  # torch CPU threads (0: torch's default)
     active_experts: int = 0  # routed experts per token (0: all 16; 8 is faster)
     int8: bool | None = None  # int8 block matrices (None: on CPU): half the memory, faster
-    backend: str = ""  # CPU: "fast" (C++ kernels, the default) or "torch" (the reference)
+    backend: str = ""  # CPU: "rust" (the Rust engine, the default; "fast" too) or "torch" (the reference)
     url: str = "https://lichess.org"
     max_games: int = 4
     greeting: str = ""

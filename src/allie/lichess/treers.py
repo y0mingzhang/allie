@@ -2,7 +2,7 @@
 backup, tree.py Nodes' boards and clocks; allie_fast.KL: kl.py's forest), with tree.Coverage's and tree.KL's
 interfaces and outputs. On the Rust backend the whole loop is native: the tree evaluates its leaves through the
 model's Server as path items on the game's cache and its own slot buffers, no Python per leaf, its steps merged
-with the other games'. On the C++ and torch backends the leaves go through tree.Nodes as before. The output
+with the other games'. On the torch backend the leaves go through tree.Nodes as before. The output
 policy is allie.search.policy's with the same calibration.
 
 Tree reuse (reuse=True, native only): a game keeps each searcher's last tree (`game.trees`); at its next turn,
@@ -126,8 +126,8 @@ class Coverage:
         return self.outputs(game, cov, root, legal, own, budget, simulations)
 
     def handles(self, game, games, zs, z, feats, budget, deadline):
-        """The tree driven by its handles, the leaves evaluated through tree.Nodes (the C++ and torch
-        backends); feats: the game's own: (the finished tree, its root logits)."""
+        """The tree driven by its handles, the leaves evaluated through tree.Nodes (the torch
+        backend); feats: the game's own: (the finished tree, its root logits)."""
         concurrent = game.engine.model.fast is not None
         trees = [Tree(g, x, capacity=4 * budget + 256) for g, x in zip(games, zs)]
         for t in trees:

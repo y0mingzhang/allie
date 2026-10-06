@@ -1,9 +1,11 @@
+"""The fast paths against model.py's reference: the Rust engine on CPU, CUDA graphs on GPU."""
+
 import threading
 
 import pytest
 import torch
 
-from allie.lichess import fast
+from allie.lichess import fastrs
 from allie.lichess.engine import Engine
 from allie.lichess.model import Cache, Model, step
 from allie.lichess.tokens import HEADER
@@ -11,10 +13,7 @@ from allie.lichess.tokens import HEADER
 from .test_model import inputs
 from .test_tokens import random_game
 
-try:
-    fast.library()
-except Exception as e:  # noqa: BLE001 - no compiler: the fallback is the reference itself
-    pytest.skip(f"no fast kernels: {e}", allow_module_level=True)
+pytest.importorskip("allie_fast")
 
 
 def play(model, games, lengths, steps=10):
@@ -58,7 +57,7 @@ def test_fast_matches_reference(tiny_path, tiny, int8, keep, n):
 
 def test_backend_choice(tiny_path, tiny):
     assert tiny.fast is None  # FP32: the reference
-    assert Model(tiny_path, dtype=torch.bfloat16).fast is not None  # CPU BF16 default
+    assert isinstance(Model(tiny_path, dtype=torch.bfloat16).fast, fastrs.RustFast)  # CPU BF16 default
     assert Model(tiny_path, dtype=torch.bfloat16, backend="torch").fast is None
     with pytest.raises(AssertionError):
         Model(tiny_path, dtype=torch.float32, backend="fast")
@@ -97,14 +96,13 @@ def test_fast_engine_and_takeback(tiny_path):
             torch.testing.assert_close(z, fresh, atol=0.1, rtol=0)
 
 
-def test_profile_and_bandwidth(tiny_path):
+def test_profile(tiny_path):
     m = Model(tiny_path, dtype=torch.bfloat16, threads=2)
     m.fast.profile()
     x = inputs(random_game(3, 10))
     step(m, [(Cache(m), *x)])
     t = m.fast.profile(False)
-    assert set(t) == set(fast.PHASES) and sum(t.values()) > 0
-    assert fast.bandwidth(1, 0.01, 1) > 0
+    assert set(t) == set(fastrs.PHASES) and sum(t.values()) > 0
 
 
 @pytest.mark.gpu

@@ -291,7 +291,7 @@ The final run uses all three changes. It also drops multi-token prediction, whos
 
 ## Fast inference
 
-One cached step: the time a move takes once the opponent's move arrives, median of 35 steps of a game (`analysis/lichess/speed.py`). A step of 16 or 64 games reads one new token for each. CPU: int8 weights and the C++ kernels (`fast` backend) unless noted. Memory: the process's resident size. Share of bandwidth: the weights one game reads per move (0.74 GB in int8) per second, against the best streaming read the same threads reach on that machine (`allie.lichess.fast.bandwidth`).
+One cached step: the time a move takes once the opponent's move arrives, median of 35 steps of a game (`analysis/lichess/speed.py`). A step of 16 or 64 games reads one new token for each. CPU: int8 weights and the C++ kernels the Rust engine replaced (bit for bit the same logits, the same speed or faster) unless noted. Memory: the process's resident size. Share of bandwidth: the weights one game reads per move (0.74 GB in int8) per second, against the best streaming read the same threads reached on that machine (measured with the C++ kernels' bandwidth probe).
 
 | Device | Threads | 1 game: ms per move | Share of bandwidth | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|---:|

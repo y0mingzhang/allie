@@ -216,7 +216,7 @@ model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player woul
 Allie 2.0 has 5.6B parameters, yet it plays a move in about 4-7 ms on a recent server CPU with 8 to 32 threads, in 6.4 GB of memory. Batching 64 games, it plays about 1,500 moves a second.
 
 - **It reads little.** Each move reads only the 0.7B parameters it routes through.
-- **It reads fast.** C++ kernels, compiled for the machine on first use, stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach.
+- **It reads fast.** Rust kernels stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach.
 - **Elsewhere.** On a GPU a move takes about 7 ms (CUDA graphs). A laptop has less memory bandwidth: we estimate 10-20 ms a move, untested.
 
 Every measurement is in [DETAILS](docs/DETAILS.md#fast-inference).

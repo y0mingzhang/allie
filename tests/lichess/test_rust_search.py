@@ -1,6 +1,7 @@
 """The Rust coverage tree (allie_fast.Coverage, treers.Coverage) against today's C++ tree and Python bookkeeping
 (tree.Coverage): the same handles call by call, the same compact arrays, values, boards and clocks, and the same
-search outputs on the tiny model through the torch and the C++ fast backends, with and without views."""
+search outputs on the tiny model through the torch backend and natively on the Rust engine, with and without
+views."""
 
 import os
 import shutil
@@ -194,32 +195,10 @@ def test_forced_move_and_blitz_cells(tiny):
     assert len(out[0]) == 1 and out[1][0] == 1.0
 
 
-def fast_model(tiny_path, threads):
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:
-        pytest.skip(f"no fast kernels: {e}")
-    return Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=threads)
-
-
-@pytest.mark.parametrize("views", [("true",), ("true", "r2800")])
-def test_coverage_matches_cpp_fast_backend(tiny_path, views):
-    """On the C++ fast backend the search runs on the game's thread through the engine's batches."""
-    engine = Engine(fast_model(tiny_path, 2))
-    for seed, plies, budget in ((5, 14, 32), (6, 23, 128)):
-        game = setup(engine, seed, plies)
-        same(
-            treers.Coverage(views=views)(game, budget),
-            tree.Coverage(views=views)(game, budget),
-        )
-
-
-def test_deadline(tiny_path, monkeypatch):
-    """Past its deadline the search gives None (before any node, or at the nodes after), and the game searches
-    again after; the nodes are accounted."""
-    engine = Engine(fast_model(tiny_path, 2))
+def test_deadline(tiny, monkeypatch):
+    """Off the Rust engine (handles through tree.Nodes): past its deadline the search gives None (before any node,
+    or at the nodes after), and the game searches again after."""
+    engine = Engine(tiny)
     game, search = setup(engine, 7, 14), treers.Coverage()
     calls, inner = [], tree.Nodes.__call__
     monkeypatch.setattr(
@@ -235,10 +214,8 @@ def test_deadline(tiny_path, monkeypatch):
     )
     clock = iter(range(10**6))
     monkeypatch.setattr(tree, "monotonic", lambda: next(clock))
-    assert search(game, 32, deadline=2.5) is None
-    assert (
-        len(calls) == 2 and calls[1] == 32
-    )  # stopped within its first nodes (the chunks' clock passed 2.5)
+    assert search(game, 128, deadline=0.5) is None
+    assert len(calls) == 3  # the first nodes ran (clock 0), the second raised (clock 1)
     monkeypatch.setattr(tree, "monotonic", time.monotonic)
     out = search(game, 32)
     assert out is not None and sorted(out[0]) == sorted(
@@ -325,17 +302,11 @@ def test_kl_views_match_python(tiny, views):
     same(treers.KL(views=views)(game, 16), tree.KL(views=views)(game, 16))
 
 
-def test_kl_matches_python_fast_backend(tiny_path):
-    engine = Engine(fast_model(tiny_path, 2))
-    for seed, plies, leaves in ((5, 14, 16), (6, 23, 48)):
-        game = setup(engine, seed, plies)
-        same(treers.KL()(game, leaves), tree.KL()(game, leaves))
-        same(
-            treers.KL(views=("r3000/noclock", "true"))(game, leaves),
-            tree.KL(views=("r3000/noclock", "true"))(game, leaves),
-        )
-    assert treers.KL()(game, 16, deadline=time.monotonic() - 1) is None
-    assert treers.KL(views=("r2800",))(game, 16, deadline=time.monotonic() - 1) is None
+# --- the native loop: the trees evaluating their leaves through the Server (allie_fast.Server) ---
+
+
+def test_kl_root_tilt_not_ported(tiny):
+    game = setup(Engine(tiny), 5, 14)
     with pytest.raises(ValueError):
         allie_fast.KL(
             list(game.tokens),
@@ -345,9 +316,6 @@ def test_kl_matches_python_fast_backend(tiny_path):
             20,
             300,
         ).select(8, root=1.0)
-
-
-# --- the native loop: the trees evaluating their leaves through the Server (allie_fast.Server) ---
 
 
 def rust_model(tiny_path, threads=3):

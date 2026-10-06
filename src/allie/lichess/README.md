@@ -5,7 +5,7 @@ Python or the command line. It needs no GPU: one CPU process holds the model onc
 a time.
 
 - **Model.** A plain-PyTorch port of the trained network (`model.py`, the reference), run by default through
-  `fast.py`: C++ kernels on CPU, compiled for your machine on first use, and CUDA graphs on GPU. Each game keeps
+  a fast path: Allie's Rust engine on CPU (`fastrs.py`, `rust/allie-fast`), CUDA graphs on GPU (`fast.py`). Each game keeps
   its own key-value cache, so a move costs one or two new tokens. Concurrent games are batched into one step.
 - **Inputs as in training.** The game header carries both ratings and the time control. Each move carries the
   board, both clocks and the mover's previous think time, computed as the training data computes them.
@@ -14,8 +14,9 @@ a time.
 
 ## Setup
 
-1. **Install.** `uv sync --extra bot` (or `uv tool install "allie[bot] @ git+https://github.com/y0mingzhang/allie"`).
-   Add `--extra search` for the `strongest` mode's search.
+1. **Install.** `uv sync --extra bot --extra fast` in a clone (or `uv tool install "allie[bot] @ git+https://github.com/y0mingzhang/allie"`,
+   without the engine). `fast` builds the Rust engine (it needs [Rust](https://rustup.rs) 1.89 or later); without it the model runs
+   the PyTorch reference, several times slower, and does not search.
 2. **Weights.** By default the bot downloads [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0)
    from Hugging Face on first start (11 GB). To serve a training checkpoint instead, export it once and set
    `model` to the directory:
@@ -61,7 +62,7 @@ trust_remote_code=True)`, see the model card).
 |---|---|
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
 | `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
-| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy on average. One rule for every rating and time control (`calibration.py`): the move's think time is drawn first, coverage search runs the largest of 8, 32, 128 or 256 simulations that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values' log-odds, more sharply for stronger players and longer-thought positions. A search stops 0.2 s before the think time (or at a fifth of the clock) and the policy plays, so no search runs past the drawn think time. Searches run only on the fast CPU backend; a simulation is priced at `calibration.COST` (8 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 32 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra search`. |
+| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy on average. One rule for every rating and time control (`calibration.py`): the move's think time is drawn first, coverage search runs the largest of 8, 32, 128 or 256 simulations that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values' log-odds, more sharply for stronger players and longer-thought positions. A search stops 0.2 s before the think time (or at a fifth of the clock) and the policy plays, so no search runs past the drawn think time. Searches run only on the Rust engine; a simulation is priced at `calibration.COST` (8 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 32 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra fast`. |
 
 - **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
   63 bins, from 0 s to over an hour, given the position, both clocks and both ratings. It is a draw, not
@@ -212,7 +213,8 @@ involved.
 **Speed and memory.** One cached step, the time a move takes once the opponent's move arrives (median of 35
 steps of a game, `analysis/lichess/speed.py`). The bot appends its own move while the opponent thinks, so
 each decision reads one new token; a step of 16 games reads one token for each. CPU: int8 weights, the
-`fast` backend (the default) unless noted. Memory: the process's resident size.
+Rust engine (the default) unless noted; the rows were measured on the C++ kernels it replaced, whose logits it
+reproduces bit for bit and whose speed it matches or beats (EPYC 7763, 16 threads, one game: 8.0 ms against 8.5). Memory: the process's resident size.
 
 | Device | Threads | 1 game: ms per move | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|
@@ -235,18 +237,18 @@ each decision reads one new token; a step of 16 games reads one token for each. 
 - **Batching.** Games in one step share each expert's weights: on CPU, 16 games cost 3.6 to 5 times one
   game and 64 games 9 to 16 times (fewer threads: more), so a bot with many games should batch them, as
   `allie-bot` does.
-- **First use** compiles the kernels for the machine (a few seconds; they are cached under
-  `~/.cache/allie`). It needs a C++ compiler (`c++`, or `CXX`); without one the model runs the PyTorch
-  reference, with a warning. `ALLIE_MARCH` picks the target (e.g. `-march=haswell` for an AVX2 build) and
-  `ALLIE_NUMA=0` leaves the weights' memory where it is.
-- **Search.** `strongest` mode's search still runs the PyTorch path for its tree of moves: 5 simulations
-  take about 0.4 s a move on CPU, 25 simulations 1.1-1.4 s.
+- **Kernels.** The engine picks AVX-512, AVX2 or scalar kernels at run time (`ALLIE_RUST_ISA` forces one);
+  without the engine installed the model runs the PyTorch reference, with a warning. `ALLIE_NUMA=0` leaves
+  the weights' memory where it is.
+- **Search.** The searches run in the engine too: tree, leaf evaluations and their batching, with no Python
+  per leaf. A search leaf costs about 2.2 ms on a 16-core EPYC 7763 serving 10 games at once.
 - **First move.** It also reads the 11-token header.
-- **How.** `fast.py` runs a whole step (input embedding, board CNN, 24 blocks, head) in one call into C++
-  kernels on a pool of threads that stays alive between steps. Matrices are read in place, int8 rows
+- **How.** The Rust engine runs a whole step (input embedding, board CNN, 24 blocks, head) in one call on a
+  pool of threads that stays alive between steps. Matrices are read in place, int8 rows
   widened to FP32 as they stream from memory, one row after another; the matrices of a step are split into
   chunks that threads take as they come free, with a barrier between phases (6 a block for one game). A
-  step's tokens are grouped by expert, so each expert is read once however many games route to it. On GPU,
+  step's tokens are grouped by expert, so each expert is read once however many games route to it. One
+  server thread owns the engine and merges every caller's work (games' moves, search leaves) into steps. On GPU,
   steps that add one token to each game replay a CUDA graph of `model.py`'s forward, captured once per batch
   size and attention span, with each game's cache a slot of one pool. `backend = "torch"` runs `model.py`
   itself, the reference everything is checked against.
@@ -269,12 +271,12 @@ over games.
 
 - **Fast against the reference**, on the same positions (CPU BF16): +0.0003 [−0.0002, +0.0008] nats. A
   position's largest change in any move's probability is 0.004 on average and 0.06 at most, and the top move
-  agrees on 99.4% of positions. The C++ kernels round to BF16 where the reference does; the sums run in a
+  agrees on 99.4% of positions. The CPU kernels round to BF16 where the reference does; the sums run in a
   different order. 16 games in one step against one at a time: +0.0002 [−0.0001, +0.0004], the top move
   agrees on 99.9%. On GPU, CUDA graphs against the eager reference: +0.0001 [−0.0002, +0.0003], 99.8%.
-- **int8 against BF16**, on the same positions: +0.0008 [−0.0013, +0.0030] nats with the fast backend; the top
+- **int8 against BF16**, on the same positions: +0.0008 [−0.0013, +0.0030] nats on the CPU kernels; the top
   move agrees on 97.7% of positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
-- **CPU against GPU** (BF16, C++ kernels against CUDA graphs): −0.0002 [−0.0006, +0.0002] nats; the top move
+- **CPU against GPU** (BF16, CPU kernels against CUDA graphs): −0.0002 [−0.0006, +0.0002] nats; the top move
   agrees on 99.5% of positions, and no move's probability differs by more than 0.067.
 - **Before the second anneal** (step 143051, the same positions against its own training-code scores): int8
   +0.0017 [−0.0005, +0.0038], BF16 −0.0005 [−0.0014, +0.0004], GPU CUDA graphs −0.0003 [−0.0012, +0.0006];

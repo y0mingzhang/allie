@@ -76,13 +76,8 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     game.update(random_game(3, 20), 590, 585)
     assert game.decide(play, search, 590).move in legal_of(game)
     assert search.budgets == []  # no search off the fast backend
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
-    engine = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2))
+    pytest.importorskip("allie_fast")
+    engine = Engine(Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2))
     game = Game(engine, 2000, 1500, 600, 5, "rapid", seed=0)
     game.update(random_game(3, 20), 590, 585)
     assert len(game.moves) == 20  # white to move
@@ -107,15 +102,10 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
 def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
     """The think time is drawn before the search, caps its rung and stops it MARGIN before; the
     Decision waits that same think time."""
-    from allie.lichess import fast
-
-    try:
-        fast.library()
-    except Exception as e:  # noqa: BLE001
-        pytest.skip(f"no fast kernels: {e}")
+    pytest.importorskip("allie_fast")
     play = Play(mode="calibrated", think_time=True, resign=False, draws=False)
     search = Search()
-    game = Game(Engine(Model(tiny_path, dtype=torch.bfloat16, backend="fast", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0)
+    game = Game(Engine(Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0)
     game.update(random_game(3, 20), 590, 585)
     sim, margin = calibration.COST, calibration.MARGIN
     for think, rung in ((256 * sim + margin + 0.05, 256), (256 * sim + margin - 0.01, 128), (8 * sim + margin - 0.001, None)):

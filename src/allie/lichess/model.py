@@ -4,8 +4,8 @@ The forward restates the training GPT.forward (allie.model.nanogpt, eval path) o
 with each game's keys and values in a Cache. It matches the trained model up to floating-point
 summation order (analysis/lichess/parity.py). Weights come from export.py: BF16 in F.linear
 layout with the attention lambdas folded in; router, balancing bias, centre and scalars FP32.
-This code is the reference; by default step() runs fast.py instead (C++ kernels on CPU, CUDA
-graphs of this forward on GPU), which matches it within BF16 rounding.
+This code is the reference; by default step() runs a fast path instead (the Rust engine on CPU,
+fastrs.py; CUDA graphs of this forward on GPU, fast.py), which matches it within BF16 rounding.
 """
 
 import json
@@ -63,10 +63,10 @@ class Model:
     """active_experts: route each token through only the best `active_experts` of its top-k,
     with the gates they have in the top-k (the speed knob; None = all). int8: the block
     matrices as int8 weights with per-row scales (CPU, BF16 activations): half the memory.
-    backend: "fast" runs step() in fast.py: its C++ kernels on CPU (BF16 activations), CUDA
-    graphs of forward() on GPU; "rust" the Rust port of the CPU kernels (fastrs.py); "torch" in
-    the PyTorch code below (the reference); None: fast where it applies (CPU with BF16, any GPU)
-    and works."""
+    backend: "fast" runs step() on the device's fast path: the Rust engine on CPU (fastrs.py, BF16
+    activations), CUDA graphs of forward() on GPU (fast.py); "rust" the Rust engine; "torch" the
+    PyTorch code below (the reference); None: fast where it applies (CPU with BF16, any GPU) and
+    works, else the reference with a warning. "fast" and "rust" fail if they cannot run."""
 
     def __init__(self, path, device="cpu", dtype=torch.bfloat16, active_experts=None, int8=False,
                  backend=None, threads=None):  # fmt: skip
@@ -105,16 +105,14 @@ class Model:
         assert backend in (None, "fast", "rust", "torch"), backend
         if backend != "torch" and (backend or self.device.type == "cuda" or dtype == torch.bfloat16):
             try:
-                from .fast import Fast, Graphs
+                if self.device.type == "cuda" and backend != "rust":
+                    from .fast import Graphs
 
-                if self.device.type == "cuda":
                     self.graphs = Graphs(self, strict=backend == "fast")
-                elif backend == "rust":
+                else:
                     from .fastrs import RustFast
 
                     self.fast = RustFast(self, threads)
-                else:
-                    self.fast = Fast(self, threads)
             except Exception as e:
                 if backend in ("fast", "rust"):
                     raise

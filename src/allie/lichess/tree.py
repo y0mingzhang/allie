@@ -20,7 +20,7 @@ from allie.search.board import advance_clocks, predicted_seconds, root_other_pre
 from allie.search.native import from_prefix, load
 
 from .engine import Game
-from .fastrs import Leaf, RustFast
+from .fastrs import Leaf
 from .model import Cache
 from .tokens import CONTEXT, HEADER, MOVE_START, MOVES, advance, header
 
@@ -49,21 +49,9 @@ class Tree:
         self.capacity, self.new_tokens = capacity, 0
         self.concurrent = False  # nodes through the engine's queue (a search on the game's thread)
         self.deadline = np.inf  # time.monotonic() past which no further nodes run (Late)
-        self.caches = []  # the fast backend's pool
 
     def reset(self):
         self.new_tokens = 0
-
-    def pool(self, n):
-        """n caches holding the game's prefix (the fast backend's leaves), copied once per tree."""
-        caches = self.caches
-        g, n0 = self.cache, self.cache.n
-        while len(caches) < n:
-            c = Cache(self.model, n0 + 8)
-            c.k[:, :, :n0], c.v[:, :, :n0], c.e[:n0] = g.k[:, :, :n0], g.v[:, :, :n0], g.e[:n0]
-            c.n = n0
-            caches.append(c)
-        return caches[:n]
 
     def handles(self, prefixes, feats, clock_rule="predicted"):
         assert len(prefixes) == 1 and list(prefixes[0]) == self.game.tokens
@@ -121,7 +109,7 @@ class Nodes:
 
     def forward(self, ids, tokens, lengths):
         if self.tree.model.fast is not None:
-            return self.fast(ids)
+            return self.leaves(ids)
         t, m = self.tree, self.tree.model
         dev, dt = m.device, m.dtype
         cache, n0 = t.cache, t.cache.n
@@ -187,13 +175,6 @@ class Nodes:
             j = int(self.parent[j])
         return p[::-1]
 
-    def fast(self, ids, chunk=8):
-        """The nodes' logits from the fast backend: in place on the Rust engine (leaves), from copies of
-        the game's cache on the C++ kernels (copied)."""
-        if isinstance(self.tree.model.fast, RustFast):
-            return self.leaves(ids)
-        return self.copied(ids, chunk)
-
     def leaves(self, ids):
         """Every node a Leaf item of one step: the engine attends over the game's cache and then the node's
         ancestors' slots and writes its keys, values and embedding to its own slot (the tree's k, v and e
@@ -209,38 +190,6 @@ class Nodes:
                  for j, i in enumerate(ids)]  # fmt: skip
         z = t.game.engine.steps(items) if t.concurrent else t.model.fast.step(items)
         return z.double().numpy()
-
-    def copied(self, ids, chunk=8):
-        """Each node runs on a copy of the game's cache (pooled: the kernel writes only past the root, so
-        the copied prefix stays) holding its ancestors' keys, values and embeddings at their own positions
-        (kept in the tree's slots when they ran); only the node's own token is new. Up to `chunk` nodes run
-        in one step: the pool holds that many copies (about 13 MB each at move 40, 1 024 tokens at most:
-        150 MB)."""
-        t, m = self.tree, self.tree.model
-        n0 = t.cache.n
-        out = []
-        for lo in range(0, len(ids), chunk):
-            if monotonic() > t.deadline:
-                raise Late
-            batch, items = ids[lo : lo + chunk], []
-            caches = t.pool(len(batch))
-            for c, i in zip(caches, batch):
-                p = self.path(i)
-                c.truncate(n0)
-                c.reserve(n0 + len(p))
-                for d, j in enumerate(p[:-1]):
-                    r = n0 + d
-                    c.k[:, :, r], c.v[:, :, r], c.e[r] = t.k[:, :, j], t.v[:, :, j], t.e[j]
-                c.n = n0 + len(p) - 1
-                board = np.frombuffer(self.board[i], np.uint8).reshape(1, 68).copy()
-                feats = torch.as_tensor(self.feats[[i]], dtype=torch.float32)
-                items.append((c, torch.as_tensor(self.token[[i]]), feats, torch.as_tensor(board)))
-            z = t.game.engine.steps(items) if t.concurrent else m.fast.step(items)
-            out.append(z.double().numpy())
-            for c, i in zip(caches, batch):
-                r = c.n - 1
-                t.k[:, :, i], t.v[:, :, i], t.e[i] = c.k[:, :, r], c.v[:, :, r], c.e[r]
-        return np.concatenate(out)
 
 
 class Coverage:

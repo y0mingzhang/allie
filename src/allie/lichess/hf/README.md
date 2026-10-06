@@ -45,9 +45,9 @@ move = model.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 playe
 - **Device:** `device="cuda"` (the default when a GPU is visible) or `device="cpu"`. On CPU the weights
   default to int8 (6.4 GB, about 1.6 times as fast as BF16); `int8=False` keeps BF16 (11 GB).
   `active_experts=8` routes each token through 8 of its 16 experts: faster, slightly less accurate.
-- **Speed:** on CPU the model runs C++ kernels compiled for your machine on first use (a few seconds; it needs
-  a C++ compiler, and without one runs the plain PyTorch code), on GPU replayed CUDA graphs. `backend="torch"`
-  runs the plain PyTorch reference, `threads=` sets the CPU threads. Calls that extend the previous call's
+- **Speed:** on CPU the model runs Allie's Rust engine when it is installed
+  (`pip install "allie[fast] @ git+GITHUB_URL"`), and otherwise the plain PyTorch code, with a warning; on GPU
+  replayed CUDA graphs. `backend="torch"` runs the plain PyTorch reference, `threads=` sets the CPU threads. Calls that extend the previous call's
   game reuse its key-value cache, so following a game move by move costs one new token per call.
 
 | Device | Weights | ms per move | Memory |
@@ -126,7 +126,7 @@ Anderson's group; its open weights made this comparison possible.
 
 **This release's code.** The inference here matches the training code within noise. On 5,000 benchmark
 positions, each scored as a live game reaches it (the last move added to a cached game), CE minus the training
-code's is +0.0003 [−0.0007, +0.0012] nats with the C++ kernels on CPU in BF16, +0.0010 [−0.0011, +0.0032] in
+code's is +0.0003 [−0.0007, +0.0012] nats with the CPU kernels in BF16, +0.0010 [−0.0011, +0.0032] in
 int8, and +0.0005 [−0.0005, +0.0014] with the CUDA graphs on GPU.
 
 **int8, the CPU default,** costs +0.0008 [−0.0013, +0.0030] nats of CE against BF16 on those positions, and

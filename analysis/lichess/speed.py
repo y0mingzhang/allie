@@ -2,7 +2,7 @@
 game's cache (batch 1), or one token each for B games at once.
 
 usage: python analysis/lichess/speed.py --model DIR [--device cpu] [--int8] [--active-experts K]
-       [--backend fast|torch] [--threads N] [--batch 1,16] [--profile]
+       [--backend rust|torch] [--threads N] [--batch 1,16] [--profile]
 """
 
 import argparse
@@ -66,7 +66,7 @@ def main():
     p.add_argument("--device", default="cpu")
     p.add_argument("--int8", action="store_true")
     p.add_argument("--active-experts", type=int)
-    p.add_argument("--backend", choices=["fast", "torch"])
+    p.add_argument("--backend", choices=["rust", "fast", "torch"])
     p.add_argument("--threads", type=int)
     p.add_argument("--batch", default="1")
     p.add_argument("--steps", type=int, default=40)

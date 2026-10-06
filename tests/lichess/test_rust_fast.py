@@ -1,6 +1,7 @@
-"""The Rust engine (fastrs.RustFast) against the C++ kernels (fast.Fast): bitwise equal logits and cache
-rows on the same ISA, for each of the three variants (the C++ rebuilt for the matching -march)."""
+"""The Rust engine (fastrs.RustFast): each of its three kernel variants against the reference and against the
+bits of the C++ kernels it replaced (recorded), leaves in place against copied caches, threads, errors."""
 
+import hashlib
 import multiprocessing
 import threading
 
@@ -8,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from allie.lichess import fast
+from allie.lichess import fastrs
 from allie.lichess.fastrs import Leaf
 from allie.lichess.model import Cache, Model, step
 from allie.lichess.tokens import CONTEXT, HEADER
@@ -16,31 +17,11 @@ from allie.lichess.tokens import CONTEXT, HEADER
 from .test_model import inputs
 from .test_tokens import random_game
 
-try:
-    fast.library()
-except Exception as e:  # noqa: BLE001
-    pytest.skip(f"no fast kernels: {e}", allow_module_level=True)
 allie_fast = pytest.importorskip("allie_fast")
 if not hasattr(allie_fast, "Engine"):
     pytest.skip("allie_fast built without Engine", allow_module_level=True)
 
-# C++ -march per Rust variant: native for the CPU's best; haswell = AVX2 + FMA; x86-64 = no AVX
-MARCH = dict(native=None, avx2="-march=haswell", scalar="-march=x86-64")
 GAMES = [inputs(random_game(s, 36 + s % 5)) for s in range(64)]
-
-
-def cxx(tiny_path, march, monkeypatch, **kw):
-    """A C++ Model built for `march` (fast.library caches one build per process: cleared around it)."""
-    if march:
-        monkeypatch.setenv("ALLIE_MARCH", march)
-    else:
-        monkeypatch.delenv("ALLIE_MARCH", raising=False)
-    fast.library.cache_clear()
-    try:
-        return Model(tiny_path, dtype=torch.bfloat16, backend="fast", **kw)
-    finally:
-        fast.library.cache_clear()
-        monkeypatch.delenv("ALLIE_MARCH", raising=False)
 
 
 def rust(tiny_path, isa, monkeypatch, **kw):
@@ -97,20 +78,40 @@ def same(a, b):
             )
 
 
+def digest(out):
+    """replay()'s logits and cache rows, hashed bit for bit."""
+    h = hashlib.sha256()
+    for z in out[0]:
+        h.update(z.contiguous().numpy().tobytes())
+    for rows in out[1]:
+        for t in rows:
+            h.update(t.contiguous().view(torch.int16).numpy().tobytes())
+    return h.hexdigest()[:16]
+
+
+# digest(replay()) per (isa, int8): the C++ kernels' bits, which the Rust port reproduced on the same ISA (the
+# equality gate, 2026-10-05); a change here changes the model's outputs
+GOLDEN = {
+    ("avx2", False): "531f923324856ba0",
+    ("avx2", True): "3972dd998c02dd04",
+    ("scalar", False): "adf623afb91bcb5e",
+    ("scalar", True): "ea60a73cacaa0822",
+}
+
+
 @pytest.mark.parametrize("int8", [False, True])
 @pytest.mark.parametrize("isa", ["native", "avx2", "scalar"])
-def test_rust_matches_cxx_bitwise(tiny_path, isa, int8, monkeypatch):
-    ref = cxx(tiny_path, MARCH[isa], monkeypatch, int8=int8, threads=3)
+def test_rust_isas(tiny_path, isa, int8, monkeypatch):
+    """Each kernel variant is the reference up to BF16 rounding, and bitwise the recorded C++ outputs."""
     got = rust(tiny_path, isa, monkeypatch, int8=int8, threads=3)
-    want = {b"avx512": "avx512", b"avx2": "avx2", b"generic": "scalar"}[
-        ref.fast.lib.allie_isa()
-    ]
-    assert got.fast.isa == want and (isa == "native" or want == isa), (
-        got.fast.isa,
-        want,
-        isa,
-    )
-    same(replay(got), replay(ref))
+    assert got.fast.isa in ("avx512", "avx2", "scalar") and (isa == "native" or got.fast.isa == isa)
+    out = replay(got)
+    ref = replay(Model(tiny_path, dtype=torch.bfloat16, int8=int8, backend="torch"))
+    for z, w in zip(out[0], ref[0]):
+        p, q = (torch.softmax(x[:, 378:2346], -1) for x in (z, w))
+        assert (p - q).abs().max() < 2e-3
+    want = GOLDEN.get((got.fast.isa, int8))
+    assert want is None or digest(out) == want, f"{got.fast.isa} int8={int8}: the kernels' bits changed"
 
 
 def test_rust_thread_count_does_not_change_results(tiny_path, monkeypatch):
@@ -324,7 +325,7 @@ def test_rust_profile_threads_isa(tiny_path):
     x = inputs(random_game(3, 10))
     step(m, [(Cache(m), *x)])
     t = m.fast.profile(False)
-    assert list(t) == list(fast.PHASES) and len(t) == 17 and sum(t.values()) > 0
+    assert list(t) == list(fastrs.PHASES) and len(t) == 17 and sum(t.values()) > 0
 
 
 def test_rust_concurrent_steps(tiny_path):

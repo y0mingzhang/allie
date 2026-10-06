@@ -1,8 +1,12 @@
-"""The Rust port of fast.py's CPU backend (rust/allie-fast, module allie_fast): the same step() on the
-same weights and caches, bit for bit the C++ kernels' logits on the same ISA. `RustFast` has `Fast`'s
-constructor, attributes and methods; the cfg and pointer lists it hands the engine are built as
-`Fast.__init__` builds them. The engine reads the tensors in place through raw pointers, so they are
-kept alive here. Threads are pinned and the weights' pages placed on their NUMA node as in fast.py.
+"""Allie 2.0's CPU fast path for model.py's step(): the Rust engine (rust/allie-fast, module allie_fast, from
+`uv sync --extra fast`). One call runs the whole step (input embedding, board CNN, every block, the head) on a
+pool of threads pinned within one NUMA node, the weights' pages moved there (ALLIE_NUMA=0 leaves them), with
+barriers between a block's phases and its matrices shared out in chunks. Matrices are read in place from
+model.w (int8 with per-row scales, or BF16) as they stream from memory, a step's tokens grouped by expert so
+each expert is read once. Activations are rounded to BF16 wherever model.py rounds them, with FP32 sums, so the
+logits match the reference up to summation order (bit for bit the C++ kernels this engine replaced, on the same
+ISA: AVX-512, AVX2 or scalar, picked at run time). The engine reads the tensors through raw pointers, so they
+are kept alive here.
 
 The engine lives in an `allie_fast.Server`: its own thread runs the steps, merging what every caller (games'
 moves, searches on their threads, the Rust searchers' native loops) has queued into one step of up to
@@ -19,9 +23,6 @@ from typing import NamedTuple
 
 import torch
 
-from .fast import LAYER, PHASES, SCALED, cpu_order, cpus, threads_default
-
-
 ERRORS = {  # the engine's error codes: 1-4 a bad request (ValueError), else RuntimeError
     1: "token outside the vocabulary",
     2: "board state out of range",
@@ -30,6 +31,67 @@ ERRORS = {  # the engine's error codes: 1-4 a bad request (ValueError), else Run
     5: "the engine failed (a panic in the step)",
     -1: "the server has stopped",
 }
+
+
+def cpus():
+    """The CPUs this process may run on."""
+    try:
+        return sorted(os.sched_getaffinity(0))
+    except AttributeError:  # macOS, Windows
+        return list(range(os.cpu_count() or 1))
+
+
+def numa(c):
+    """CPU c's NUMA node (0 where the system does not say)."""
+    path = Path(f"/sys/devices/system/cpu/cpu{c}")
+    return next((int(d.name[4:]) for d in path.glob("node[0-9]*")), 0)
+
+
+def threads_default():
+    """torch's thread count, within the NUMA node that has most of our CPUs: threads on two
+    sockets run slower than on one (remote memory, cross-socket barriers)."""
+    nodes = [numa(c) for c in cpus()]
+    return max(1, min(torch.get_num_threads(), max(map(nodes.count, set(nodes)))))
+
+
+def _sys(path, default=0):
+    try:
+        return int(Path(path).read_text().split(",")[0].split("-")[0])
+    except (OSError, ValueError):
+        return default
+
+
+def cpu_order(n):
+    """n CPUs of this process to pin threads to: within one NUMA node when they fit, spread over
+    the node's L3 caches, one thread per core before the cores' second hardware threads. Also
+    each one's node and cache group (numbered from 0)."""
+    ids = cpus()
+    if len(ids) < n:
+        return None
+    path = "/sys/devices/system/cpu/cpu{}/"
+    node = {c: numa(c) for c in ids}
+    l3 = {c: _sys(path.format(c) + "cache/index3/id") for c in ids}
+    first = {c: _sys(path.format(c) + "topology/thread_siblings_list", c) == c for c in ids}
+    nodes = sorted(set(node.values()), key=lambda k: -sum(node[c] == k for c in ids))
+    out = []
+    for k in nodes[:1] if sum(node[c] == nodes[0] for c in ids) >= n else nodes:
+        for primary in (True, False):
+            groups = {}
+            for c in ids:
+                if node[c] == k and first[c] == primary:
+                    groups.setdefault(l3[c], []).append(c)
+            lists = list(groups.values())
+            out += [g[j] for j in range(max(map(len, lists), default=0)) for g in lists if j < len(g)]
+    out = out[:n]
+    caches = sorted({(node[c], l3[c]) for c in out})
+    return out, [node[c] for c in out], [caches.index((node[c], l3[c])) for c in out]
+
+
+PHASES = ("start", "board cnn", "embedding rows", "smear", "norm", "qkv", "rotary", "attention", "o",
+          "norm2", "router", "top-k", "group", "up", "down", "head norm", "head")  # fmt: skip
+LAYER = ("qkv", "o", "gates", "fc", "proj", "router", "moe_bias", "mu", "up", "down", "shared_up",
+         "shared_down")  # fmt: skip
+SCALED = ("qkv", "o", "fc", "proj", "up", "down", "shared_up", "shared_down")
 
 
 class Leaf(NamedTuple):
@@ -48,10 +110,13 @@ class Leaf(NamedTuple):
 
 
 class RustFast:
-    """model.py's step() for a CPU Model with BF16 activations (int8 or BF16 matrices), in Rust."""
+    """model.py's step() for a CPU Model with BF16 activations (int8 or BF16 matrices)."""
 
     def __init__(self, model, threads=None, pin=True, spin=0.002, place=True, max_items=128, min_items=48, gather=3e-4):
-        import allie_fast
+        try:
+            import allie_fast
+        except ImportError as e:
+            raise ImportError(f"the Rust engine is not installed (allie[fast]; in a clone uv sync --extra fast): {e}") from e
 
         assert model.device.type == "cpu" and model.dtype == torch.bfloat16
         c, w, n = model.config, model.w, model.layers
@@ -114,7 +179,7 @@ class RustFast:
         self.cpus, nodes, groups = order or (None, None, None)
         place = place and os.environ.get("ALLIE_NUMA") != "0"
         if place and nodes and len(set(nodes)) == 1 and Path("/sys/devices/system/node/node1").exists():
-            # the weights' pages moved to the threads' NUMA node (as fast.py: threads on several nodes
+            # the weights' pages moved to the threads' NUMA node (threads on several nodes
             # leave them where they are)
             ts = [t for t in self.tensors if t is not None]
             allie_fast.place([t.data_ptr() for t in ts], [t.numel() * t.element_size() for t in ts], sorted(set(nodes)))
