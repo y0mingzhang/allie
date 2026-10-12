@@ -17,7 +17,7 @@ from torch import Tensor, nn
 
 from allie.model import shard as expert_shard
 from allie.model.arch import swiglu_hidden
-from allie.model.moe import MoE, rebalance_all, replay_context
+from allie.model.moe import MoE, replay_context
 
 dynamo.config.recompile_limit = 64
 # set by model.network.configure: the device, args (num_layers, num_iterations) and attention backend
@@ -397,7 +397,6 @@ CKPT_LAYERS = (
 DEFER = (
     False  # eager checkpoints: NorMuon's param broadcasts finish under the next forward
 )
-BATCHED_REBALANCE = False  # moe.rebalance_all in place of per-layer rebalance (--moe-batched-rebalance)
 _inflight = []  # (work, param, grad) reduces of the running backward
 INFLIGHT_BYTES = 1 << 29  # BF16 grads whose reduce compute has not waited on yet
 _bcast = {}  # block index (-1: outside blocks) -> the param broadcasts it waits on
@@ -1564,11 +1563,8 @@ class TrainingManager:
                 opt.zero_grad(set_to_none=True)
         self.adam_opt.should_sync = self.scalar_opt.should_sync = False
 
-        if BATCHED_REBALANCE and self.moe:
-            rebalance_all(self.moe)
-        else:
-            for m in self.moe:
-                m.rebalance()
+        for m in self.moe:
+            m.rebalance()
 
         if step == self.split_step:
             self.adam_opt.copy_lm_to_embed()

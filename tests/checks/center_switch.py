@@ -1,7 +1,6 @@
 """trainer --resume-new-source from arch moe_router_center_first 1 to 4 (migratable, centre_more) on CPU: the
 moe_shard check's model (arch moe_shard, world 2, gloo; quantile balancing, centring 0.9) at 8 layers, block 0 dense, so
-7 MoE layers, blocks 0-3 under eager checkpoints; once with --moe-batched-rebalance --moe-remat --moe-chunks 4, once
-with neither.
+7 MoE layers, blocks 0-3 under eager checkpoints; once with --moe-remat --moe-chunks 4, once without.
 
 A (center_first 1) trained 3 steps and saved as the trainer saves it (model.pt with whole experts, each rank's state)
 loads into B (center_first 4) as the trainer loads it: MoE layers 1-3 (blocks 2-4) take fresh mu and mu_steps (0),
@@ -29,7 +28,7 @@ import moe_shard as T
 from allie.data.packed import Packed
 from allie.model import moe_kernels
 from allie.model import shard as expert_shard
-from allie.model.network import Config, TrainingManager, core, create_model
+from allie.model.network import Config, TrainingManager, create_model
 from allie.train.trainer import centre_more, migratable
 
 ARCH = T.ARCH | dict(moe_shard=True)
@@ -93,16 +92,15 @@ def means(val, model, manager, step):
     return out, [sums[m][:-1] / sums[m][-1].clamp(min=1) for m in manager.moe]
 
 
-def worker(rank, world, port, tmp, batched):
+def worker(rank, world, port, tmp, remat):
     dist.init_process_group(
         "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
     )
     torch.set_num_threads(1)
     T.patch()
-    core.BATCHED_REBALANCE = batched
-    moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not batched, 4 if batched else 1
+    moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not remat, 4 if remat else 1
     val = Packed(T.DATA, "val")
-    tag = "batched rebalance, remat, chunks 4" if batched else "per-layer rebalance"
+    tag = "remat, chunks 4" if remat else "plain"
     say = lambda *a: rank == 0 and print(f"{tag}:", *a, flush=True)
 
     model, manager = build(1)
@@ -195,10 +193,10 @@ def refusals():
 
 if __name__ == "__main__":
     refusals()
-    for batched in (True, False):
+    for remat in (True, False):
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
         with tempfile.TemporaryDirectory() as tmp:
-            mp.spawn(worker, args=(2, port, tmp, batched), nprocs=2)
+            mp.spawn(worker, args=(2, port, tmp, remat), nprocs=2)
     print("PASS center switch")
