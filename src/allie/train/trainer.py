@@ -415,12 +415,6 @@ def main():
         "experts, one-byte sorts (bitwise)",
     )
     p.add_argument(
-        "--shard-late-prefetch",
-        action="store_true",
-        help="moe_shard: the backward gathers the next layer's experts after this layer's expert grads, not "
-        "before (one gathered layer less at the peak; less overlap)",
-    )
-    p.add_argument(
         "--shard-prefetch",
         type=int,
         default=1,
@@ -438,12 +432,6 @@ def main():
         action="store_true",
         help="moe_shard: blocks past --ckpt-frac keep their forward's gathered experts for their backward instead of "
         "gathering again (bitwise; 0.8 gb per block at width 2048)",
-    )
-    p.add_argument(
-        "--shard-host-gather",
-        action="store_true",
-        help="moe_shard: gathers copy the whole experts from a node-shared pinned host image of every rank's shards "
-        "(published after each optimizer step) on the copy engines instead of NCCL all-gathers (bitwise)",
     )
     p.add_argument(
         "--moe-batched-rebalance",
@@ -537,9 +525,7 @@ def main():
     network.ATTENTION = "triton" if a.attn_kernel else "flex"
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
     moe_kernels.TUNED = a.smoe_tuned
-    expert_shard.LATE = a.shard_late_prefetch
     expert_shard.DEPTH, expert_shard.HOLD = a.shard_prefetch, a.shard_hold
-    expert_shard.HOST = a.shard_host_gather
     network.core.BATCHED_REBALANCE = a.moe_batched_rebalance
     assert a.shard_prefetch >= 1
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -728,10 +714,6 @@ def main():
         del shared, local
     elif (out / "last.pt").exists():
         raise ValueError("Existing checkpoint requires explicit resume")
-    if expert_shard.HOST:  # the loaded shards into the host image
-        assert sharded, "--shard-host-gather needs arch moe_shard on more than one rank"
-        expert_shard.host_setup(cpu)
-        expert_shard.publish()
     termination = [False]
 
     def stop_handler(*_):
@@ -957,8 +939,6 @@ def main():
             count_sum += count
             window_tokens += rows.shape[0] * world * a.row_tokens
         manager.step_optimizers(index)
-        if expert_shard.HOST:
-            expert_shard.publish()
         if a.shard_early and sharded:
             expert_shard.start(manager.moe)
         step = index + 1

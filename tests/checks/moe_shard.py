@@ -9,10 +9,10 @@ resume: a sharded run saved after 3 steps as train.trainer saves it (model.pt wi
 rebuilt, loaded and continued through the embed split equals the uninterrupted run bit for bit: losses, model.pt,
 every rank's optimizer state. --moe-remat --moe-chunks 4 (the down output rerun in checkpointed blocks, the [T*k, D]
 products in 4 token chunks) is bitwise the sharded run (on CPU: on GPU the gates' grad, a batched matmul per chunk,
-may round otherwise). --shard-prefetch 2 --shard-early --shard-hold --optimizers-reversed (schedule only; also with
---shard-late-prefetch) is bitwise the sharded run, with no gather left in flight but the next forward's early ones,
-and stays on for the resume and eval checks (the eval forward takes the early gather of the last step). eval: an
-unsharded model loading the final model.pt gives the sharded model's eval logits.
+may round otherwise). --shard-prefetch 2 --shard-early --shard-hold --optimizers-reversed (schedule only) is bitwise
+the sharded run, with no gather left in flight but the next forward's early ones, and stays on for the resume and eval
+checks (the eval forward takes the early gather of the last step). eval: an unsharded model loading the final model.pt
+gives the sharded model's eval logits.
 
     TORCH_COMPILE_DISABLE=1 python tests/checks/moe_shard.py
 """
@@ -257,13 +257,12 @@ def worker(rank, world, port, tmp):
         assert not diff.any(), "every step must be bitwise"
     final = got[-1][1], manager.rank_state_dict()
     del model, manager
-    moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS, expert_shard.LATE = False, 4, True
+    moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = False, 4
     assert same(train(val, *build(True), range(STEPS)), got) == 0.0
-    moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS, expert_shard.LATE = True, 1, False
-    say("--moe-remat --moe-chunks 4 --shard-late-prefetch bitwise")
+    moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = True, 1
+    say("--moe-remat --moe-chunks 4 bitwise")
     global EARLY
     EARLY, expert_shard.DEPTH, expert_shard.HOLD = True, 2, True
-    expert_shard.LATE = True
     model, manager = build(True)
     assert same(train(val, model, manager, range(STEPS)), got) == 0.0
     # only the next forward's early gathers are left
@@ -271,8 +270,7 @@ def worker(rank, world, port, tmp):
     expert_shard.reset()
     assert not expert_shard._ready
     del model, manager
-    expert_shard.LATE = False
-    say("--shard-prefetch 2 --shard-early --shard-hold --optimizers-reversed (+ late prefetch) bitwise")
+    say("--shard-prefetch 2 --shard-early --shard-hold --optimizers-reversed bitwise")
 
     model, manager = build(True)
     head = train(val, model, manager, range(SAVE))
