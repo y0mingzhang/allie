@@ -45,8 +45,8 @@ from allie.model.moe import STATS, MoE
 from allie.train.provenance import source_hashes
 from allie.train.schedule import Schedule
 from allie.train.tail import TailEMA
+from allie.paths import DATA, ROOT
 
-ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[3]))
 # arguments a resume, fork or continuation shares with its checkpoint: they change what is computed
 SAME = (
     "width", "layers", "head_dim", "initial_batch_rows", "micro_batch", "lr_scale", "seed",
@@ -363,7 +363,7 @@ def main():
     )
     p.add_argument(
         "--data",
-        default="/scratch/yimingz3/allie/lichess_tokens_v2",
+        default=str(DATA / "lichess_tokens_v2"),
         help="packed corpus of the validation rows",
     )
     p.add_argument("--mix", required=True, help="data.mix policy")

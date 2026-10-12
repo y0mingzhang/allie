@@ -228,7 +228,8 @@ def create_model(cfg, device="cuda"):
         # import, so the module imports without a GPU
         torch.empty(1, device=device, requires_grad=True).backward()
     world = dist.get_world_size()
-    shard = model_arch.resolve(cfg.arch)["moe_shard"] and world > 1
+    arch = model_arch.resolve(cfg.arch)
+    shard = arch["moe_shard"] and world > 1
     # sharded, two ranks at a time: the node holds two whole FP32 inits (~40-53 GB each at width 2048), not eight
     turns = world // 2 if shard else 1
     for turn in range(turns):
@@ -242,7 +243,6 @@ def create_model(cfg, device="cuda"):
     model.use_feats = cfg.feats
     model.feat_embed.weight.lr_mul = cfg.input_lr_mul
     model.board = board_cnn.build(cfg.width).to(device)
-    arch = model_arch.resolve(cfg.arch)
     if arch["xsa"]:  # zero init, no RNG draw
         model.xsa_alphas = torch.nn.Parameter(torch.zeros(cfg.layers, cfg.width // cfg.head_dim, device=device))
         a = model.xsa_alphas
@@ -254,7 +254,7 @@ def create_model(cfg, device="cuda"):
     for p in model.parameters():
         if not getattr(p, "local", False):
             dist.broadcast(p.detach(), 0)
-    small = model_arch.resolve(cfg.arch)["fp32_small_masters"]
+    small = arch["fp32_small_masters"]
     masters = MASTER_LABELS + ("attn_gate", "value_embed_gate") * small
     for p in model.parameters():
         if getattr(p, "label", None) in masters:

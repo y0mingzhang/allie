@@ -34,7 +34,7 @@ def train(val, **kw):
     )
     m = create_model(cfg)
     sched = Schedule(
-        warmup_steps=2, mtp_steps=0, split_step=5, batch_rows=2, momentum_warmup=True
+        warmup_steps=2, mtp_steps=0, split_step=5, batch_rows=2
     )
     mgr = TrainingManager(m, cfg, sched, decay_start=2, end_step=8)
     net = torch.compile(m, dynamic=False, fullgraph=True)

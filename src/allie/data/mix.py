@@ -30,13 +30,10 @@ import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
 from allie.data.vocab import BOS, INCREMENTS_ID, SECONDS_ID, TERM_NORMAL, TERM_OTHER, UNK
+from allie.paths import DATA
 
-# storage root of the stores, recipe tables and eval sets
-ALLIE_DATA = Path(
-    os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie")
-)
-STORE = ALLIE_DATA / "data-v1"
-RECIPES = Path(os.environ.get("ALLIE_RECIPES", ALLIE_DATA / "results/recipe10x/recipes"))
+STORE = DATA / "data-v1"
+RECIPES = Path(os.environ.get("ALLIE_RECIPES", DATA / "results/recipe10x/recipes"))
 COLUMNS = [
     "moves",
     "white_elo",

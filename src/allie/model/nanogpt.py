@@ -694,7 +694,7 @@ class NorMuon(torch.optim.Optimizer):
 
             v_chunk = v_chunk.view(grad_shape)
 
-            # # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
+            # "Cautious" weight decay (https://arxiv.org/abs/2510.12402)
             flat = self._pflat.get(self._group_of[params[0]])
             direct_publish = owned and (self._deferred is not None or self.local)
             updated_params = (
@@ -1220,6 +1220,7 @@ class GPT(nn.Module):
     ):
         super().__init__()
         self.num_layers = num_layers
+        # a multiple of 128 for efficiency: suggested by @Grad62304977, from Karpathy's experiments
         vocab_size = next_multiple_of_n(vocab_size, n=128)
 
         self.smear_gate = CastedLinear(16, 1)
@@ -1250,8 +1251,6 @@ class GPT(nn.Module):
             [Block(model_dim, head_dim, num_heads, i, m) for i, m in enumerate(moe)]
         )
         self.yarn = Yarn(head_dim, max_seq_len)
-        # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
-        # suggested to me by @Grad62304977. this originates from Karpathy's experiments.
         self.lm_head = CastedLinear(model_dim, vocab_size)
         nn.init.normal_(self.lm_head.weight, mean=0, std=0.005)
         self.lm_head.weight.label = "lm_head"
@@ -1268,9 +1267,7 @@ class GPT(nn.Module):
         self.x0_lambdas.lr_mul = 5.0
         self.x0_lambdas.wd_mul = 0.0
 
-        pad = (
-            -num_layers * 3 - 5
-        ) % dist.get_world_size()  # updated: 3*num_layers instead of 4*
+        pad = (-num_layers * 3 - 5) % dist.get_world_size()
         self.scalars = nn.Parameter(
             torch.cat(
                 [

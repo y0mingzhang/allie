@@ -18,7 +18,6 @@ from torch import nn
 from allie.model import moe_kernels
 
 SHARDED = []  # every sharded MoE layer, each model's in forward order
-PREFETCH = True
 DEPTH = 1  # layers the forward gathers ahead (train.trainer --shard-prefetch)
 # layers out of a checkpoint save their forward's gathered experts, not their shards: no gather in their backward
 # (train.trainer --shard-hold; 0.8 GB per such layer at width 2048, held from its forward to its backward)
@@ -87,7 +86,7 @@ def prefetch(nxt, pos):
     """Launch layer nxt's gather for the layer pos's pass reaches next; never in backward for a layer HOLD kept."""
     lo, end = _span[pos]
     held = nxt < pos and HOLD and SHARDED[nxt].remat
-    if PREFETCH and lo <= nxt < end and nxt not in _ready and not held:
+    if lo <= nxt < end and nxt not in _ready and not held:
         _ready[nxt] = _launch(nxt)
 
 
