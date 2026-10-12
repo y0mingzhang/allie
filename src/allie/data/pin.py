@@ -28,7 +28,8 @@ FORMATS = ("ultrabullet", "bullet", "blitz", "rapid", "classical", "corresponden
 
 
 def sha(p):
-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+    with open(p, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def digest(p):

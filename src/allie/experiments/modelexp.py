@@ -42,7 +42,7 @@ import numpy as np
 
 from allie import paths
 from allie.data import pin as datapin
-from allie.data.pin import sha
+from allie.data.pin import digest, sha
 from allie.model.arch import extra_flops
 from allie.train.provenance import source_hashes
 
@@ -109,8 +109,7 @@ def baseline():
     """The baseline's data inputs (hash-checked) with the shipped model recipe."""
     b = json.loads(B3.read_text())
     body = {k: v for k, v in b.items() if k != "sha256"}
-    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
-    assert b["sha256"] == digest, "B_3 was edited after it was hashed"
+    assert b["sha256"] == digest(body), "B_3 was edited after it was hashed"
     return b | dict(arch=SHIP, meta={k: b.pop(k) for k in B3_META})
 
 
@@ -784,9 +783,6 @@ def owner(study, r):
     run of one frozen study."""
     plan = study / "plan.json"
     frozen = json.loads(plan.read_text())["hashes"] if plan.exists() else {}
-    digest = lambda x: hashlib.sha256(
-        json.dumps(x, sort_keys=True).encode()
-    ).hexdigest()
     return dict(study=str(study), run=digest(r), frozen=digest(frozen))
 
 

@@ -4,13 +4,14 @@ Usage: data.fetch YYYY-MM OUT_DIR. Files are fetched in parallel with curl and e
 against the size and sha256 that the Hub records; exits nonzero unless every file verifies.
 """
 
-import hashlib
 import json
 import subprocess
 import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from allie.data.pin import sha
 
 REPO = "datasets/Lichess/standard-chess-games"
 API = f"https://huggingface.co/api/{REPO}/tree/main/data/year={{}}/month={{}}"
@@ -19,17 +20,12 @@ TOKEN = Path.home() / ".cache/huggingface/token"  # authenticated requests get a
 AUTH = ["-H", f"Authorization: Bearer {TOKEN.read_text().strip()}"] if TOKEN.exists() else []
 
 
-def sha256(path):
-    with open(path, "rb") as f:
-        return hashlib.file_digest(f, "sha256").hexdigest()
-
-
 def fetch(entry, out):
     dst = out / Path(entry["path"]).name
     ok = lambda: (
         dst.exists()
         and dst.stat().st_size == entry["size"]
-        and sha256(dst) == entry["lfs"]["oid"]
+        and sha(dst) == entry["lfs"]["oid"]
     )
     for _ in range(5):
         if ok():

@@ -26,6 +26,7 @@ import torch
 import torch.distributed as dist
 
 from allie import paths
+from allie.data.pin import digest, sha
 from allie.train.provenance import source_hashes
 
 REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
@@ -35,13 +36,9 @@ REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
 EQUIVALENT = {
     "3efce06d87e5e5fb22e2d6e79bbc52ab7386b5a3af9923a4eafcbbc42995b944": (
         "Allie 2.0",
-        "22ea0247b5c67e3070db73970a3c389a2653e3c60ee06c89cde97765dc74a7f2",
+        "ae590a9f8f8ba67dc8a44b36f9d67f93c3407618e27e5053b1e6f1ca0450a1ca",
     ),
 }
-
-
-def digest(hashes):
-    return hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
 
 
 def read_hashed(path):
@@ -54,11 +51,6 @@ def read_hashed(path):
 def tokens(model, x):
     """forward()'s token arguments: frozen sources from before this package also take an unused target."""
     return (x, x) if "target_seq" in inspect.signature(model.forward).parameters else (x,)
-
-
-def sha(path):
-    with path.open("rb") as f:
-        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def training_code(state, source=None):

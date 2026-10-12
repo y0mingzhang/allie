@@ -28,6 +28,7 @@ import pyarrow.parquet as pq
 import requests
 
 from allie import paths
+from allie.data.pin import sha
 from allie.data import store as cd
 from allie.data.vocab import BOS, SECONDS, TERM_NORMAL, TERM_OTHER
 from allie.data.mix import SHARD_GAMES as SHARD
@@ -160,11 +161,6 @@ def urls(src):
             return out
 
 
-def sha256(path):
-    with open(path, "rb") as f:
-        return hashlib.file_digest(f, "sha256").hexdigest()
-
-
 def fetch_tcec():
     repo = RAW / "tcec" / "repo"
     if not (repo / ".git").exists():
@@ -181,7 +177,7 @@ def fetch_tcec():
                 url=f"{TCEC_REPO}/blob/{commit}/{rel}",
                 file=str(p.relative_to(RAW)),
                 bytes=p.stat().st_size,
-                sha256=sha256(p),
+                sha256=sha(p),
                 status=200,
             )
             log.write(json.dumps(rec) + "\n")
@@ -215,7 +211,7 @@ def fetch(a):
                 part.rename(dest)
             rec = dict(url=url, file=str(dest.relative_to(RAW)), status=r.status_code)
             if r.status_code == 200:
-                rec |= dict(bytes=dest.stat().st_size, sha256=sha256(dest))
+                rec |= dict(bytes=dest.stat().st_size, sha256=sha(dest))
             log.write(json.dumps(rec) + "\n")
             log.flush()
             time.sleep(a.delay)
