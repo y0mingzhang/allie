@@ -107,6 +107,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
         ),
         check("nanogpt_knobs", torchrun=1, marks=GPU + DATA),
         check("xsa", torchrun=1, marks=GPU + DATA),
+        check("lichess_export", torchrun=1, marks=GPU),
         check(
             "moe_nongemm",
             "kernels",

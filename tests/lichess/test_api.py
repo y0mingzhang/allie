@@ -92,25 +92,32 @@ def test_play_temperatures(tiny):
         allie.play(game, temperature=float("nan"))
 
 
+@pytest.fixture(params=["tiny_path", "c4x_path"])
+def export(request):
+    return request.getfixturevalue(request.param)
+
+
 @pytest.fixture
-def release(tiny_path, tmp_path, monkeypatch):
-    """The Hugging Face folder of the tiny model, loaded through a fresh module cache."""
+def release(export, tmp_path, monkeypatch):
+    """The Hugging Face folder of a tiny export, loaded through a fresh module cache."""
     transformers = pytest.importorskip("transformers")
     from allie.lichess.hub import build
 
     monkeypatch.setenv("HF_MODULES_CACHE", str(tmp_path / "modules"))
     (tmp_path / "export").mkdir()
     for f in ("config.json", "model.safetensors"):
-        (tmp_path / "export" / f).symlink_to(tiny_path / f)
+        (tmp_path / "export" / f).symlink_to(export / f)
     out = build(tmp_path / "export", tmp_path / "hf")
     return lambda **kw: transformers.AutoModel.from_pretrained(str(out), trust_remote_code=True, **kw)
 
 
-def test_transformers_remote_code(release, tiny_path):
+def test_transformers_remote_code(release, export):
     game = "1. e4 e5 2. Nf3 Nc6 3. Bb5"
-    ref = Allie(Model(tiny_path, dtype=torch.float32))
+    ref = Allie(Model(export, dtype=torch.float32))
     model = release(device="cpu", dtype="float32")
     assert model.dtype == torch.float32 and model.allie.model.keep == ref.model.keep
+    m, r = model.allie.model, ref.model
+    assert m.log_gates == r.log_gates and (m.xsa is None) == (r.xsa is None)
     assert model.predict(game, 1800, 1750, "180+2") == ref.predict(game, 1800, 1750, "180+2")
     assert release(device_map="cpu", torch_dtype=torch.float32).dtype == torch.float32
     assert release(device="cpu").dtype == torch.int8  # the CPU default

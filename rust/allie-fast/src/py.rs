@@ -16,11 +16,11 @@ pub struct PyEngine {
 
 #[pymethods]
 impl PyEngine {
-    /// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads 0, then per layer G ve
-    /// skip_in skip_out; scale, floor: the attention scale and gate floor; globals: the 18 + nve global
-    /// tensors' data pointers in fast.py's `glob` order; layers: 20 pointers a layer (fast.py's `lay`, 0
-    /// for a missing matrix); cpus / groups: thread t's CPU and cache group; spin: seconds a worker spins
-    /// before sleeping.
+    /// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads log_gates, then per layer G ve
+    /// skip_in skip_out; scale, floor: the attention scale and gate floor; globals: the 19 + nve global
+    /// tensors' data pointers in fastrs.py's `glob` order (the last, XSA's, 0 when off); layers: 20 pointers a
+    /// layer (fastrs.py's `lay`, 0 for a missing matrix); cpus / groups: thread t's CPU and cache group; spin:
+    /// seconds a worker spins before sleeping.
     #[new]
     #[pyo3(signature = (cfg, scale, floor, globals, layers, cpus=None, groups=None, spin=0.002))]
     #[allow(clippy::too_many_arguments)]

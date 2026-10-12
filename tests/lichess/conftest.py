@@ -8,8 +8,10 @@ from allie.lichess.model import Model
 from allie.lichess.tokens import CONTEXT
 
 
-def tiny_export(path, layers=6, width=64, head_dim=16, experts=8, topk=4, seed=0):
-    """A random model in export.py's layout, small enough for CPU unit tests."""
+def tiny_export(path, layers=6, width=64, head_dim=16, experts=8, topk=4, seed=0, dense_first=1,
+                centre_first=0, xsa=False, log_gates=False):  # fmt: skip
+    """A random model in export.py's layout, small enough for CPU unit tests. dense_first, centre_first
+    (router centres on the first n MoE layers, 0: all), xsa and log_gates as the arch switches."""
     g = torch.Generator().manual_seed(seed)
     r = lambda *s, std=0.1: torch.randn(*s, generator=g) * std
     heads, ve, eh, sh, dense, vocab = (
@@ -42,16 +44,18 @@ def tiny_export(path, layers=6, width=64, head_dim=16, experts=8, topk=4, seed=0
     for i in range(layers):
         w[f"{i}.qkv"], w[f"{i}.o"] = r(3 * width, width), r(width, width)
         w[f"{i}.attn_gate"], w[f"{i}.ve_gate"] = r(heads, 16), r(heads, 16)
-        if i == 0:
-            w["0.fc"], w["0.proj"] = r(2 * dense, width), r(width, dense)
+        if i < dense_first:
+            w[f"{i}.fc"], w[f"{i}.proj"] = r(2 * dense, width), r(width, dense)
             continue
         w[f"{i}.router"], w[f"{i}.moe_bias"], w[f"{i}.mu"] = (
             r(experts, width),
             r(experts),
-            r(width),
+            r(width) * (not centre_first or i - dense_first < centre_first),
         )
         w[f"{i}.up"], w[f"{i}.down"] = r(experts, 2 * eh, width), r(experts, width, eh)
         w[f"{i}.shared_up"], w[f"{i}.shared_down"] = r(2 * sh, width), r(width, sh)
+    if xsa:
+        w["xsa"] = r(layers, heads, std=2)
     path.mkdir(parents=True, exist_ok=True)
     save_file(
         {k: v.contiguous() for k, v in w.items()}, str(path / "model.safetensors")
@@ -59,6 +63,8 @@ def tiny_export(path, layers=6, width=64, head_dim=16, experts=8, topk=4, seed=0
     config = dict(layers=layers, width=width, heads=heads, head_dim=head_dim, vocab=vocab,
                   value_embeds=ve, experts=experts, topk=topk, expert_hidden=eh,
                   shared_hidden=sh, gate_floor=1e-12, attn_scale=0.1, name="tiny")  # fmt: skip
+    if log_gates:
+        config["log_gates"] = True
     (path / "config.json").write_text(json.dumps(config))
     return path
 
@@ -71,3 +77,12 @@ def tiny_path(tmp_path_factory):
 @pytest.fixture(scope="session")
 def tiny(tiny_path):
     return Model(tiny_path, dtype=torch.float32)
+
+
+# Allie 2.2's switches
+C4X = dict(layers=8, dense_first=3, centre_first=2, xsa=True, log_gates=True)
+
+
+@pytest.fixture(scope="session")
+def c4x_path(tmp_path_factory):
+    return tiny_export(tmp_path_factory.mktemp("c4x"), **C4X)

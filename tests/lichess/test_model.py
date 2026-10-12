@@ -2,12 +2,14 @@ import threading
 
 import numpy as np
 import torch
+from safetensors.torch import load_file, save_file
 from torch.nn import functional as F
 
 from allie.lichess.engine import Engine, Game
-from allie.lichess.model import Cache, Model, step, swiglu
+from allie.lichess.model import Cache, Model, step, swiglu, xsa
 from allie.lichess.tokens import HEADER, MOVE_ID, START, advance, features, header
 
+from .conftest import C4X, tiny_export
 from .test_tokens import random_game
 
 
@@ -59,13 +61,26 @@ def test_batched_matches_single(tiny):
         torch.testing.assert_close(z, prefill(tiny, x, n + 2), atol=2e-5, rtol=0)
 
 
+def saturate(path, std=20, seed=1):
+    """path's export with one random direction of this std added to every router row: the scores of many
+    tokens saturate together, every selected one underflowing to 0 in FP32 for about a quarter of them."""
+    w = load_file(path / "model.safetensors")
+    u = torch.randn(w["0.qkv"].shape[1], generator=torch.Generator().manual_seed(seed))
+    w = {k: v + std * u if k.endswith(".router") else v for k, v in w.items()}
+    save_file(w, path / "model.safetensors")
+    return path
+
+
 def naive_moe(m, i, h, keep):
     w = m.w
     out = []
-    for t in h:
-        s = torch.sigmoid(F.linear(t.float() - w[f"{i}.mu"], w[f"{i}.router"]))
+    # the router logits as the model rounds them: saturated, the log gates move 1:1 with their rounding
+    for t, z in zip(h, F.linear(h.float() - w[f"{i}.mu"], w[f"{i}.router"])):
+        s = torch.sigmoid(z)
         idx = torch.topk(s + w[f"{i}.moe_bias"], m.topk).indices
-        g = s[idx] * m.topk**0.5 / s[idx].sum()
+        if m.log_gates:  # the renormalised scores in FP64, where they do not underflow
+            s = torch.sigmoid(z.double())
+        g = (s[idx] * m.topk**0.5 / s[idx].sum()).float()
         y = sum(g[j] * F.linear(swiglu(F.linear(t, w[f"{i}.up"][e])), w[f"{i}.down"][e])
                 for j, e in enumerate(idx[:keep].tolist()))  # fmt: skip
         out.append(
@@ -81,6 +96,38 @@ def test_moe_matches_naive(tiny_path):
         m = Model(tiny_path, dtype=torch.float32, active_experts=keep)
         for i in (1, 3):
             torch.testing.assert_close(m.mlp(i, h), naive_moe(m, i, h, keep or m.topk))
+
+
+def test_log_gates_where_scores_underflow(tmp_path):
+    """Log gates are the renormalised scores even where every selected one underflows in FP32 (and the plain
+    gates, floored, switch the routed experts off)."""
+    m = Model(saturate(tiny_export(tmp_path, **C4X)), dtype=torch.float32)
+    h = torch.randn(64, 64, generator=torch.Generator().manual_seed(0))
+    for keep in (None, 2):
+        m.keep = keep or m.topk
+        for i in (3, 6):
+            z = F.linear(h - m.w[f"{i}.mu"], m.w[f"{i}.router"])
+            under = (torch.sigmoid(z) == 0).all(-1)
+            assert 8 <= under.sum() <= 56
+            want = naive_moe(m, i, h, m.keep)
+            torch.testing.assert_close(m.mlp(i, h), want)
+            shared = m.ffn(h, f"{i}.shared_up", f"{i}.shared_down")[under]
+            assert (want[under] - shared).abs().amax(-1).min() > 1e-3
+            m.log_gates = False
+            assert torch.equal(m.mlp(i, h)[under], shared)
+            m.log_gates = True
+
+
+def test_xsa(c4x_path):
+    """XSA takes out the part of each head's output along the token's own value, by tanh of its strength."""
+    m = Model(c4x_path, dtype=torch.float32)
+    y, v = torch.randn(2, 5, m.heads, m.head_dim)
+    a = torch.tanh(load_file(c4x_path / "model.safetensors")["xsa"][3])
+    assert torch.equal(m.xsa[3], a)
+    out = xsa(y, v, a)
+    u = v / v.norm(dim=-1, keepdim=True)
+    torch.testing.assert_close(out, y - a[:, None] * (y * u).sum(-1, keepdim=True) * u)
+    torch.testing.assert_close(xsa(v, v, torch.ones(m.heads)), torch.zeros_like(v))
 
 
 def test_engine_batches_games(tiny):

@@ -14,7 +14,7 @@ pub mod simd;
 
 /// The Python-visible contract (the classes' arguments, the step's cfg and meta layouts): fastrs.py refuses an
 /// engine whose INTERFACE is not its own. Bump both on any change to it.
-pub const INTERFACE: u32 = 2;
+pub const INTERFACE: u32 = 3;
 
 #[pyfunction]
 fn version() -> &'static str {

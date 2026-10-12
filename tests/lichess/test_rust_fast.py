@@ -14,7 +14,8 @@ from allie.lichess.fastrs import Leaf
 from allie.lichess.model import Cache, Model, step
 from allie.lichess.tokens import CONTEXT, HEADER
 
-from .test_model import inputs
+from .conftest import C4X, tiny_export
+from .test_model import inputs, saturate
 from .test_tokens import random_game
 
 allie_fast = pytest.importorskip("allie_fast")
@@ -101,6 +102,13 @@ GOLDEN = {
 }
 
 
+def gap(a, b):
+    """The mean difference of the move log-probabilities of two replay()s."""
+    lp = lambda z: torch.log_softmax(z[:, 378:2346], -1)
+    d = [(lp(z) - lp(w)).abs().flatten() for z, w in zip(a[0], b[0])]
+    return torch.cat(d).mean().item()
+
+
 @pytest.mark.parametrize("int8", [False, True])
 @pytest.mark.parametrize("isa", ["native", "avx2", "scalar"])
 def test_rust_isas(tiny_path, isa, int8, monkeypatch):
@@ -108,12 +116,37 @@ def test_rust_isas(tiny_path, isa, int8, monkeypatch):
     got = rust(tiny_path, isa, monkeypatch, int8=int8, threads=3)
     assert got.fast.isa in ("avx512", "avx2", "scalar") and (isa == "native" or got.fast.isa == isa)
     out = replay(got)
-    ref = replay(Model(tiny_path, dtype=torch.bfloat16, int8=int8, backend="torch"))
-    for z, w in zip(out[0], ref[0]):
-        p, q = (torch.softmax(x[:, 378:2346], -1) for x in (z, w))
-        assert (p - q).abs().max() < 2e-3
+    ref = Model(tiny_path, dtype=torch.bfloat16, int8=int8, backend="torch")
+    assert gap(out, replay(ref)) < 0.01
     want = GOLDEN.get((got.fast.isa, int8))
     assert want is None or digest(out) == want, f"{got.fast.isa} int8={int8}: the kernels' bits changed"
+
+
+@pytest.mark.parametrize("int8", [False, True])
+@pytest.mark.parametrize("isa", ["native", "avx2", "scalar"])
+def test_rust_allie22(c4x_path, isa, int8, monkeypatch):
+    """Allie 2.2's switches (XSA, log gates, three dense blocks, centring on the first MoE layers): each kernel
+    variant is the reference up to BF16 rounding, which without XSA is far off."""
+    out = replay(rust(c4x_path, isa, monkeypatch, int8=int8, threads=3))
+    ref = Model(c4x_path, dtype=torch.bfloat16, int8=int8, backend="torch")
+    want = replay(ref)
+    assert gap(out, want) < 0.01
+    if isa == "native":
+        ref.xsa = None
+        assert gap(replay(ref), want) > 0.1
+
+
+@pytest.mark.parametrize("int8", [False, True])
+def test_rust_log_gates_saturated(tmp_path, int8, monkeypatch):
+    """Log gates where many tokens' selected scores all underflow to 0 in FP32: the engine is the reference,
+    whose plain renormalised gates there are far off."""
+    path = saturate(tiny_export(tmp_path, **C4X))
+    out = replay(rust(path, "native", monkeypatch, int8=int8, threads=3))
+    ref = Model(path, dtype=torch.bfloat16, int8=int8, backend="torch")
+    want = replay(ref)
+    assert gap(out, want) < 0.01
+    ref.log_gates = False
+    assert gap(replay(ref), want) > 0.03
 
 
 def test_rust_thread_count_does_not_change_results(tiny_path, monkeypatch):
@@ -300,10 +333,11 @@ def same_leaves(a, b):
 
 @pytest.mark.parametrize("int8", [False, True])
 @pytest.mark.parametrize("isa", ["native", "avx2", "scalar"])
-def test_rust_leaves_match_copied_bitwise(tiny_path, isa, int8, monkeypatch):
+@pytest.mark.parametrize("export", ["tiny_path", "c4x_path"])
+def test_rust_leaves_match_copied_bitwise(export, isa, int8, monkeypatch, request):
     """A node evaluated in place (a Leaf item: the cache's rows, then its ancestors' slots) is bitwise the node
     evaluated on a copy of the cache with the path appended, logits and the slot's new k, v and e alike."""
-    m = rust(tiny_path, isa, monkeypatch, int8=int8, threads=3)
+    m = rust(request.getfixturevalue(export), isa, monkeypatch, int8=int8, threads=3)
     zs, slots, rows = leaves_both_ways(m)
     same_leaves((zs[0], slots[0], rows), (zs[1], slots[1], rows))
     assert all(torch.isfinite(z).all() for z in zs[0]) and len(zs[0]) == 40

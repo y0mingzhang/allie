@@ -1,7 +1,8 @@
 """Training checkpoint (last.pt pointer or model.pt) -> model.safetensors + config.json.
 
 Matrices go to F.linear layout with the attention lambdas folded in, rounded to BF16 as the
-training forward rounds them; router, balancing bias, router centre and scalars stay FP32.
+training forward rounds them; router, balancing bias, router centre (zeros on uncentred layers),
+scalars and XSA strengths stay FP32. config.json has log_gates only when they are on.
 """
 
 import hashlib
@@ -43,9 +44,9 @@ def convert(state):
     assert arch.get("board") == "conv" and arch.get("mlp") == "swiglu"
     assert arch.get("tc_header", True) and arch.get("x0", True)
     assert arch.get("moe_score", "sigmoid") == "sigmoid" and arch.get("moe_shared", True)
-    for key in ("key_offset", "header_feats", "moe_log_gates", "moe_keep"):
+    for key in ("key_offset", "header_feats", "moe_keep"):
         assert not arch.get(key), f"arch {key} is not supported"
-    assert not arch.get("moe_router_center_first"), "arch moe_router_center_first"
+    assert bool(arch.get("xsa")) == ("xsa_alphas" in m)
     assert min(inf["ws_short"], inf["ws_long"]) * 128 >= CONTEXT  # plain causal per game
     s = m["scalars"].float()
     bf = lambda t: t.bfloat16().contiguous()
@@ -64,6 +65,8 @@ def convert(state):
     ve = sum(k.startswith("value_embeds.") for k in m)
     w |= {f"value_embed.{j}": m[f"value_embeds.{j}.weight"] for j in range(ve)}
     w |= {f"board.{k[6:]}": v for k, v in m.items() if k.startswith("board.")}
+    if "xsa_alphas" in m:
+        w["xsa"] = m["xsa_alphas"].float()
     for i in range(n):
         b = f"blocks.{i}."
         qkvo = m[b + "attn.qkvo_w"].float()
@@ -82,10 +85,12 @@ def convert(state):
         w[f"{i}.down"] = m[b + "mlp.down"].transpose(1, 2)
         w[f"{i}.shared_up"] = m[b + "mlp.shared_up"]
         w[f"{i}.shared_down"] = m[b + "mlp.shared_down"].T
-    fp32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas")
+    fp32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas", "xsa")
     w = {k: v.contiguous() if k.split(".")[-1] in fp32 else bf(v) for k, v in w.items()}
     experts, topk = arch["moe"]
-    up = w["1.up"]
+    dense = arch.get("moe_dense_first", 1)
+    assert all((f"{i}.fc" in w) == (i < dense) for i in range(n))
+    up = w[f"{dense}.up"]
     config = dict(
         layers=n,
         width=d,
@@ -96,10 +101,12 @@ def convert(state):
         experts=experts,
         topk=topk,
         expert_hidden=up.shape[1] // 2,
-        shared_hidden=w["1.shared_up"].shape[0] // 2,
+        shared_hidden=w[f"{dense}.shared_up"].shape[0] // 2,
         gate_floor=arch.get("moe_gate_floor", 0.0),
         attn_scale=inf["yarn"]["attn_scale"],
     )
+    if arch.get("moe_log_gates"):
+        config["log_gates"] = True
     assert up.shape[0] == experts and config["heads"] * cfg["head_dim"] == d
     return w, config
 

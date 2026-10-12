@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 import torch
 
-INTERFACE = 2  # allie_fast.INTERFACE this code is written against (rust/allie-fast/src/lib.rs)
+INTERFACE = 3  # allie_fast.INTERFACE this code is written against (rust/allie-fast/src/lib.rs)
 ERRORS = {  # the engine's error codes: 1-4 a bad request (ValueError), else RuntimeError
     1: "token outside the vocabulary",
     2: "board state out of range",
@@ -146,7 +146,7 @@ class RustFast:
         )
         cfg = [n, model.width, model.heads, model.head_dim, c["vocab"], model.ve, c["experts"],
                model.topk, model.keep, c["expert_hidden"], c["shared_hidden"], dense, int(int8),
-               w["cos"].shape[0], skip_out[-1], self.threads, 0]  # fmt: skip
+               w["cos"].shape[0], skip_out[-1], self.threads, int(model.log_gates)]  # fmt: skip
         for i in range(n):
             cfg += [w[f"{i}.gates"].shape[0], -1 if ve[i] is None else ve[i],
                     skip_in.index(i) if i in skip_in else -1,
@@ -163,6 +163,10 @@ class RustFast:
             ), k
             ptrs.append(t.data_ptr())
             self.tensors.append(t)
+        xsa = model.xsa  # [layers, heads] BF16 tanh strengths
+        assert xsa is None or (xsa.is_contiguous() and xsa.shape == (n, model.heads))
+        ptrs.append(0 if xsa is None else xsa.data_ptr())
+        self.tensors.append(xsa)
         lay = []
         for i in range(n):
             for k in LAYER:

@@ -3,7 +3,8 @@
 The forward restates the training GPT.forward (allie.model.nanogpt, eval path) over flat tokens,
 with each game's keys and values in a Cache. It matches the trained model up to floating-point
 summation order (analysis/lichess/parity.py). Weights come from export.py: BF16 in F.linear
-layout with the attention lambdas folded in; router, balancing bias, centre and scalars FP32.
+layout with the attention lambdas folded in; router, balancing bias, centre, scalars and XSA
+strengths FP32.
 This code is the reference; by default step() runs a fast path instead (the Rust engine on CPU,
 fastrs.py; CUDA graphs of this forward on GPU, fast.py), which matches it within BF16 rounding.
 """
@@ -27,8 +28,15 @@ def swiglu(x):
     return F.silu(a) * b
 
 
+def xsa(y, v, a):
+    """Exclusive self-attention: y [T, heads, hd] less a [heads] times its projection on the
+    token's own value v."""
+    dot = (y * v).sum(-1, keepdim=True)
+    return y - a[:, None] * (dot / v.square().sum(-1, keepdim=True).clamp_min(1e-8)) * v
+
+
 MATRICES = ("qkv", "o", "fc", "proj", "up", "down", "shared_up", "shared_down")
-FP32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas")
+FP32 = ("router", "moe_bias", "mu", "scalars", "x0_lambdas", "xsa")
 
 
 def read(path):
@@ -76,6 +84,7 @@ class Model:
         self.layers, self.width = c["layers"], c["width"]
         self.heads, self.head_dim = c["heads"], c["head_dim"]
         self.topk, self.floor, self.scale = c["topk"], c["gate_floor"], c["attn_scale"]
+        self.log_gates = c.get("log_gates", False)
         self.keep = active_experts or self.topk
         assert 1 <= self.keep <= self.topk
         assert not int8 or (self.device.type == "cpu" and dtype == torch.bfloat16)
@@ -89,6 +98,8 @@ class Model:
         for i in range(self.layers):  # the output gate and value-embedding gate read the same
             gates = [self.w.pop(f"{i}.attn_gate"), self.w.pop(f"{i}.ve_gate", None)]
             self.w[f"{i}.gates"] = torch.cat([g for g in gates if g is not None])
+        a = self.w.pop("xsa", None)  # [layers, heads]: tanh in our dtype, as trained
+        self.xsa = None if a is None else torch.tanh(a).to(dtype)
         self.moe_mode = None  # None: by device and tokens; or token / group / gather / dense
         self.views = {  # each routed expert's matrices (and int8 scales), indexed in Python
             k: [(v[e], self.scales[k][e] if k in self.scales else None) for e in range(len(v))]
@@ -162,10 +173,14 @@ class Model:
         if f"{i}.fc" in self.w:
             return self.ffn(h, f"{i}.fc", f"{i}.proj")
         w, k = self.w, self.topk
-        s = torch.sigmoid(F.linear(h.float() - w[f"{i}.mu"], w[f"{i}.router"]))
+        z = F.linear(h.float() - w[f"{i}.mu"], w[f"{i}.router"])
+        s = torch.sigmoid(z)
         idx = torch.topk(s + w[f"{i}.moe_bias"], k, dim=-1).indices
-        gate = s.gather(1, idx)
-        gate = gate * (k**0.5 / gate.sum(-1, keepdim=True).clamp_min(self.floor))
+        if self.log_gates:  # the same gates, finite at any score
+            gate = k**0.5 * torch.softmax(F.logsigmoid(z.gather(1, idx)), -1)
+        else:
+            gate = s.gather(1, idx)
+            gate = gate * (k**0.5 / gate.sum(-1, keepdim=True).clamp_min(self.floor))
         gate = gate[:, : self.keep].to(h.dtype).float()  # BF16 gates, FP32 sums (trainer)
         idx = idx[:, : self.keep]
         mode = self.moe_mode or (
@@ -258,7 +273,10 @@ class Model:
             g = torch.sigmoid(F.linear(h[:, :16], w[f"{i}.gates"]))  # output, value
             if ve[i] is not None:
                 v = v + 2 * g[:, heads:, None] * ve[i].view_as(v)
-            y = attend(i, qk[:, :heads], qk[:, heads:], v) * g[:, :heads, None]
+            y = attend(i, qk[:, :heads], qk[:, heads:], v)
+            if self.xsa is not None:
+                y = xsa(y, v, self.xsa[i])
+            y = y * g[:, :heads, None]
             x = x + self.linear(y.reshape(-1, self.width), f"{i}.o")
             x = x + self.mlp(i, norm(x))
             if i in skip_in:

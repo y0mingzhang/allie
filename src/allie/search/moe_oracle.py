@@ -14,6 +14,8 @@ import torch
 import torch.distributed as dist
 from torch.nn import functional as F
 
+from allie.eval.score import training_code
+from allie.lichess.model import xsa
 from allie.search.board import (
     advance_boards,
     advance_clocks,
@@ -21,7 +23,6 @@ from allie.search.board import (
     predicted_seconds,
     root_other_previous,
 )
-from allie.eval.score import training_code
 
 CONTEXT = 1025
 
@@ -106,6 +107,7 @@ def forward(m, ids, pos, feats, boards, previous, attend, last=None):
     if not getattr(m, "use_x0", True):
         x0l = torch.stack((x0l[:, 0] * 0, x0l[:, 1]), 1)
     cos, sin = m.yarn.cos[pos][:, None], m.yarn.sin[pos][:, None]
+    alphas = getattr(m, "xsa_alphas", None)  # frozen sources from before XSA have none
 
     def rotary(z):
         a, b = z.chunk(2, dim=-1)
@@ -136,9 +138,10 @@ def forward(m, ids, pos, feats, boards, previous, attend, last=None):
             v = v + 2 * torch.sigmoid(a.value_embed_gate(h[..., :16])).view(
                 -1, heads, 1
             ) * ve[i].view_as(v)
-        y = attend(i, q, k, v) * torch.sigmoid(a.attn_gate(h[..., :16])).view(
-            -1, heads, 1
-        )
+        y = attend(i, q, k, v)
+        if alphas is not None:
+            y = xsa(y, v, torch.tanh(alphas[i]).type_as(y))
+        y = y * torch.sigmoid(a.attn_gate(h[..., :16])).view(-1, heads, 1)
         x = x + F.linear(y.reshape(-1, d), sa[i, 1] * a.qkvo_w[3 * d :].type_as(y))
         x = x + block.mlp(norm(x))
         if i in skip_in:

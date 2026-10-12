@@ -98,6 +98,7 @@ pub struct Layer {
     router: *const f32,
     bias: *const f32,
     mu: *const f32,
+    xsa: *const u16,
     g: usize,
     ve: i64,
     skin: i64,
@@ -227,6 +228,7 @@ pub struct Engine {
     backout_layer: i64,
     scale: f32,
     floor: f32,
+    log_gates: bool,
     q8: bool,
     embed: *const u16,
     embed2: *const u16,
@@ -278,6 +280,7 @@ pub struct Engine {
     skip: [Buf; 3],
     bko: Buf,
     rs: Buf,
+    zr: Buf,
     acc: Buf,
     hid: Buf,
     shid: Buf,
@@ -448,18 +451,19 @@ unsafe fn board_final(wsq: *const f32, bmeta: *const u16, st: *const u8, a: *con
 }
 
 impl Engine {
-    /// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads 0 (unused), then per layer
+    /// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads log_gates, then per layer
     /// G ve skip_in skip_out. glob: embed embed2 lm_head feat_embed smear_gate scalars x0_lambdas cos sin
     /// board.first board.residual.0 board.residual.1 board.squeeze board.meta board.output skip_gate.0-2
-    /// value_embed.*. lay, per layer (20): qkv qkv_s o o_s gates fc fc_s proj proj_s router moe_bias mu
-    /// up up_s down down_s shared_up shared_up_s shared_down shared_down_s. Pointers as integers.
+    /// value_embed.* xsa (BF16 [L, H] tanh strengths, 0: off). lay, per layer (20): qkv qkv_s o o_s gates
+    /// fc fc_s proj proj_s router moe_bias mu up up_s down down_s shared_up shared_up_s shared_down
+    /// shared_down_s. Pointers as integers.
     pub fn new(cfg: &[i64], fl: (f64, f64), glob: &[usize], lay: &[usize], cpus: Option<Vec<i32>>, groups: Option<Vec<i32>>, spin: f64) -> Result<Engine, String> {
         if cfg.len() < 17 {
             return Err("cfg: 17 values then 4 per layer".into());
         }
         let u = |i: usize| cfg[i].max(0) as usize;
         let (l, nve) = (u(0), u(5));
-        if cfg.len() < 17 + 4 * l || glob.len() != 18 + nve || lay.len() != 20 * l {
+        if cfg.len() < 17 + 4 * l || glob.len() != 19 + nve || lay.len() != 20 * l {
             return Err(format!("cfg {} glob {} lay {}: wrong lengths for {l} layers, {nve} value embeddings", cfg.len(), glob.len(), lay.len()));
         }
         let bp = |j: usize| glob[j] as *const u16;
@@ -483,6 +487,7 @@ impl Engine {
         let wsq = (0..8 * 32).map(|i| bf(unsafe { *bsq.add(i) })).collect();
         let q8 = cfg[12] != 0;
         let kind = q8 as u8;
+        let xsa = glob[18 + nve] as *const u16;
         let layers = (0..l)
             .map(|i| {
                 let p = &lay[20 * i..20 * i + 20];
@@ -497,6 +502,7 @@ impl Engine {
                     router: p[9] as *const f32,
                     bias: p[10] as *const f32,
                     mu: p[11] as *const f32,
+                    xsa: if xsa.is_null() { xsa } else { xsa.wrapping_add(i * u(2)) },
                     up: p[12] as *const u8,
                     ups: p[13] as *const u16,
                     down: p[14] as *const u8,
@@ -529,6 +535,7 @@ impl Engine {
             backout_layer: cfg[14],
             scale: fl.0 as f32,
             floor: fl.1 as f32,
+            log_gates: cfg[16] != 0,
             q8,
             embed: bp(0),
             embed2: bp(1),
@@ -579,6 +586,7 @@ impl Engine {
             skip: [Buf::new(), Buf::new(), Buf::new()],
             bko: Buf::new(),
             rs: Buf::new(),
+            zr: Buf::new(),
             acc: Buf::new(),
             hid: Buf::new(),
             shid: Buf::new(),
@@ -789,6 +797,9 @@ impl Engine {
         self.qkv.grow(3 * td);
         self.g.grow(t * 2 * self.h);
         self.rs.grow(t * self.e);
+        if self.log_gates {
+            self.zr.grow(t * self.e);
+        }
         self.hid.grow(t * self.keep * self.eh);
         let w = self.sh.max(self.dh);
         self.shid.grow(t * w);
@@ -1086,10 +1097,11 @@ impl Engine {
         }
     }
 
-    /// token k's attention in head hh over its game's cache (a leaf's: the cache's rows, then its slots), times
-    /// the output gate; sc: scores
+    /// token k's attention in head hh over its game's cache (a leaf's: the cache's rows, then its slots), less
+    /// its part along the token's own value (XSA), times the output gate; sc: scores
     #[inline(always)]
     unsafe fn attend<S: Simd>(&self, i: usize, k: usize, hh: usize, gk: *const f32, sc: *mut f32) {
+        let ly = &self.layers[i];
         let s = &self.seq[self.tseq[k]];
         let (d, h, hd, vl) = (self.d, self.h, self.hd, S::VL);
         let kp = s.k.add((i * h + hh) * s.cap * hd) as *const u16;
@@ -1159,8 +1171,23 @@ impl Engine {
         for c in 0..nc {
             S::st(ov.as_mut_ptr().add(c * vl), o[c]);
         }
+        if ly.xsa.is_null() {
+            for c in 0..hd {
+                *yo.add(c) = rb(rb(ov[c] / sum) * og);
+            }
+            return;
+        }
+        let own = if s.leaf() { s.sv.add(((i * h + hh) * s.scap + s.dest) * hd) as *const u16 } else { vp.add(p * hd) };
+        let (mut dot, mut vv) = (0f32, 0f32);
         for c in 0..hd {
-            *yo.add(c) = rb(rb(ov[c] / sum) * og);
+            let v = bf(*own.add(c));
+            ov[c] = rb(ov[c] / sum);
+            dot += rb(ov[c] * v);
+            vv += rb(v * v);
+        }
+        let a = rb(bf(*ly.xsa.add(hh)) * rb(rb(dot) / rb(vv).max(rb(1e-8))));
+        for c in 0..hd {
+            *yo.add(c) = rb(rb(ov[c] - rb(a * bf(*own.add(c)))) * og);
         }
     }
 
@@ -1258,7 +1285,8 @@ impl Engine {
         self.ffn::<S>(t, nt, dense, i, solo);
     }
 
-    /// top-k of one token and its gates. Exact ties in the biased scores go to the lower expert id
+    /// top-k of one token and its gates: the selected scores renormalised, or with log gates the softmax of
+    /// their log-sigmoid logits (finite at any logit). Exact ties in the biased scores go to the lower expert id
     unsafe fn route(&self, ly: &Layer, k: usize, r: &Routing) {
         let (e, topk, keep) = (self.e, self.topk, self.keep);
         let s = self.rs.p.add(k * e) as *const f32;
@@ -1284,11 +1312,32 @@ impl Engine {
             best[j] = v;
             bi[j] = ex;
         }
+        let f = (topk as f64).sqrt() as f32;
+        if self.log_gates {
+            let z = self.zr.p.add(k * e) as *const f32;
+            let mut ls = [0f32; 64];
+            let mut mx = f32::NEG_INFINITY;
+            for j in 0..topk {
+                let x = *z.add(bi[j]);
+                ls[j] = x.min(0.0) - (-x.abs()).exp().ln_1p();
+                mx = mx.max(ls[j]);
+            }
+            let mut sum = 0f32;
+            for l in &mut ls[..topk] {
+                *l = (*l - mx).exp();
+                sum += *l;
+            }
+            for j in 0..keep {
+                *r.pidx.add(k * keep + j) = bi[j];
+                *r.pgate.add(k * keep + j) = rb(f * (ls[j] / sum));
+            }
+            return;
+        }
         let mut sum = 0f32;
         for &b in &bi[..topk] {
             sum += *s.add(b);
         }
-        let f = (topk as f64).sqrt() as f32 / if sum < self.floor { self.floor } else { sum };
+        let f = f / if sum < self.floor { self.floor } else { sum };
         for j in 0..keep {
             *r.pidx.add(k * keep + j) = bi[j];
             *r.pgate.add(k * keep + j) = rb(*s.add(bi[j]) * f);
@@ -1359,6 +1408,9 @@ impl Engine {
                 let n = cr.min(e - lo);
                 mm::<S>(&Mat { w: ly.router as *const u8, s: std::ptr::null(), kind: 2 }, d, lo, n, fp, tt, self.rs.p.add(lo), e);
                 for k in 0..tt {
+                    if self.log_gates {
+                        std::ptr::copy_nonoverlapping(self.rs.p.add(k * e + lo), self.zr.p.add(k * e + lo), n);
+                    }
                     for ex in lo..lo + n {
                         let p = self.rs.p.add(k * e + ex);
                         *p = sigm(*p);
