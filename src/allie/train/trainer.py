@@ -44,6 +44,7 @@ from allie.model.nanogpt import sync_params
 from allie.model.moe import STATS, MoE
 from allie.train.provenance import source_hashes
 from allie.train.schedule import Schedule
+from allie.train.tail import TailEMA
 
 ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", Path(__file__).resolve().parents[3]))
 # arguments a resume, fork or continuation shares with its checkpoint: they change what is computed
@@ -497,6 +498,19 @@ def main():
         help="start from this checkpoint's weights (pointer or directory) with a fresh optimizer",
     )
     p.add_argument(
+        "--tail-ema",
+        default="",
+        help="comma-separated horizons as fractions of the steps: host FP32 EMAs of the weights over the last 3 x "
+        "the longest (train.tail), in the rank files, written as tail-ema-H.pt at the last step; a readout, the run "
+        "is unchanged",
+    )
+    p.add_argument(
+        "--tail-ema-every",
+        type=int,
+        default=1,
+        help="steps between tail EMA updates (each with the decay of the steps since the last)",
+    )
+    p.add_argument(
         "--final-model-only",
         action="store_true",
         help="the last scheduled step's checkpoint holds model.pt only, published as final.pt (last.pt "
@@ -608,6 +622,9 @@ def main():
     sharded = any(m.pos is not None for m in manager.moe)
     vrows = val.rows(val_idx) if rank == 0 or sharded else None
     first, best, elapsed_prior, flops_local = 0, float("inf"), 0.0, 0
+    tails = [float(f) for f in a.tail_ema.split(",") if f]
+    assert a.tail_ema_every >= 1
+    tail = TailEMA(model, tails, a.wsd_end_step, a.tail_ema_every, cpu) if tails else None
     runtime = dict(
         torch=torch.__version__,
         triton=triton.__version__,
@@ -708,6 +725,8 @@ def main():
                     assert shared["args"][key] == vars(a)[key], f"Resume changes {key}"
         model.load_state_dict(shared["model"])
         manager.load_rank_state_dict(local["manager"])
+        if tail:  # restored exactly, or restarted inside the window (recorded in the file)
+            tail.load_state_dict(local.get("tail_ema"))
         train.load_state_dict(local["data"])
         restore_rng(local["rng"])
         first, best = shared["step"], shared["best_move_ce"]
@@ -798,6 +817,7 @@ def main():
             rng=rng_state(),
             data=train.state_dict(),
             useful_training_flops=flops_local,
+            **({"tail_ema": saver.snapshot(tail.state_dict())} if tail else {}),
         )
         if not weights_only:
             saver.add(rank_state, directory / f"rank{rank}.pt")
@@ -955,6 +975,9 @@ def main():
         if a.shard_early and sharded:
             expert_shard.start(manager.moe)
         step = index + 1
+        if tail and tail.due(step):
+            sync_params()
+            tail.update(step)
         saver.poll()
         if a.profile and step == a.profile:
             torch.cuda.synchronize()
@@ -1094,6 +1117,8 @@ def main():
             break
     saver.flush()
     expert_shard.reset()  # no gather left in flight
+    if tail and step == total_steps:
+        tail.write(out, step)
     if rank == 0:
         log.close()
         (out / "done.json").write_text(

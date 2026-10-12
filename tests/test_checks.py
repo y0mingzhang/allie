@@ -83,6 +83,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
         check("game_blocks", env=NOCOMPILE, marks=DATA),
         check("moe_shard", env=NOCOMPILE, marks=DATA),
         check("center_switch", env=NOCOMPILE, marks=DATA),
+        check("tail_ema"),
         check("resume_retune", env=NOCOMPILE, marks=DATA),
         check("datapin_exclusions", *PINS, marks=DATA + PINNED),
         check("moe_remat", env=NOCOMPILE, marks=DATA),

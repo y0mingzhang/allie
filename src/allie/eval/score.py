@@ -33,7 +33,7 @@ REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
 EQUIVALENT = {
     "3efce06d87e5e5fb22e2d6e79bbc52ab7386b5a3af9923a4eafcbbc42995b944": (
         "Allie 2.0",
-        "c76d49c8b0a1d9f9bb72e76b31bf9352d05da0a1e91fd8d97ec296ec8602ef80",
+        "22ea0247b5c67e3070db73970a3c389a2653e3c60ee06c89cde97765dc74a7f2",
     ),
 }
 
