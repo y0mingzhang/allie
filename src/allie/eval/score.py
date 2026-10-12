@@ -1,7 +1,9 @@
-"""Main evaluation (strat-eval-v1) or original-validation CE of a checkpoint, on one GPU.
+"""Main evaluation (strat-eval-v1, or another set in its layout via --golden) or original-validation CE of a
+checkpoint, on one GPU.
 
 strat         CE per format x mover-Elo cell (16), their macro, the >= 2400 cells' macro and
-              time-trouble CE -> results/lm-eval/RUN/strat-v1.json
+              time-trouble CE -> results/lm-eval/RUN/strat-v1.json (strat-eval-vN: strat-vN.json and
+              strat-vN-rows.npz, NLL sums and counts per row and cell)
 original_val  move / >= 2400 / >= 2600 CE over every original validation row
               -> results/lm-eval/RUN/original-val.json (+ per-row sums)
 
@@ -103,6 +105,7 @@ def main():
     p.add_argument("--split", choices=["original_val", "strat"], required=True)
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--source", help="a pre-package checkpoint's frozen flat source directory")
+    p.add_argument("--golden", default="strat-eval-v1", help="the main evaluation set, a folder in ALLIE_DATA")
     a = p.parse_args()
     print(json.dumps(dict(phase="load_checkpoint", split=a.split)), flush=True)
     checkpoint = Path(a.checkpoint).resolve()
@@ -187,7 +190,7 @@ def main():
         return scores.logsumexp(-1) - truth, y
 
     if a.split == "strat":
-        cached = paths.DATA / "strat-eval-v1"
+        cached = paths.DATA / a.golden
         manifest = json.loads((cached / "manifest.json").read_text())
         assert sha(cached / "strat.npz") == manifest["sha256"]
         with np.load(cached / "strat.npz") as z:
@@ -205,6 +208,7 @@ def main():
         cells = manifest["cells"]
         k = len(cells)
         sums, tsums = np.zeros((k, 2)), np.zeros((k, 2))
+        row_nll, row_n = np.zeros((len(srows), k)), np.zeros((len(srows), k), np.int64)
 
         def add(acc, lab, loss):
             acc[:, 0] += (
@@ -221,6 +225,18 @@ def main():
             lab = torch.as_tensor(slabels[lo : lo + batch], device="cuda")
             keep = lab >= 0
             add(sums, lab[keep], loss[keep])
+            n = len(lab)
+            flat = (torch.arange(n, device="cuda")[:, None] * k + lab)[keep]
+            row_nll[lo : lo + n] = (
+                torch.zeros(n * k, device="cuda", dtype=torch.float64)
+                .index_add_(0, flat, loss[keep].double())
+                .view(n, k)
+                .cpu()
+                .numpy()
+            )
+            row_n[lo : lo + n] = (
+                torch.bincount(flat, minlength=n * k).view(n, k).cpu().numpy()
+            )
             tt = keep & torch.as_tensor(tt_all[lo : lo + batch], device="cuda")
             add(tsums, lab[tt], loss[tt])
         assert (
@@ -231,6 +247,7 @@ def main():
         formats = ("bullet", "blitz", "rapid", "classical")
         report = common | dict(
             split="strat",
+            golden=a.golden,
             strat_sha256=manifest["sha256"],
             cells=ce,
             counts=dict(zip(cells, sums[:, 1].astype(int).tolist())),
@@ -255,9 +272,12 @@ def main():
         report["sidecars"] = {"clocks_sha256": manifest["clocks_sha256"]}
         if feats:
             report["sidecars"]["feats_sha256"] = manifest["feats_sha256"]
-        tmp = out / "strat-v1.json.tmp"
+        name = "strat-" + a.golden.removeprefix("strat-eval-")
+        if name != "strat-v1":  # v1 keeps its outputs as they were
+            np.savez(out / f"{name}-rows.npz", nll_sums=row_nll, counts=row_n)
+        tmp = out / f"{name}.json.tmp"
         tmp.write_text(json.dumps(report, indent=2) + "\n")
-        tmp.replace(out / "strat-v1.json")  # a preempted write never looks complete
+        tmp.replace(out / f"{name}.json")  # a preempted write never looks complete
         summary = {k: report[k] for k in ("macro", "expert_macro")}
         print(json.dumps(dict(phase="strat") | summary), flush=True)
         dist.destroy_process_group()

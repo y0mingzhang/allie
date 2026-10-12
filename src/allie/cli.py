@@ -90,7 +90,9 @@ def evaluate():
     p.add_argument("--split", choices=["strat", "original_val"], default="strat")
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--source", help="a pre-package checkpoint's frozen flat source")
+    p.add_argument("--golden", default="strat-eval-v1", help="a folder in ALLIE_DATA")
     a = p.parse_args()
     args = ["--checkpoint", a.checkpoint, "--split", a.split, "--batch", a.batch]
+    args += ["--golden", a.golden]
     args += ["--source", a.source] * bool(a.source)
     sys.exit(torchrun(1, "allie.eval.score", args, {}))
