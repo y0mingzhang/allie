@@ -5,8 +5,7 @@ routed() runs the experts of T tokens' k routes, sorted by expert (order: the ro
 slot, in expert order; se: their experts; offsets: cumulative routes per expert):
   forward   up:        pre = x[route // k] @ up[e] (BF16, sorted rows), y = silu(a) * b, a | b = pre
             scatter:   y @ down[e] into route order, then the gated combine over each token's k slots
-  backward  dgates:    expanded @ grad (bmm), expanded recomputed by the scatter unless saved (FUSED_DGATES:
-                       the scatter's epilogue dots its BF16 rows with grad[route // k], FP32 sums: not bitwise)
+  backward  dgates:    expanded @ grad (bmm), expanded recomputed by the scatter unless saved
             down_wgrad: y^T @ (gate * grad[route // k]), per expert
             dx:        d pre = SwiGLU backward at pre of (gate * grad[route // k]) @ down[e]^T
             up_wgrad:  x[route // k]^T @ d pre, per expert
@@ -41,15 +40,13 @@ UP = (128, 128, 64, 8, 3)
 DX = (64, 128, 64, 8, 3)
 SCATTER = (128, 128, 32, 4, 4)
 WGRAD = (32, 128, 128, 4, 4)
-WIDE = dict(up=UP, dx=DX, scatter=SCATTER, scatter2=SCATTER, up_wgrad=WGRAD, down_wgrad=WGRAD,
-            dgates=(*SCATTER, True))
+WIDE = dict(up=UP, dx=DX, scatter=SCATTER, scatter2=SCATTER, up_wgrad=WGRAD, down_wgrad=WGRAD)
 # hidden widths whose last 128-wide hidden tile would be at most half used (h192 pads to 256): up and dx 64-wide
 # hidden tiles, scatter BLOCK_K 64, up wgrad BLOCK_N 256; the down wgrad keeps WGRAD. Tuned on sm_89 at d1536 h192
 # E256 top16, every candidate bitwise. A wgrad's BLOCK_M is free: Triton compiles acc += dot(a, b) as dot(a, b, acc),
 # one k16 chain over all of an expert's rows
 NARROW = dict(up=(256, 64, 64, 8, 2), dx=(64, 64, 128, 8, 2), scatter=(128, 128, 64, 4, 3),
-              scatter2=(128, 128, 64, 4, 3), up_wgrad=(32, 256, 128, 8, 3), down_wgrad=WGRAD,
-              dgates=(128, 128, 32, 4, 4, True))
+              scatter2=(128, 128, 64, 4, 3), up_wgrad=(32, 256, 128, 8, 3), down_wgrad=WGRAD)
 # --smoe-tuned (bitwise): WIDE's tiles retuned on sm_89 at d2048 h256 E256 top-16, 64K tokens, 4 chunks; the
 # router's one-pass top-ks up to E 256, one-byte sorts, the chunks' rows gathered in the scatter
 TUNED = False
@@ -197,53 +194,29 @@ def _expert_block(E_idx, E_mask, M_in_idx, N_block, N_mask, X_ptr, stride_xm, st
 def _scatter(X_ptr, stride_xm: tl.constexpr, stride_xk: tl.constexpr,
              W_ptr, stride_we, stride_wk: tl.constexpr, stride_wn: tl.constexpr,
              Y_ptr, stride_ym: tl.constexpr, stride_yn: tl.constexpr,
-             grouped_idx_ptr, expert_idxs_ptr, rows_ptr, G_ptr, M, K: tl.constexpr, N: tl.constexpr,
-             E: tl.constexpr, FAN: tl.constexpr, GATHER: tl.constexpr, NLOOP: tl.constexpr, DOT: tl.constexpr,
+             grouped_idx_ptr, expert_idxs_ptr, rows_ptr, M, K: tl.constexpr, N: tl.constexpr,
+             E: tl.constexpr, GATHER: tl.constexpr,
              BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
     """Y[order[i]] = X[i] @ W[se[i]] over expert-sorted rows i (GATHER: X[rows[i]], se[rows[i]]); a
-    row tile straddling experts loops over them with the other experts' rows masked to exact zeros.
-    NLOOP: a program's row tile loops over every column tile. DOT (with NLOOP): Y[order[i]] = the row's
-    BF16 product dotted with G[order[i] // FAN] (FP32 sums), the product never stored."""
+    row tile straddling experts loops over them with the other experts' rows masked to exact zeros."""
     pid = tl.program_id(axis=0)
     N_BLOCK_COUNT = tl.cdiv(N, BLOCK_N)
-    M_block = (pid if NLOOP else pid // N_BLOCK_COUNT) * BLOCK_M + tl.arange(0, BLOCK_M)
+    M_block = pid // N_BLOCK_COUNT * BLOCK_M + tl.arange(0, BLOCK_M)
+    N_block = pid % N_BLOCK_COUNT * BLOCK_N + tl.arange(0, BLOCK_N)
+    N_mask = N_block < N
     M_boundary_mask = M_block < M
     M_in = tl.load(rows_ptr + M_block, mask=M_boundary_mask, other=0) if GATHER else M_block
     E_idxs = tl.load(expert_idxs_ptr + M_in, mask=M_boundary_mask, other=E)
+    no_k_mask = K % BLOCK_K == 0
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     E_first_idx = tl.min(E_idxs)
     E_last_idx = tl.minimum(tl.max(E_idxs), E - 1)
     M_idx = tl.load(grouped_idx_ptr + M_block, mask=M_boundary_mask).to(tl.int32)
-    if NLOOP:
-        dot = tl.zeros((BLOCK_M,), tl.float32)
-        for n in range(N_BLOCK_COUNT):
-            N_block = n * BLOCK_N + tl.arange(0, BLOCK_N)
-            acc = _scatter_tile(N_block, E_idxs, E_first_idx, E_last_idx, M_in, X_ptr, stride_xm, stride_xk, W_ptr,
-                                stride_we, stride_wk, stride_wn, K, N, BLOCK_M, BLOCK_N, BLOCK_K)
-            mask = M_boundary_mask[:, None] & (N_block < N)[None, :]
-            if DOT:
-                g = tl.load(G_ptr + (M_idx // FAN)[:, None] * N + N_block[None, :], mask, other=0)
-                dot += tl.sum(acc.to(g.dtype).to(tl.float32) * g.to(tl.float32), 1)
-            else:
-                tl.store(Y_ptr + (M_idx[:, None] * stride_ym + N_block[None, :] * stride_yn), acc, mask)
-        if DOT:
-            tl.store(Y_ptr + M_idx * stride_ym, dot, M_boundary_mask)
-    else:
-        N_block = pid % N_BLOCK_COUNT * BLOCK_N + tl.arange(0, BLOCK_N)
-        acc = _scatter_tile(N_block, E_idxs, E_first_idx, E_last_idx, M_in, X_ptr, stride_xm, stride_xk, W_ptr,
-                            stride_we, stride_wk, stride_wn, K, N, BLOCK_M, BLOCK_N, BLOCK_K)
-        Y_blk_ptrs = Y_ptr + (M_idx[:, None] * stride_ym + N_block[None, :] * stride_yn)
-        tl.store(Y_blk_ptrs, acc, mask=M_boundary_mask[:, None] & (N_block < N)[None, :])
-
-
-@triton.jit
-def _scatter_tile(N_block, E_idxs, E_first_idx, E_last_idx, M_in, X_ptr, stride_xm, stride_xk, W_ptr, stride_we,
-                  stride_wk, stride_wn, K: tl.constexpr, N: tl.constexpr, BLOCK_M: tl.constexpr,
-                  BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     for E_idx in range(E_first_idx, E_last_idx + 1):
-        acc = _expert_block(E_idx, E_idxs == E_idx, M_in, N_block, N_block < N, X_ptr, stride_xm, stride_xk,
-                            W_ptr, stride_we, stride_wk, stride_wn, K, acc, K % BLOCK_K == 0, BLOCK_K)
-    return acc
+        acc = _expert_block(E_idx, E_idxs == E_idx, M_in, N_block, N_mask, X_ptr, stride_xm, stride_xk,
+                            W_ptr, stride_we, stride_wk, stride_wn, K, acc, no_k_mask, BLOCK_K)
+    Y_blk_ptrs = Y_ptr + (M_idx[:, None] * stride_ym + N_block[None, :] * stride_yn)
+    tl.store(Y_blk_ptrs, acc, mask=M_boundary_mask[:, None] & N_mask[None, :])
 
 
 @triton.jit
@@ -324,15 +297,12 @@ def dx_op(dy: torch.Tensor, w: torch.Tensor, gates: torch.Tensor, order: torch.T
 
 @torch.library.custom_op("allie_smoe::scatter", mutates_args={"out"})
 def scatter_op(x: torch.Tensor, w: torch.Tensor, se: torch.Tensor, order: torch.Tensor,
-               rows: torch.Tensor, g: torch.Tensor, out: torch.Tensor, bm: int, bn: int, bk: int, warps: int,
-               stages: int, nloop: bool = False) -> None:
-    """out = scatter, or with g [T, N] given (nloop): the scatter's rows dotted with g's, out [T * k, 1] FP32."""
-    dot = g.numel() > 0
-    assert not dot or nloop and g.is_contiguous()
-    grid = (triton.cdiv(order.numel(), bm) * (1 if nloop else triton.cdiv(out.shape[1], bn)),)
-    _scatter[grid](x, *x.stride(), w, *w.stride(), out, *out.stride(), order, se, rows, g,
-                   order.numel(), x.shape[1], w.shape[-1], w.shape[0], order.numel() // len(g) if dot else 1,
-                   rows.numel() > 0, nloop, dot, bm, bn, bk, num_warps=warps, num_stages=stages)
+               rows: torch.Tensor, out: torch.Tensor, bm: int, bn: int, bk: int, warps: int,
+               stages: int) -> None:
+    grid = (triton.cdiv(order.numel(), bm) * triton.cdiv(out.shape[1], bn),)
+    _scatter[grid](x, *x.stride(), w, *w.stride(), out, *out.stride(), order, se, rows,
+                   order.numel(), x.shape[1], w.shape[-1], w.shape[0],
+                   rows.numel() > 0, bm, bn, bk, num_warps=warps, num_stages=stages)
 
 
 @torch.library.custom_op("allie_smoe::down_wgrad", mutates_args={"out"})
@@ -352,70 +322,6 @@ def up_wgrad_op(dy: torch.Tensor, x: torch.Tensor, order: torch.Tensor, offsets:
     _up_wgrad[grid](dy, x, order, offsets, out, *dy.stride(), *x.stride(), *out.stride(),
                     x.shape[-1], dy.shape[-1], fan, bm, bn, bk, num_warps=warps, num_stages=stages)
 # fmt: on
-
-
-# fmt: off
-@triton.jit
-def _mm(A, B, C, M, N, K, sam, sak, sbk, sbn, scm, scn, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr,
-        GROUP: tl.constexpr):
-    """C = A @ B, FP32 accumulation over K in order, rounded once to C's dtype."""
-    pid = tl.program_id(0)
-    nm, nn = tl.cdiv(M, BM), tl.cdiv(N, BN)
-    pm, pn = tl.swizzle2d(pid // nn, pid % nn, nm, nn, GROUP)
-    rm = pm * BM + tl.arange(0, BM)
-    rn = pn * BN + tl.arange(0, BN)
-    rk = tl.arange(0, BK)
-    a = A + rm[:, None] * sam + rk[None, :] * sak
-    b = B + rk[:, None] * sbk + rn[None, :] * sbn
-    acc = tl.zeros((BM, BN), tl.float32)
-    for k in range(0, tl.cdiv(K, BK)):
-        x = tl.load(a, mask=(rm[:, None] < M) & (rk[None, :] < K - k * BK), other=0.0)
-        w = tl.load(b, mask=(rk[:, None] < K - k * BK) & (rn[None, :] < N), other=0.0)
-        acc = tl.dot(x, w, acc)
-        a += BK * sak
-        b += BK * sbk
-    c = C + rm[:, None] * scm + rn[None, :] * scn
-    tl.store(c, acc.to(C.dtype.element_ty), mask=(rm[:, None] < M) & (rn[None, :] < N))
-# fmt: on
-
-
-@torch.library.custom_op("allie_smoe::mm", mutates_args=())
-def mm_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """a [M, K] @ b [K, N] (any strides) in BF16."""
-    m, k = a.shape
-    n = b.shape[1]
-    c = torch.empty(m, n, device=a.device, dtype=a.dtype)
-    _mm[(triton.cdiv(m, 128) * triton.cdiv(n, 256),)](a, b, c, m, n, k, *a.stride(), *b.stride(), *c.stride(),
-                                                       128, 256, 64, 8, num_warps=8, num_stages=3)  # fmt: skip
-    return c
-
-
-@mm_op.register_fake
-def _(a, b):
-    return a.new_empty(a.shape[0], b.shape[1])
-
-
-class Linear(torch.autograd.Function):
-    """F.linear(x, w) with mm_op forward and torch.mm backward (cuBLAS, as F.linear's)."""
-
-    @staticmethod
-    def forward(ctx, x, w):
-        ctx.save_for_backward(x, w)
-        return mm_op(x, w.t())
-
-    @staticmethod
-    def backward(ctx, dy):
-        x, w = ctx.saved_tensors
-        return dy @ w, dy.t() @ x
-
-
-def linear(x, w):
-    """F.linear(x, w) for BF16 x [..., K], w [N, K]; DENSE_TRITON: the Triton forward for K 2048 at 2048 or more rows."""
-    big = x.dtype == torch.bfloat16 and x.numel() >= 2048 * w.shape[1]
-    if not DENSE_TRITON or not big or w.shape[1] != 2048:
-        return torch.nn.functional.linear(x, w)
-    x2 = x.reshape(-1, w.shape[1])
-    return Linear.apply(x2, w).view(*x.shape[:-1], w.shape[0])
 
 
 def up(x, w, order, offsets, k, save=True):
@@ -446,7 +352,7 @@ def scatter(x, w, se, order, h, rows=None):
         x, se, rows = x[rows], se[rows], None
     out = x.new_empty((order.numel(), w.shape[-1]))
     rows = order.new_empty(0) if rows is None else rows
-    scatter_op(x, w, se, order, rows, x.new_empty(0), out, *tiles(h)["scatter" if w.shape[1] == h else "scatter2"])
+    scatter_op(x, w, se, order, rows, out, *tiles(h)["scatter" if w.shape[1] == h else "scatter2"])
     return out
 
 
@@ -491,14 +397,6 @@ SAVE_EXPANDED = True
 # (blocks out of a checkpoint, or with --moe-remat), the gates' grad is a batched matmul per chunk, which need not
 # round as the whole batch's does
 CHUNKS = 1
-# --smoe-fused-dgates: the gates' grad in the down scatter's epilogue, its [T * k, D] output never stored; FP32 sums
-# in another order than the batched matmul's, so not bitwise
-FUSED_DGATES = False
-# --dense-triton: the step's big dense forward GEMMs with K 2048 (QKV, O, shared up, head) through _mm with 128 x 256 x
-# 64 tiles instead of cuBLAS: one sequential k16 MMA chain per output element, which is cuBLAS's on the hardware checked
-# (sm_89, tests/checks/dense_triton.py), so bitwise there, not by construction; the backward keeps torch.mm. Shapes
-# whose cuBLAS kernel splits K (the wgrads) are left alone
-DENSE_TRITON = False
 
 
 def chunks(order, k):
@@ -518,12 +416,7 @@ def chunks(order, k):
 
 
 def gates_grad(y, down, se, order, grad, k):
-    """(expanded @ grad) per token, the down scatter rerun chunk by chunk (FUSED_DGATES: whole, dotted in its
-    epilogue)."""
-    if FUSED_DGATES:
-        out = grad.new_empty(order.numel(), 1, dtype=torch.float32)
-        scatter_op(y, down, se, order, order.new_empty(0), grad.contiguous(), out, *tiles(y.shape[1])["dgates"])
-        return out.view(-1, k).to(grad.dtype)
+    """(expanded @ grad) per token, the down scatter rerun chunk by chunk."""
     parts = [
         (scatter(y, down, se, d, y.shape[1], r).view(hi - lo, k, -1) @ grad[lo:hi].unsqueeze(-1)).squeeze(-1)
         for lo, hi, r, d in chunks(order, k)

@@ -10,9 +10,8 @@ outputs, input and parameter gradients and the load buffer after every micro-bat
 implementation runs in its own process.
 
 kernels: moe_kernels.routed (output, input, weight and gate grads, and the no-grad path) against an
-FP32 torch reference on ragged shapes with empty experts, plain, chunked with TUNED, and with
-FUSED_DGATES; its grads with expanded recomputed equal those with it saved, bit for bit (but with
-FUSED_DGATES).
+FP32 torch reference on ragged shapes with empty experts, plain and chunked with TUNED; its grads with
+expanded recomputed equal those with it saved, bit for bit.
 
 topk: moe_kernels.route against torch.topk (CUDA; CPU: aten_topk, an emulation of ATen's kernels)
 on live, tie-heavy and special (+-0, +-inf, NaN, subnormal) scores.
@@ -226,13 +225,13 @@ def kernels(a):
     shapes = (
         ((96, 1536, 512, 4, 8192), (128, 768, 256, 4, 4096)) if DEV == "cuda" else ()
     )
-    # (CHUNKS, TUNED, FUSED_DGATES); chunked shapes are T % 3 == 0
-    settings = ((1, False, False), (3, True, False), (3, True, True))
-    for (e, d, h, k, t), (chunks, tuned, fused) in itertools.product(
+    # (CHUNKS, TUNED); chunked shapes are T % 3 == 0
+    settings = ((1, False), (3, True))
+    for (e, d, h, k, t), (chunks, tuned) in itertools.product(
         shapes + ((16, 64, 22, 4, 300), (8, 48, 40, 2, 129)), settings
     ):
         moe_kernels.CHUNKS = chunks if t % chunks == 0 else 1
-        moe_kernels.TUNED, moe_kernels.FUSED_DGATES = tuned, fused
+        moe_kernels.TUNED = tuned
         s = torch.rand(t, e, device=DEV, generator=gen)
         s[:, : e // 4] -= 2  # a quarter of the experts get no routes
         idx = s.topk(k, -1).indices
@@ -268,8 +267,7 @@ def kernels(a):
             kept[3],
             False,
         ).backward(dy)
-        # FUSED_DGATES: the gates' grad alone sums otherwise
-        remat = all(torch.equal(u.grad, v.grad) for u, v in zip(leaves[: 3 if fused else 4], kept))
+        remat = all(torch.equal(u.grad, v.grad) for u, v in zip(leaves, kept))
         with torch.no_grad():
             y0 = moe_kernels.routed(
                 x, up.transpose(1, 2), down, k, flat[order], order, offsets, gates
@@ -286,11 +284,11 @@ def kernels(a):
         exact = torch.equal(y0, y.detach())
         good = max(errs) < 2e-2 and exact and remat
         print(
-            f"  E{e} d{d} h{h} k{k} T{t} chunks/tuned/fused {chunks, tuned, fused}: rel err out/dx/dup/ddown/dgates"
+            f"  E{e} d{d} h{h} k{k} T{t} chunks/tuned {chunks, tuned}: rel err out/dx/dup/ddown/dgates"
             f" {errs}, no-grad == grad {exact}, remat == saved {remat}"
         )
         ok &= good
-    moe_kernels.CHUNKS, moe_kernels.TUNED, moe_kernels.FUSED_DGATES = 1, False, False
+    moe_kernels.CHUNKS, moe_kernels.TUNED = 1, False
     print(f"{'PASS' if ok else 'FAIL'} routed kernels vs FP32 reference ({DEV})")
     return ok
 

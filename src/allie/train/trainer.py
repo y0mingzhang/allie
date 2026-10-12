@@ -53,7 +53,7 @@ SAME = (
     "deterministic", "wsd_schedule", "mix", "mix_stores", "mix_pool_frac", "mix_history",
     "mix_months", "clock_feats", "input_lr_mul", "aux_time", "aux_wdl", "arch", "attn_kernel",
 )  # fmt: skip
-# later SAME arguments, with the value a checkpoint that predates them ran with
+# later SAME arguments, with the value a checkpoint that predates them ran with (retired ones: the value this code runs)
 SAME_SINCE = dict(
     mix_exclusions="",
     init_from=None,
@@ -415,18 +415,6 @@ def main():
         "experts, one-byte sorts (bitwise)",
     )
     p.add_argument(
-        "--smoe-fused-dgates",
-        action="store_true",
-        help="routed experts: the gates' grad in the down scatter's epilogue, its [T*k, d] output never stored "
-        "(FP32 sums in another order than the batched matmul's: not bitwise)",
-    )
-    p.add_argument(
-        "--dense-triton",
-        action="store_true",
-        help="the big dense forward GEMMs with K 2048 (QKV, O, shared up, head) through a Triton kernel with 128 x 256 "
-        "tiles instead of cuBLAS (the same k16 chain: bitwise where cuBLAS runs one, as on sm_89)",
-    )
-    p.add_argument(
         "--shard-late-prefetch",
         action="store_true",
         help="moe_shard: the backward gathers the next layer's experts after this layer's expert grads, not "
@@ -548,8 +536,7 @@ def main():
     torch.utils.deterministic.fill_uninitialized_memory = False
     network.ATTENTION = "triton" if a.attn_kernel else "flex"
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not a.moe_remat, a.moe_chunks
-    moe_kernels.TUNED, moe_kernels.FUSED_DGATES = a.smoe_tuned, a.smoe_fused_dgates
-    moe_kernels.DENSE_TRITON = a.dense_triton
+    moe_kernels.TUNED = a.smoe_tuned
     expert_shard.LATE = a.shard_late_prefetch
     expert_shard.DEPTH, expert_shard.HOLD = a.shard_prefetch, a.shard_hold
     expert_shard.HOST = a.shard_host_gather
@@ -665,7 +652,7 @@ def main():
             "a distillation run: resume it with the trainer that trained it"
         )
         for key, default in SAME_SINCE.items():
-            assert shared["args"].get(key, default) == vars(a)[key], (
+            assert shared["args"].get(key, default) == vars(a).get(key, default), (
                 f"Resume changes {key}"
             )
         old_row = shared["args"].get("row_tokens", 1024)
