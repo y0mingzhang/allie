@@ -29,6 +29,8 @@ DEFAULTS = dict(
     moe_dense_first=1,  # blocks 0 .. n-1 keep the dense MLP, MoE after (DeepSeek-V3: 3)
     # routed experts sharded over the ranks, whole experts, gathered per layer (model.shard); model.pt keeps them whole
     moe_shard=False,
+    # learnable exclusive self-attention (upstream #264): y -= tanh(a) <y, v> / |v|^2 v per (layer, head), a = 0 at init
+    xsa=False,
 )
 # switches a --resume-new-source resume may change: numerical guards, not a different model
 RESUMABLE = ("moe_gate_floor", "moe_log_gates")
@@ -86,6 +88,7 @@ def resolve(arch):
     assert isinstance(out["moe_log_gates"], bool)
     assert isinstance(out["moe_dense_first"], int) and out["moe_dense_first"] >= 1
     assert isinstance(out["moe_router_center_first"], int) and out["moe_router_center_first"] >= 0
+    assert isinstance(out["xsa"], bool)
     return out
 
 

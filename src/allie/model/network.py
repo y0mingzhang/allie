@@ -242,6 +242,11 @@ def create_model(cfg, device="cuda"):
     model.use_feats = cfg.feats
     model.feat_embed.weight.lr_mul = cfg.input_lr_mul
     model.board = board_cnn.build(cfg.width).to(device)
+    arch = model_arch.resolve(cfg.arch)
+    if arch["xsa"]:  # zero init, no RNG draw
+        model.xsa_alphas = torch.nn.Parameter(torch.zeros(cfg.layers, cfg.width // cfg.head_dim, device=device))
+        a = model.xsa_alphas
+        a.label, a.lr_mul, a.wd_mul, a.fp32_state = "xsa", 5.0, 0.0, True  # lr as x0_lambdas
     # Follow upstream: BF16 embeddings/gates/head; the board stays FP32
     for m in model.modules():
         if isinstance(m, (torch.nn.Embedding, torch.nn.Linear)):

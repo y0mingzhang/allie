@@ -105,6 +105,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
             id="checkpoint_resume-2",
         ),
         check("nanogpt_knobs", torchrun=1, marks=GPU + DATA),
+        check("xsa", torchrun=1, marks=GPU + DATA),
         check(
             "moe_nongemm",
             "kernels",

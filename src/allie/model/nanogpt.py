@@ -982,6 +982,7 @@ class AttnArgs:
     cos: torch.Tensor
     sin: torch.Tensor
     attn_scale: float
+    xsa: torch.Tensor | None = None  # (heads,) XSA strength logits (arch xsa)
 
 
 class CausalSelfAttention(nn.Module):
@@ -1046,6 +1047,7 @@ class CausalSelfAttention(nn.Module):
         )
         if seqlens.backend == "triton":
             # q/k norm, rotary, value embeddings and the output gate inside the attention kernels
+            assert attn_args.xsa is None, "xsa needs flex"
             g = gate()
             vg = None if ve is None else ve_gate()
             y = medium_attention_qkv(
@@ -1064,6 +1066,10 @@ class CausalSelfAttention(nn.Module):
 
         y = medium_attention(q, k, v, seqlens, bm_size, attn_scale)
         y = y.view(B, T, self.num_heads, self.head_dim)
+        if attn_args.xsa is not None:  # drop the part of y along the token's own value (arXiv:2603.09078)
+            a = torch.tanh(attn_args.xsa).type_as(y).view(1, 1, self.num_heads, 1)
+            dot = (y * v).sum(-1, keepdim=True)
+            y = y - a * (dot / v.square().sum(-1, keepdim=True).clamp_min(1e-8)) * v
         y = y * gate()
         y = y.contiguous().view(
             B, T, self.num_heads * self.head_dim
@@ -1315,6 +1321,7 @@ class GPT(nn.Module):
         self.feat_embed.weight.lr_mul = 75.0
         self.feat_embed.weight.wd_mul = 5.0
         self.board = None  # model.board branch, added at every position
+        self.register_parameter("xsa_alphas", None)  # (layers, heads): arch xsa
 
     def train(
         self, mode=True
@@ -1396,6 +1403,7 @@ class GPT(nn.Module):
                 cos=cos,
                 sin=sin,
                 attn_scale=self.yarn.attn_scale,
+                xsa=None if self.xsa_alphas is None else self.xsa_alphas[i],
             )
             if i in skip_out:
                 skip_gate_out = (
@@ -1478,6 +1486,7 @@ class TrainingManager:
             "embed",
             "board",
             "router",
+            "xsa",
         ]
         scalar_labels = ["scalars"]
         muon_labels = ["attn_gate", "value_embed_gate", "attn", "mlp", "mlp_proj"]
