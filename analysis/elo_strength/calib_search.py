@@ -1,7 +1,7 @@
 """GPU pass of the calibration eval. Per position: the legal policy and root heads (think time, W/D/L);
 coverage search (allie.search with the bot's Allie 2.0 calibration) keeping per-move Q and its
 calibrated distribution; Allie-paper MCTS (allie.search's "allie" tree) keeping per-move Q and visits.
-Runs in the search-bench environment on the training model (moe-oracle); see run-calib.sbatch.
+Runs in the search-bench environment on the training model (moe-oracle).
 
 python calib_search.py POSITIONS.npz OUT_DIR --shard i --shards n
 """
