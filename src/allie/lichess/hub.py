@@ -1,7 +1,7 @@
 """The Hugging Face release: weights, config, the inference code and a model card in one folder.
 
-    python -m allie.lichess.hub build EXPORT_DIR OUT_DIR   # weights hard-linked, not copied
-    python -m allie.lichess.hub upload OUT_DIR             # private unless --public
+    python -m allie.lichess.hub build EXPORT_DIR OUT_DIR [--name allie-2.0]  # weights hard-linked, not copied
+    python -m allie.lichess.hub upload OUT_DIR [--repo REPO]  # private unless --public
 
 The folder runs with transformers alone (AutoModel, trust_remote_code): it ships this package's
 api.py, fast.py, fastrs.py, model.py and tokens.py unchanged, plus hf/'s configuration, modeling wrapper and card.
@@ -21,7 +21,7 @@ CODE = ("api.py", "fast.py", "fastrs.py", "model.py", "tokens.py")
 WRAPPER = ("configuration_allie.py", "modeling_allie.py", "README.md")
 
 
-def build(export, out):
+def build(export, out, name="allie-2.0"):
     export, out = Path(export), Path(out)
     out.mkdir(parents=True, exist_ok=True)
     weights = out / "model.safetensors"
@@ -33,7 +33,7 @@ def build(export, out):
     config = json.loads((export / "config.json").read_text())
     config.pop("checkpoint", None)  # a path on the training cluster
     config |= dict(
-        name="allie-2.0",
+        name=name,
         model_type="allie",
         architectures=["AllieModel"],
         auto_map=dict(
@@ -55,7 +55,8 @@ def upload(out, repo=REPO, private=True):
 
     api = HfApi()
     api.create_repo(repo, private=private, exist_ok=True)
-    api.upload_folder(folder_path=str(out), repo_id=repo, commit_message="Allie 2.0")
+    name = json.loads((Path(out) / "config.json").read_text())["name"]  # allie-2.0: "Allie 2.0"
+    api.upload_folder(folder_path=str(out), repo_id=repo, commit_message=name.replace("allie-", "Allie ", 1))
     return f"https://huggingface.co/{repo}"
 
 
@@ -65,13 +66,14 @@ def main():
     b = sub.add_parser("build")
     b.add_argument("export")
     b.add_argument("out")
+    b.add_argument("--name", default="allie-2.0", help="the release's name in config.json")
     u = sub.add_parser("upload")
     u.add_argument("out")
     u.add_argument("--repo", default=REPO)
     u.add_argument("--public", action="store_true")
     a = p.parse_args()
     if a.command == "build":
-        print(build(a.export, a.out))
+        print(build(a.export, a.out, a.name))
     else:
         print(upload(a.out, a.repo, not a.public))
 
