@@ -2,8 +2,8 @@
 backup, tree.py Nodes' boards and clocks; allie_fast.KL: kl.py's forest), with tree.Coverage's and tree.KL's
 interfaces and outputs. On the Rust backend the whole loop is native: the tree evaluates its leaves through the
 model's Server as path items on the game's cache and its own slot buffers, no Python per leaf, its steps merged
-with the other games'. On the torch backend the leaves go through tree.Nodes as before. The output
-policy is allie.search.policy's with the same calibration.
+with the other games'. On the torch backend the leaves go through tree.Nodes. The output policy is
+allie.search.policy's with the same calibration.
 
 Tree reuse (reuse=True, native only): a game keeps each searcher's last tree (`game.trees`); at its next turn,
 if the two plies since form a path in it, the search starts from that grandchild's subtree (allie_fast's
@@ -15,7 +15,6 @@ model's output depends on the move sequence and the clocks, not on the position 
 outputs. Every search leaves its counts in `game.last_search` (reused, evaluated, ...).
 """
 
-import json
 import logging
 from time import monotonic
 
@@ -26,9 +25,8 @@ from scipy.special import softmax
 from allie.search.policy import policy
 
 from . import tree
-from .fastrs import RustFast
 from .tokens import CONTEXT, MOVE_START, MOVES
-from .tree import CALIBRATION, POLICY, WDL, Late, Mixed, Tree, View
+from .tree import WDL, Late, Mixed, Tree, games_of
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ log = logging.getLogger(__name__)
 def server(game):
     """The model's Server when it runs on the Rust engine, else None."""
     fast = game.engine.model.fast
-    return fast.server if isinstance(fast, RustFast) else None
+    return None if fast is None else fast.server
 
 
 def ref(cache):
@@ -52,16 +50,6 @@ def ref(cache):
 
 def increment(game):
     return game.inc if game.inc is not None else -1
-
-
-def games_of(searcher, game):
-    """The game under each of the searcher's views, and their synced logits."""
-    own = game.__dict__.setdefault("views", {})
-    games = [
-        game if v == "true" else own.get(v) or own.setdefault(v, View(game, v))
-        for v in searcher.views
-    ]
-    return games, [g.sync() for g in games]
 
 
 def reusable(game, games, key, reuse):
@@ -89,13 +77,9 @@ class Coverage:
     views as tree.Coverage's: every node read under each, its W/D/L their mean. reuse: start from the last
     search's tree when the game followed it (native only). merged: all views' leaves of a call in one step."""
 
-    def __init__(self, threads=4, views=("true",), reuse=False, merged=True):
-        self.parameters = json.loads(CALIBRATION.read_text())
-        bp = self.parameters["budget_policies"]
-        for b, key in POLICY.items():
-            bp.setdefault(str(b), bp[key])
-        self.threads, self.views = threads, tuple(views)
-        self.reuse, self.merged = reuse, merged
+    def __init__(self, views=("true",), reuse=False, merged=True):
+        self.parameters = tree.parameters()
+        self.views, self.reuse, self.merged = tuple(views), reuse, merged
 
     def __call__(self, game, simulations, deadline=np.inf):
         if len(game.tokens) >= CONTEXT:  # no room for a node: the policy plays
@@ -128,10 +112,9 @@ class Coverage:
     def handles(self, game, games, zs, z, feats, budget, deadline):
         """The tree driven by its handles, the leaves evaluated through tree.Nodes (the torch
         backend); feats: the game's own: (the finished tree, its root logits)."""
-        concurrent = game.engine.model.fast is not None
         trees = [Tree(g, x, capacity=4 * budget + 256) for g, x in zip(games, zs)]
         for t in trees:
-            t.concurrent, t.deadline = concurrent, deadline
+            t.deadline = deadline
         oracle = (
             Mixed(trees, z.double().numpy()) if self.views != ("true",) else trees[0]
         )
@@ -166,7 +149,7 @@ class Coverage:
             )
             return cov, root
 
-        return run() if concurrent else game.engine.run(run)
+        return game.engine.run(run)
 
     def native(self, srv, game, games, root, feats, budget, deadline):
         """The whole search in Rust through the Server, from the kept tree when reuse allows; None past the
@@ -305,10 +288,9 @@ class KL:
         return [MOVES[t - MOVE_START] for t in moves], p, q
 
     def handles(self, game, games, zs, feats, roots, prior, cap, leaves, deadline):
-        concurrent = game.engine.model.fast is not None
         trees = [Tree(g, x, capacity=cap) for g, x in zip(games, zs)]
         for t in trees:
-            t.concurrent, t.deadline = concurrent, deadline
+            t.deadline = deadline
 
         def run():
             bridges = [
@@ -338,7 +320,7 @@ class KL:
             )
             return forest
 
-        return run() if concurrent else game.engine.run(run)
+        return game.engine.run(run)
 
     def native(self, srv, game, games, feats, roots, prior, cap, leaves, deadline):
         key = ("kl", self.views, self.clock_rule)

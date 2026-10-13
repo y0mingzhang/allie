@@ -21,8 +21,6 @@ from .test_tokens import random_game
 tree = pytest.importorskip("allie.lichess.tree")
 treers = pytest.importorskip("allie.lichess.treers")
 allie_fast = pytest.importorskip("allie_fast")
-if not hasattr(allie_fast, "Coverage"):
-    pytest.skip("allie_fast built without Coverage", allow_module_level=True)
 pytest.importorskip("pybind11")
 native = Path(
     os.environ.get(
@@ -808,17 +806,17 @@ def test_cli_picks_the_native_searcher(tiny_path, monkeypatch):
 
     c = Config(model=str(tiny_path), threads=2, backend="rust", play=Play(mode="calibrated"))
     reference = Model(tiny_path, backend="torch")
-    assert cli.coverage(c, reference) is None  # calibrated searches only on the engine
+    assert cli.searcher(c, reference) is None  # calibrated searches only on the engine
     strongest = Config(model=str(tiny_path), play=Play(mode="strongest", search=8))
-    assert isinstance(cli.coverage(strongest, reference), tree.Coverage)
+    assert isinstance(cli.searcher(strongest, reference), tree.Coverage)
     before = torch.get_num_threads()
     try:
         m = cli.model(c)
     finally:
         torch.set_num_threads(before)
-    search = cli.coverage(c, m)
+    search = cli.searcher(c, m)
     assert isinstance(search, treers.KL) and search.views == calibration.VIEWS
-    assert isinstance(cli.coverage(strongest, m), treers.Coverage)
+    assert isinstance(cli.searcher(strongest, m), treers.Coverage)
     monkeypatch.setattr(cpp, "_load", refuse)
     game = setup(Engine(m), 5, 14)
     assert search(game, 32) is not None and not game.last_search["late"]

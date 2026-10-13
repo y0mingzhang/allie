@@ -30,11 +30,10 @@ def model(c):
     return m
 
 
-def coverage(c, m):
-    """The searcher play.mode uses: calibration.py's KL search for calibrated, coverage for strongest with
-    search. On model m's Rust engine the native ones (treers: the whole search in Rust); off it only strongest
-    searches (tree.Coverage, on allie.search's C++ tree: --extra search), as calibrated searches only on the
-    engine."""
+def searcher(c, m):
+    """play.mode's search on model m: calibrated's KL search (calibration.py) and strongest's coverage search
+    (play.search), both native on the Rust engine (treers). Off the engine only strongest searches
+    (tree.Coverage on allie.search's C++ tree, --extra search); calibrated plays the policy there."""
     strongest = c.play.mode == "strongest" and c.play.search
     if m.fast is not None and c.play.mode == "calibrated":
         from . import calibration
@@ -132,7 +131,7 @@ def run_command(a):
         if not token:
             sys.exit("set LICHESS_TOKEN to the bot account's API token (bot:play)")
         m = model(c)
-        bot = Bot(c, Lichess(token, c.url), Engine(m), coverage(c, m))
+        bot = Bot(c, Lichess(token, c.url), Engine(m), searcher(c, m))
         if a.drain_file:
             threading.Thread(target=watch, args=(bot, a.drain_file), daemon=True).start()
         signal.signal(signal.SIGUSR1, lambda *_: bot.drain())
@@ -144,10 +143,10 @@ def run_command(a):
     m = model(c)
     if a.command == "selfplay":
         args = (a.games, a.opponent, a.base, a.increment)
-        out = selfplay(c, m, coverage(c, m), *args)
+        out = selfplay(c, m, searcher(c, m), *args)
         print(json.dumps(out["summary"], indent=1))
     else:
-        out = bench(c, m, coverage(c, m), a.moves, a.concurrent)
+        out = bench(c, m, searcher(c, m), a.moves, a.concurrent)
         print(json.dumps(out, indent=1))
     dump(out, a.out)
 

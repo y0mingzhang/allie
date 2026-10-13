@@ -3,10 +3,10 @@
 
 model = "yimingzhang/allie-2.0"  # Hugging Face repo (downloaded once, 11 GB), or an export directory
 device = "cpu"                # or "cuda"
-dtype = "bfloat16"            # or "float32" (twice the memory, no faster on most CPUs)
-threads = 8                   # torch CPU threads (6-8 is fastest for one game; 0 = all cores)
+dtype = "bfloat16"            # or "float32" (twice the memory; on CPU the PyTorch reference, about 3x slower)
+threads = 8                   # CPU threads (0 = one per core of one socket; more are faster up to memory bandwidth)
 active_experts = 0            # routed experts per token, 0 = all 16; 8 is faster, slightly less accurate
-# int8 = false               # int8 weights are the CPU default (8 GB, about twice as fast); false: BF16
+# int8 = false               # int8 weights are the CPU default (6.4 GB, about 1.6 times as fast); false: BF16
 url = "https://lichess.org"
 max_games = 4                 # concurrent games; the rest are declined with "later"
 greeting = ""                 # sent to the opponent's chat at the start of each game

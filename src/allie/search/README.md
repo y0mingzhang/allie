@@ -111,6 +111,12 @@ evaluator's by a mean KL of 1.3e-3 nats with 97% top-1 agreement, as much as the
 tree node's prediction matches a fresh prefill of its path to a mean KL of 6e-4. `python -m allie.search.moe_parity
 --checkpoint CKPT` reruns the checks.
 
+## KL search
+
+`kl.py` is the KL-regularized search (piKL) of the bot's calibrated mode: each side plays its policy tilted by
+its values, `pi ~ p exp(beta Q)`, and the trees grow best-first by reach. The bot runs its Rust port
+(`allie_fast.KL`, bit for bit this code) with `allie.lichess.calibration`'s settings.
+
 ## Other models
 
 An oracle implements `reset()`, `new_tokens` and `handles(prefixes, features, clock_rule)`, which returns an object
@@ -121,12 +127,12 @@ returns their logits. `cpu.CPUOracle` is a plain reference on the dense port in 
 
 ```sh
 uv sync --extra search --extra test
-ALLIE_CHESS_INCLUDE=/path/to/chess-library/include OMP_NUM_THREADS=1 uv run pytest tests/search
+OMP_NUM_THREADS=1 uv run pytest tests/search
 ```
 
-They check the rules against python-chess, the clock and board transitions, and the value backup, and pin the
-search's outputs bitwise with a deterministic stand-in model (`tests/search/migration.json`). Without pybind11 or
-`chess.hpp` they are skipped.
+They check the rules against python-chess, the clock and board transitions, the value backup and the KL search,
+and pin the search's outputs bitwise with a deterministic stand-in model (`tests/search/migration.json`). Without
+pybind11 they are skipped.
 
 The search derives from the original [Allie](https://github.com/ippolito-cmu/allie) and keeps its MIT notice in
 [ALLIE_LICENSE](ALLIE_LICENSE).

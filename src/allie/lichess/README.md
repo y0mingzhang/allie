@@ -289,7 +289,8 @@ over games.
 
 - `pytest tests/lichess` runs the unit tests on a small random model and a local mock of the Bot API
   (`mock.py`). They cover challenge rules, full games, reconnects, rate limits, draw offers, resignation,
-  takebacks, clock features against the training data loader, and board states against the native encoder.
+  takebacks, clock features against the training data loader, board states against the native encoder, and
+  the Rust engine and its searches against the PyTorch reference and allie.search.
 - `allie-bot selfplay --config my-bot.toml --games 4` plays the real model against itself through the mock
   server. `--opponent random` plays a random mover instead. Every move goes through the full protocol, and the
   server checks it.

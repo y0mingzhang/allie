@@ -34,6 +34,22 @@ class Late(Exception):
     """A search ran past its deadline."""
 
 
+def parameters():
+    """Allie 2.0's output calibration, with every POLICY budget filled in."""
+    p = json.loads(CALIBRATION.read_text())
+    bp = p["budget_policies"]
+    for b, key in POLICY.items():
+        bp.setdefault(str(b), bp[key])
+    return p
+
+
+def games_of(searcher, game):
+    """The game under each of the searcher's views (kept on the game), and their synced logits."""
+    own = game.__dict__.setdefault("views", {})
+    games = [game if v == "true" else own.get(v) or own.setdefault(v, View(game, v)) for v in searcher.views]
+    return games, [g.sync() for g in games]
+
+
 class Tree:
     """allie.search's oracle interface (reset, handles, new_tokens) for one root: the game's
     current position, whose keys and values are the game's cache."""
@@ -200,17 +216,12 @@ class Coverage:
     prior and think time always the game's own."""
 
     def __init__(self, threads=4, views=("true",)):
-        self.parameters = json.loads(CALIBRATION.read_text())
-        bp = self.parameters["budget_policies"]
-        for b, key in POLICY.items():
-            bp.setdefault(str(b), bp[key])
+        self.parameters = parameters()
         self.threads, self.views = threads, tuple(views)
         load(), load("value")  # built or loaded now, not in a game's first search
 
     def __call__(self, game, simulations, deadline=np.inf):
-        own = game.__dict__.setdefault("views", {})
-        games = [game if v == "true" else own.get(v) or own.setdefault(v, View(game, v)) for v in self.views]
-        zs = [g.sync() for g in games]
+        games, zs = games_of(self, game)
         if self.views != ("true",) and monotonic() > deadline:  # a view's first sync prefills the whole game
             return None
         z = game.sync()
@@ -354,9 +365,7 @@ class KL:
         load()
 
     def __call__(self, game, leaves, deadline=np.inf):
-        own = game.__dict__.setdefault("views", {})
-        games = [game if v == "true" else own.get(v) or own.setdefault(v, View(game, v)) for v in self.views]
-        zs = [g.sync() for g in games]
+        games, zs = games_of(self, game)
         if self.views != ("true",) and monotonic() > deadline:  # a view's first sync prefills the whole game
             return None
         z = game.sync()

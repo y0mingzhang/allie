@@ -99,7 +99,7 @@ class Leaf(NamedTuple):
     """A search node evaluated in place (the engine's path item): the token `ids` [1] at position cache.n +
     len(path) attends to the cache's rows and then to the slots `path` (its ancestors below the root, in order)
     of the tree's buffer (k, v [L, H, capacity, hd], e [capacity, D]); its keys, values and embedding are written
-    to `slot`. The cache is read only. Its first four fields are a plain item's, so engine.py batches it as one."""
+    to `slot`. The cache is read only. Its first four fields are a plain item's."""
 
     cache: object
     ids: torch.Tensor

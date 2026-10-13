@@ -4,8 +4,8 @@
     allie = Allie.from_pretrained()  # yimingzhang/allie-2.0 from the Hub, or an export directory
     allie.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="180+2")
 
-Self-contained (torch, numpy, python-chess and this directory's model.py and tokens.py), so the
-Hugging Face release ships it as is.
+Self-contained (torch, numpy, python-chess and this directory's model.py, its fast paths and tokens.py),
+so the Hugging Face release ships it as is.
 """
 
 import io
