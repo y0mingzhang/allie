@@ -1,7 +1,7 @@
-//! The C++ kernels' `vf` type and its operations (fast.py's SOURCE), three ways: AVX-512, AVX2 + FMA and
-//! the scalar struct. Every kernel is generic over `Simd` and compiled once per variant; the Engine picks
-//! one at construction. The variants reproduce the C++ builds bit for bit, including what GCC makes of the
-//! source: `fma`/`fnmadd` where it contracts a multiply into an add (`exp`'s range reduction, `exp1`'s
+//! The vector type the kernels compute with, three ways: AVX-512, AVX2 + FMA and scalar. Every kernel is
+//! generic over `Simd` and compiled once per variant; the Engine picks one at construction. The variants
+//! reproduce the GCC builds of the C++ kernels this engine replaced bit for bit, including what GCC made of
+//! their source: `fma`/`fnmadd` where it contracted a multiply into an add (`exp`'s range reduction, `exp1`'s
 //! final step, and the scalar `fmaf` sites), plain operations elsewhere.
 
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop, clippy::missing_safety_doc, clippy::excessive_precision)]

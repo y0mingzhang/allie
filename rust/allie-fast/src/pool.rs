@@ -1,4 +1,4 @@
-//! The C++ `Pool`: workers pinned to CPUs stay alive between steps, spin briefly for work, then sleep on a
+//! The thread pool: workers pinned to CPUs stay alive between steps, spin briefly for work, then sleep on a
 //! condvar until woken; a barrier whose arrivals are counted per group of threads sharing a last-level
 //! cache, then once per group. A panic on any thread abandons the job: the others leave it at their next
 //! barrier, and `run` re-raises it on the caller once every thread is out.

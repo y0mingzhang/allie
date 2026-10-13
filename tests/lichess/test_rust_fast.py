@@ -18,9 +18,7 @@ from .conftest import C4X, tiny_export
 from .test_model import inputs, saturate
 from .test_tokens import random_game
 
-allie_fast = pytest.importorskip("allie_fast")
-if not hasattr(allie_fast, "Engine"):
-    pytest.skip("allie_fast built without Engine", allow_module_level=True)
+pytest.importorskip("allie_fast")
 
 GAMES = [inputs(random_game(s, 36 + s % 5)) for s in range(64)]
 

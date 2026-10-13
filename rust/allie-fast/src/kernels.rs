@@ -1,7 +1,7 @@
-//! The matrix and vector kernels of fast.py's SOURCE, generic over the SIMD variant: rows of W (int8, BF16
-//! or FP32) against FP32 activations with register tiles of partial sums, and the element-wise steps that
-//! round to BF16 where model.py does. Every output element is one thread's fixed-order reduction, so the
-//! results are deterministic and equal the C++ kernels' bit for bit.
+//! The matrix and vector kernels, generic over the SIMD variant: rows of W (int8, BF16 or FP32) against FP32
+//! activations with register tiles of partial sums, and the element-wise steps that round to BF16 where
+//! model.py does. Every output element is one thread's fixed-order reduction, so the results are
+//! deterministic: bit for bit those of the C++ kernels this engine replaced (tests/lichess/test_rust_fast.py).
 
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop, clippy::missing_safety_doc, clippy::excessive_precision)]
 

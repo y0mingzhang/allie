@@ -1,4 +1,4 @@
-//! The C++ `Engine` of fast.py's SOURCE: one step of Allie 2.0 (input embedding, board CNN, every block
+//! The `Engine`: one step of Allie 2.0 (input embedding, board CNN, every block
 //! with attention over per-game KV caches, the head) on a pool of threads, with barriers between a block's
 //! phases and its matrices shared out in chunks. Weights and caches are read and written in place through
 //! raw pointers the caller keeps alive. Generic over the SIMD variant; `run_*` are the per-ISA entry points.

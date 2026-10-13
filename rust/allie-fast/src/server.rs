@@ -9,7 +9,7 @@
 //!
 //! Pointer contract: a request's ids, feats and boards are copied at submission; its caches, slot buffers and
 //! `out` are written in place during the step, so the caller keeps them alive and untouched until its reply
-//! (the blocking call returns), as the Python side does for `Engine.step`.
+//! (the blocking call returns), as fastrs.py does.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -344,10 +344,14 @@ pub struct PyServer {
 
 #[pymethods]
 impl PyServer {
-    /// `Engine`'s arguments, then the gather policy: max_items (the most items in a step), min_items (a batch
-    /// this large runs at once), gather (seconds waited after a step's first request for the other requests
-    /// of the last step), chunk (> 0: every request alone, in steps of at most chunk items), moves_first (plain-only
-    /// requests first, in a step of their own).
+    /// cfg: L D H hd V nve E topk keep eh sh dh int8 ctx backout_layer threads log_gates, then per layer G ve
+    /// skip_in skip_out; scale, floor: the attention scale and gate floor; globals: the 19 + nve global
+    /// tensors' data pointers in fastrs.py's `glob` order (the last, XSA's, 0 when off); layers: 20 pointers a
+    /// layer (fastrs.py's `lay`, 0 for a missing matrix); cpus / groups: thread t's CPU and cache group; spin:
+    /// seconds a worker spins before sleeping. Then the gather policy: max_items (the most items in a step),
+    /// min_items (a batch this large runs at once), gather (seconds waited after a step's first request for the
+    /// other requests of the last step), chunk (> 0: every request alone, in steps of at most chunk items),
+    /// moves_first (plain-only requests first, in a step of their own).
     #[new]
     #[pyo3(signature = (cfg, scale, floor, globals, layers, cpus=None, groups=None, spin=0.002, max_items=128, min_items=48, gather=3e-4, chunk=0, moves_first=true))]
     fn new(cfg: Vec<i64>, scale: f64, floor: f64, globals: Vec<usize>, layers: Vec<usize>, cpus: Option<Vec<i32>>, groups: Option<Vec<i32>>, spin: f64, max_items: usize, min_items: usize, gather: f64, chunk: usize, moves_first: bool) -> PyResult<Self> {
@@ -359,9 +363,14 @@ impl PyServer {
         Ok(PyServer { inner, thread: Some(thread), pid: unsafe { libc::getpid() } })
     }
 
-    /// `Engine.step`'s call, queued and merged with the other callers' and run on the server's thread; blocks
-    /// for the reply with the GIL released. ids, feats and boards are copied here; the caches and `out` are
-    /// written during the step.
+    /// One step of T tokens over S items: ids (int64 [T]), feats (float32 [T, 3]), boards (uint8 [T, 68]) and
+    /// out (float32 [S, V]) as data pointers; meta: per item n0 len cap off scap plen poff dest (scap 0: a plain
+    /// item appending len tokens to its cache; else a path item, a search leaf whose one token attends to the
+    /// cache's n0 rows then to slots paths[poff..poff + plen] of a slot buffer of capacity scap, its keys,
+    /// values and embedding written to slot dest); caches: per item the cache's k, v, e pointers then the slot
+    /// buffer's (0 for a plain item). Queued and merged with the other callers' requests and run on the
+    /// server's thread; blocks for the reply with the GIL released. ids, feats and boards are copied here; the
+    /// caches and `out` are written during the step. Returns 0 or fastrs.py's ERRORS code.
     fn step(&self, py: Python<'_>, t: usize, s: usize, ids: usize, feats: usize, boards: usize, meta: Vec<i64>, caches: Vec<usize>, paths: Vec<i64>, out: usize) -> i32 {
         if meta.len() < 8 * s || caches.len() < 6 * s {
             return 3;
@@ -388,18 +397,12 @@ impl PyServer {
         py.allow_threads(move || inner.submit(req))
     }
 
-    /// Seconds spent in each phase since the last call (fast.py's PHASES order); on: keep profiling. Waits for
+    /// Seconds spent in each phase since the last call (fastrs.py's PHASES order); on: keep profiling. Waits for
     /// a running step.
     #[pyo3(signature = (on=true))]
     fn profile(&self, py: Python<'_>, on: bool) -> Vec<f64> {
         let inner = self.inner.clone();
         py.allow_threads(move || inner.engine.lock().unwrap_or_else(PoisonError::into_inner).profile(on).to_vec())
-    }
-
-    /// Sleeping workers spin again, ready for a step.
-    fn wake(&self, py: Python<'_>) {
-        let inner = self.inner.clone();
-        py.allow_threads(move || inner.engine.lock().unwrap_or_else(PoisonError::into_inner).pool.wake())
     }
 
     /// on: no step starts until every pause is lifted (requests queue up and merge), and none is running once
