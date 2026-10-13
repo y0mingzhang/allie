@@ -316,12 +316,12 @@ One cached step: the time a move takes once the opponent's move arrives, median 
 | `allie.data.fetch`, `fastbuild`, `store`, `external`, `annotate` | Download Lichess months and build the game store, bucketed by time control and rating; the same for over-the-board and engine games, deduplicated against the evaluation games |
 | `allie.data.pin`, `history`, `inventory` | Freeze a data selection, count its games per bucket, build sampling tables such as the Elo ramp |
 | `allie.data.mix`, `vocab`, `packed` | The training-time sampler, the vocabulary, the original packed validation rows |
-| `allie.model.network`, `nanogpt`, `attention`, `moe`, `moe_kernels`, `board`, `arch` | The model and its modded-nanoGPT core with optimizers, the MoE layer and its Triton kernels, the board CNN, architecture switches |
-| `allie.train.trainer`, `schedule`, `checkpoints`, `state`, `runtime`, `provenance` | The resumable distributed trainer, learning-rate schedule, checkpoints, and the source hashes a checkpoint records |
-| `allie.eval.build`, `score`, `maia3` | Build and score the main evaluation; the blitz benchmark |
+| `allie.model.network`, `nanogpt`, `attention`, `moe`, `moe_kernels`, `shard`, `board`, `arch` | The model and its modded-nanoGPT core with optimizers, the MoE layer, its Triton kernels and expert sharding, the board CNN, architecture switches |
+| `allie.train.trainer`, `schedule`, `checkpoints`, `state`, `runtime`, `tail`, `provenance` | The resumable distributed trainer, learning-rate schedule, checkpoints, tail EMAs of the weights, and the source hashes a checkpoint records |
+| `allie.eval.build`, `score`, `maia3` | Build and score the main evaluation (or another held-out month's, `--golden`); the blitz benchmark |
 | `allie.search` | The tree-search engine; `moe_oracle` serves MoE checkpoints to it |
 | `allie.lichess` | The Lichess bot and its CPU inference engine |
-| `allie.experiments.modelexp`, `isoflop`, `dmix`, `readout` | Frozen studies on Slurm, scaling-law fits, the sweep readout |
+| `allie.experiments.modelexp`, `isoflop`, `dmix`, `readout`, `tail_ema` | Frozen studies on Slurm, scaling-law fits, the sweep readout, scores of final-to-EMA blends |
 | `allie.cli` | `allie-train` (a config file to a torchrun of the trainer) and `allie-eval` |
 | `configs/` | `allie-2.0.json`, the trainer's arguments; `recipes/`, its sampling table; `allie-2.0/`, the run's record |
 | `tests/` | `test_checks.py` runs each check in `tests/checks/` as its own program; `test_equivalent.py` guards how the big run's final checkpoint loads |
