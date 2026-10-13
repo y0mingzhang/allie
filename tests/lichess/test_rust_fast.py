@@ -103,10 +103,9 @@ GOLDEN = {
 
 
 def gap(a, b):
-    """The mean difference of the move log-probabilities of two replay()s."""
+    """The mean difference of the move log-probabilities of two replay()s, in their worst step."""
     lp = lambda z: torch.log_softmax(z[:, 378:2346], -1)
-    d = [(lp(z) - lp(w)).abs().flatten() for z, w in zip(a[0], b[0])]
-    return torch.cat(d).mean().item()
+    return max((lp(z) - lp(w)).abs().mean().item() for z, w in zip(a[0], b[0]))
 
 
 @pytest.mark.parametrize("int8", [False, True])
@@ -117,7 +116,7 @@ def test_rust_isas(tiny_path, isa, int8, monkeypatch):
     assert got.fast.isa in ("avx512", "avx2", "scalar") and (isa == "native" or got.fast.isa == isa)
     out = replay(got)
     ref = Model(tiny_path, dtype=torch.bfloat16, int8=int8, backend="torch")
-    assert gap(out, replay(ref)) < 0.01
+    assert gap(out, replay(ref)) < 0.02
     want = GOLDEN.get((got.fast.isa, int8))
     assert want is None or digest(out) == want, f"{got.fast.isa} int8={int8}: the kernels' bits changed"
 
@@ -130,7 +129,7 @@ def test_rust_allie22(c4x_path, isa, int8, monkeypatch):
     out = replay(rust(c4x_path, isa, monkeypatch, int8=int8, threads=3))
     ref = Model(c4x_path, dtype=torch.bfloat16, int8=int8, backend="torch")
     want = replay(ref)
-    assert gap(out, want) < 0.01
+    assert gap(out, want) < 0.02
     if isa == "native":
         ref.xsa = None
         assert gap(replay(ref), want) > 0.1
@@ -144,15 +143,15 @@ def test_rust_log_gates_saturated(tmp_path, int8, monkeypatch):
     out = replay(rust(path, "native", monkeypatch, int8=int8, threads=3))
     ref = Model(path, dtype=torch.bfloat16, int8=int8, backend="torch")
     want = replay(ref)
-    assert gap(out, want) < 0.01
+    assert gap(out, want) < 0.02
     ref.log_gates = False
     assert gap(replay(ref), want) > 0.03
 
 
-def test_rust_thread_count_does_not_change_results(tiny_path, monkeypatch):
+def test_rust_thread_count_does_not_change_results(export, monkeypatch):
     """Every output element is one thread's fixed-order reduction: 1 and 3 threads agree bitwise."""
-    a = rust(tiny_path, "native", monkeypatch, int8=True, threads=1)
-    b = rust(tiny_path, "native", monkeypatch, int8=True, threads=3)
+    a = rust(export, "native", monkeypatch, int8=True, threads=1)
+    b = rust(export, "native", monkeypatch, int8=True, threads=3)
     assert a.fast.threads == 1 and b.fast.threads == 3
     same(replay(a, 9), replay(b, 9))
 

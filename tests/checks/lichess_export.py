@@ -1,8 +1,8 @@
 """export.convert of a small random model with Allie 2.2's arch (log gates, three dense blocks, router centres on the
-first four MoE layers, XSA): the exported reference (allie.lichess.model, BF16 on the GPU) and the GPU search oracle
-(allie.search.moe_oracle.forward) against the compiled training forward, game by game, within BF16 rounding (the gap
-of the reference in BF16 to itself in FP32: 3x its mean logit and CE differences); the reference without XSA is
-outside it.
+first four MoE layers, XSA): the exported reference (allie.lichess.model, BF16 on the GPU, and its CUDA graphs) and
+the GPU search oracle (allie.search.moe_oracle.forward) against the compiled training forward, game by game, within
+BF16 rounding (3x the reference's gap to itself in FP32, in mean logit and CE differences); the reference without XSA
+is outside it.
 
     torchrun --standalone --nproc_per_node=1 tests/checks/lichess_export.py
 """
@@ -169,41 +169,51 @@ def main():
             dt: Model(tmp, "cuda", dt, backend="torch")
             for dt in (torch.bfloat16, torch.float32)
         }
+        fast = Model(tmp, "cuda", torch.bfloat16)
+
+    dev = [tuple(t.cuda() for t in g) for g in games]
 
     def run(model):
-        return [
-            step(model, [(Cache(model), *(t.cuda() for t in g))], every=True).float()
-            for g in games
-        ]
+        return [step(model, [(Cache(model), *g)], every=True).float() for g in dev]
+
+    def decode(model):
+        """Every game a token at a time, one step for all: replayed CUDA graphs."""
+        caches, out = [Cache(model) for _ in games], [[] for _ in games]
+        for j in range(max(len(g[0]) for g in games)):
+            live = [k for k, g in enumerate(games) if j < len(g[0])]
+            items = [(caches[k], *(t[j : j + 1] for t in dev[k])) for k in live]
+            for k, z in zip(live, step(model, items)):
+                out[k].append(z.float())
+        return [torch.stack(z) for z in out]
 
     def oracle_all():
         with torch.no_grad():
-            return [oracle(m, *(t.cuda() for t in g)).float() for g in games]
+            return [oracle(m, *g).float() for g in dev]
 
     want = [train[a : a + len(g[0])] for a, g in zip(spans, games)]
     ref, ref32, orc = run(refs[torch.bfloat16]), run(refs[torch.float32]), oracle_all()
+    graphs = decode(fast)
+    assert fast.graphs.graphs and not fast.graphs.broken
     refs[torch.bfloat16].xsa = None
     plain = run(refs[torch.bfloat16])
 
     def gaps(a, b):
         d = torch.cat([(x - y).abs().flatten() for x, y in zip(a, b)])
-        c = torch.cat(
-            [ce(x, g[0].cuda()) - ce(y, g[0].cuda()) for x, y, g in zip(a, b, games)]
-        )
+        c = torch.cat([ce(x, g[0]) - ce(y, g[0]) for x, y, g in zip(a, b, dev)])
         return dict(mean_logit=d.mean().item(), max_logit=d.max().item(), mean_ce=c.mean().item(),
                     mean_abs_ce=c.abs().mean().item())  # fmt: skip
 
-    ces = {k: torch.cat([ce(z, g[0].cuda()) for z, g in zip(v, games)]).mean().item()
-           for k, v in dict(train=want, ref=ref, ref32=ref32, oracle=orc, no_xsa=plain).items()}  # fmt: skip
+    ces = {k: torch.cat([ce(z, g[0]) for z, g in zip(v, dev)]).mean().item()
+           for k, v in dict(train=want, ref=ref, ref32=ref32, graphs=graphs, oracle=orc, no_xsa=plain).items()}  # fmt: skip
     print(
         f"{len(games)} games, {sum(len(g[0]) - HEADER for g in games)} moves; CE {ces}"
     )
     floor = gaps(ref32, ref)
-    out = dict(ref=gaps(want, ref), oracle=gaps(want, orc), ref32=gaps(want, ref32), floor=floor,
-               no_xsa=gaps(want, plain))  # fmt: skip
+    out = dict(ref=gaps(want, ref), graphs=gaps(want, graphs), oracle=gaps(want, orc), ref32=gaps(want, ref32),
+               floor=floor, no_xsa=gaps(want, plain))  # fmt: skip
     for k, v in out.items():
         print(k, {a: round(b, 5) for a, b in v.items()})
-    for k in ("ref", "oracle", "ref32"):
+    for k in ("ref", "graphs", "oracle", "ref32"):
         assert (
             out[k]["mean_logit"] < 3 * floor["mean_logit"]
             and out[k]["mean_abs_ce"] < 3 * floor["mean_abs_ce"]

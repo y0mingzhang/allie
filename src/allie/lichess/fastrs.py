@@ -164,7 +164,9 @@ class RustFast:
             ptrs.append(t.data_ptr())
             self.tensors.append(t)
         xsa = model.xsa  # [layers, heads] BF16 tanh strengths
-        assert xsa is None or (xsa.is_contiguous() and xsa.shape == (n, model.heads))
+        if xsa is not None:
+            assert xsa.is_contiguous() and xsa.shape == (n, model.heads), xsa.shape
+            assert xsa.dtype == torch.bfloat16
         ptrs.append(0 if xsa is None else xsa.data_ptr())
         self.tensors.append(xsa)
         lay = []

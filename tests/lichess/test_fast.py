@@ -40,15 +40,15 @@ def play(model, games, lengths, steps=10):
 @pytest.mark.parametrize("int8", [False, True])
 @pytest.mark.parametrize("keep", [None, 2])
 @pytest.mark.parametrize("n", [1, 3])  # one game: steps of one or two tokens (each thread alone)
-def test_fast_matches_reference(tiny_path, tiny, int8, keep, n):
+def test_fast_matches_reference(export, int8, keep, n):
     """Fast and PyTorch BF16 paths differ by BF16 rounding only: the fast one is no further
     from FP32 than the reference is (a routing near-tie can flip in either)."""
     games = [inputs(random_game(s, 30 + 7 * s)) for s in range(n)]
     lengths = [HEADER + 5, HEADER, HEADER + 9][:n]
     kw = dict(dtype=torch.bfloat16, int8=int8, active_experts=keep)
-    ref = play(Model(tiny_path, backend="torch", **kw), games, lengths)
-    got = play(Model(tiny_path, backend="fast", threads=3, **kw), games, lengths)
-    hi = play(Model(tiny_path, dtype=torch.float32, active_experts=keep), games, lengths)
+    ref = play(Model(export, backend="torch", **kw), games, lengths)
+    got = play(Model(export, backend="fast", threads=3, **kw), games, lengths)
+    hi = play(Model(export, dtype=torch.float32, active_experts=keep), games, lengths)
     assert (got - hi).abs().mean() < 1.25 * (ref - hi).abs().mean() + 1e-3
     assert (got - hi).abs().max() < 2 * (ref - hi).abs().max() + 0.02
     p, q = (torch.softmax(z[:, 378:2346], -1) for z in (got, ref))
@@ -108,13 +108,13 @@ def test_profile(tiny_path):
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
-def test_graphs_match_eager(tiny_path, dtype):
+def test_graphs_match_eager(export, dtype):
     """Decode steps replayed from CUDA graphs on pooled caches equal the eager path's."""
     games = [inputs(random_game(s, 30 + 7 * s)) for s in range(3)]
     games = [tuple(t.cuda() for t in x) for x in games]
     lengths = [HEADER + 5, HEADER, HEADER + 9]
-    ref = Model(tiny_path, "cuda", dtype, backend="torch")
-    m = Model(tiny_path, "cuda", dtype)
+    ref = Model(export, "cuda", dtype, backend="torch")
+    m = Model(export, "cuda", dtype)
     assert m.graphs is not None and ref.graphs is None
     tol = dict(atol=2e-4, rtol=0) if dtype == torch.float32 else dict(atol=0.1, rtol=0)
     torch.testing.assert_close(play(m, games, lengths, 20), play(ref, games, lengths, 20), **tol)

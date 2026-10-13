@@ -86,3 +86,9 @@ C4X = dict(layers=8, dense_first=3, centre_first=2, xsa=True, log_gates=True)
 @pytest.fixture(scope="session")
 def c4x_path(tmp_path_factory):
     return tiny_export(tmp_path_factory.mktemp("c4x"), **C4X)
+
+
+@pytest.fixture(params=["tiny_path", "c4x_path"])
+def export(request):
+    """Each tiny export: Allie 2.0's switches and 2.2's."""
+    return request.getfixturevalue(request.param)

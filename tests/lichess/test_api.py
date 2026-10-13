@@ -92,11 +92,6 @@ def test_play_temperatures(tiny):
         allie.play(game, temperature=float("nan"))
 
 
-@pytest.fixture(params=["tiny_path", "c4x_path"])
-def export(request):
-    return request.getfixturevalue(request.param)
-
-
 @pytest.fixture
 def release(export, tmp_path, monkeypatch):
     """The Hugging Face folder of a tiny export, loaded through a fresh module cache."""
