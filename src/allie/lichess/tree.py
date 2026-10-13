@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from allie.search import Search, kl, lookahead
+from allie.search import Search, kl
 from allie.search.board import advance_clocks, predicted_seconds, root_other_previous
 from allie.search.native import from_prefix, load
 
@@ -331,34 +331,6 @@ class MixedNodes:
             z.append(n(handles))
             n.elapsed[ids] = self.nodes[0].elapsed[ids]
         return mixed(z)
-
-
-class Lookahead:
-    """search(game, calls, deadline) -> (legal moves, their prior, their searched values for the
-    mover), or None if the search runs past deadline (time.monotonic()): allie.search.lookahead on
-    the game's cache, m root moves grown by k children a call after the first. On the fast backend
-    it runs on the game's thread, as Coverage does."""
-
-    def __init__(self, m=8, k=2, beta=4.0):
-        self.m, self.k, self.beta = m, k, beta
-        load()
-
-    def __call__(self, game, calls, deadline=np.inf):
-        z = game.sync()
-        feats = np.array(game.features(), np.float32)
-        concurrent = game.engine.model.fast is not None
-
-        def run():
-            tree = Tree(game, z, capacity=256 + calls * self.m * self.k)
-            tree.concurrent, tree.deadline = concurrent, deadline
-            bridge = tree.handles([game.tokens], [feats])
-            return lookahead.search(bridge, game.tokens, calls, self.m, self.k, self.beta)
-
-        try:
-            moves, prior, q = run() if concurrent else game.engine.run(run)
-        except Late:
-            return None
-        return [MOVES[t - MOVE_START] for t in moves], prior, q
 
 
 class KL:
