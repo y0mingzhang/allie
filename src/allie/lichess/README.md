@@ -22,7 +22,7 @@ a time.
    from Hugging Face on first start (11 GB). To serve a training checkpoint instead, export it once and set
    `model` to the directory:
    ```sh
-   allie-bot export results/pretrain/allie-2.0/last.pt exports/allie-2.0
+   allie-bot export results/pretrain/allie-2.0/last.pt exports/allie-2.0 --name allie-2.0
    ```
 3. **Create a bot account.** Bot accounts must be new accounts that have never played a game. Create one on
    lichess.org, then make a personal API token with the `bot:play` scope at

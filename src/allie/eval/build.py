@@ -83,6 +83,7 @@ def select(month, skip, side=None, upper=UPPER, target=TARGET):
     """Sampled games in bucket order: [(tokens, labels, side channel or None, site)], the sampling fractions and
     population moves per cell (format x band of upper)."""
     n = 4 * len(upper)
+    assert n <= 128, "cells must fit the int8 labels"
     buckets = [b for b in json.loads((month / "buckets.json").read_text()) if 1 <= b["code"] // 10000 - 1 <= 4]
     rate, total = {}, np.zeros(n)
     for b in buckets:

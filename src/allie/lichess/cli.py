@@ -69,7 +69,7 @@ def main():
     e = sub.add_parser("export", help="training checkpoint -> safetensors export")
     e.add_argument("checkpoint")
     e.add_argument("out")
-    e.add_argument("--name", default="allie-2.0", help="its name in config.json")
+    e.add_argument("--name", required=True, help="its name in config.json (the release: allie-2.0)")
     run = sub.add_parser("play", help="play on Lichess (token: LICHESS_TOKEN)")
     run.add_argument("--drain-file", help="once this file exists, finish the games and exit")
     run.add_argument("--log", help="append the log here (reopened after a failed write; while "

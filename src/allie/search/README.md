@@ -115,7 +115,8 @@ tree node's prediction matches a fresh prefill of its path to a mean KL of 6e-4.
 
 `kl.py` is the KL-regularized search (piKL) of the bot's calibrated mode: each side plays its policy tilted by
 its values, `pi ~ p exp(beta Q)`, and the trees grow best-first by reach. The bot runs its Rust port
-(`allie_fast.KL`, bit for bit this code) with `allie.lichess.calibration`'s settings.
+(`allie_fast.KL`) with `allie.lichess.calibration`'s settings: bit for bit this code where numpy's exp and log are
+the C library's, within 1e-12 where they are not (numpy's own AVX-512 functions).
 
 ## Other models
 

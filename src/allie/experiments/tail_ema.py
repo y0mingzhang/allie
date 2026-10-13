@@ -17,7 +17,7 @@ from pathlib import Path
 
 import torch
 
-ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
+from allie.paths import ROOT
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
     run = ROOT / "results/pretrain" / run
     pointer = torch.load(run / "last.pt", weights_only=False)
     state = torch.load(run / pointer["directory"] / "model.pt", map_location="cpu", weights_only=False)
-    scratch = Path(tempfile.mkdtemp(dir=os.environ.get("TMPDIR", "/scratch/yimingz3")))
+    scratch = Path(tempfile.mkdtemp())
     out = {}
     try:
         for path in sorted(run.glob("tail-ema-*.pt")):
@@ -47,10 +47,10 @@ def main():
                 torch.save(state | dict(model=model), d / "checkpoints/blend/model.pt")
                 torch.save(pointer | dict(directory="checkpoints/blend"), d / "last.pt")
                 cmd = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1"]
-                env = None
+                env = os.environ | {"ALLIE_PROJECT_ROOT": str(ROOT)}  # scores land in ROOT/results, read below
                 if (study / "source/allie").exists():  # a package study: its frozen package
                     cmd += ["-m", "allie.eval.score", "--checkpoint", d / "last.pt"]
-                    env = os.environ | {"PYTHONPATH": str(study / "source")}
+                    env["PYTHONPATH"] = str(study / "source")
                 else:  # a flat study: its frozen evaluator on its frozen source
                     cmd += [study / "evaluator-ours/eval_strat.py", "--checkpoint", d / "last.pt"]
                     cmd += ["--source", study / "source-ours"]

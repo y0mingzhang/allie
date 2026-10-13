@@ -119,7 +119,7 @@ def test_release_name(tiny_path, tmp_path):
     from allie.lichess.hub import build
 
     name = lambda out: json.loads((out / "config.json").read_text())["name"]
-    assert name(build(tiny_path, tmp_path / "a")) == "allie-2.0"
+    assert name(build(tiny_path, tmp_path / "a")) == "tiny"  # the export's
     assert name(build(tiny_path, tmp_path / "b", "allie-2.2")) == "allie-2.2"
 
 

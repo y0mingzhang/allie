@@ -13,6 +13,8 @@ import torch
 from safetensors.torch import save_file
 from torch.torch_version import TorchVersion
 
+from allie.model import arch as model_arch
+
 from .tokens import CONTEXT
 
 
@@ -40,12 +42,9 @@ def convert(state):
     arch = cfg["arch"]
     n, d = cfg["layers"], cfg["width"]
     assert cfg["feats"] == 3 and inf["split_embed"]
-    # the switches this port implements; anything else would be exported as something else
+    # unknown or retired switches would be exported as another model
+    model_arch.resolve(arch)
     assert arch.get("board") == "conv" and arch.get("mlp") == "swiglu"
-    assert arch.get("tc_header", True) and arch.get("x0", True)
-    assert arch.get("moe_score", "sigmoid") == "sigmoid" and arch.get("moe_shared", True)
-    for key in ("key_offset", "header_feats", "moe_keep"):
-        assert not arch.get(key), f"arch {key} is not supported"
     assert bool(arch.get("xsa")) == ("xsa_alphas" in m)
     assert min(inf["ws_short"], inf["ws_long"]) * 128 >= CONTEXT  # plain causal per game
     s = m["scalars"].float()
@@ -111,7 +110,7 @@ def convert(state):
     return w, config
 
 
-def main(checkpoint, out, name="allie-2.0"):
+def main(checkpoint, out, name):
     state, path = load(checkpoint)
     w, config = convert(state)
     out = Path(out)

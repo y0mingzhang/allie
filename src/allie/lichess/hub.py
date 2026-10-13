@@ -1,6 +1,6 @@
 """The Hugging Face release: weights, config, the inference code and a model card in one folder.
 
-    python -m allie.lichess.hub build EXPORT_DIR OUT_DIR [--name allie-2.0]  # weights hard-linked, not copied
+    python -m allie.lichess.hub build EXPORT_DIR OUT_DIR [--name NAME]  # weights hard-linked, not copied
     python -m allie.lichess.hub upload OUT_DIR [--repo REPO]  # private unless --public
 
 The folder runs with transformers alone (AutoModel, trust_remote_code): it ships this package's
@@ -21,7 +21,7 @@ CODE = ("api.py", "fast.py", "fastrs.py", "model.py", "tokens.py")
 WRAPPER = ("configuration_allie.py", "modeling_allie.py", "README.md")
 
 
-def build(export, out, name="allie-2.0"):
+def build(export, out, name=None):
     export, out = Path(export), Path(out)
     out.mkdir(parents=True, exist_ok=True)
     weights = out / "model.safetensors"
@@ -33,7 +33,7 @@ def build(export, out, name="allie-2.0"):
     config = json.loads((export / "config.json").read_text())
     config.pop("checkpoint", None)  # a path on the training cluster
     config |= dict(
-        name=name,
+        name=name or config["name"],
         model_type="allie",
         architectures=["AllieModel"],
         auto_map=dict(
@@ -66,7 +66,7 @@ def main():
     b = sub.add_parser("build")
     b.add_argument("export")
     b.add_argument("out")
-    b.add_argument("--name", default="allie-2.0", help="the release's name in config.json")
+    b.add_argument("--name", help="the release's name in config.json (default: the export's)")
     u = sub.add_parser("upload")
     u.add_argument("out")
     u.add_argument("--repo", default=REPO)
