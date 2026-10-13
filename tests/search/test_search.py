@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 from pathlib import Path
 import unittest
 import numpy as np
@@ -8,6 +9,11 @@ from allie.search import Search
 from allie.search.native import load, MOVES, MOVE_ID
 
 FIXTURE = Path(__file__).with_name("migration.json")
+# recorded where numpy's exp, log and log1p are libm's; on AVX-512 CPUs numpy runs its own SIMD versions, a bit or
+# two off libm's, and the outputs computed through them match to rounding only
+_x = np.linspace(0.001, 0.999, 999)
+LIBM = all(np.array_equal(f(_x), np.vectorize(g)(_x)) for f, g in ((np.exp, math.exp), (np.log, math.log),
+                                                                   (np.log1p, math.log1p)))  # fmt: skip
 
 
 def logits(prefix):
@@ -62,7 +68,10 @@ class SearchTests(unittest.TestCase):
                     got = engine.predict(queries, budget=key if key == "adaptive" else int(key))
                 for actual, reference in zip(got, expected):
                     for name in ("probabilities", "values"):
-                        np.testing.assert_array_equal(actual[name], reference[name])
+                        if LIBM:
+                            np.testing.assert_array_equal(actual[name], reference[name])
+                        else:
+                            np.testing.assert_allclose(actual[name], reference[name], rtol=1e-12, atol=1e-15)
                     if "nodes" in reference:
                         self.assertEqual(actual["nodes"], reference["nodes"])
                         self.assertEqual(actual["simulations"], reference["simulations"])

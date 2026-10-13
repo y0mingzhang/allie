@@ -3,6 +3,7 @@
 search outputs on the tiny model through the torch backend and natively on the Rust engine, with and without
 views."""
 
+import math
 import os
 import shutil
 import time
@@ -40,11 +41,27 @@ def setup(engine, seed, plies, base=1800, inc=20, speed="classical"):
     return g
 
 
-def same(a, b):
-    """Two searches' (moves, probabilities, prior, values) bit for bit."""
+def same(a, b, equal=np.testing.assert_array_equal):
+    """Two searches' (moves, probabilities, prior, values): the same moves, the floats by `equal` (bit for bit)."""
     assert a[0] == b[0]
     for x, y in zip(a[1:], b[1:]):
+        equal(x, y)
+
+
+# numpy's exp, log and arctanh are libm's, as the Rust KL forest's are, except on AVX-512 CPUs: there numpy runs its
+# own SIMD versions, a bit or two off libm's
+_x = np.linspace(0.001, 0.999, 999)
+LIBM = all(np.array_equal(f(_x), np.vectorize(g)(_x)) for f, g in ((np.exp, math.exp), (np.log, math.log),
+                                                                   (np.arctanh, math.atanh)))  # fmt: skip
+
+
+def kl_equal(x, y):
+    """The Rust KL forest's floats against kl.py's: bit for bit where numpy's transcendentals are libm's, else to
+    rounding."""
+    if LIBM:
         np.testing.assert_array_equal(x, y)
+    else:
+        np.testing.assert_allclose(x, y, rtol=1e-12, atol=1e-15)
 
 
 def test_trees_agree_call_by_call(tiny):
@@ -274,13 +291,13 @@ def test_kl_forests_agree_call_by_call(tiny, grow, read):
         )
         V, sigma, rest = kl.backup(F.view(), **read)
         for mine, theirs in zip(rs.values(**read), (V, sigma, rest)):
-            np.testing.assert_array_equal(mine, theirs)
+            kl_equal(mine, theirs)
         moves, prior, q = kl.root_q(F, V, 0)
         m2, p2, q2 = rs.root_q(**read)
         np.testing.assert_array_equal(m2, moves)
-        np.testing.assert_array_equal(p2, prior)
+        kl_equal(p2, prior)
         fill = np.arctanh(read["squash"] * np.clip(F.value[0], -1, 1))
-        np.testing.assert_array_equal(q2, np.where(np.isnan(q), fill, q))
+        kl_equal(q2, np.where(np.isnan(q), fill, q))
         ids = [0, *np.concatenate(seen)[:, 0].tolist()]
         np.testing.assert_array_equal(
             rs.feats(ids), nodes.feats[ids].astype(np.float32)
@@ -296,7 +313,7 @@ def test_kl_matches_python_torch_backend(tiny, leaves):
     engine = Engine(tiny)
     for seed, plies in ((1, 12), (7, 14), (3, 30)):
         game = setup(engine, seed, plies)
-        same(treers.KL()(game, leaves), tree.KL()(game, leaves))
+        same(treers.KL()(game, leaves), tree.KL()(game, leaves), kl_equal)
 
 
 @pytest.mark.parametrize(
@@ -310,7 +327,7 @@ def test_kl_matches_python_torch_backend(tiny, leaves):
 )
 def test_kl_views_match_python(tiny, kw):
     game = setup(Engine(tiny), 9, 14, base=1800, inc=10)
-    same(treers.KL(**kw)(game, 16), tree.KL(**kw)(game, 16))
+    same(treers.KL(**kw)(game, 16), tree.KL(**kw)(game, 16), kl_equal)
 
 
 # --- the native loop: the trees evaluating their leaves through the Server (allie_fast.Server) ---
@@ -370,14 +387,11 @@ def test_native_kl_matches_handles(tiny_path, kw):
     for seed, plies, leaves in ((5, 14, 16), (6, 23, 48), (8, 18, 600)):
         game = setup(engine, seed, plies)
         want = tree.KL(**kw)(game, leaves)
-        same(treers.KL(**kw, merged=False)(game, leaves), want)
+        same(treers.KL(**kw, merged=False)(game, leaves), want, kl_equal)
         assert game.last_search["evaluated"] == leaves
         got = treers.KL(**kw)(game, leaves)
-        assert (
-            got[0] == want[0]
-            and np.array_equal(got[1], want[1])
-            and np.abs(got[2] - want[2]).max() < 5e-2
-        )
+        assert got[0] == want[0] and np.abs(got[2] - want[2]).max() < 5e-2
+        kl_equal(got[1], want[1])
 
 
 @pytest.mark.parametrize("searcher", ["coverage", "kl"])
