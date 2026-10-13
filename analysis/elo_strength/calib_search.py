@@ -17,9 +17,9 @@ import numpy as np
 
 H = Path("/home/yimingz3/src/allie/results/recipe10x/maia3-bench/search")
 sys.path[:0] = [str(H / "moe-oracle"), "/home/yimingz3/src/allie"]
-from oracle import MoEOracle
-from search import Search
-from search.native import from_prefix, load
+from oracle import MoEOracle  # noqa: E402
+from search import Search  # noqa: E402
+from search.native import from_prefix, load  # noqa: E402
 
 # the bot's output calibration and backup (this checkout's; ALLIE_SRC overrides it)
 CALIBRATION = Path(os.environ.get("ALLIE_SRC", Path(__file__).resolve().parents[2] / "src")) / "allie/lichess/calibration-allie-2.0.json"

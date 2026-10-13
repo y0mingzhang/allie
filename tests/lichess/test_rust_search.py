@@ -32,7 +32,7 @@ native = Path(
 if not (native / "chess.hpp").exists() or not shutil.which("c++"):
     pytest.skip("native search", allow_module_level=True)
 
-from allie.search.native import load
+from allie.search.native import load  # noqa: E402
 
 
 def setup(engine, seed, plies, base=1800, inc=20, speed="classical"):
