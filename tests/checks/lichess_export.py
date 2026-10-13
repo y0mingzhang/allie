@@ -179,6 +179,8 @@ def main():
     def decode(model):
         """Every game a token at a time, one step for all: replayed CUDA graphs."""
         caches, out = [Cache(model) for _ in games], [[] for _ in games]
+        assert len(games) <= model.graphs.BATCHES[-1]
+        assert all(c.slot is not None for c in caches)  # every step replays a graph
         for j in range(max(len(g[0]) for g in games)):
             live = [k for k, g in enumerate(games) if j < len(g[0])]
             items = [(caches[k], *(t[j : j + 1] for t in dev[k])) for k in live]

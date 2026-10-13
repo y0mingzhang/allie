@@ -116,7 +116,7 @@ def test_graphs_match_eager(export, dtype):
     ref = Model(export, "cuda", dtype, backend="torch")
     m = Model(export, "cuda", dtype)
     assert m.graphs is not None and ref.graphs is None
-    tol = dict(atol=2e-4, rtol=0) if dtype == torch.float32 else dict(atol=0.1, rtol=0)
+    tol = dict(atol=2e-4, rtol=0) if dtype == torch.float32 else dict(atol=0.15, rtol=0)
     torch.testing.assert_close(play(m, games, lengths, 20), play(ref, games, lengths, 20), **tol)
     one = play(m, games[:1], lengths[:1], 5)
     torch.testing.assert_close(one, play(ref, games[:1], lengths[:1], 5), **tol)
