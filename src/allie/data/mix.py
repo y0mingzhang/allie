@@ -197,16 +197,10 @@ class Games:
         )
         self.fmt, self.term = get("format"), get("termination")
         self.rated, self.leak = get("rated_prefix"), get("val_leak")
-        bot = lambda k: (
-            pc.equal(table.column(k), "BOT")
-            .fill_null(False)
-            .to_numpy(zero_copy_only=False)
-        )
+        bot = lambda k: pc.equal(table.column(k), "BOT").fill_null(False).to_numpy(zero_copy_only=False)
         self.wbot, self.bbot = bot("white_title"), bot("black_title")
         self.n = len(self.welo)
-        digits = lambda e: np.stack(
-            [e // 1000 % 10, e // 100 % 10, e // 10 % 10, e % 10], 1
-        ).astype(np.int16)
+        digits = lambda e: np.stack([e // 1000 % 10, e // 100 % 10, e // 10 % 10, e % 10], 1).astype(np.int16)
         self.head = np.concatenate(
             [
                 np.full((self.n, 1), BOS, np.int16),
@@ -221,9 +215,7 @@ class Games:
             c = table.column("clocks").combine_chunks()
             self.coff, self.cval = c.offsets.to_numpy(), c.values.to_numpy()
             self.base, self.inc = get("base"), get("increment")
-            self.dropped = (
-                get("token_hash") % 10 == 0
-            )  # these games train without clocks
+            self.dropped = get("token_hash") % 10 == 0  # these games train without clocks
         if aux:
             self.result = get("result")
 
@@ -234,15 +226,11 @@ class Games:
         time, wdl = np.full(size, -1, np.int16), np.full(size, -1, np.int8)
         moves, r = self.off[i + 1] - self.off[i], self.result[i]
         if 0 <= r < 3:
-            wdl[10 : 10 + moves] = np.array([[0, 2], [2, 0], [1, 1]])[r][
-                np.arange(moves) % 2
-            ]
+            wdl[10 : 10 + moves] = np.array([[0, 2], [2, 0], [1, 1]])[r][np.arange(moves) % 2]
         c = self.cval[self.coff[i] : self.coff[i + 1]].astype(np.int64)
         if len(c) == moves > 2 and self.base[i] >= 0:
             spent = c[:-2] - c[2:] + self.inc[i]
-            time[12 : 10 + moves] = np.where(
-                spent >= 0, clock_bucket(np.maximum(spent, 0)) - 1, -1
-            )
+            time[12 : 10 + moves] = np.where(spent >= 0, clock_bucket(np.maximum(spent, 0)) - 1, -1)
         return time, wdl
 
     def feats(self, i, size, drop=True):
@@ -324,8 +312,7 @@ def dated(before, k):
     """control, with games from Lichess months before `before` (YYYY-MM) weighted k times."""
     assert 0 <= k <= 1, "bucket caps are control's"
     return lambda g, p: (
-        control(g, p)[0]
-        * (k if g.src == 0 and getattr(g, "month", before) < before else 1),
+        control(g, p)[0] * (k if g.src == 0 and getattr(g, "month", before) < before else 1),
         True,
         True,
     )
@@ -347,6 +334,8 @@ POLICIES = dict(
     **{f"no{n}": sources(s, 0) for n, s in EXT},
     pre2108_d2=dated("2021-08", 0.5),
 )
+
+
 def recipe(name):
     """Recipe NAME.json, whose name ends in the first 12 hex digits of its sha256
     (data.inventory recipe writes them): from recipes/ beside the source tree if there, else RECIPES."""
@@ -373,9 +362,7 @@ def cool(name):
         assert not name.startswith("cool"), name
         return None
     start, before, after = int(m[1]) / 100, m[2], m[3]
-    assert 0 < start < 1 and not any(
-        (x or "").startswith(("cool", "recent")) for x in (before, after)
-    ), name
+    assert 0 < start < 1 and not any((x or "").startswith(("cool", "recent")) for x in (before, after)), name
     return start, before, after
 
 
@@ -434,11 +421,7 @@ def resolve(name):
         return cooldown(resolve(after), start, resolve(before) if before else control)
     if r := recent(name):
         return resolve(r[-1])
-    return (
-        table(name.removeprefix("table:"))
-        if name.startswith("table:")
-        else POLICIES[name]
-    )
+    return table(name.removeprefix("table:")) if name.startswith("table:") else POLICIES[name]
 
 
 def marks(name):
@@ -464,9 +447,7 @@ def compose(name):
             assert not ((base == 0) & (np.broadcast_to(w, base.shape) > 0)).any(), name
         for f in rest:
             wk, mwk, mbk = f(g, p)
-            w = w * np.divide(
-                np.asarray(wk, float), base, out=np.zeros_like(base), where=base > 0
-            )
+            w = w * np.divide(np.asarray(wk, float), base, out=np.zeros_like(base), where=base > 0)
             mw, mb = mw & mwk, mb & mbk
         return w, mw, mb
 
@@ -478,12 +459,8 @@ class Grid:
 
     def __init__(self, code):
         fmt, hi, lo = code // 10000 % 10 - 1, code // 100 % 100, code % 100
-        high = np.arange(
-            0 if hi == 6 else hi * 100, 3500 if hi == 30 else hi * 100 + 100, 10
-        )
-        low = np.arange(
-            0 if lo == 3 else lo * 200, 3500 if lo == 14 else lo * 200 + 200, 10
-        )
+        high = np.arange(0 if hi == 6 else hi * 100, 3500 if hi == 30 else hi * 100 + 100, 10)
+        low = np.arange(0 if lo == 3 else lo * 200, 3500 if lo == 14 else lo * 200 + 200, 10)
         w, b = [x.ravel() for x in np.meshgrid(high, low)]
         keep = b <= w
         self.welo, self.belo, self.n = w[keep], b[keep], int(keep.sum())
@@ -511,9 +488,7 @@ def listed(month, spec=None):
     """A month's buckets.json entries but those of the format ids its exclusion spec drops."""
     drop = (spec or {}).get("formats", ())
     return [
-        b
-        for b in json.loads((Path(month) / "buckets.json").read_text())
-        if b["code"] // 10000 % 10 - 1 not in drop
+        b for b in json.loads((Path(month) / "buckets.json").read_text()) if b["code"] // 10000 % 10 - 1 not in drop
     ]
 
 
@@ -568,9 +543,7 @@ class Sampler:
         row=ROW,
         exclusions=None,
     ):
-        self.init = {
-            k: v for k, v in locals().items() if k != "self"
-        }  # to rebuild elsewhere
+        self.init = {k: v for k, v in locals().items() if k != "self"}  # to rebuild elsewhere
         self.aux, self.last, self.row = aux, {}, row
         self.feats = feats
         self.channels = ["tokens", "mask"] + ["time", "wdl"] * aux + ["feat"] * feats
@@ -585,10 +558,7 @@ class Sampler:
             sorted(months)
             if months
             else sorted(
-                str(p.parent)
-                for s in stores
-                for p in Path(s).glob("20*/stats.json")
-                if p.parent.name not in exclude
+                str(p.parent) for s in stores for p in Path(s).glob("20*/stats.json") if p.parent.name not in exclude
             )
         )
         self._index(
@@ -613,9 +583,7 @@ class Sampler:
         self.months, self.pool_frac, self.history = months, pool_frac, history
         self.exclusions = exclusions or {}
         assert set(self.exclusions) <= set(months), "exclusion of an undrawn month"
-        self.drop = {
-            str(Path(m)): masked(e) for m, e in self.exclusions.items() if "hashes" in e
-        }
+        self.drop = {str(Path(m)): masked(e) for m, e in self.exclusions.items() if "hashes" in e}
         buckets = [(m, b) for m in months for b in listed(m, self.exclusions.get(m))]
         games = {}
         for _, b in buckets:
@@ -623,9 +591,7 @@ class Sampler:
         self.missing = 0  # all-history games in buckets absent from the stores
         if history:
             self.missing = sum(v for k, v in history.items() if int(k) not in games)
-            scale = {
-                c: pool_frac * history.get(str(c), 0) / n for c, n in games.items()
-            }
+            scale = {c: pool_frac * history.get(str(c), 0) / n for c, n in games.items()}
             games = {c: history.get(str(c), 0) for c in games}
         else:
             scale = dict.fromkeys(games, pool_frac)
@@ -659,9 +625,7 @@ class Sampler:
     def _weights(self, p):
         ph = phase(self.policy, p)
         if ph != self.weights_phase:
-            self.caps = np.array(
-                [np.max(self.fn(Grid(c), ph)[0], initial=0) for c in self.codes]
-            )
+            self.caps = np.array([np.max(self.fn(Grid(c), ph)[0], initial=0) for c in self.codes])
             total = self.games * self.caps
             self.cdf, self.weights_phase = np.cumsum(total) / total.sum(), ph
         return ph
@@ -681,9 +645,7 @@ class Sampler:
         pieces = []
         while count:
             cur = cursor.setdefault(key, [int(rng.integers(2**63)), 0, 0])
-            path, rows = shards[
-                np.random.default_rng(cur[0]).permutation(len(shards))[cur[1]]
-            ]
+            path, rows = shards[np.random.default_rng(cur[0]).permutation(len(shards))[cur[1]]]
             t = min(count, rows - cur[2])
             pieces.append((path, rows, np.arange(cur[2], cur[2] + t)))
             cur[2] += t
@@ -803,10 +765,7 @@ class Sampler:
             row=self.row,
             **({"exclusions": self.exclusions} if self.exclusions else {}),
             pool_lens=[len(g[0]) for g in pool],
-            **{
-                f"pool_{k}": np.concatenate([g[j] for g in pool] or [[]]).tolist()
-                for j, k in enumerate(self.channels)
-            },
+            **{f"pool_{k}": np.concatenate([g[j] for g in pool] or [[]]).tolist() for j, k in enumerate(self.channels)},
         )
 
     def load_state_dict(self, state):
@@ -825,9 +784,7 @@ class Sampler:
         self.rng.bit_generator.state = state["rng"]
         self.cursor, self.seen = copy.deepcopy(state["cursor"]), state["seen"]
         cut = np.cumsum(state["pool_lens"])[:-1]
-        chans = [
-            np.split(np.array(state[f"pool_{k}"], POOL[k]), cut) for k in self.channels
-        ]
+        chans = [np.split(np.array(state[f"pool_{k}"], POOL[k]), cut) for k in self.channels]
         self.pool = list(zip(*chans)) if state["pool_lens"] else []
 
 
@@ -912,9 +869,7 @@ class Prefetch:
                 break
             except queue.Empty:
                 if not self.proc.is_alive():
-                    raise RuntimeError(
-                        f"prefetch worker died (exit {self.proc.exitcode})"
-                    ) from None
+                    raise RuntimeError(f"prefetch worker died (exit {self.proc.exitcode})") from None
         if isinstance(item, BaseException):
             raise RuntimeError("prefetch worker failed") from item
         return item

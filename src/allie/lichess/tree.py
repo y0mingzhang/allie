@@ -101,9 +101,7 @@ class Nodes:
             raise Late
         h = np.asarray(handles, np.int64)
         ids, parents, tokens, lengths = h.T
-        assert (self.length[ids] == 0).all() and (
-            lengths == self.length[parents] + 1
-        ).all()
+        assert (self.length[ids] == 0).all() and (lengths == self.length[parents] + 1).all()
         assert lengths.max() <= CONTEXT
         self.parent[ids], self.token[ids] = parents, tokens
         self.length[ids] = lengths
@@ -139,9 +137,7 @@ class Nodes:
             paths.append(p[::-1])
         width = max(map(len, paths))
         path = torch.tensor([p + [0] * (width - len(p)) for p in paths], device=dev)
-        live = torch.tensor(
-            [[k < len(p) for k in range(width)] for p in paths], device=dev
-        )
+        live = torch.tensor([[k < len(p) for k in range(width)] for p in paths], device=dev)
         slots = torch.as_tensor(ids, device=dev)
         before = torch.as_tensor(self.parent[ids], device=dev)
 
@@ -167,15 +163,11 @@ class Nodes:
             )
             s[..., n0:] = s[..., n0:].masked_fill(~live[:, None], float("-inf"))
             a = F.softmax(s, -1).to(dt)
-            return torch.einsum("nhl,hld->nhd", a[..., :n0], vp) + torch.einsum(
-                "nhp,hnpd->nhd", a[..., n0:], vn
-            )
+            return torch.einsum("nhl,hld->nhd", a[..., :n0], vp) + torch.einsum("nhp,hnpd->nhd", a[..., n0:], vn)
 
         feats = torch.as_tensor(self.feats[ids], dtype=torch.float32, device=dev)
         boards = torch.tensor(
-            np.frombuffer(b"".join(self.board[i] for i in ids), np.uint8).reshape(
-                -1, 68
-            ),
+            np.frombuffer(b"".join(self.board[i] for i in ids), np.uint8).reshape(-1, 68),
             device=dev,
         )
         pos = torch.as_tensor(lengths - 1, device=dev)
@@ -379,11 +371,17 @@ class KL:
                 t.concurrent, t.deadline = concurrent, deadline
                 bridges.append(t.handles([g.tokens], [f], self.clock_rule))
             root = None if self.views == ("true",) else z[None].double().numpy()  # the game's own prior
-            F = kl.Forest(bridges, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], trees[0].capacity, prior=root)
+            F = kl.Forest(
+                bridges, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], trees[0].capacity, prior=root
+            )
             kl.grow(F, leaves, **self.grow)
             moves, prior, q = kl.root_q(F, kl.backup(F.view(), **self.read)[0], 0)
             s = self.read.get("squash", 0.0)
-            return moves, prior, np.where(np.isnan(q), np.arctanh(s * np.clip(F.value[0], -1, 1)) if s else F.value[0], q)
+            return (
+                moves,
+                prior,
+                np.where(np.isnan(q), np.arctanh(s * np.clip(F.value[0], -1, 1)) if s else F.value[0], q),
+            )
 
         try:
             moves, prior, q = run() if concurrent else game.engine.run(run)

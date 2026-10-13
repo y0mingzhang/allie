@@ -64,18 +64,12 @@ def load_dists(dirs):
     out = defaultdict(dict)
     for d in dirs:
         for z in chunks(d):
-            per = [
-                k
-                for k in z
-                if k not in ("index", "legal", "offsets", "heads", "seconds")
-            ]
+            per = [k for k in z if k not in ("index", "legal", "offsets", "heads", "seconds")]
             for n, i in enumerate(z["index"]):
                 a, b = z["offsets"][n], z["offsets"][n + 1]
                 o = out[int(i)]
                 legal = z["legal"][a:b].astype(int)
-                if "legal" in o and not np.array_equal(
-                    o["legal"], legal
-                ):  # align to the first order
+                if "legal" in o and not np.array_equal(o["legal"], legal):  # align to the first order
                     order = {t: k for k, t in enumerate(legal)}
                     perm = np.array([order[t] for t in o["legal"]])
                 else:
@@ -185,9 +179,7 @@ def distances(hist, names):
     out = {}
     for key, hs in hist.items():
         hc = hs["human"] / max(hs["human"].sum(), 1)
-        o = {
-            "human": (0.0, 0.0, quantile(hs["human"], 0.5), quantile(hs["human"], 0.9))
-        }
+        o = {"human": (0.0, 0.0, quantile(hs["human"], 0.5), quantile(hs["human"], 0.9))}
         for n in names:
             if hs[n].sum() > 0:
                 diff = np.cumsum(hc) - np.cumsum(hs[n] / hs[n].sum())
@@ -204,11 +196,7 @@ def distances(hist, names):
 def curve(human, f, k, key="human"):
     """Series `key`'s metric k against mean mover Elo over the solid bins: a weighted quadratic (on
     a log scale for losses and rates), made monotone in the direction of its overall trend."""
-    pts = [
-        (s["elo"], s[key][k], s["n"])
-        for (g, b), s in human.items()
-        if g == f and solid(g, b) and key in s
-    ]
+    pts = [(s["elo"], s[key][k], s["n"]) for (g, b), s in human.items() if g == f and solid(g, b) and key in s]
     x, y, w = (np.array(v, float) for v in zip(*pts))
     log = METRICS[k] in LOG
     c = np.polyfit((x - 1700) / 1000, np.log(y) if log else y, 2, w=np.sqrt(w))
@@ -228,11 +216,7 @@ def implied(grid, fit, up, value):
 def slope(human, f, k, elo):
     """d metric / d Elo of format f's human curve at elo (of the log metric for log metrics): the
     quadratic fit's derivative, kept to the overall trend's sign and at least a quarter of it."""
-    pts = [
-        (s["elo"], s["human"][k], s["n"])
-        for (g, b), s in human.items()
-        if g == f and solid(g, b)
-    ]
+    pts = [(s["elo"], s["human"][k], s["n"]) for (g, b), s in human.items() if g == f and solid(g, b)]
     x, y, w = (np.array(v, float) for v in zip(*pts))
     y = np.log(y) if METRICS[k] in LOG else y
     c = np.polyfit((x - 1700) / 1000, y, 2, w=np.sqrt(w))
@@ -245,9 +229,7 @@ def errors(human, summary, names, k):
     """Per candidate, format and solid bin: the paired gap (candidate minus human on the same
     positions) in Elo, through the human curve's local slope; per format the mean gap (bias) and the
     noise-debiased RMS, sqrt(mean(gap^2) - mean(se^2)); overall: formats equally weighted."""
-    present = [
-        f for f in range(4) if sum(g == f and solid(g, b) for g, b in summary) >= 3
-    ]
+    present = [f for f in range(4) if sum(g == f and solid(g, b) for g, b in summary) >= 3]
     log = METRICS[k] in LOG
     out = {}
     for n in names:
@@ -264,9 +246,7 @@ def errors(human, summary, names, k):
             if gaps:
                 g_, e_ = np.array([x[1] for x in gaps]), np.array([x[2] for x in gaps])
                 per[FORMATS[f]] = {b: (round(v), round(e)) for b, v, e in gaps}
-                rms[FORMATS[f]] = float(
-                    np.sqrt(max(np.mean(g_**2) - np.mean(e_**2), 0))
-                )
+                rms[FORMATS[f]] = float(np.sqrt(max(np.mean(g_**2) - np.mean(e_**2), 0)))
                 bias[FORMATS[f]] = float(np.mean(g_))
         if rms:
             rms["overall"] = float(np.sqrt(np.mean([v**2 for v in rms.values()])))
@@ -388,28 +368,15 @@ def calibrated_mode(d, m):
 
 def candidates(search=False):
     """name -> fn(position's distributions, meta row) -> move distribution over its legal moves."""
-    out = {
-        f"T{t}": partial(temperature, t=t) for t in (0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.15)
-    }
+    out = {f"T{t}": partial(temperature, t=t) for t in (0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.15)}
     out["tunedT"] = tuned_temp
     if search:
         out["calibrated"] = calibrated_mode
-        out |= {
-            f"cov{n}": (lambda n: lambda d, m: d.get(f"cov_p{n}"))(n)
-            for n in (8, 32, 128)
-        }
+        out |= {f"cov{n}": (lambda n: lambda d, m: d.get(f"cov_p{n}"))(n) for n in (8, 32, 128)}
         out |= {f"vis{n}": partial(visits, n=n) for n in BUDGETS}
-        out |= {
-            f"tilt{n}b{b}": partial(tilt, n=n, beta=b)
-            for n in (8, 32, 128)
-            for b in (1, 2, 4, 8)
-        }
+        out |= {f"tilt{n}b{b}": partial(tilt, n=n, beta=b) for n in (8, 32, 128) for b in (1, 2, 4, 8)}
         out |= {f"avis_c{c}": partial(adaptive, c=c) for c in (1, 2, 4, 8, 16, 32)}
-        out |= {
-            f"atilt_c{c}b{b}": partial(adaptive, c=c, beta=b)
-            for c in (2, 8, 32)
-            for b in (2, 4, 8)
-        }
+        out |= {f"atilt_c{c}b{b}": partial(adaptive, c=c, beta=b) for c in (2, 8, 32) for b in (2, 4, 8)}
     return out
 
 
@@ -451,9 +418,7 @@ def human_figure(human, path):
             ax.set_yscale("log")
             ax.set_yticks(ticks)
             ax.yaxis.set_minor_formatter(plt.NullFormatter())
-        ax.yaxis.set_major_formatter(
-            plt.FuncFormatter(lambda v, _, fmt=fmt: fmt.format(v).replace(".0%", "%"))
-        )
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _, fmt=fmt: fmt.format(v).replace(".0%", "%")))
         ax.set_ylabel(label)
         ax.set_xlabel("Mover's rating (Lichess)")
         ax.set_xlim(800, 3100)
@@ -483,9 +448,7 @@ def figure(human, summary, series, path):
         ("blunder", "Blunder rate", (0.01, 0.02, 0.05, 0.1)),
     )
     fig, axes = plt.subplots(2, 4, figsize=(16, 8.4), sharex=True)
-    fig.subplots_adjust(
-        left=0.06, right=0.83, top=0.95, bottom=0.09, wspace=0.1, hspace=0.12
-    )
+    fig.subplots_adjust(left=0.06, right=0.83, top=0.95, bottom=0.09, wspace=0.1, hspace=0.12)
     for row, (name, ylabel, ticks) in enumerate(rows):
         k = METRICS.index(name)
         for f in range(4):
@@ -517,9 +480,7 @@ def figure(human, summary, series, path):
                 ax.yaxis.set_minor_formatter(plt.NullFormatter())
                 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
             if row == 0:
-                ax.set_title(
-                    FORMATS[f].capitalize(), fontsize=14, color=ink2, loc="left"
-                )
+                ax.set_title(FORMATS[f].capitalize(), fontsize=14, color=ink2, loc="left")
             if f == 0:
                 ax.set_ylabel(ylabel)
             else:
@@ -550,10 +511,7 @@ def figure(human, summary, series, path):
 
 def report(summary, names, k):
     print(f"\n{METRICS[k]} by bin: positions / games / mean elo / human / candidates")
-    print(
-        "format     bin     n games    elo   human "
-        + " ".join(f"{n:>7s}" for n in names)
-    )
+    print("format     bin     n games    elo   human " + " ".join(f"{n:>7s}" for n in names))
     for (f, b), s in summary.items():
         vals = " ".join(f"{s[n][k]:7.4g}" for n in names if n in s)
         print(f"{FORMATS[f]:9s} {b:4d} {s['n']:5d} {s['games']:5d} {s['elo']:6.0f} {s['human'][k]:7.4g} {vals}"
@@ -586,9 +544,7 @@ def main():
         action="store_true",
         help="candidates.png: humans, T=1, tuned temperature, calibrated",
     )
-    p.add_argument(
-        "--rule", help="calib_rule.py output: its fitted families become candidates"
-    )
+    p.add_argument("--rule", help="calib_rule.py output: its fitted families become candidates")
     p.add_argument(
         "--rules",
         help="json {name: {params, hw, label, colour, dash}}: rule candidates, drawn in order",
@@ -607,15 +563,18 @@ def main():
     cands = candidates(a.search)
     rules = json.loads((d / a.rules).read_text()) if a.rules else {}
     for name, r in rules.items():
-        cands[name] = partial(rule_mode, par=tuple(r["params"]), hw=r.get("hw", np.inf),
-                              ladder=tuple(r.get("ladder", (0, 8, 32, 128, 256))), no_bullet=r.get("no_bullet", False))
+        cands[name] = partial(
+            rule_mode,
+            par=tuple(r["params"]),
+            hw=r.get("hw", np.inf),
+            ladder=tuple(r.get("ladder", (0, 8, 32, 128, 256))),
+            no_bullet=r.get("no_bullet", False),
+        )
     if a.rule:
         fitted = json.loads((d / a.rule).read_text())
         for fam in ("temp", "search", "both"):
             if fam in fitted:
-                cands[f"rule-{fam}"] = partial(
-                    rule_mode, par=tuple(fitted[fam]["all"]["params"])
-                )
+                cands[f"rule-{fam}"] = partial(rule_mode, par=tuple(fitted[fam]["all"]["params"]))
     hist = defaultdict(lambda: defaultdict(lambda: np.zeros(len(EDGES) - 1)))
     rows = table(
         np.load(d / a.positions)["meta"],
@@ -628,14 +587,9 @@ def main():
     print(f"\n{len(rows)} paired positions")
     for k in [METRICS.index(m) for m in HEADLINE]:
         report(summary, list(cands), k)
-    err = {
-        m: errors(human, summary, list(cands), METRICS.index(m))
-        for m in (*HEADLINE, "wploss", "acpl")
-    }
+    err = {m: errors(human, summary, list(cands), METRICS.index(m)) for m in (*HEADLINE, "wploss", "acpl")}
     dist = distances(hist, list(cands))
-    print(
-        "\nCalibration error (Elo): debiased RMS (mean signed gap) per format, overall RMS"
-    )
+    print("\nCalibration error (Elo): debiased RMS (mean signed gap) per format, overall RMS")
     for m in HEADLINE:
         print(f"  {m}")
         for n in cands:
@@ -645,39 +599,22 @@ def main():
     print("\nWin%-loss W1 (points), mean over solid bins per format:")
     for n in cands:
         w = {
-            FORMATS[f]: np.mean(
-                [
-                    v[n][0]
-                    for (g, b), v in dist.items()
-                    if g == f and solid(g, b) and n in v
-                ]
-            )
+            FORMATS[f]: np.mean([v[n][0] for (g, b), v in dist.items() if g == f and solid(g, b) and n in v])
             for f in range(4)
         }
-        print(
-            f"{n:10s} "
-            + " ".join(f"{k[:4]} {v:.2f}" for k, v in w.items() if np.isfinite(v))
-        )
+        print(f"{n:10s} " + " ".join(f"{k[:4]} {v:.2f}" for k, v in w.items() if np.isfinite(v)))
     js = lambda v: v.tolist() if isinstance(v, np.ndarray) else v
     out = dict(
         metrics=METRICS,
-        human={
-            f"{FORMATS[f]}/{b}": {k: js(v) for k, v in s.items()}
-            for (f, b), s in human.items()
-        },
-        summary={
-            f"{FORMATS[f]}/{b}": {k: js(v) for k, v in s.items()}
-            for (f, b), s in summary.items()
-        },
+        human={f"{FORMATS[f]}/{b}": {k: js(v) for k, v in s.items()} for (f, b), s in human.items()},
+        summary={f"{FORMATS[f]}/{b}": {k: js(v) for k, v in s.items()} for (f, b), s in summary.items()},
         errors=err,
         distances={f"{FORMATS[f]}/{b}": v for (f, b), v in dist.items()},
     )
     (d / a.out).write_text(json.dumps(out, indent=1) + "\n")
     if a.figure:
         series = [("T1.0", "Allie now (T = 1)", "#a1a1aa", "-")]
-        series += [
-            (n, r["label"], r["colour"], r.get("dash", "-")) for n, r in rules.items()
-        ]
+        series += [(n, r["label"], r["colour"], r.get("dash", "-")) for n, r in rules.items()]
         if a.rule:
             series += [("rule-temp", "Temperature only", "#d97706", "--"), ("rule-search", "Search only", "#0d9488", "--"),
                        ("rule-both", "Temperature + search", "#2563eb", "-")]  # fmt: skip

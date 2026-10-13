@@ -40,13 +40,9 @@ def game(seed):
         board.push(rng.choice(list(board.legal_moves)))
     moves = [m.uci() for m in board.move_stack]
     base, inc = rng.choice([(60, 0), (180, 2), (600, 5)])
-    tokens = header(base, inc, rng.randrange(800, 2800), rng.randrange(800, 2800)) + [
-        MOVE_ID[m] for m in moves
-    ]
+    tokens = header(base, inc, rng.randrange(800, 2800), rng.randrange(800, 2800)) + [MOVE_ID[m] for m in moves]
     clocks = [base - k // 2 for k in range(len(moves))]
-    feats = [[-1] * 3] * (HEADER - 1) + [
-        features(k, base, inc, clocks) for k in range(len(moves) + 1)
-    ]
+    feats = [[-1] * 3] * (HEADER - 1) + [features(k, base, inc, clocks) for k in range(len(moves) + 1)]
     boards = [START] * HEADER
     for t in tokens[HEADER:]:
         boards.append(advance(boards[-1], t))
@@ -62,9 +58,7 @@ def game(seed):
 def randomize(m, g):
     """Every weight random (the init zeroes many) at scales that keep activations O(1),
     the board CNN's as built."""
-    r = lambda p, std: (
-        torch.randn(p.shape, generator=g, device=p.device).to(p.dtype) * std
-    )
+    r = lambda p, std: torch.randn(p.shape, generator=g, device=p.device).to(p.dtype) * std
     for name, p in m.named_parameters():
         if name == "xsa_alphas":
             p.copy_(r(p, 2))
@@ -89,9 +83,7 @@ def oracle(m, ids, feats, boards):
 
     def attend(i, q, k, v):
         q, k, v = (x.transpose(0, 1) for x in (q, k, v))
-        return F.scaled_dot_product_attention(
-            q, k, v, is_causal=True, scale=scale
-        ).transpose(0, 1)
+        return F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=scale).transpose(0, 1)
 
     pos = torch.arange(n, device="cuda")
     return moe_oracle.forward(m, ids, pos, feats, boards, previous, attend)[0]
@@ -143,9 +135,7 @@ def main():
     net = torch.compile(m, dynamic=False, fullgraph=True)
     with torch.inference_mode():
         ctx = make_context(x, 11 * 128, 23 * 128)
-        train = net(
-            x.flatten(), ctx, core.ForwardScheduleConfig(None, 11, 23), feat_seq=f
-        )[0].float()
+        train = net(x.flatten(), ctx, core.ForwardScheduleConfig(None, 11, 23), feat_seq=f)[0].float()
 
     inference = dict(split_embed=True, ws_short=11, ws_long=23,
                      yarn=dict(cos=m.yarn.cos.cpu(), sin=m.yarn.sin.cpu(), attn_scale=m.yarn.attn_scale))  # fmt: skip
@@ -155,20 +145,12 @@ def main():
         inference=inference,
     )
     w, config = export.convert(state)
-    assert (
-        config["log_gates"]
-        and "xsa" in w
-        and all(f"{i}.fc" in w for i in range(3))
-        and "3.up" in w
-    )
+    assert config["log_gates"] and "xsa" in w and all(f"{i}.fc" in w for i in range(3)) and "3.up" in w
     assert all(w[f"{i}.mu"].any() == (i < 7) for i in range(3, 8))
     with tempfile.TemporaryDirectory() as tmp:
         save_file(w, str(Path(tmp) / "model.safetensors"))
         (Path(tmp) / "config.json").write_text(json.dumps(config))
-        refs = {
-            dt: Model(tmp, "cuda", dt, backend="torch")
-            for dt in (torch.bfloat16, torch.float32)
-        }
+        refs = {dt: Model(tmp, "cuda", dt, backend="torch") for dt in (torch.bfloat16, torch.float32)}
         fast = Model(tmp, "cuda", torch.bfloat16)
 
     dev = [tuple(t.cuda() for t in g) for g in games]
@@ -207,19 +189,14 @@ def main():
 
     ces = {k: torch.cat([ce(z, g[0]) for z, g in zip(v, dev)]).mean().item()
            for k, v in dict(train=want, ref=ref, ref32=ref32, graphs=graphs, oracle=orc, no_xsa=plain).items()}  # fmt: skip
-    print(
-        f"{len(games)} games, {sum(len(g[0]) - HEADER for g in games)} moves; CE {ces}"
-    )
+    print(f"{len(games)} games, {sum(len(g[0]) - HEADER for g in games)} moves; CE {ces}")
     floor = gaps(ref32, ref)
     out = dict(ref=gaps(want, ref), graphs=gaps(want, graphs), oracle=gaps(want, orc), ref32=gaps(want, ref32),
                floor=floor, no_xsa=gaps(want, plain))  # fmt: skip
     for k, v in out.items():
         print(k, {a: round(b, 5) for a, b in v.items()})
     for k in ("ref", "graphs", "oracle", "ref32"):
-        assert (
-            out[k]["mean_logit"] < 3 * floor["mean_logit"]
-            and out[k]["mean_abs_ce"] < 3 * floor["mean_abs_ce"]
-        ), k
+        assert out[k]["mean_logit"] < 3 * floor["mean_logit"] and out[k]["mean_abs_ce"] < 3 * floor["mean_abs_ce"], k
     # the bound catches a missing XSA
     assert out["no_xsa"]["mean_logit"] > 3 * floor["mean_logit"]
     dist.destroy_process_group()

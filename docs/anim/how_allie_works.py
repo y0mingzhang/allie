@@ -66,9 +66,7 @@ D = DATA["arch"]
 G, V0, V1, R = D["game"], D["v20"], D["v21"], D["router"]
 E, K = D["experts"], D["topk"]
 SIDE = int(round(E**0.5))
-WPS = (
-    2.6
-)  # caption reading speed: slower than the default, the pictures need watching too
+WPS = 2.6  # caption reading speed: slower than the default, the pictures need watching too
 PALE, BLUE_PALE, GREY = "#E9C3AE", "#BFD0DE", "#A9B0B6"
 LIGHT_SQ, DARK_SQ = "#EFE8DA", "#CDBFA6"
 GLYPH = dict(k="♚", q="♛", r="♜", b="♝", n="♞", p="♟")
@@ -199,12 +197,8 @@ def arrow(a, b, color=RULE, buff=0.08, width=3, tip=0.14):
 
 
 def plus(r=0.22, at=(0, 0, 0)):
-    c = Circle(
-        radius=r, fill_color=OFF, fill_opacity=1, stroke_color=INK2, stroke_width=2.5
-    )
-    p = VGroup(
-        Line(LEFT * r * 0.55, RIGHT * r * 0.55), Line(UP * r * 0.55, DOWN * r * 0.55)
-    ).set_stroke(INK2, 2.5)
+    c = Circle(radius=r, fill_color=OFF, fill_opacity=1, stroke_color=INK2, stroke_width=2.5)
+    p = VGroup(Line(LEFT * r * 0.55, RIGHT * r * 0.55), Line(UP * r * 0.55, DOWN * r * 0.55)).set_stroke(INK2, 2.5)
     return VGroup(c, p).move_to(at)
 
 
@@ -262,10 +256,7 @@ def shade(s):
 
 def light(g, on, edge=OFF_EDGE):
     return [
-        c.animate.set_fill(ORANGE if i in on else OFF).set_stroke(
-            ORANGE if i in on else edge
-        )
-        for i, c in enumerate(g)
+        c.animate.set_fill(ORANGE if i in on else OFF).set_stroke(ORANGE if i in on else edge) for i, c in enumerate(g)
     ]
 
 
@@ -306,13 +297,9 @@ def at(b, square):
 
 def check(ok, s=0.22):
     if ok:
-        m = VMobject().set_points_as_corners(
-            [[-s, 0, 0], [-s / 3, -s * 0.7, 0], [s, s * 0.8, 0]]
-        )
+        m = VMobject().set_points_as_corners([[-s, 0, 0], [-s / 3, -s * 0.7, 0], [s, s * 0.8, 0]])
         return m.set_stroke(BLUE, 6)
-    return VGroup(
-        Line([-s, -s, 0], [s, s, 0]), Line([-s, s, 0], [s, -s, 0])
-    ).set_stroke(ORANGE, 6)
+    return VGroup(Line([-s, -s, 0], [s, s, 0]), Line([-s, s, 0], [s, -s, 0])).set_stroke(ORANGE, 6)
 
 
 def hbars(rows, x0, y0, scale, step=0.62, h=0.38, px=26, fmt=pct, name_px=None):
@@ -329,9 +316,7 @@ def hbars(rows, x0, y0, scale, step=0.62, h=0.38, px=26, fmt=pct, name_px=None):
         ).move_to([x0, y, 0], aligned_edge=LEFT)
         g.add(
             VGroup(
-                mono(name, name_px or px, ncol).move_to(
-                    [x0 - 0.25, y, 0], aligned_edge=RIGHT
-                ),
+                mono(name, name_px or px, ncol).move_to([x0 - 0.25, y, 0], aligned_edge=RIGHT),
                 bar,
                 sans(fmt(v), px - 2, INK2).next_to(bar, RIGHT, buff=0.15),
             )
@@ -362,10 +347,7 @@ class Title(Scene):
             run_time=1.4,
         )
         self.play(
-            *[
-                c.animate.set_fill(shade(s[i])).set_stroke(shade(s[i]))
-                for i, c in enumerate(g)
-            ],
+            *[c.animate.set_fill(shade(s[i])).set_stroke(shade(s[i])) for i, c in enumerate(g)],
             run_time=0.8,
         )
         self.play(
@@ -414,9 +396,7 @@ class Tokens(Scene):
             FadeIn(k),
             FadeIn(card),
             FadeIn(lines, shift=0.1 * DOWN),
-            *cap(
-                "On Lichess, a game is a time control, two ratings and a list of moves."
-            ),
+            *cap("On Lichess, a game is a time control, two ratings and a list of moves."),
             run_time=1.0,
         )
         cap.hold(0.3)
@@ -457,10 +437,7 @@ class Tokens(Scene):
         mbr = bracket(VGroup(*moves), "one token per move", 26, INK)
         self.play(
             *[FadeTransform(s.copy(), m) for s, m in zip(msrc, moves)],
-            *cap(
-                "Then one token per move, from-square to-square: "
-                f"{D['move_tokens']:,} possible moves."
-            ),
+            *cap(f"Then one token per move, from-square to-square: {D['move_tokens']:,} possible moves."),
             run_time=1.1,
         )
         self.play(FadeIn(mbr), run_time=0.5)
@@ -492,17 +469,15 @@ class Tokens(Scene):
         )
         self.play(
             FadeTransform(row, segs[0]),
-            LaggedStart(
-                *[FadeIn(s, shift=0.1 * RIGHT) for s in segs[1:]], lag_ratio=0.15
-            ),
+            LaggedStart(*[FadeIn(s, shift=0.1 * RIGHT) for s in segs[1:]], lag_ratio=0.15),
             FadeIn(rlab),
             run_time=0.9,
         )
         side, top = 3.0, 1.2
         sc = side / width
-        frame = Square(
-            side, stroke_color=RULE, stroke_width=2, fill_color=OFF, fill_opacity=1
-        ).move_to([0, top - side / 2, 0])
+        frame = Square(side, stroke_color=RULE, stroke_width=2, fill_color=OFF, fill_opacity=1).move_to(
+            [0, top - side / 2, 0]
+        )
         mx = -side / 2
         tris = VGroup(
             *[
@@ -530,10 +505,7 @@ class Tokens(Scene):
             FadeIn(frame),
             LaggedStart(*[FadeIn(t) for t in tris], lag_ratio=0.2),
             FadeIn(mlab),
-            *cap(
-                f"Training packs games into rows of {D['row_tokens']:,} tokens; "
-                "attention stays inside each game."
-            ),
+            *cap(f"Training packs games into rows of {D['row_tokens']:,} tokens; attention stays inside each game."),
             run_time=1.4,
         )
         cap.hold(0.4)
@@ -572,9 +544,7 @@ class Inputs(Scene):
             *[
                 Square(
                     0.62,
-                    fill_color=interpolate_color(
-                        ManimColor(BLUE), ManimColor(BG), 0.25 + 0.2 * i
-                    ),
+                    fill_color=interpolate_color(ManimColor(BLUE), ManimColor(BG), 0.25 + 0.2 * i),
                     fill_opacity=1,
                     stroke_color=BG,
                     stroke_width=2,
@@ -584,9 +554,7 @@ class Inputs(Scene):
         )
         cb = D["board"]
         cnn_lab = sans(f"{cb['convs']} conv layers,\n{cb['channels']} channels", 22)
-        cnn = VGroup(maps, cnn_lab.next_to(maps, RIGHT, buff=0.2)).move_to(
-            [xs[1], -0.4, 0]
-        )
+        cnn = VGroup(maps, cnn_lab.next_to(maps, RIGHT, buff=0.2)).move_to([xs[1], -0.4, 0])
         b1 = arrow(bd.get_bottom(), [xs[1], cnn.get_top()[1], 0])
         b2 = arrow([xs[1], cnn.get_bottom()[1], 0], vecs[1].get_top())
         self.play(
@@ -639,9 +607,7 @@ class Inputs(Scene):
                 for i in range(nw)
             ]
         )
-        probe = DashedLine(
-            [x_at, 0.5, 0], [x_at, -0.8, 0], color=ORANGE, stroke_width=3
-        )
+        probe = DashedLine([x_at, 0.5, 0], [x_at, -0.8, 0], color=ORANGE, stroke_width=3)
         dots = VGroup(
             *[
                 Dot(
@@ -661,9 +627,7 @@ class Inputs(Scene):
         self.play(
             FadeIn(titles[2]),
             FadeIn(rows, shift=0.1 * DOWN),
-            *cap(
-                "And the clocks: its time left, the opponent's, and its last think time."
-            ),
+            *cap("And the clocks: its time left, the opponent's, and its last think time."),
             run_time=0.9,
         )
         cap.hold(-0.5)
@@ -681,9 +645,7 @@ class Inputs(Scene):
         p = plus(0.24, [0, -2.5, 0])
         x0 = vec(8, ORANGE, 9).next_to(p, RIGHT, buff=0.5)
         x0lab = sans("one vector per move", 24).next_to(x0, RIGHT, buff=0.25)
-        ins = VGroup(
-            *[arrow(v.get_bottom(), p.get_center(), buff=0.28, width=2.5) for v in vecs]
-        )
+        ins = VGroup(*[arrow(v.get_bottom(), p.get_center(), buff=0.28, width=2.5) for v in vecs])
         self.play(
             Create(ins),
             FadeIn(p),
@@ -734,10 +696,7 @@ class Trunk(Scene):
             FadeIn(k),
             Create(stream),
             LaggedStart(*[FadeIn(b, shift=0.15 * UP) for b in blocks], lag_ratio=0.05),
-            *cap(
-                f"The vectors then pass through {n} transformer blocks, "
-                "each attention followed by an MLP."
-            ),
+            *cap(f"The vectors then pass through {n} transformer blocks, each attention followed by an MLP."),
             run_time=1.6,
         )
         dot = Dot([-6.9, ys, 0], 0.1, color=ORANGE).set_z_index(2)
@@ -770,9 +729,7 @@ class Trunk(Scene):
         )
         self.play(
             FadeIn(toks),
-            *cap(
-                "Attention lets each move look back at every earlier token of its game."
-            ),
+            *cap("Attention lets each move look back at every earlier token of its game."),
             run_time=0.7,
         )
         self.play(
@@ -807,24 +764,18 @@ class Trunk(Scene):
         self.play(
             FadeOut(toks),
             FadeOut(arcs),
-            *[
-                b[1].animate.set_fill(GREY if i in dense else ORANGE)
-                for i, b in enumerate(blocks, 1)
-            ],
+            *[b[1].animate.set_fill(GREY if i in dense else ORANGE) for i, b in enumerate(blocks, 1)],
             FadeIn(legend),
-            *cap(
-                f"In Allie 2.0, block {d} has an ordinary MLP; "
-                f"blocks {d + 1} to {n} use a mixture of experts."
-            ),
+            *cap(f"In Allie 2.0, block {d} has an ordinary MLP; blocks {d + 1} to {n} use a mixture of experts."),
             run_time=0.9,
         )
         cap.hold(-0.3)
 
         skips = VGroup(
             *[
-                ArcBetweenPoints(
-                    [xs[a - 1], yb - 0.5, 0], [xs[b - 1], yb - 0.5, 0], angle=PI * 0.36
-                ).set_stroke(BLUE, 3.5)
+                ArcBetweenPoints([xs[a - 1], yb - 0.5, 0], [xs[b - 1], yb - 0.5, 0], angle=PI * 0.36).set_stroke(
+                    BLUE, 3.5
+                )
                 for a, b in D["skips"]
             ]
         )
@@ -924,10 +875,7 @@ class Experts(Scene):
         self.play(
             *cap(f"The router scores all {E} experts for this move, each on its own."),
             LaggedStart(
-                *[
-                    c.animate.set_fill(shade(s[i])).set_stroke(shade(s[i]))
-                    for i, c in enumerate(g)
-                ],
+                *[c.animate.set_fill(shade(s[i])).set_stroke(shade(s[i])) for i, c in enumerate(g)],
                 lag_ratio=0.004,
             ),
             run_time=1.3,
@@ -964,14 +912,9 @@ class Experts(Scene):
                 ).set_stroke(RULE, 2)
                 for t in range(D["gate_sum"] + 1)
             ],
-            *[
-                sans(str(t), 20, MUTED).move_to([bx + unit * t, by - 0.48, 0])
-                for t in range(D["gate_sum"] + 1)
-            ],
+            *[sans(str(t), 20, MUTED).move_to([bx + unit * t, by - 0.48, 0]) for t in range(D["gate_sum"] + 1)],
         )
-        glab2 = sans(f"{K} gates add up to {D['gate_sum']}", 24, INK).next_to(
-            segs, UP, buff=0.15
-        )
+        glab2 = sans(f"{K} gates add up to {D['gate_sum']}", 24, INK).next_to(segs, UP, buff=0.15)
         ins = [Dot(router.get_center(), 0.06, color=INK2) for _ in range(K)]
         sin = Dot([-3.75, Y, 0], 0.06, color=INK2)
         self.add(*ins, sin)
@@ -982,16 +925,11 @@ class Experts(Scene):
             run_time=0.7,
         )
         self.remove(*ins, sin)
-        outs = [
-            Dot(g[i].get_center(), 0.03 + 0.06 * gt, color=ORANGE)
-            for i, gt in zip(top, gates)
-        ]
+        outs = [Dot(g[i].get_center(), 0.03 + 0.06 * gt, color=ORANGE) for i, gt in zip(top, gates)]
         sout = Dot(sh.get_right(), 0.1, color=BLUE)
         self.add(*outs, sout)
         self.play(
-            *cap(
-                f"Their outputs are weighted by {K} gates that add up to {D['gate_sum']}, then summed."
-            ),
+            *cap(f"Their outputs are weighted by {K} gates that add up to {D['gate_sum']}, then summed."),
             *[d.animate.move_to(merge) for d in outs],
             sout.animate.move_to(merge),
             LaggedStart(*[GrowFromEdge(r, LEFT) for r in segs], lag_ratio=0.08),
@@ -1001,9 +939,7 @@ class Experts(Scene):
         )
         self.remove(*outs, sout)
         out = vec(5, ORANGE, 5, 0.14).move_to(merge)
-        self.play(
-            FadeIn(out, scale=0.5), merge[0].animate.set_stroke(ORANGE), run_time=0.4
-        )
+        self.play(FadeIn(out, scale=0.5), merge[0].animate.set_stroke(ORANGE), run_time=0.4)
         self.play(out.animate.move_to([5.4, Y + 0.3, 0]), run_time=0.6)
         cap.hold(-0.3)
         idle = [c for i, c in enumerate(g) if i not in on]
@@ -1048,9 +984,7 @@ class Heads(Scene):
             .next_to(bd, DOWN, buff=0.2)
         )
         fv = vec(8, ORANGE, 9, 0.19, vertical=True).move_to([-2.75, 0.3, 0])
-        flab = sans(f"after block {D['blocks']}", 20, MUTED).next_to(
-            fv, DOWN, buff=0.15
-        )
+        flab = sans(f"after block {D['blocks']}", 20, MUTED).next_to(fv, DOWN, buff=0.15)
         a0 = arrow(bd.get_right(), fv.get_left(), buff=0.15)
         self.play(
             FadeIn(k),
@@ -1067,16 +1001,11 @@ class Heads(Scene):
             bold(s, 30).move_to([hx, y, 0], aligned_edge=LEFT)
             for s, y in zip(("Next move", "Think time", "Result"), ys)
         ]
-        arrows = VGroup(
-            *[arrow(fv.get_right(), t.get_left(), buff=0.15, width=2.5) for t in titles]
-        )
+        arrows = VGroup(*[arrow(fv.get_right(), t.get_left(), buff=0.15, width=2.5) for t in titles])
 
         ms = o["moves"][:4]
         rows = hbars(
-            [
-                (san, p, ORANGE if j == 0 else PALE, INK)
-                for j, (san, _, p) in enumerate(ms)
-            ],
+            [(san, p, ORANGE if j == 0 else PALE, INK) for j, (san, _, p) in enumerate(ms)],
             0.3,
             ys[0] - 0.55,
             4.6 / ms[0][2],
@@ -1090,9 +1019,7 @@ class Heads(Scene):
             *[FadeIn(r[0]) for r in rows],
             LaggedStart(*[GrowFromEdge(r[1], LEFT) for r in rows], lag_ratio=0.15),
             *[FadeIn(r[2]) for r in rows],
-            *cap(
-                f"The next move: a probability for each of the {D['move_tokens']:,} move tokens."
-            ),
+            *cap(f"The next move: a probability for each of the {D['move_tokens']:,} move tokens."),
             run_time=1.1,
         )
         cap.hold()
@@ -1120,32 +1047,21 @@ class Heads(Scene):
             stroke_color=RULE,
             stroke_width=2,
         )
-        ticks = VGroup(
-            *[
-                sans(f"{t} s", 20, MUTED).move_to([tx(t), base - 0.22, 0])
-                for t in (1, 10, 60)
-            ]
-        )
+        ticks = VGroup(*[sans(f"{t} s", 20, MUTED).move_to([tx(t), base - 0.22, 0]) for t in (1, 10, 60)])
         mean = DashedLine(
             [tx(o["think"]), base, 0],
             [tx(o["think"]), base + 1.2, 0],
             color=ORANGE,
             stroke_width=2.5,
         )
-        mlab = (
-            sans(f"expected {o['think']:.1f} s", 22, ORANGE)
-            .next_to(mean, RIGHT, buff=0.12)
-            .align_to(mean, UP)
-        )
+        mlab = sans(f"expected {o['think']:.1f} s", 22, ORANGE).next_to(mean, RIGHT, buff=0.12).align_to(mean, UP)
         self.play(
             Create(arrows[1]),
             FadeIn(titles[1]),
             Create(axis),
             FadeIn(ticks),
             LaggedStart(*[GrowFromEdge(r, DOWN) for r in hist], lag_ratio=0.01),
-            *cap(
-                f"How long the player will think, in {D['heads']['time_bins']} time bins."
-            ),
+            *cap(f"How long the player will think, in {D['heads']['time_bins']} time bins."),
             run_time=1.1,
         )
         self.play(Create(mean), FadeIn(mlab), run_time=0.5)
@@ -1167,13 +1083,9 @@ class Heads(Scene):
             )
             x += bw * p
         labs = VGroup(
-            sans(f"win {pct(w)}", 22, ORANGE)
-            .next_to(segs[0], DOWN, buff=0.12)
-            .align_to(segs[0], LEFT),
+            sans(f"win {pct(w)}", 22, ORANGE).next_to(segs[0], DOWN, buff=0.12).align_to(segs[0], LEFT),
             sans(f"draw {pct(d)}", 22, INK2).next_to(segs[1], DOWN, buff=0.12),
-            sans(f"loss {pct(l_)}", 22, BLUE)
-            .next_to(segs[2], DOWN, buff=0.12)
-            .align_to(segs[2], RIGHT),
+            sans(f"loss {pct(l_)}", 22, BLUE).next_to(segs[2], DOWN, buff=0.12).align_to(segs[2], RIGHT),
         )
         self.play(
             Create(arrows[2]),
@@ -1186,9 +1098,7 @@ class Heads(Scene):
         cap.hold()
         aux = D["heads"]["aux_weight"]
         self.play(
-            *cap(
-                f"The move is the main training target; think time and result each weigh {aux}."
-            ),
+            *cap(f"The move is the main training target; think time and result each weigh {aux}."),
             run_time=0.6,
         )
         cap.hold()
@@ -1207,21 +1117,15 @@ class Human(Scene):
             FadeIn(k),
             FadeIn(bd),
             FadeIn(line),
-            *cap(
-                "Allie does not hunt for the best move. It predicts what a player would play."
-            ),
+            *cap("Allie does not hunt for the best move. It predicts what a player would play."),
             run_time=1.0,
         )
         cap.hold(-0.3)
         trap = arrow(at(bd, h["trap"][0]), at(bd, h["trap"][1]), BLUE, 0.1, 9, 0.26)
-        threat = arrow(
-            at(bd, h["threat"][0]), at(bd, h["threat"][1]), ORANGE, 0.1, 9, 0.26
-        )
+        threat = arrow(at(bd, h["threat"][0]), at(bd, h["threat"][1]), ORANGE, 0.1, 9, 0.26)
         self.play(
             Create(trap),
-            *cap(
-                f"Here Black can play {h['focus']}, which loses at once to {h['punish']}."
-            ),
+            *cap(f"Here Black can play {h['focus']}, which loses at once to {h['punish']}."),
             run_time=0.8,
         )
         self.play(Create(threat), run_time=0.6)
@@ -1269,9 +1173,7 @@ class Human(Scene):
             anims = [Transform(cur, bars(i)), Transform(num, rnum(i))]
             if i == len(ratings) - 1:
                 fl = pct(ps[i][h["focus"]])
-                anims += cap(
-                    f"At {ratings[i]}, only {fl}: strong players rarely fall for it."
-                )
+                anims += cap(f"At {ratings[i]}, only {fl}: strong players rarely fall for it.")
             self.play(*anims, run_time=0.8)
             self.wait(0.45)
         cap.hold(-0.2)
@@ -1288,41 +1190,26 @@ class Human(Scene):
             (False, "an engine's evaluation"),
         ]
         rows = VGroup(
-            *[
-                VGroup(check(ok, 0.24), sans(s, 38, INK if ok else INK2)).arrange(
-                    RIGHT, buff=0.4
-                )
-                for ok, s in items
-            ]
+            *[VGroup(check(ok, 0.24), sans(s, 38, INK if ok else INK2)).arrange(RIGHT, buff=0.4) for ok, s in items]
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.36)
         head = bold("What Allie learns to predict", 42)
-        VGroup(head, rows).arrange(DOWN, aligned_edge=LEFT, buff=0.5).move_to(
-            [0, 0.3, 0]
-        )
+        VGroup(head, rows).arrange(DOWN, aligned_edge=LEFT, buff=0.5).move_to([0, 0.3, 0])
         self.play(
             FadeIn(head),
-            LaggedStart(
-                *[FadeIn(r, shift=0.15 * RIGHT) for r in rows[:3]], lag_ratio=0.25
-            ),
-            *cap(
-                "Every training target is a human decision: the move, the time taken, the result."
-            ),
+            LaggedStart(*[FadeIn(r, shift=0.15 * RIGHT) for r in rows[:3]], lag_ratio=0.25),
+            *cap("Every training target is a human decision: the move, the time taken, the result."),
             run_time=1.2,
         )
         cap.hold(-0.3)
         eng = f"{D['human']['engine_share']:.0%}"
         self.play(
             FadeIn(rows[3], shift=0.15 * RIGHT),
-            *cap(
-                f"No engine evaluation is ever a target; engine games are under {eng} of the data."
-            ),
+            *cap(f"No engine evaluation is ever a target; engine games are under {eng} of the data."),
             run_time=0.7,
         )
         cap.hold()
         self.play(
-            *cap(
-                "So Allie at rating R plays like a typical R-rated human, mistakes included."
-            ),
+            *cap("So Allie at rating R plays like a typical R-rated human, mistakes included."),
             run_time=0.6,
         )
         cap.hold(0.3)
@@ -1336,14 +1223,8 @@ class Small(Scene):
         k = kicker("7 · why many small experts")
         mlp, ex, shw = V0["mlp"], V0["expert"], V0["shared"]
         W, x0, y = 11.0, -5.5, 2.0
-        dense = Rectangle(
-            width=W, height=0.6, fill_color=GREY, fill_opacity=1, stroke_width=0
-        ).move_to([0, y, 0])
-        dlab = (
-            sans(f"one dense MLP: {mlp:,} hidden units", 28, INK)
-            .next_to(dense, UP, buff=0.2)
-            .align_to(dense, LEFT)
-        )
+        dense = Rectangle(width=W, height=0.6, fill_color=GREY, fill_opacity=1, stroke_width=0).move_to([0, y, 0])
+        dlab = sans(f"one dense MLP: {mlp:,} hidden units", 28, INK).next_to(dense, UP, buff=0.2).align_to(dense, LEFT)
         self.play(
             FadeIn(k),
             GrowFromEdge(dense, LEFT),
@@ -1366,17 +1247,13 @@ class Small(Scene):
                 for j, (a, b) in enumerate(zip(xs, xs[1:]))
             ]
         )
-        lab1 = sans(f"{K} experts × {ex}", 26, ORANGE).next_to(
-            VGroup(*pieces[:K]), DOWN, buff=0.15
-        )
+        lab1 = sans(f"{K} experts × {ex}", 26, ORANGE).next_to(VGroup(*pieces[:K]), DOWN, buff=0.15)
         lab2 = sans(f"shared {shw:,}", 26, BLUE).next_to(pieces[K], DOWN, buff=0.15)
         self.play(
             ReplacementTransform(dense, pieces),
             FadeIn(lab1),
             FadeIn(lab2),
-            *cap(
-                f"A move uses {K} experts of {ex} plus a shared one of {shw:,}: the same {mlp:,}."
-            ),
+            *cap(f"A move uses {K} experts of {ex} plus a shared one of {shw:,}: the same {mlp:,}."),
             run_time=1.0,
         )
         cap.hold()
@@ -1398,29 +1275,21 @@ class Small(Scene):
         store.move_to([x0 + store.width / 2, -1.0, 0])
         _, top, _ = route(8)
         times = E * ex // mlp
-        slab = sans(f"stored: {E} experts,\n{times}× the dense MLP", 28, INK).next_to(
-            store, RIGHT, buff=0.45
-        )
+        slab = sans(f"stored: {E} experts,\n{times}× the dense MLP", 28, INK).next_to(store, RIGHT, buff=0.45)
         self.play(
             FadeIn(store),
             FadeIn(slab),
-            *cap(
-                f"But each layer stores {E} experts, {times}× the weights, and each move picks {K}."
-            ),
+            *cap(f"But each layer stores {E} experts, {times}× the weights, and each move picks {K}."),
             run_time=0.9,
         )
-        picked = VGroup(
-            *[store[i].copy().set_fill(ORANGE).set_stroke(ORANGE) for i in top]
-        )
+        picked = VGroup(*[store[i].copy().set_fill(ORANGE).set_stroke(ORANGE) for i in top])
         self.play(
             *[TransformFromCopy(pieces[j], p) for j, p in enumerate(picked)],
             run_time=0.9,
         )
         cap.hold()
 
-        self.play(
-            FadeOut(VGroup(pieces, lab1, lab2, dlab, store, picked, slab)), run_time=0.5
-        )
+        self.play(FadeOut(VGroup(pieces, lab1, lab2, dlab, store, picked, slab)), run_time=0.5)
         wy = D["why"]
         rows = [
             (f"Allie: {E} small experts", 1.0, 1.0, ORANGE),
@@ -1428,9 +1297,7 @@ class Small(Scene):
             ("dense transformer", *wy["dense"], GREY),
         ]
         bx, scale = -0.9, 2.5
-        title = bold("training compute needed for the same loss", 30).move_to(
-            [0, 2.5, 0]
-        )
+        title = bold("training compute needed for the same loss", 30).move_to([0, 2.5, 0])
         axis = Line(
             [bx, -1.55, 0],
             [bx + scale * 2.8, -1.55, 0],
@@ -1440,9 +1307,7 @@ class Small(Scene):
         tks = VGroup(
             *[
                 VGroup(
-                    Line(
-                        [bx + scale * t, -1.55, 0], [bx + scale * t, -1.65, 0]
-                    ).set_stroke(RULE, 2),
+                    Line([bx + scale * t, -1.55, 0], [bx + scale * t, -1.65, 0]).set_stroke(RULE, 2),
                     sans(f"{t}×", 22, MUTED).move_to([bx + scale * t, -1.88, 0]),
                 )
                 for t in (1, 2)
@@ -1462,16 +1327,10 @@ class Small(Scene):
             g = VGroup(
                 sans(name, 26, INK).move_to([bx - 0.3, yy, 0], aligned_edge=RIGHT),
                 bar,
-                sans(rng, 24, INK2).move_to(
-                    [bx + scale * hi + 0.2, yy, 0], aligned_edge=LEFT
-                ),
+                sans(rng, 24, INK2).move_to([bx + scale * hi + 0.2, yy, 0], aligned_edge=LEFT),
             )
             if hi > lo:
-                g.add(
-                    Line([bx + scale * lo, yy, 0], [bx + scale * hi, yy, 0]).set_stroke(
-                        INK, 3
-                    )
-                )
+                g.add(Line([bx + scale * lo, yy, 0], [bx + scale * hi, yy, 0]).set_stroke(INK, 3))
             bars.add(g)
         self.play(
             FadeIn(title),
@@ -1486,9 +1345,7 @@ class Small(Scene):
             FadeIn(bars[1][0]),
             GrowFromEdge(bars[1][1], LEFT),
             FadeIn(bars[1][2:]),
-            *cap(
-                f"Experts twice the size, half as many: {wy['fine'][0]:.2f}–{wy['fine'][1]:.2f}× the compute."
-            ),
+            *cap(f"Experts twice the size, half as many: {wy['fine'][0]:.2f}–{wy['fine'][1]:.2f}× the compute."),
             run_time=0.9,
         )
         cap.hold(-0.3)
@@ -1496,9 +1353,7 @@ class Small(Scene):
             FadeIn(bars[2][0]),
             GrowFromEdge(bars[2][1], LEFT),
             FadeIn(bars[2][2:]),
-            *cap(
-                f"A dense transformer: {wy['dense'][0]:.2f}–{wy['dense'][1]:.2f}× the compute."
-            ),
+            *cap(f"A dense transformer: {wy['dense'][0]:.2f}–{wy['dense'][1]:.2f}× the compute."),
             run_time=0.9,
         )
         cap.hold(0.3)
@@ -1511,12 +1366,7 @@ class Router(Scene):
         cap = Captions(self, wps=WPS)
         k = kicker("8 · keeping the router healthy")
         steps = (
-            VGroup(
-                *[
-                    sans(s, 26, MUTED)
-                    for s in ("1 · collapse", "2 · overflow", "3 · built in")
-                ]
-            )
+            VGroup(*[sans(s, 26, MUTED) for s in ("1 · collapse", "2 · overflow", "3 · built in")])
             .arrange(RIGHT, buff=0.9, aligned_edge=UP)
             .move_to([2.4, 3.5, 0])
         )
@@ -1530,27 +1380,19 @@ class Router(Scene):
             FadeIn(k),
             FadeIn(steps),
             FadeIn(g),
-            *cap(
-                "Each expert should get a fair share of moves. Routers can break that."
-            ),
+            *cap("Each expert should get a fair share of moves. Routers can break that."),
             run_time=0.9,
         )
         cap.hold(-0.4)
 
         self.play(steps[0].animate.set_color(ORANGE), run_time=0.3)
         n = ValueTracker(0)
-        cnt = always_redraw(
-            lambda: bold(f"{int(round(n.get_value()))}", 96, ORANGE).move_to(
-                [3.4, 0.55, 0]
-            )
-        )
+        cnt = always_redraw(lambda: bold(f"{int(round(n.get_value()))}", 96, ORANGE).move_to([3.4, 0.55, 0]))
         clab = sans(f"of {E} experts starved", 30).move_to([3.4, -0.45, 0])
         self.add(cnt)
         self.play(
             FadeIn(clab),
-            *cap(
-                "In the first attempt, the first router's input became nearly constant."
-            ),
+            *cap("In the first attempt, the first router's input became nearly constant."),
             run_time=0.7,
         )
         cap.hold(-0.6)
@@ -1561,9 +1403,7 @@ class Router(Scene):
                 *[g[i].animate.set_fill(BG).set_stroke(RULE, 1) for i in dead],
                 lag_ratio=0.01,
             ),
-            *cap(
-                f"Its scores froze, and {R['starved']} of {E} experts got no moves at all."
-            ),
+            *cap(f"Its scores froze, and {R['starved']} of {E} experts got no moves at all."),
             run_time=2.2,
         )
         cap.hold(-0.3)
@@ -1574,9 +1414,7 @@ class Router(Scene):
                 *[g[i].animate.set_fill(busy[i]).set_stroke(OFF_EDGE, 1) for i in dead],
                 lag_ratio=0.01,
             ),
-            *cap(
-                "Fix: centre the router's input with a running mean, and step its optimizer every step."
-            ),
+            *cap("Fix: centre the router's input with a running mean, and step its optimizer every step."),
             run_time=1.6,
         )
         after = bold(f"{lo}–{hi}", 96, BLUE).move_to([3.4, 0.55, 0])
@@ -1591,15 +1429,9 @@ class Router(Scene):
             steps[1].animate.set_color(ORANGE),
             run_time=0.5,
         )
-        f1 = text(f"gate = {D['gate_sum']} · s / Σs", 52, INK, markup=True).move_to(
-            [0, 1.3, 0]
-        )
-        tiny = text(f"Σs = {sci(R['overflow_sum'])}", 44, ORANGE, markup=True).move_to(
-            [0, 0.0, 0]
-        )
-        boom = sans("the backward pass overflows", 32, ORANGE).next_to(
-            tiny, DOWN, buff=0.35
-        )
+        f1 = text(f"gate = {D['gate_sum']} · s / Σs", 52, INK, markup=True).move_to([0, 1.3, 0])
+        tiny = text(f"Σs = {sci(R['overflow_sum'])}", 44, ORANGE, markup=True).move_to([0, 0.0, 0])
+        boom = sans("the backward pass overflows", 32, ORANGE).next_to(tiny, DOWN, buff=0.35)
         self.play(
             FadeIn(f1),
             *cap(f"Each gate divides a score s by the sum of the {K} chosen scores."),
@@ -1608,9 +1440,7 @@ class Router(Scene):
         cap.hold(-0.4)
         self.play(
             FadeIn(tiny, shift=0.2 * DOWN),
-            *cap(
-                f"At step {R['overflow_step']:,}, one move's sum was {sci(R['overflow_sum'])}."
-            ),
+            *cap(f"At step {R['overflow_step']:,}, one move's sum was {sci(R['overflow_sum'])}."),
             run_time=0.8,
         )
         self.play(FadeIn(boom), Indicate(tiny, color=ORANGE), run_time=0.6)
@@ -1626,23 +1456,17 @@ class Router(Scene):
             TransformMatchingShapes(f1, f2),
             FadeOut(boom),
             FadeOut(tiny),
-            *cap(
-                f"Fix: floor the sum at {sci(R['floor'])}. Only {share} of that layer's tokens change."
-            ),
+            *cap(f"Fix: floor the sum at {sci(R['floor'])}. Only {share} of that layer's tokens change."),
             run_time=1.0,
         )
         cap.hold()
 
-        f3 = text(
-            f"gate = {D['gate_sum']} · softmax(log s)", 52, INK, markup=True
-        ).move_to(f1)
+        f3 = text(f"gate = {D['gate_sum']} · softmax(log s)", 52, INK, markup=True).move_to(f1)
         self.play(
             steps[1].animate.set_color(MUTED),
             steps[2].animate.set_color(ORANGE),
             TransformMatchingShapes(f2, f3),
-            *cap(
-                "Allie 2.1 computes the same gates in log space, with no division at all."
-            ),
+            *cap("Allie 2.1 computes the same gates in log space, with no division at all."),
             run_time=1.0,
         )
         cap.hold(-0.4)
@@ -1669,9 +1493,7 @@ class Router(Scene):
         self.play(
             LaggedStart(*[FadeIn(b, shift=0.1 * UP) for b in strip], lag_ratio=0.03),
             FadeIn(slab),
-            *cap(
-                f"And its first {len(d21)} blocks are dense, so the most fragile routers are gone."
-            ),
+            *cap(f"And its first {len(d21)} blocks are dense, so the most fragile routers are gone."),
             run_time=1.0,
         )
         cap.hold()
@@ -1691,9 +1513,9 @@ class Params(Scene):
             stroke_color=RULE,
             stroke_width=2,
         ).move_to([-3.6, 0.0, 0])
-        act = Square(
-            s * V0["active"] ** 0.5, fill_color=ORANGE, fill_opacity=1, stroke_width=0
-        ).align_to(big, DOWN + LEFT)
+        act = Square(s * V0["active"] ** 0.5, fill_color=ORANGE, fill_opacity=1, stroke_width=0).align_to(
+            big, DOWN + LEFT
+        )
         tl = (
             VGroup(bold(f"{V0['total']}B", 48, INK), sans("parameters stored", 26))
             .arrange(DOWN, buff=0.08)
@@ -1715,9 +1537,7 @@ class Params(Scene):
         self.play(
             GrowFromEdge(act, DOWN + LEFT),
             FadeIn(al),
-            *cap(
-                f"Each move uses only {V0['active']} billion, since it runs just {K} experts per block."
-            ),
+            *cap(f"Each move uses only {V0['active']} billion, since it runs just {K} experts per block."),
             run_time=0.9,
         )
         cap.hold()
@@ -1728,9 +1548,7 @@ class Params(Scene):
             (D["maia3"]["name"], D["maia3"]["gflops"], BLUE_PALE),
         ]
         bx, sc = 0.9, 5.2 / D["maia3"]["gflops"]
-        ttl = bold("compute per move, GFLOPs", 30).move_to(
-            [bx, 2.0, 0], aligned_edge=LEFT
-        )
+        ttl = bold("compute per move, GFLOPs", 30).move_to([bx, 2.0, 0], aligned_edge=LEFT)
         bars = VGroup()
         for j, (name, gf, col) in enumerate(rows):
             yy = 0.95 - 1.05 * j
@@ -1753,17 +1571,13 @@ class Params(Scene):
             *[FadeIn(b[0]) for b in bars],
             *[GrowFromEdge(b[1], LEFT) for b in bars],
             *[FadeIn(b[2]) for b in bars],
-            *cap(
-                f"So a move costs {V0['gflops']} GFLOPs, against {D['maia3']['gflops']} for {D['maia3']['name']}."
-            ),
+            *cap(f"So a move costs {V0['gflops']} GFLOPs, against {D['maia3']['gflops']} for {D['maia3']['name']}."),
             run_time=1.1,
         )
         cap.hold()
         ms = D["cpu_ms"]
         self.play(
-            *cap(
-                f"A move reads only {D['int8_gb']} GB of int8 weights: {ms[0]}–{ms[1]} ms on a server CPU."
-            ),
+            *cap(f"A move reads only {D['int8_gb']} GB of int8 weights: {ms[0]}–{ms[1]} ms on a server CPU."),
             run_time=0.6,
         )
         cap.hold()
@@ -1779,9 +1593,7 @@ class Next(Scene):
         sq, x = [], -6.5
         for v in (V0, V1):
             side = s * v["total"] ** 0.5
-            big = Square(
-                side, fill_color=OFF, fill_opacity=1, stroke_color=RULE, stroke_width=2
-            )
+            big = Square(side, fill_color=OFF, fill_opacity=1, stroke_color=RULE, stroke_width=2)
             big.move_to([x + side / 2, base + side / 2, 0])
             act = Square(
                 s * v["active"] ** 0.5,
@@ -1797,10 +1609,7 @@ class Next(Scene):
             lab.next_to(big, DOWN, buff=0.15)
             sq.append(VGroup(big, act, lab))
             x += side + 0.5
-        heads = [
-            bold(n, 32).next_to(q[0], UP, buff=0.2)
-            for n, q in zip(("Allie 2.0", "Allie 2.1"), sq)
-        ]
+        heads = [bold(n, 32).next_to(q[0], UP, buff=0.2) for n, q in zip(("Allie 2.0", "Allie 2.1"), sq)]
 
         def blocks(v):
             d = v["dense"]
@@ -1825,9 +1634,7 @@ class Next(Scene):
                     sans(name, 28).move_to([cx[0], yy, 0], aligned_edge=LEFT),
                     mono(a, 30, INK2).move_to([cx[1], yy, 0]),
                     mono(b, 30, INK).move_to([cx[2], yy, 0]),
-                    Line([cx[0], yy - 0.37, 0], [cx[2] + 0.8, yy - 0.37, 0]).set_stroke(
-                        OFF_EDGE, 1.5
-                    ),
+                    Line([cx[0], yy - 0.37, 0], [cx[2] + 0.8, yy - 0.37, 0]).set_stroke(OFF_EDGE, 1.5),
                 )
             )
         self.play(
@@ -1855,9 +1662,7 @@ class Next(Scene):
         )
         cap.hold()
         self.play(
-            *cap(
-                f"Allie 2.1 has been {V1['status']}, with the router guards built in."
-            ),
+            *cap(f"Allie 2.1 has been {V1['status']}, with the router guards built in."),
             run_time=0.6,
         )
         cap.hold()
@@ -1869,9 +1674,7 @@ class Next(Scene):
             mono("huggingface.co/yimingzhang/allie-2.0", 32, INK2),
             mono("lichess.org/@/AllieTheChessBot", 32, ORANGE),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.24)
-        VGroup(name, links).arrange(DOWN, aligned_edge=LEFT, buff=0.5).move_to(
-            [0, 0.3, 0]
-        )
+        VGroup(name, links).arrange(DOWN, aligned_edge=LEFT, buff=0.5).move_to([0, 0.3, 0])
         self.play(
             FadeIn(name, shift=0.2 * UP),
             LaggedStart(*[FadeIn(m) for m in links], lag_ratio=0.2),

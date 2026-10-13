@@ -73,9 +73,7 @@ def main():
     t0 = time.monotonic()
     oracle = Capture(moe_oracle(a.moe, a.source, a.slots))
     print(f"startup {time.monotonic() - t0:.0f}s", flush=True)
-    engine = adapter.Bench(
-        oracle, batch_size=128, threads=min(8, len(os.sched_getaffinity(0)))
-    )
+    engine = adapter.Bench(oracle, batch_size=128, threads=min(8, len(os.sched_getaffinity(0))))
     for budget in a.budgets.split(","):
         b = budget if budget in ("legal", "adaptive") else int(budget)
         folder = out / budget
@@ -93,9 +91,7 @@ def main():
             dt = time.monotonic() - t
             hit = [r["tokens"].index(P[i]["target"]) for r, i in zip(res, part)]
             prob = np.array([r["probabilities"][h] for r, h in zip(res, hit)])
-            top1 = np.array(
-                [int(np.argmax(r["probabilities"])) == h for r, h in zip(res, hit)]
-            )
+            top1 = np.array([int(np.argmax(r["probabilities"])) == h for r, h in zip(res, hit)])
             cat = lambda k: np.concatenate([r[k] for r in res])
             tmp = dst.with_suffix(".partial.npz")
             np.savez(

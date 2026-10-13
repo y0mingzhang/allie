@@ -28,9 +28,7 @@ from moe_gate_floor import saturated
 
 
 def old_arch(rev):
-    src = subprocess.check_output(
-        ["git", "-C", Path(__file__).parent, "show", f"{rev}:scripts/modded_arch.py"]
-    )
+    src = subprocess.check_output(["git", "-C", Path(__file__).parent, "show", f"{rev}:scripts/modded_arch.py"])
     path = Path(tempfile.mkdtemp()) / "ref_arch.py"
     path.write_bytes(src)
     spec = importlib.util.spec_from_file_location("ref_arch", path)
@@ -73,13 +71,8 @@ def main():
     dist.init_process_group("gloo", rank=0, world_size=1)
     moe_kernels.routed = routed_ref
     gen = torch.Generator().manual_seed(0)
-    xs = [
-        (torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16)
-        for _ in range(3)
-    ]
-    dys = [
-        torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16) for _ in range(3)
-    ]
+    xs = [(torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16) for _ in range(3)]
+    dys = [torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16) for _ in range(3)]
 
     ref = reference(rev)
     kw = dict(seq=1e-3, center=0.9, gate_floor=1e-12)
@@ -92,10 +85,7 @@ def main():
     off &= same(old.state_dict(), new.state_dict())
     ra, shapes = old_arch(rev), [(8, 512), (24, 1536), (32, 2048)]
     s16 = dict(moe=[256, 16], moe_shared_frac=0.25, moe_round=16, moe_update="quantile")
-    flops = all(
-        ra.extra_flops(s16, d, L) == model_arch.extra_flops(s16, d, L)
-        for L, d in shapes
-    )
+    flops = all(ra.extra_flops(s16, d, L) == model_arch.extra_flops(s16, d, L) for L, d in shapes)
     flops &= ra.extra_flops({}, 512, 8) == model_arch.extra_flops({}, 512, 8)
     print(f"off: bitwise {rev}'s MoE over 3 steps: {off}; extra_flops equal: {flops}")
 
@@ -103,17 +93,11 @@ def main():
     dense = 2 * (3 * 2048 * model_arch.swiglu_hidden(2048) - 8 * 2048 * 2048)
     _, k, routed, shared, *_ = model_arch.moe_dims(2048, s16)
     layer = 2 * 2048 * 256 + 2 * (3 * 2048 * (shared + k * routed) - 8 * 2048 * 2048)
-    moved = model_arch.extra_flops(a3, 2048, 32) - model_arch.extra_flops(
-        s16, 2048, 32
-    ) == 2 * (dense - layer)
-    carried = mm.MoE(
-        D, *model_arch.moe_dims(1536, s16 | dict(moe_log_gates=True))
-    ).log_gates
+    moved = model_arch.extra_flops(a3, 2048, 32) - model_arch.extra_flops(s16, 2048, 32) == 2 * (dense - layer)
+    carried = mm.MoE(D, *model_arch.moe_dims(1536, s16 | dict(moe_log_gates=True))).log_gates
     guards = refused(dict(moe_log_gates=True, moe_score="sqrtsoftplus"))
     guards &= refused(dict(moe_dense_first=0)) and refused(dict(moe_dense_first=2.0))
-    print(
-        f"dense_first 3 moves 2 layers' FLOPs: {moved}; moe_dims carries log_gates: {carried}; guards: {guards}"
-    )
+    print(f"dense_first 3 moves 2 layers' FLOPs: {moved}; moe_dims carries log_gates: {carried}; guards: {guards}")
 
     router = 0.3 * torch.randn(E, D, generator=gen)
     x = (torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16)
@@ -126,9 +110,7 @@ def main():
     wp = s * (K**0.5 / s.sum(-1, keepdim=True))
     wl = K**0.5 * torch.softmax(torch.nn.functional.logsigmoid(z.gather(1, idx)), -1)
     gate = rel(wl, wp)
-    print(
-        f"log vs plain, ordinary tokens: FP32 gates {gate:.1e}, BF16 outputs / grads {err:.1e} (relative)"
-    )
+    print(f"log vs plain, ordinary tokens: FP32 gates {gate:.1e}, BF16 outputs / grads {err:.1e} (relative)")
 
     router, xs = saturated(gen)
     dy = torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16)
@@ -138,17 +120,7 @@ def main():
     plain, logs = fin(y0, gx0, *g0.values()), fin(y1, gx1, *g1.values())
     print(f"saturated tokens: plain finite {plain}, log gates finite {logs}")
 
-    ok = (
-        off
-        and flops
-        and moved
-        and carried
-        and guards
-        and gate < 1e-6
-        and err < 1e-3
-        and not plain
-        and logs
-    )
+    ok = off and flops and moved and carried and guards and gate < 1e-6 and err < 1e-3 and not plain and logs
     dist.destroy_process_group()
     print("PASS" if ok else "FAIL")
     sys.exit(not ok)

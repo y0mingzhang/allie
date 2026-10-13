@@ -48,9 +48,7 @@ class Model:
         self.calls.append((system, messages))
         self.gate.wait(10)
         out = json.dumps({"speak": bool(self.text), "text": self.text})
-        return Reply(
-            [{"type": "text", "text": out}], bool(self.text), self.text, 0.1, 0.2, 0.001
-        )
+        return Reply([{"type": "text", "text": out}], bool(self.text), self.text, 0.1, 0.2, 0.001)
 
     def turn(self, i=-1):
         return self.calls[i][1][-1]["content"]
@@ -153,10 +151,7 @@ def test_conversation(engine):
     assert "CASUAL" in system[1]["text"] and "Opp (1500)" in system[1]["text"]
     turn = m.turn()
     assert "1. e4 them" in turn and "| you expected " in turn and "| feel " in turn
-    assert (
-        re.search(r"1\.\.\. e5 you \d+s \| feel", turn) is not None
-        and 'Chat (player) Opp: "hi gl"' in turn
-    )
+    assert re.search(r"1\.\.\. e5 you \d+s \| feel", turn) is not None and 'Chat (player) Opp: "hi gl"' in turn
     assert "Now (ply 2): them to move." in turn and "Opening: King's Pawn Game" in turn
     assert "FEN: rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2" in turn
     assert "the fixed greeting" in turn
@@ -182,9 +177,7 @@ def test_moments_draw_resign(engine):
     g.feed(state(" ".join(moves), **{them: True}), state(" ".join(moves)))
     assert len(m.calls) == 2
     turn = m.turn()
-    assert (
-        "Event: they offer a draw." in turn and "you declined their draw offer" in turn
-    )
+    assert "Event: they offer a draw." in turn and "you declined their draw offer" in turn
     assert "1. e4 them" in m.turn(0)  # the waiting updates
     g.feed(state(" ".join(moves + ["d2d3"]), status="resign", winner="black"))
     assert len(m.calls) == 3
@@ -204,17 +197,13 @@ def script(c, feel):
     """Allie's views from a script: feel(ply) -> our expected score; uniform moves."""
 
     def see(moves, w, b):
-        c.game.update(
-            moves, None if w is None else w / 1000, None if b is None else b / 1000
-        )
+        c.game.update(moves, None if w is None else w / 1000, None if b is None else b / 1000)
         board = chess.Board()
         for u in moves:
             board.push_uci(u)
         legal = [m.uci() for m in board.legal_moves]
         e = feel(len(moves))
-        c.views[len(moves)] = chat.View(
-            dict.fromkeys(legal, 1 / len(legal)), (e, 0.0, 1 - e), 5.0
-        )
+        c.views[len(moves)] = chat.View(dict.fromkeys(legal, 1 / len(legal)), (e, 0.0, 1 - e), 5.0)
 
     c.see = see
 
@@ -255,9 +244,7 @@ def test_reciprocity(engine, caplog):
     q = Game(engine, opp="shy2", hello="", quiet_p_moment=0, p_end=0, min_plies=0)
     q.chatter(Model("x"))
     q.feed(q.full(), state("e2e4 e7e5", status="resign", winner="black"), q.say("gg"))
-    assert q.posts == [
-        ("player", chat.GG)
-    ]  # nothing said after the game: the fixed reply
+    assert q.posts == [("player", chat.GG)]  # nothing said after the game: the fixed reply
     d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=1, every=0)
     c = d.chatter(Model("hey"))
     c.allowed = ([], ["endgame"])
@@ -359,9 +346,7 @@ def test_one_goodbye(engine):
     """A finish remark queued when their gg arrives in the same batch: the fixed reply
     goes out and the remark is dropped, so the bot says goodbye once."""
     m = Model("A line.")
-    g = Game(
-        engine, opp="bye", hello="", quiet_p_moment=1, p_end=1, min_plies=2, linger=5
-    )
+    g = Game(engine, opp="bye", hello="", quiet_p_moment=1, p_end=1, min_plies=2, linger=5)
     c = g.chatter(m)
     g.feed(g.full(), state("e2e4"), state("e2e4 e7e5"))
     m.gate.clear()
@@ -375,9 +360,7 @@ def test_one_goodbye(engine):
 
 def test_long_goodbye_posts_whole(engine):
     """A closing line over one chat line is posted in both its parts."""
-    text = (
-        "Thanks for the game, that was a hard fight all the way. " * 3 + "See you soon."
-    )
+    text = "Thanks for the game, that was a hard fight all the way. " * 3 + "See you soon."
     g = Game(engine, opp="long", hello="", p_end=1, min_plies=2, linger=5)
     g.chatter(Model(text))
     g.feed(g.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
@@ -463,9 +446,7 @@ def test_recent_lines(engine, tmp_path):
     )
     g.feed(g.full())
     for k, _ in enumerate(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"]):
-        g.feed(
-            state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"][: k + 1]))
-        )
+        g.feed(state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"][: k + 1])))
     read = lambda: json.loads(pathlib.Path(path).read_text())
     wait(lambda: os.path.exists(path) and read() == ["A line to remember."])
     chat.RECENTS.clear()  # a new process: seeded from the file
@@ -684,25 +665,19 @@ class FakeAPI:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                api.requests.append(
-                    ({k.lower(): v for k, v in self.headers.items()}, body)
-                )
+                api.requests.append(({k.lower(): v for k, v in self.headers.items()}, body))
                 step = api.script.pop(0)
                 stall = 0
                 if isinstance(step, tuple) and step[0] == "sleep":
                     time.sleep(step[1])
                     step = {"speak": False, "text": ""}
-                elif (
-                    isinstance(step, tuple) and step[0] == "slow"
-                ):  # late headers, slow body
+                elif isinstance(step, tuple) and step[0] == "slow":  # late headers, slow body
                     time.sleep(step[1])
                     stall, step = step[1] / 6, {"speak": True, "text": "Late reply"}
                 elif isinstance(step, tuple):  # ("stall", s): stall after message_start
                     stall, step = step[1], {"speak": False, "text": ""}
                 if isinstance(step, int):
-                    data = json.dumps(
-                        {"type": "error", "error": {"type": "x", "message": "no"}}
-                    )
+                    data = json.dumps({"type": "error", "error": {"type": "x", "message": "no"}})
                     self.send_response(step)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(data)))
@@ -730,9 +705,7 @@ class FakeAPI:
                      "stop_sequence": None}, "usage": {"output_tokens": 12}},
                     {"type": "message_stop"},
                 ):  # fmt: skip
-                    self.wfile.write(
-                        f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode()
-                    )
+                    self.wfile.write(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode())
                     self.wfile.flush()
                     time.sleep(stall)
 
@@ -760,9 +733,7 @@ def test_claude(monkeypatch, tmp_path):
     key.chmod(0o600)
     cfg = Chat(enabled=True, timeout=1.0, key_file=str(key), ledger=str(ledger))
     m = llm.make(cfg)
-    system = [
-        {"type": "text", "text": "persona", "cache_control": {"type": "ephemeral"}}
-    ]
+    system = [{"type": "text", "text": "persona", "cache_control": {"type": "ephemeral"}}]
     r = m(system, [{"role": "user", "content": "update"}])
     assert r.speak and r.text == "Nice move!" and r.first <= r.seconds
     headers, body = api.requests[0]
@@ -782,20 +753,14 @@ def test_claude(monkeypatch, tmp_path):
     assert m(system, [{"role": "user", "content": "u"}]) is None  # timeout
     assert time.monotonic() - start < 1.4
     start = time.monotonic()
-    assert (
-        m(system, [{"role": "user", "content": "u"}]) is None
-    )  # stalled after starting
+    assert m(system, [{"role": "user", "content": "u"}]) is None  # stalled after starting
     assert time.monotonic() - start < 1.4  # the total deadline
-    partial = (
-        300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + 300) * 10
-    ) / 1e6  # + all it could write
+    partial = (300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + 300) * 10) / 1e6  # + all it could write
     m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] == pytest.approx(usd + partial)
     before = json.loads(ledger.read_text())[day]
     start = time.monotonic()
-    assert (
-        m(system, [{"role": "user", "content": "u"}]) is None
-    )  # over the total deadline
+    assert m(system, [{"role": "user", "content": "u"}]) is None  # over the total deadline
     assert time.monotonic() - start < 1.4
     m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] > before  # still charged
@@ -810,9 +775,7 @@ def test_config(tmp_path):
     from allie.lichess.config import load
 
     p = tmp_path / "bot.toml"
-    p.write_text(
-        '[chat]\nenabled = true\nrooms = ["player", "spectator"]\np_moment = 0.2\n'
-    )
+    p.write_text('[chat]\nenabled = true\nrooms = ["player", "spectator"]\np_moment = 0.2\n')
     c = load(p)
     assert c.chat.enabled and "spectator" in c.chat.rooms and c.chat.p_moment == 0.2
     p.write_text("[chat]\nstockfish = 'x'\n")
@@ -872,9 +835,7 @@ def test_ledger_survives_an_outage(tmp_path, caplog, monkeypatch):
     monkeypatch.setattr("builtins.open", broken)
     start = time.monotonic()
     assert a.add(0.2) == pytest.approx([0.3, 0.3]) and a.allows()
-    assert (
-        a.add(0.8) == pytest.approx([1.1, 1.1]) and not a.allows()
-    )  # the cap, in memory
+    assert a.add(0.8) == pytest.approx([1.1, 1.1]) and not a.allows()  # the cap, in memory
     assert time.monotonic() - start < 0.1  # nothing waited on the file
     time.sleep(0.6)  # a few failed writes
     monkeypatch.setattr("builtins.open", real)

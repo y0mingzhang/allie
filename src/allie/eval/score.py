@@ -36,7 +36,7 @@ REVISION = "20a899ddf344ccaea74e273509a60e5a511125f8"
 EQUIVALENT = {
     "3efce06d87e5e5fb22e2d6e79bbc52ab7386b5a3af9923a4eafcbbc42995b944": (
         "Allie 2.0",
-        "ae590a9f8f8ba67dc8a44b36f9d67f93c3407618e27e5053b1e6f1ca0450a1ca",
+        "3b853cf05c8193ed133721877b86287e969eb138e7c5e89e472978da2aab54b5",
     ),
 }
 
@@ -77,8 +77,7 @@ def training_code(state, source=None):
     source = Path(source).resolve()
     for name, expected in recorded.items():
         assert (source / name).exists() and sha(source / name) == expected, (
-            f"{source / name} is not the code this checkpoint was trained with: "
-            "pass its run's frozen source"
+            f"{source / name} is not the code this checkpoint was trained with: pass its run's frozen source"
         )
     sys.path.insert(0, str(source))
     import lm_data
@@ -120,14 +119,9 @@ def main():
     cfg = Config(**state["config"])
     model = create_model(cfg)
     dropped = [k for k in ("use_clock", "use_elo") if getattr(model, k, False)]
-    assert not dropped, (
-        f"checkpoint uses the dropped {dropped} inputs: score it with its study's "
-        "evaluator-ours copy"
-    )
+    assert not dropped, f"checkpoint uses the dropped {dropped} inputs: score it with its study's evaluator-ours copy"
     # an N-GPU checkpoint pads the scalars; keep that shape for strict loading
-    model.scalars.data = state["model"]["scalars"].to(
-        device="cuda", dtype=model.scalars.dtype
-    )
+    model.scalars.data = state["model"]["scalars"].to(device="cuda", dtype=model.scalars.dtype)
     model.load_state_dict(state["model"])
     inference = state["inference"]
     model.split_embed = inference["split_embed"]
@@ -137,9 +131,7 @@ def main():
     model.eval()
     print(json.dumps(dict(phase="model_restored", step=state["step"])), flush=True)
     net = torch.compile(model, dynamic=False, fullgraph=True)
-    schedule = core.ForwardScheduleConfig(
-        None, inference["ws_short"], inference["ws_long"]
-    )
+    schedule = core.ForwardScheduleConfig(None, inference["ws_short"], inference["ws_long"])
     batch = min(a.batch, cfg.max_tokens // 1024)
     assert batch > 0
     feats = getattr(model, "use_feats", False)
@@ -204,10 +196,7 @@ def main():
 
         def add(acc, lab, loss):
             acc[:, 0] += (
-                torch.zeros(k, device="cuda", dtype=torch.float64)
-                .index_add_(0, lab, loss.double())
-                .cpu()
-                .numpy()
+                torch.zeros(k, device="cuda", dtype=torch.float64).index_add_(0, lab, loss.double()).cpu().numpy()
             )
             acc[:, 1] += torch.bincount(lab, minlength=k).cpu().numpy()
 
@@ -226,14 +215,10 @@ def main():
                 .cpu()
                 .numpy()
             )
-            row_n[lo : lo + n] = (
-                torch.bincount(flat, minlength=n * k).view(n, k).cpu().numpy()
-            )
+            row_n[lo : lo + n] = torch.bincount(flat, minlength=n * k).view(n, k).cpu().numpy()
             tt = keep & torch.as_tensor(tt_all[lo : lo + batch], device="cuda")
             add(tsums, lab[tt], loss[tt])
-        assert (
-            np.isfinite(sums).all() and (sums[:, 1] == manifest["scored_moves"]).all()
-        )
+        assert np.isfinite(sums).all() and (sums[:, 1] == manifest["scored_moves"]).all()
         ce = dict(zip(cells, (sums[:, 0] / sums[:, 1]).tolist()))
         group = lambda pred: float(np.mean([v for c, v in ce.items() if pred(c)]))
         formats = ("bullet", "blitz", "rapid", "classical")
@@ -247,8 +232,7 @@ def main():
             expert_macro=group(lambda c: c.endswith(">=2400")),
             by_format={f: group(lambda c, f=f: c.startswith(f + "/")) for f in formats},
             by_band={
-                b: group(lambda c, b=b: c.endswith("/" + b))
-                for b in ("<1400", "1400-2000", "2000-2400", ">=2400")
+                b: group(lambda c, b=b: c.endswith("/" + b)) for b in ("<1400", "1400-2000", "2000-2400", ">=2400")
             },
             time_trouble=dict(
                 definition="scored moves whose mover has at most 15 s left",
@@ -297,9 +281,7 @@ def main():
         valid = (y >= 378) & (y < 2346)
         elo = torch.as_tensor(ratings(rows), device="cuda")
         for j, mask in enumerate((valid, valid & (elo >= 2400), valid & (elo >= 2600))):
-            totals[lo : lo + len(rows), 2 * j] = (
-                (loss.double() * mask).sum(-1).cpu().numpy()
-            )
+            totals[lo : lo + len(rows), 2 * j] = (loss.double() * mask).sum(-1).cpu().numpy()
             totals[lo : lo + len(rows), 2 * j + 1] = mask.sum(-1).cpu().numpy()
     assert np.isfinite(totals).all()
     np.savez(

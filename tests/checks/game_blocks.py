@@ -82,18 +82,14 @@ def synthetic(rng, n, length):
     edges = [p for p in (127, 128, 255, 256, length - 1) if p < length]
     rows[0, edges] = BOS  # boundaries at block edges and the row's last token
     if n > 1:
-        rows[1] = rng.integers(
-            0, BOS, size=length
-        )  # no game start: the row start splits
+        rows[1] = rng.integers(0, BOS, size=length)  # no game start: the row start splits
     if n > 2:
         rows[2] = BOS  # every token starts a game
     return rows
 
 
 def main():
-    device = (
-        sys.argv[sys.argv.index("--device") + 1] if "--device" in sys.argv else "cpu"
-    )
+    device = sys.argv[sys.argv.index("--device") + 1] if "--device" in sys.argv else "cpu"
     rng = np.random.default_rng(0)
     val = Packed(DATA, "val")
     real = val.rows(rng.choice(int(val.ends[-1]), 17, replace=False))[:, :-1]
@@ -128,9 +124,7 @@ def main():
         rows[:, ::1025] = BOS  # games of at most 1025 tokens
         check(rows, train_windows, device, f"span 1025 {count}x4096", span=1025)
         n += 1
-    print(
-        f"{n} cases on {device}: every BlockMask tensor identical to create_block_mask"
-    )
+    print(f"{n} cases on {device}: every BlockMask tensor identical to create_block_mask")
 
 
 if __name__ == "__main__":

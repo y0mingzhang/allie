@@ -57,9 +57,7 @@ def tiny_export(path, layers=6, width=64, head_dim=16, experts=8, topk=4, seed=0
     if xsa:
         w["xsa"] = r(layers, heads, std=2)
     path.mkdir(parents=True, exist_ok=True)
-    save_file(
-        {k: v.contiguous() for k, v in w.items()}, str(path / "model.safetensors")
-    )
+    save_file({k: v.contiguous() for k, v in w.items()}, str(path / "model.safetensors"))
     config = dict(layers=layers, width=width, heads=heads, head_dim=head_dim, vocab=vocab,
                   value_embeds=ve, experts=experts, topk=topk, expert_hidden=eh,
                   shared_hidden=sh, gate_floor=1e-12, attn_scale=0.1, name="tiny")  # fmt: skip

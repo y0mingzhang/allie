@@ -163,9 +163,7 @@ def main():
             q = z["probs"]
         assert q.shape == probs.shape
         diff = np.abs(probs - q).max(1)
-        kl = (
-            q * (np.log(np.maximum(q, 1e-30)) - np.log(np.maximum(probs, 1e-30)))
-        ).sum(1)
+        kl = (q * (np.log(np.maximum(q, 1e-30)) - np.log(np.maximum(probs, 1e-30)))).sum(1)
         out["against"] = dict(
             file=a.against, max_abs_prob_diff=float(diff.max()),
             p99_abs_prob_diff=float(np.percentile(diff, 99)),

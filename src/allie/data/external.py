@@ -134,39 +134,26 @@ def urls(src):
         case "pgnmentor":
             html = get("https://www.pgnmentor.com/files.html").text
             pat = r'href="((?:players|openings)/[^"]+\.zip|events/[^"]+\.pgn)"'
-            return [
-                "https://www.pgnmentor.com/" + h
-                for h in dict.fromkeys(re.findall(pat, html))
-            ]
+            return ["https://www.pgnmentor.com/" + h for h in dict.fromkeys(re.findall(pat, html))]
         case "twic":
             html = get("https://theweekinchess.com/twic").text
             last = max(map(int, re.findall(r"twic(\d+)g\.zip", html)))
-            return [
-                f"https://theweekinchess.com/zips/twic{n}g.zip"
-                for n in range(920, last + 1)
-            ]
+            return [f"https://theweekinchess.com/zips/twic{n}g.zip" for n in range(920, last + 1)]
         case "broadcast":
-            return sorted(
-                get("https://database.lichess.org/broadcast/list.txt").text.split()
-            )
+            return sorted(get("https://database.lichess.org/broadcast/list.txt").text.split())
         case "ccrl":
             base = "https://computerchess.org.uk/"
             out = []
             for l in ("4040", "404"):
                 html = get(f"{base}{l}/games.html").text
-                out.append(
-                    f"{base}{l}/"
-                    + re.search(rf'href="(CCRL-{l}\.\[\d+\]\.pgn\.7z)"', html)[1]
-                )
+                out.append(f"{base}{l}/" + re.search(rf'href="(CCRL-{l}\.\[\d+\]\.pgn\.7z)"', html)[1])
             return out
 
 
 def fetch_tcec():
     repo = RAW / "tcec" / "repo"
     if not (repo / ".git").exists():
-        subprocess.run(
-            ["git", "clone", "--depth", "1", TCEC_REPO, str(repo)], check=True
-        )
+        subprocess.run(["git", "clone", "--depth", "1", TCEC_REPO, str(repo)], check=True)
     commit = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True
     ).stdout.strip()
@@ -188,11 +175,7 @@ def fetch(a):
     if a.source == "tcec":
         return fetch_tcec()
     man = RAW / a.source / "manifest.jsonl"
-    done = (
-        {json.loads(l)["url"] for l in man.read_text().splitlines()}
-        if man.exists()
-        else set()
-    )
+    done = {json.loads(l)["url"] for l in man.read_text().splitlines()} if man.exists() else set()
     todo = urls(a.source)
     (RAW / a.source / "urls.txt").write_text("\n".join(todo) + "\n")
     referer = "https://theweekinchess.com/twic" if a.source == "twic" else None
@@ -246,9 +229,7 @@ def load(path, lo, hi):
     """Decoded PGN text of one raw file, or of bytes [lo, hi) of a plain PGN."""
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as z:
-            return "\n\n".join(
-                decode(z.read(n)) for n in z.namelist() if n.lower().endswith(".pgn")
-            )
+            return "\n\n".join(decode(z.read(n)) for n in z.namelist() if n.lower().endswith(".pgn"))
     with open(path, "rb") as f:
         if path.suffix == ".zst":
             import zstandard
@@ -338,11 +319,7 @@ def parse_tc(s, engine):
         return None
     (x, u, _), rest = nums[0], nums[1:]
     inc = next(
-        (
-            y
-            for y, v, plus in rest
-            if v.startswith(("s", "''", '"', "”", "″")) or (plus and not v and y <= 60)
-        ),
+        (y for y, v, plus in rest if v.startswith(("s", "''", '"', "”", "″")) or (plus and not v and y <= 60)),
         0,
     )
     return minutes(x, u), inc
@@ -448,11 +425,7 @@ def record(game, src):
     engine = SOURCES[src][0] == "engine"
     lines = game.split("\n")
     k = next(
-        (
-            i
-            for i, l in enumerate(lines)
-            if l.strip() and not l.lstrip().startswith("[")
-        ),
+        (i for i, l in enumerate(lines) if l.strip() and not l.lstrip().startswith("[")),
         len(lines),
     )
     h = dict(HEADER.findall("\n".join(lines[:k])))
@@ -518,9 +491,7 @@ def record(game, src):
         time_control=tc,
         white_raw_elo=raw[0],
         black_raw_elo=raw[1],
-        name_key=int.from_bytes(
-            hashlib.blake2b(key.encode(), digest_size=8).digest(), "little"
-        ),
+        name_key=int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), "little"),
     )
     g["token_hash"] = cd.hash64(cd.tokenize(g))
     return g, None
@@ -553,9 +524,7 @@ def parse_task(src, path, lo, hi):
 
 
 def parse(a):
-    todo = sorted(
-        (t for t in tasks() if not part_path(*t[:3]).exists()), key=lambda t: -t[4]
-    )
+    todo = sorted((t for t in tasks() if not part_path(*t[:3]).exists()), key=lambda t: -t[4])
     print(f"{len(todo)} parse tasks", flush=True)
     t0 = time.time()
     PARTS.mkdir(parents=True, exist_ok=True)
@@ -686,9 +655,9 @@ def finalize(a):
     res = t["result"].to_numpy()
     dates = t["date"].combine_chunks()
     dk = dates.dictionary_encode().indices.fill_null(-1).to_numpy()
-    full = (pc.utf8_length(dates).fill_null(0).to_numpy() == 10) & ~pc.match_substring(
-        dates, "?"
-    ).fill_null(True).to_numpy(zero_copy_only=False)
+    full = (pc.utf8_length(dates).fill_null(0).to_numpy() == 10) & ~pc.match_substring(dates, "?").fill_null(
+        True
+    ).to_numpy(zero_copy_only=False)
     # duplicates: same moves and players (normalised surnames); else same moves, full date and
     # result (>= 20 plies: relays spell names differently); else same moves over >= 60 plies
     pref = (prio, ~clocked, ~evald)
@@ -712,9 +681,7 @@ def finalize(a):
         if not (keep & m).any():
             summary["sources"][src] = dict(games=0, dropped=dropped)
             continue
-        c, stats = write_store(
-            t.filter(pa.array(keep & m)), src, bad[src], dropped, a.seed
-        )
+        c, stats = write_store(t.filter(pa.array(keep & m)), src, bad[src], dropped, a.seed)
         counts |= c
         summary["sources"][src] = dict(
             games=stats["games"],
@@ -732,9 +699,7 @@ def finalize(a):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch")
     f.add_argument("source", choices=["pgnmentor", "twic", "broadcast", "tcec", "ccrl"])

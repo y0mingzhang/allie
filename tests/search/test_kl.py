@@ -6,8 +6,7 @@ from allie.search.native import MOVE_ID, from_prefix
 
 START = [2348, 198, 11, 2, 5, 0, 0, 2, 5, 0, 0]
 PREFIXES = [
-    START + [MOVE_ID[u] for u in g]
-    for g in (("e2e4", "e7e5"), ("d2d4", "g8f6", "c2c4"), ("f2f3", "e7e5", "g2g4"))
+    START + [MOVE_ID[u] for u in g] for g in (("e2e4", "e7e5"), ("d2d4", "g8f6", "c2c4"), ("f2f3", "e7e5", "g2g4"))
 ]
 
 
@@ -16,9 +15,7 @@ class Bridge:
 
     def __init__(self, prefixes):
         self.paths, self.calls = {r: tuple(p) for r, p in enumerate(prefixes)}, 0
-        self.root_logits = np.array(
-            [self.logits(self.paths[r]) for r in range(len(prefixes))]
-        )
+        self.root_logits = np.array([self.logits(self.paths[r]) for r in range(len(prefixes))])
 
     @staticmethod
     def logits(path):
@@ -78,7 +75,9 @@ def test_backup_matches_recursion(tilt):
         keep = F.cost[: F.size] <= budget
         V, sigma, rest = kl.backup(F.view(), keep, **tilt)
         for r in range(F.n):
-            assert V[r] == pytest.approx(reference(F, r, keep=keep, **(dict(own=0, opp=0, soft=False) | tilt)), abs=1e-12)
+            assert V[r] == pytest.approx(
+                reference(F, r, keep=keep, **(dict(own=0, opp=0, soft=False) | tilt)), abs=1e-12
+            )
         par = F.parent[: F.size]
         for i in range(F.size):  # each kept node's tilted policy sums to one with its unexpanded moves
             kids = np.flatnonzero((par == i) & keep)
@@ -101,16 +100,12 @@ def test_budget_protocol_and_prefix():
     b, F = forest(budget=60, own=4, k=4, g=0.25)
     assert (F.spent == 60).all()
     assert b.calls == F.calls and len(b.paths) - F.n == F.spent.sum()
-    for i in range(
-        F.n, F.size
-    ):  # cost counts the evaluations so far; parents come first
+    for i in range(F.n, F.size):  # cost counts the evaluations so far; parents come first
         assert F.parent[i] < i and (F.cost[i] >= F.cost[i - 1] or F.owner[i] != F.owner[i - 1])
         assert (F.cost[i] >= F.cost[F.parent[i]]) or F.parent[i] < F.n
     for r in range(F.n):
         own = np.flatnonzero(F.owner[: F.size] == r)
-        assert F.cost[own].max() == 60 and set(
-            F.cost[own[~F.terminal[own]]][1:]
-        ) == set(range(1, 61))
+        assert F.cost[own].max() == 60 and set(F.cost[own[~F.terminal[own]]][1:]) == set(range(1, 61))
     for i in range(F.n, F.size):  # below the roots, moves are expanded by falling prior
         kids = F.ekid[F.start[i] : F.start[i] + F.count[i]]
         assert (kids[: F.done[i]] >= 0).all() and (kids[F.done[i] :] < 0).all()
@@ -121,14 +116,10 @@ def test_root_q():
     V, _, _ = kl.backup(F.view())
     for r in range(F.n):
         moves, prior, q = kl.root_q(F, V, r)
-        assert sorted(moves.tolist()) == sorted(
-            from_prefix(np.array(PREFIXES[r])).legal()
-        )
+        assert sorted(moves.tolist()) == sorted(from_prefix(np.array(PREFIXES[r])).legal())
         assert np.all(np.diff(prior) <= 0) and prior.sum() == pytest.approx(1)
         kid = F.ekid[F.start[r] : F.start[r] + F.count[r]]
-        assert np.isnan(q[kid < 0]).all() and np.allclose(
-            q[kid >= 0], -V[kid[kid >= 0]]
-        )
+        assert np.isnan(q[kid < 0]).all() and np.allclose(q[kid >= 0], -V[kid[kid >= 0]])
 
 
 class View(Bridge):
@@ -163,7 +154,9 @@ def test_views():
 def test_prior():
     """A view under another header searches; the roots keep the game's own policy."""
     b, v = Bridge(PREFIXES), View(PREFIXES)
-    F = kl.Forest(v, [from_prefix(np.array(p)) for p in PREFIXES], [len(p) for p in PREFIXES], 4096, prior=b.root_logits)
+    F = kl.Forest(
+        v, [from_prefix(np.array(p)) for p in PREFIXES], [len(p) for p in PREFIXES], 4096, prior=b.root_logits
+    )
     kl.grow(F, 20, own=4)
     for r in range(F.n):
         e = slice(F.start[r], F.start[r] + F.count[r])

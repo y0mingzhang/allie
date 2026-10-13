@@ -14,11 +14,7 @@ PLAN = Path(__file__).resolve().parents[1] / "configs/allie-2.0/plan.json"
 def allie_2():
     """The source_sha256 Allie 2.0's checkpoint records: its frozen source's Python files."""
     hashes = json.loads(PLAN.read_text())["hashes"]
-    src = {
-        k.removeprefix("source-ours/"): v
-        for k, v in hashes.items()
-        if k.startswith("source-ours/")
-    }
+    src = {k.removeprefix("source-ours/"): v for k, v in hashes.items() if k.startswith("source-ours/")}
     return {"source_sha256": {k: v for k, v in src.items() if k.endswith(".py")}}
 
 

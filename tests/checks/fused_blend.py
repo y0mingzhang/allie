@@ -170,16 +170,12 @@ if __name__ == "__main__":
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = tempfile.mkdtemp()
     round_like_triton()
     torch.set_num_threads(4)
-    torch._dynamo.config.recompile_limit = (
-        64  # one _blend_fwd graph per tested shape; training compiles two
-    )
+    torch._dynamo.config.recompile_limit = 64  # one _blend_fwd graph per tested shape; training compiles two
     from allie.model import network as mm
 
     test_blend(mm.core, device)
     if device.type == "cpu":
-        dist.init_process_group(
-            "gloo", init_method="tcp://127.0.0.1:29541", rank=0, world_size=1
-        )
+        dist.init_process_group("gloo", init_method="tcp://127.0.0.1:29541", rank=0, world_size=1)
         test_gpt(mm, mm.core)
         dist.destroy_process_group()
     print(f"PASS fused blend bitwise eager on {device}")

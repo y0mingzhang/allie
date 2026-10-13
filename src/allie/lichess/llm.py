@@ -178,9 +178,7 @@ class Ledger:
 
     def totals(self):
         with self.lock:
-            return [
-                (self.file or {}).get(w, 0.0) + self.owed[w] for w in self.windows()
-            ]
+            return [(self.file or {}).get(w, 0.0) + self.owed[w] for w in self.windows()]
 
     def allows(self, wait=5.0):
         if not self.seeded.wait(wait) or self.broken:
@@ -211,12 +209,7 @@ class Ledger:
                 spent = json.load(f)
         except FileNotFoundError:
             return {}
-        number = lambda x: (
-            isinstance(x, (int, float))
-            and not isinstance(x, bool)
-            and math.isfinite(x)
-            and x >= 0
-        )
+        number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x >= 0
         if not isinstance(spent, dict) or not all(map(number, spent.values())):
             raise ValueError("not a ledger")
         return spent
@@ -241,17 +234,13 @@ class Ledger:
                         json.dump(spent, f, indent=0, sort_keys=True)
                     os.replace(self.path + ".tmp", self.path)
         except ValueError as e:
-            log.error(
-                "chat: ledger %s: %s; no paid calls until this is fixed", self.path, e
-            )
+            log.error("chat: ledger %s: %s; no paid calls until this is fixed", self.path, e)
             self.broken = True
             self.seeded.set()
             return
         except OSError as e:
             if not self.failing:
-                log.error(
-                    "chat: ledger %s: %s; spend kept in memory, retrying", self.path, e
-                )
+                log.error("chat: ledger %s: %s; spend kept in memory, retrying", self.path, e)
             self.failing = True
             raise
         if self.failing:
@@ -273,9 +262,7 @@ class Claude:
         import anthropic
 
         self.sdk, self.cfg, self.until = anthropic, cfg, 0.0
-        self.client = anthropic.Anthropic(
-            api_key=key, timeout=cfg.timeout, max_retries=0
-        )
+        self.client = anthropic.Anthropic(api_key=key, timeout=cfg.timeout, max_retries=0)
         self.ledger = Ledger(cfg.ledger, cfg.day_cap, cfg.month_cap)
         names = ("calls", "new", "cached", "written", "output", "usd")
         self.usage = dict.fromkeys(names, 0)
@@ -299,9 +286,7 @@ class Claude:
             return None
         first = seen = r = None
         try:
-            with self.client.beta.messages.stream(
-                system=system, messages=messages, **self.params
-            ) as s:
+            with self.client.beta.messages.stream(system=system, messages=messages, **self.params) as s:
                 left = max(self.cfg.timeout - (time.monotonic() - start), 0)
                 deadline = threading.Timer(left, s.close)  # the total deadline
                 deadline.start()
@@ -323,12 +308,8 @@ class Claude:
             self.until = start + 60
         except Exception as e:  # noqa: BLE001 - timeouts, the deadline, connection, server
             took = time.monotonic() - start
-            log.warning(
-                "chat model: %s (%.1f s), message dropped", e or type(e).__name__, took
-            )
-        if (
-            r is None
-        ):  # a stream that started is billed: what it read, all it could write
+            log.warning("chat model: %s (%.1f s), message dropped", e or type(e).__name__, took)
+        if r is None:  # a stream that started is billed: what it read, all it could write
             if seen is not None:
                 worst = self.cfg.max_tokens * PRICES[self.cfg.model][4] / 1e6
                 self.ledger.add(cost(self.cfg.model, seen) + worst)
@@ -349,6 +330,4 @@ class Claude:
             d = json.loads("".join(b.text for b in r.content if b.type == "text"))
         except ValueError:
             return None
-        return Reply(
-            r.content, bool(d.get("speak")), d.get("text", ""), first or t, t, usd
-        )
+        return Reply(r.content, bool(d.get("speak")), d.get("text", ""), first or t, t, usd)

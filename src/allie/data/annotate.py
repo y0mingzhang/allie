@@ -78,19 +78,13 @@ def shard(path):
         raw = VALS[OFF[j[i]] : OFF[j[i] + 1]].tolist() if hit[i] else None
         evals.append([] if raw is None else align(raw, off[i + 1] - off[i]))
     t = t.drop_columns([c for c in ("end", "evals") if c in t.column_names])
-    new = t.append_column("end", pa.array(end)).append_column(
-        "evals", pa.array(evals, pa.large_list(pa.int16()))
-    )
+    new = t.append_column("end", pa.array(end)).append_column("evals", pa.array(evals, pa.large_list(pa.int16())))
     record = json.dumps(dict(end=1, evals=int(HF))).encode()
-    new = new.replace_schema_metadata(
-        {**(t.schema.metadata or {}), b"annotate": record}
-    )
+    new = new.replace_schema_metadata({**(t.schema.metadata or {}), b"annotate": record})
     tmp = Path(path).with_suffix(".annotate-tmp")
     pq.write_table(new, tmp, compression="zstd")
     back = pq.read_table(tmp)
-    assert back.drop_columns(["end", "evals"]).equals(t), (
-        f"legacy columns changed: {path}"
-    )
+    assert back.drop_columns(["end", "evals"]).equals(t), f"legacy columns changed: {path}"
     assert back["end"].type == pa.int8() and 0 <= end.min() and end.max() < len(END)
     os.replace(tmp, path)
     return len(t), sum(map(bool, evals))
@@ -102,16 +96,10 @@ def main():
     HF = bool(hf)
     workers, start = len(os.sched_getaffinity(0)), time.monotonic()
     if hf:
-        with ProcessPoolExecutor(
-            min(16, workers)
-        ) as ex:  # each holds a file's movetext
-            SITES, OFF, VALS = join(
-                ex.map(hf_evals, sorted(Path(hf).glob("*.parquet")))
-            )
+        with ProcessPoolExecutor(min(16, workers)) as ex:  # each holds a file's movetext
+            SITES, OFF, VALS = join(ex.map(hf_evals, sorted(Path(hf).glob("*.parquet"))))
         print(
-            json.dumps(
-                dict(analysed=len(SITES), seconds=round(time.monotonic() - start))
-            ),
+            json.dumps(dict(analysed=len(SITES), seconds=round(time.monotonic() - start))),
             flush=True,
         )
     paths = sorted(month.glob("games/b*/shard-*.parquet"))
@@ -121,9 +109,7 @@ def main():
             games, analysed = games + n, analysed + e
             if k % 200 == 0 or k == len(paths):
                 print(
-                    json.dumps(
-                        dict(shards=k, of=len(paths), games=games, analysed=analysed)
-                    ),
+                    json.dumps(dict(shards=k, of=len(paths), games=games, analysed=analysed)),
                     flush=True,
                 )
     (month / "annotate-complete.json").write_text(

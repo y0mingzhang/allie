@@ -131,12 +131,7 @@ class Model:
 
     def board(self, states):
         w, dt = self.w, self.dtype
-        x = (
-            F.one_hot(states[:, :64].long(), 13)
-            .to(dt)
-            .view(-1, 8, 8, 13)
-            .permute(0, 3, 1, 2)
-        )
+        x = F.one_hot(states[:, :64].long(), 13).to(dt).view(-1, 8, 8, 13).permute(0, 3, 1, 2)
         gelu = lambda z: F.gelu(z, approximate="tanh")
         x = gelu(F.conv2d(x, w["board.first"], padding=1))
         for i in range(2):
@@ -352,10 +347,7 @@ def step(model, items, every=False):
             c.v[i, :, n0:n1] = v[a:b].transpose(0, 1)
             mask = None
             if b - a > 1:
-                mask = (
-                    torch.arange(n1, device=dev)
-                    <= torch.arange(n0, n1, device=dev)[:, None]
-                )
+                mask = torch.arange(n1, device=dev) <= torch.arange(n0, n1, device=dev)[:, None]
             y[a:b] = F.scaled_dot_product_attention(
                 q[a:b].transpose(0, 1),
                 c.k[i, :, :n1],

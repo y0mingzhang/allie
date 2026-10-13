@@ -73,13 +73,9 @@ def test_trees_agree_call_by_call(tiny):
     par = treers.Coverage().parameters
     cpp, value = load(), load("value")
     for budget in (5, 32):
-        nodes = tree.Tree(game, z, capacity=4 * budget + 256).handles(
-            [game.tokens], [feats]
-        )
+        nodes = tree.Tree(game, z, capacity=4 * budget + 256).handles([game.tokens], [feats])
         root = nodes.root_logits
-        rs = allie_fast.Coverage(
-            list(game.tokens), root[0], feats, game.inc, budget, par["cpuct"]
-        )
+        rs = allie_fast.Coverage(list(game.tokens), root[0], feats, game.inc, budget, par["cpuct"])
         cx = cpp.Coverage([list(game.tokens)], root, [budget], [par["cpuct"]], 2)
         calls = 0
         while not rs.done:
@@ -92,39 +88,24 @@ def test_trees_agree_call_by_call(tiny):
                 calls += 1
         assert cx.done and rs.evals == list(cx.evals) == [nodes.queries]
         s = rs.stats()
-        assert (
-            s["evaluated_leaves"] == nodes.queries
-            and s["requests"] == calls
-            and s["simulations"] == budget
-        )
+        assert s["evaluated_leaves"] == nodes.queries and s["requests"] == calls and s["simulations"] == budget
         mine, theirs = rs.compact(), cx.compact()
         assert set(mine) == set(theirs)
         for k in theirs:
             np.testing.assert_array_equal(mine[k], theirs[k], err_msg=k)
-        ids = (
-            np.array([allie_fast.Position.from_tokens(game.tokens).legal()], np.int64)
-            - 378
-        )
+        ids = np.array([allie_fast.Position.from_tokens(game.tokens).legal()], np.int64) - 378
         b = par["backup"]
         q = rs.reduce(np.log(b["tau"]), b["exponent"], b["count_scale"], budget, ids)
         qc = value.Backup(theirs, budget, b["count_scale"]).reduce(
             np.log(b["tau"]), b["exponent"], ids.astype(np.int32)
         )
         np.testing.assert_array_equal(q, qc)
-        all_ids = [
-            i for i in range(len(theirs["parent"])) if nodes.length[i]
-        ]  # evaluated: not the terminal nodes
+        all_ids = [i for i in range(len(theirs["parent"])) if nodes.length[i]]  # evaluated: not the terminal nodes
         assert len(all_ids) == nodes.queries + 1
-        np.testing.assert_array_equal(
-            rs.feats(all_ids), nodes.feats[all_ids].astype(np.float32)
-        )
-        boards = np.frombuffer(
-            b"".join(nodes.board[i] for i in all_ids), np.uint8
-        ).reshape(-1, 68)
+        np.testing.assert_array_equal(rs.feats(all_ids), nodes.feats[all_ids].astype(np.float32))
+        boards = np.frombuffer(b"".join(nodes.board[i] for i in all_ids), np.uint8).reshape(-1, 68)
         np.testing.assert_array_equal(rs.boards(all_ids), boards)
-        assert (
-            rs.feats(all_ids[1:]) >= 0
-        ).all()  # the game has clocks: every node's are known
+        assert (rs.feats(all_ids[1:]) >= 0).all()  # the game has clocks: every node's are known
     with pytest.raises(RuntimeError):
         rs.select()  # finished
 
@@ -142,13 +123,9 @@ def test_zero_clock_rule_and_views_clocks(tiny):
         h = rs.select()
         if len(h):
             rs.update(np.random.default_rng(len(h)).normal(0, 1, (len(h), 2432)))
-    depth1 = [
-        i for i in range(1, rs.stats()["nodes"]) if rs.compact()["parent"][i] == 0
-    ]
+    depth1 = [i for i in range(1, rs.stats()["nodes"]) if rs.compact()["parent"][i] == 0]
     f0, f1, f2 = (rs.feats(depth1, v) for v in range(3))
-    np.testing.assert_array_equal(
-        f0[:, 1], feats[-1, 0] + game.inc
-    )  # nothing spent, the increment added
+    np.testing.assert_array_equal(f0[:, 1], feats[-1, 0] + game.inc)  # nothing spent, the increment added
     np.testing.assert_array_equal(f0[:, 0], feats[-1, 1])
     assert (f1 == -1).all()
     np.testing.assert_array_equal(f2[:, 1], feats[-1, 0] + 2)
@@ -186,9 +163,7 @@ def test_forced_move_and_blitz_cells(tiny):
     """One legal move: no search (budget 0), the policy of budget 128; the cell from the game's speed."""
     engine = Engine(tiny)
     game = Game(engine, 1200, 1300, 180, 2, "blitz")
-    game.update(
-        ["f2f3", "e7e5", "g2g4"], 178, 179
-    )  # black mates in one, but White's move is not forced: a real search
+    game.update(["f2f3", "e7e5", "g2g4"], 178, 179)  # black mates in one, but White's move is not forced: a real search
     same(treers.Coverage()(game, 32), tree.Coverage()(game, 32))
     import chess
 
@@ -217,26 +192,17 @@ def test_deadline(tiny, monkeypatch):
     engine = Engine(tiny)
     game, search = setup(engine, 7, 14), treers.Coverage()
     calls, inner = [], tree.Nodes.__call__
-    monkeypatch.setattr(
-        tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h)
-    )
+    monkeypatch.setattr(tree.Nodes, "__call__", lambda self, h: calls.append(len(h)) or inner(self, h))
     assert search(game, 32, deadline=time.monotonic() - 1) is None
     assert len(calls) == 1  # Late raised at the first nodes
-    assert (
-        treers.Coverage(views=("true", "r2800"))(
-            game, 32, deadline=time.monotonic() - 1
-        )
-        is None
-    )
+    assert treers.Coverage(views=("true", "r2800"))(game, 32, deadline=time.monotonic() - 1) is None
     clock = iter(range(10**6))
     monkeypatch.setattr(tree, "monotonic", lambda: next(clock))
     assert search(game, 128, deadline=0.5) is None
     assert len(calls) == 3  # the first nodes ran (clock 0), the second raised (clock 1)
     monkeypatch.setattr(tree, "monotonic", time.monotonic)
     out = search(game, 32)
-    assert out is not None and sorted(out[0]) == sorted(
-        m.uci() for m in game.board.legal_moves
-    )
+    assert out is not None and sorted(out[0]) == sorted(m.uci() for m in game.board.legal_moves)
     assert abs(out[1].sum() - 1) < 1e-9 and abs(out[2].sum() - 1) < 1e-9
 
 
@@ -258,16 +224,12 @@ def test_kl_forests_agree_call_by_call(tiny, grow, read):
     for budget in (8, 40):
         cap = 2 * budget + 256
         nodes = tree.Tree(game, z, cap).handles([game.tokens], [feats], "zero")
-        rs = allie_fast.KL(
-            list(game.tokens), [nodes.root_logits[0]], None, feats, game.inc, cap
-        )
+        rs = allie_fast.KL(list(game.tokens), [nodes.root_logits[0]], None, feats, game.inc, cap)
         seen = []
 
         def bridge(h, nodes=nodes, rs=rs, seen=seen, budget=budget):
             want = rs.select(budget, **grow)
-            while want is not None and not len(
-                want
-            ):  # a call of terminal children only: no evaluation
+            while want is not None and not len(want):  # a call of terminal children only: no evaluation
                 want = rs.select(budget, **grow)
             np.testing.assert_array_equal(h, want)
             zz = nodes(h)
@@ -276,19 +238,11 @@ def test_kl_forests_agree_call_by_call(tiny, grow, read):
             return zz
 
         bridge.root_logits = nodes.root_logits
-        F = kl.Forest(
-            bridge, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], cap
-        )
+        F = kl.Forest(bridge, [from_prefix(np.asarray(game.tokens))], [len(game.tokens)], cap)
         kl.grow(F, budget, **grow)
-        while (
-            h := rs.select(budget, **grow)
-        ) is not None:  # whatever kl.grow still took (terminal children)
+        while (h := rs.select(budget, **grow)) is not None:  # whatever kl.grow still took (terminal children)
             assert not len(h)
-        assert (
-            F.spent[0] == rs.spent == budget
-            and F.size == rs.size
-            and F.calls == rs.calls
-        )
+        assert F.spent[0] == rs.spent == budget and F.size == rs.size and F.calls == rs.calls
         V, sigma, rest = kl.backup(F.view(), **read)
         for mine, theirs in zip(rs.values(**read), (V, sigma, rest)):
             kl_equal(mine, theirs)
@@ -299,12 +253,8 @@ def test_kl_forests_agree_call_by_call(tiny, grow, read):
         fill = np.arctanh(read["squash"] * np.clip(F.value[0], -1, 1))
         kl_equal(q2, np.where(np.isnan(q), fill, q))
         ids = [0, *np.concatenate(seen)[:, 0].tolist()]
-        np.testing.assert_array_equal(
-            rs.feats(ids), nodes.feats[ids].astype(np.float32)
-        )
-        boards = np.frombuffer(b"".join(nodes.board[i] for i in ids), np.uint8).reshape(
-            -1, 68
-        )
+        np.testing.assert_array_equal(rs.feats(ids), nodes.feats[ids].astype(np.float32))
+        boards = np.frombuffer(b"".join(nodes.board[i] for i in ids), np.uint8).reshape(-1, 68)
         np.testing.assert_array_equal(rs.boards(ids), boards)
 
 
@@ -377,9 +327,7 @@ def test_native_coverage_matches_handles(tiny_path, views):
         assert got[0] == want[0] and np.abs(got[1] - want[1]).max() < 5e-3
 
 
-@pytest.mark.parametrize(
-    "kw", [dict(views=("true",)), dict(views=("r3000/noclock", "true")), SHIP]
-)
+@pytest.mark.parametrize("kw", [dict(views=("true",)), dict(views=("r3000/noclock", "true")), SHIP])
 def test_native_kl_matches_handles(tiny_path, kw):
     """The native loop (calls of more than 32 nodes in several requests from 300 leaves on) grows the tree the
     handles do."""
@@ -401,9 +349,7 @@ def test_native_searches_merge_across_games(tiny_path, searcher):
     import threading
 
     engine = Engine(rust_model(tiny_path))
-    search, budget = (
-        (treers.Coverage(), 32) if searcher == "coverage" else (treers.KL(), 16)
-    )
+    search, budget = (treers.Coverage(), 32) if searcher == "coverage" else (treers.KL(), 16)
     games = [setup(engine, s, 12 + 2 * s) for s in range(4)]
     alone = [search(g, budget) for g in games]
     release, together = threading.Event(), [None] * len(games)
@@ -411,25 +357,18 @@ def test_native_searches_merge_across_games(tiny_path, searcher):
     blocker.start()
     before = engine.server.stats()
     threads = [
-        threading.Thread(
-            target=lambda i=i: together.__setitem__(i, search(games[i], budget))
-        )
+        threading.Thread(target=lambda i=i: together.__setitem__(i, search(games[i], budget)))
         for i in range(len(games))
     ]
     for t in threads:
         t.start()
     time.sleep(0.5)
-    assert engine.server.stats()["queued"] == len(
-        games
-    )  # every first request waits for the blocker
+    assert engine.server.stats()["queued"] == len(games)  # every first request waits for the blocker
     release.set()
     for t in [blocker, *threads]:
         t.join()
     after = engine.server.stats()
-    assert (
-        engine.widest > 8
-        and after["requests"] - before["requests"] > after["steps"] - before["steps"]
-    )
+    assert engine.widest > 8 and after["requests"] - before["requests"] > after["steps"] - before["steps"]
     for a, b in zip(alone, together):  # coverage's probabilities, kl's prior; then the searched values
         assert a[0] == b[0] and np.abs(np.asarray(a[1]) - np.asarray(b[1])).max() < 5e-3
         assert np.abs(np.asarray(a[-1]) - np.asarray(b[-1])).max() < 5e-2
@@ -454,24 +393,16 @@ def test_native_deadline(tiny_path):
     blocker = threading.Thread(target=engine.run, args=(lambda: release.wait(10),))
     blocker.start()
     t = threading.Thread(
-        target=lambda: out.__setitem__(
-            0, treers.Coverage()(game, 128, deadline=time.monotonic() + 0.2)
-        )
+        target=lambda: out.__setitem__(0, treers.Coverage()(game, 128, deadline=time.monotonic() + 0.2))
     )
     t.start()
     time.sleep(0.5)
     release.set()
     for x in (blocker, t):
         x.join()
-    assert (
-        out[0] is None
-        and game.last_search["late"]
-        and 0 < game.last_search["evaluated"] < 128
-    )
+    assert out[0] is None and game.last_search["late"] and 0 < game.last_search["evaluated"] < 128
     out = treers.Coverage()(game, 32)
-    assert out is not None and sorted(out[0]) == sorted(
-        m.uci() for m in game.board.legal_moves
-    )
+    assert out is not None and sorted(out[0]) == sorted(m.uci() for m in game.board.legal_moves)
 
 
 def test_native_kl_ends_by_its_deadline(tiny_path):
@@ -539,9 +470,7 @@ def test_kl_reroot_takes_the_new_capacity():
     """A forest built for 16 leaves re-rooted for 512 reaches 512 evaluations; re-rooted at its old capacity it
     stops short and says so (full)."""
     rng = np.random.default_rng(0)
-    toks = [2348, 199, 12, 1, 5, 0, 0, 1, 5, 0, 0] + [
-        378 + allie_fast.moves().index(m) for m in random_game(3, 20)
-    ]
+    toks = [2348, 199, 12, 1, 5, 0, 0, 1, 5, 0, 0] + [378 + allie_fast.moves().index(m) for m in random_game(3, 20)]
     feats = np.full((len(toks), 3), -1, np.float32)
     feats2 = np.full((len(toks) + 2, 3), -1, np.float32)
 
@@ -591,9 +520,7 @@ def test_reroot_keeps_the_grandchilds_subtree(tiny_path):
     assert kept == kept_old
     new = {o: n for n, o in enumerate(kept)}
     c2, v2 = cov.compact(), np.array(cov.visits())
-    assert c2["parent"][0] == -1 and all(
-        c2["parent"][n] == new[c["parent"][o]] for n, o in enumerate(kept) if n
-    )
+    assert c2["parent"][0] == -1 and all(c2["parent"][n] == new[c["parent"][o]] for n, o in enumerate(kept) if n)
     np.testing.assert_array_equal(c2["depth"], c["depth"][kept] - 2)
     assert (c2["born"] == 0).all() and (c2["move"][1:] == c["move"][kept][1:]).all()
     for k in ("degree", "terminal"):
@@ -603,10 +530,7 @@ def test_reroot_keeps_the_grandchilds_subtree(tiny_path):
     deeper = c2["depth"] >= 2
     np.testing.assert_array_equal(c2["prior"][deeper], c["prior"][kept][deeper])
     legal = allie_fast.Position.from_tokens(game.tokens).legal()
-    prior = np.exp(
-        root2[legal].astype(np.float32).astype(np.float64)
-        - root2[legal].astype(np.float32).max()
-    )
+    prior = np.exp(root2[legal].astype(np.float32).astype(np.float64) - root2[legal].astype(np.float32).max())
     prior /= prior.sum()
     for n in np.flatnonzero(c2["depth"] == 1):
         want = prior[legal.index(int(c2["move"][n]) + 378)]
@@ -614,16 +538,10 @@ def test_reroot_keeps_the_grandchilds_subtree(tiny_path):
     np.testing.assert_array_equal(v2[1:], v[kept][1:])
     s = cov.stats()
     assert v2[0] == s["kept_pulls"] == v[k2] - 1 == v2[c2["parent"] == 0].sum()
-    assert (
-        s["reused_leaves"] == int((c["degree"][kept_old] > 0).sum()) - 1
-        and s["evaluated_leaves"] == 0
-    )
+    assert s["reused_leaves"] == int((c["degree"][kept_old] > 0).sum()) - 1 and s["evaluated_leaves"] == 0
     assert cov.run(srv, [treers.ref(game.cache)])
     s = cov.stats()
-    assert (
-        s["evaluated_leaves"] + s["terminal_visits"] + s.get("depth_limited_visits", 0)
-        == 64 - s["kept_pulls"]
-    )
+    assert s["evaluated_leaves"] + s["terminal_visits"] + s.get("depth_limited_visits", 0) == 64 - s["kept_pulls"]
     assert len(cov.compact()["parent"]) >= len(kept) + s["evaluated_leaves"]
     q = cov.reduce(
         np.log(par["backup"]["tau"]),
@@ -641,11 +559,7 @@ def test_reroot_keeps_the_grandchilds_subtree(tiny_path):
     other = setup(engine, 3, 16)
     other.update(game.moves + [tree.MOVES[c3["move"][k1]]], 1680, 1680)
     seen = set(c3["move"][c3["parent"] == k1])
-    reply = next(
-        t
-        for t in allie_fast.Position.from_tokens(other.tokens).legal()
-        if t - 378 not in seen
-    )
+    reply = next(t for t in allie_fast.Position.from_tokens(other.tokens).legal() if t - 378 not in seen)
     other.update(other.moves + [tree.MOVES[reply - 378]], 1680, 1670)
     assert (
         cov.reroot(
@@ -671,34 +585,18 @@ def test_reuse_through_the_searchers(tiny_path):
     game.update(game.moves + [tree.MOVES[t - 378] for t in moves], 1690, 1680)
     out = search(game, 64)
     s = game.last_search
-    assert (
-        out is not None
-        and s["reused"] >= 1
-        and s["kept_pulls"] >= 1
-        and s["evaluated"] <= 64 - s["kept_pulls"]
-    )
-    assert (
-        sorted(out[0]) == sorted(m.uci() for m in game.board.legal_moves)
-        and abs(out[1].sum() - 1) < 1e-9
-    )
+    assert out is not None and s["reused"] >= 1 and s["kept_pulls"] >= 1 and s["evaluated"] <= 64 - s["kept_pulls"]
+    assert sorted(out[0]) == sorted(m.uci() for m in game.board.legal_moves) and abs(out[1].sum() - 1) < 1e-9
     assert game.trees[("coverage", ("true",))][0] is cov  # the same tree, re-rooted
     _, moves = grandchild(cov)
     game.update(game.moves + [tree.MOVES[t - 378] for t in moves], 1680, 1670)
-    game.clocks[-3] = (
-        1600  # a clock learnt late revises a row the tree was searched on: no reuse
-    )
+    game.clocks[-3] = 1600  # a clock learnt late revises a row the tree was searched on: no reuse
     search(game, 64)
-    assert (
-        game.last_search["reused"] == 0
-        and game.trees[("coverage", ("true",))][0] is not cov
-    )
+    assert game.last_search["reused"] == 0 and game.trees[("coverage", ("true",))][0] is not cov
     cov = game.trees[("coverage", ("true",))][0]
     game.update(game.moves[:-1], 1690, 1680)  # a takeback: the prefix no longer matches
     search(game, 64)
-    assert (
-        game.last_search["reused"] == 0
-        and game.trees[("coverage", ("true",))][0] is not cov
-    )
+    assert game.last_search["reused"] == 0 and game.trees[("coverage", ("true",))][0] is not cov
     kl = treers.KL(reuse=True)
     game = setup(engine, 6, 15)
     kl(game, 64)
@@ -707,10 +605,7 @@ def test_reuse_through_the_searchers(tiny_path):
     game.update(game.moves + [tree.MOVES[tokens[0] - 378]], 1690, 1680)
     game.update(game.moves + [next(iter(game.board.legal_moves)).uci()], 1690, 1670)
     out = kl(game, 64)
-    assert (
-        out is not None
-        and game.last_search["evaluated"] + game.last_search["reused"] == 64
-    )
+    assert out is not None and game.last_search["evaluated"] + game.last_search["reused"] == 64
     plain = treers.Coverage()
     game = setup(engine, 8, 15)
     plain(game, 32)
@@ -732,11 +627,7 @@ def test_moves_go_first(tiny_path, moves_first):
         np.array(searching.features(), np.float32),
     )
     par = treers.Coverage().parameters
-    first = len(
-        allie_fast.Coverage(
-            list(searching.tokens), z, feats, searching.inc, 32, par["cpuct"]
-        ).select()
-    )
+    first = len(allie_fast.Coverage(list(searching.tokens), z, feats, searching.inc, 32, par["cpuct"]).select())
     mover.sync()
     mover.update(mover.moves + [next(iter(mover.board.legal_moves)).uci()], 1680, 1680)
     release = threading.Event()
@@ -755,9 +646,7 @@ def test_moves_go_first(tiny_path, moves_first):
     for t in (blocker, search, move):
         t.join()
     sizes = srv.sizes()
-    assert first > 1 and sizes[:2] == (
-        [1, first] if moves_first else [first + 1, sizes[1]]
-    )
+    assert first > 1 and sizes[:2] == ([1, first] if moves_first else [first + 1, sizes[1]])
 
 
 def test_native_errors_raise(tiny_path):
@@ -768,18 +657,11 @@ def test_native_errors_raise(tiny_path):
     z, feats = game.sync().double().numpy(), np.array(game.features(), np.float32)
     cov = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 32, 2.5)
     k, v, e, cap, n = treers.ref(game.cache)
-    with pytest.raises(
-        RuntimeError, match=r"a search step of \d+ leaves: tokens, paths or slots"
-    ):
-        cov.run(
-            engine.server, [(k, v, e, cap, cap + 1)]
-        )  # more rows than the cache holds
+    with pytest.raises(RuntimeError, match=r"a search step of \d+ leaves: tokens, paths or slots"):
+        cov.run(engine.server, [(k, v, e, cap, cap + 1)])  # more rows than the cache holds
     ids = torch.zeros(1, dtype=torch.int64)
     meta = [0, 2**63 - 1, cap, 0, 0, 0, 0, 0]
-    assert (
-        engine.server.step(1, 1, ids.data_ptr(), 0, 0, meta, [k, v, e, 0, 0, 0], [], 0)
-        == 3
-    )
+    assert engine.server.step(1, 1, ids.data_ptr(), 0, 0, meta, [k, v, e, 0, 0, 0], [], 0) == 3
     out = treers.Coverage()(game, 8)
     assert out is not None and engine.server.stats()["queued"] == 0
     handled = allie_fast.Coverage(list(game.tokens), z, feats, game.inc, 32, 2.5)
@@ -834,4 +716,3 @@ def test_cli_picks_the_native_searcher(tiny_path, monkeypatch):
     monkeypatch.setattr(cpp, "_load", refuse)
     game = setup(Engine(m), 5, 14)
     assert search(game, 32) is not None and not game.last_search["late"]
-

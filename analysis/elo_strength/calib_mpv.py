@@ -34,11 +34,7 @@ def multipv(sf, moves, depth):
         ):
             continue
         k = f.index("score")
-        cp = (
-            int(f[k + 2])
-            if f[k + 1] == "cp"
-            else CAP * (1 if int(f[k + 2]) > 0 else -1)
-        )
+        cp = int(f[k + 2]) if f[k + 1] == "cp" else CAP * (1 if int(f[k + 2]) > 0 else -1)
         out[MOVE_ID[f[f.index("pv") + 1]]] = max(-CAP, min(CAP, cp))
     return out
 
@@ -47,9 +43,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("positions")
     p.add_argument("out")
-    p.add_argument(
-        "--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", "0"))
-    )
+    p.add_argument("--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", "0")))
     p.add_argument("--shards", type=int, default=1)
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--depth", type=int, default=10)
@@ -62,9 +56,7 @@ def main():
 
     def one(i):
         if getattr(local, "sf", None) is None:
-            local.sf = UCI(
-                [SF], [("Threads", 1), ("Hash", 64), ("MultiPV", 256)], depth=None
-            )
+            local.sf = UCI([SF], [("Threads", 1), ("Hash", 64), ("MultiPV", 256)], depth=None)
         moves = [MOVES[t - 378] for t in tokens[off[i] + 11 : off[i + 1]]]
         return multipv(local.sf, moves, a.depth)
 

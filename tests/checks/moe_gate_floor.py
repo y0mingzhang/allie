@@ -72,13 +72,8 @@ def main():
     dist.init_process_group("gloo", rank=0, world_size=1)
     moe_kernels.routed = routed_ref
     gen = torch.Generator().manual_seed(0)
-    xs = [
-        (torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16)
-        for _ in range(3)
-    ]
-    dys = [
-        torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16) for _ in range(3)
-    ]
+    xs = [(torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16) for _ in range(3)]
+    dys = [torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16) for _ in range(3)]
     ok = True
 
     ref = reference(rev)
@@ -90,9 +85,7 @@ def main():
     got = [step(m, x, dy) for m in (old, new) for x, dy in zip(xs, dys)]
     off = all(same(a, b) for a, b in zip(got[:3], got[3:]))
     off &= same(old.state_dict(), new.state_dict())
-    print(
-        f"floor off: bitwise {rev}'s MoE over 3 steps (outputs, grads, buffers, state dict): {off}"
-    )
+    print(f"floor off: bitwise {rev}'s MoE over 3 steps (outputs, grads, buffers, state dict): {off}")
     arch = dict(moe=[E, K], moe_update="quantile", moe_gate_floor=FLOOR)
     carried = mm.MoE(D, *model_arch.moe_dims(1536, arch)).gate_floor == FLOOR
     try:
@@ -100,18 +93,14 @@ def main():
         refused = False
     except AssertionError:
         refused = True
-    print(
-        f"moe_dims carries the floor: {carried}; resolve refuses an infinite one: {refused}"
-    )
+    print(f"moe_dims carries the floor: {carried}; resolve refuses an infinite one: {refused}")
     ok &= off and carried and refused
 
     router, x = saturated(gen)
     s = torch.sigmoid(x[0].float() @ router.T)
     total = s.topk(K, dim=-1).values.sum(-1)
     for i, z in enumerate(LOGITS):
-        print(
-            f"tokens at logits ~{z}: selected score sums {total[8 * i : 8 * i + 8].max():.2g} max"
-        )
+        print(f"tokens at logits ~{z}: selected score sums {total[8 * i : 8 * i + 8].max():.2g} max")
     dy = torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16)
     y0, fy0, g0 = run(router, x, dy, 0.0)
     y1, fy1, g1 = run(router, x, dy, FLOOR)
@@ -119,18 +108,14 @@ def main():
     print(f"floor {FLOOR:g}: output finite {fy1}, grads finite {g1}")
     keep = total >= FLOOR
     rest = torch.equal(y0[0, keep], y1[0, keep])
-    print(
-        f"floor {FLOOR:g}: the {int(keep.sum())} tokens with sums >= the floor are bitwise off's: {rest}"
-    )
+    print(f"floor {FLOOR:g}: the {int(keep.sum())} tokens with sums >= the floor are bitwise off's: {rest}")
     m = build(router, FLOOR)
     with torch.no_grad():
         h = x[0, :8]
         up, down = m.shared_up.type_as(h), m.shared_down.T.type_as(h)
         shared = F.linear(m.act(F.linear(h, up)), down)
     zero = torch.equal(y1[0, :8], shared)
-    print(
-        f"floor {FLOOR:g}: tokens whose scores are all 0 get the shared expert only: {zero}"
-    )
+    print(f"floor {FLOOR:g}: tokens whose scores are all 0 get the shared expert only: {zero}")
     ok &= not fy0 and fy1 and g1 and rest and zero and int(keep.sum()) == 1024 - 24
     dist.destroy_process_group()
     print("PASS" if ok else "FAIL")

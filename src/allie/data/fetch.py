@@ -22,11 +22,7 @@ AUTH = ["-H", f"Authorization: Bearer {TOKEN.read_text().strip()}"] if TOKEN.exi
 
 def fetch(entry, out):
     dst = out / Path(entry["path"]).name
-    ok = lambda: (
-        dst.exists()
-        and dst.stat().st_size == entry["size"]
-        and sha(dst) == entry["lfs"]["oid"]
-    )
+    ok = lambda: dst.exists() and dst.stat().st_size == entry["size"] and sha(dst) == entry["lfs"]["oid"]
     for _ in range(5):
         if ok():
             return True
@@ -54,17 +50,18 @@ def main(month, out):
     year, mo = month.split("-")
     files = [
         f
-        for f in json.load(urllib.request.urlopen(urllib.request.Request(
-            API.format(year, mo), headers=dict([AUTH[1].split(": ", 1)]) if AUTH else {})))
+        for f in json.load(
+            urllib.request.urlopen(
+                urllib.request.Request(API.format(year, mo), headers=dict([AUTH[1].split(": ", 1)]) if AUTH else {})
+            )
+        )
         if f["path"].endswith(".parquet")
     ]
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(16) as ex:
         ok = list(ex.map(lambda f: fetch(f, out), files))
-    print(
-        f"{month}: {sum(ok)}/{len(files)} files verified, {sum(f['size'] for f in files) / 1e9:.1f} GB"
-    )
+    print(f"{month}: {sum(ok)}/{len(files)} files verified, {sum(f['size'] for f in files) / 1e9:.1f} GB")
     sys.exit(0 if files and all(ok) else 1)
 
 

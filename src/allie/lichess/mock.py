@@ -45,9 +45,7 @@ class MockGame:
         self.chat = []  # chatLine events, as the game stream sends them
 
     def color(self, user):
-        return (
-            "white" if user == self.white else "black" if user == self.black else None
-        )
+        return "white" if user == self.white else "black" if user == self.black else None
 
     def state(self):
         s = dict(
@@ -142,9 +140,7 @@ class MockLichess:
         # streams ("event" or "game") whose next connection goes silent (no keepalives) for
         # this many seconds after its first line, as a stalled connection does
         self.stall = {}
-        self.house = house or (
-            lambda board: random.choice(list(board.legal_moves)).uci()
-        )
+        self.house = house or (lambda board: random.choice(list(board.legal_moves)).uci())
         self.house_delay, self.max_plies = house_delay, max_plies
         self.events = {u: Queue() for u in self.tokens.values()}
         self.games, self.challenges, self.declined, self.rejected = {}, {}, [], []
@@ -152,9 +148,7 @@ class MockLichess:
             [],
             {},
         )  # fail: path prefix -> [HTTP codes to return first]
-        self.drop_after = (
-            None  # close each user's next game stream after this many events
-        )
+        self.drop_after = None  # close each user's next game stream after this many events
         self.next_id, self.lock = 0, threading.Lock()
         self.closing = threading.Event()
         handler = type("Handler", (Handler,), dict(mock=self))
@@ -180,9 +174,7 @@ class MockLichess:
         self.challenges[cid] = c = dict(
             id=cid,
             status="created",
-            challenger=dict(
-                id=challenger, name=challenger, rating=ratings[0], title=None
-            ),
+            challenger=dict(id=challenger, name=challenger, rating=ratings[0], title=None),
             destUser=dict(id=dest, name=dest, rating=ratings[1]),
             variant=dict(key=variant),
             rated=rated,
@@ -206,13 +198,9 @@ class MockLichess:
         self.games[g.id] = g
         for u in (white, black):
             if u in self.events:
-                self.events[u].put(
-                    dict(type="gameStart", game=dict(gameId=g.id, id=g.id))
-                )
+                self.events[u].put(dict(type="gameStart", game=dict(gameId=g.id, id=g.id)))
             else:
-                threading.Thread(
-                    target=self.house_player, args=(g, u), daemon=True
-                ).start()
+                threading.Thread(target=self.house_player, args=(g, u), daemon=True).start()
         return g
 
     def house_player(self, g, user):
@@ -227,9 +215,7 @@ class MockLichess:
             if g.status == "started" and self.house_accepts and g.draw[other]:
                 g.end("draw")
                 continue
-            if g.status == "started" and g.color(user) == (
-                "white" if white else "black"
-            ):
+            if g.status == "started" and g.color(user) == ("white" if white else "black"):
                 self.closing.wait(self.house_delay)
                 offer = len(g.board.move_stack) in self.house_offers
                 g.move(user, self.house(g.board.copy()), offer)

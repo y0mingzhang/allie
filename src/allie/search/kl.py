@@ -68,7 +68,9 @@ class Forest:
         z = [np.asarray(b.root_logits, float) for b in self.bridges]
         self.heads = (z[0] if prior is None else self.prior_logits)[:, 2350:2416]
         self._set(np.arange(n), z)
-        self.rootw = self.rootw0 = np.concatenate([root_weights(self.ep[self.start[r] : self.start[r] + self.count[r]]) for r in range(n)])
+        self.rootw = self.rootw0 = np.concatenate(
+            [root_weights(self.ep[self.start[r] : self.start[r] + self.count[r]]) for r in range(n)]
+        )
         root = [self.etok[self.start[r] : self.start[r] + self.count[r]] for r in range(n)]
         self.rootpv = np.stack([np.concatenate([softmax(x[r][m]) for r, m in enumerate(root)]) for x in z], 1)
 
@@ -80,7 +82,11 @@ class Forest:
             self.etok, self.ep = np.resize(self.etok, grow), np.resize(self.ep, grow)
             self.ekid = np.resize(self.ekid, grow)
         for k, (i, m) in enumerate(zip(ids, legal)):
-            pz = self.prior_logits if i < self.n and self.prior_logits is not None else z[0 if i < self.n else self.policy[self.depth[i] % 2]]
+            pz = (
+                self.prior_logits
+                if i < self.n and self.prior_logits is not None
+                else z[0 if i < self.n else self.policy[self.depth[i] % 2]]
+            )
             p = softmax(pz[k][m])
             o = np.argsort(-p, kind="stable")
             e = slice(self.edges, self.edges + len(m))
@@ -193,7 +199,21 @@ def root_weights(p):
     return w / max(w.sum(), 1e-300)
 
 
-def grow(F, budget, own=0.0, opp=0.0, soft=False, kappa=0.0, k=8, g=0.125, width=4, root=0.0, full=False, floor=0.0, squash=0.0):
+def grow(
+    F,
+    budget,
+    own=0.0,
+    opp=0.0,
+    soft=False,
+    kappa=0.0,
+    k=8,
+    g=0.125,
+    width=4,
+    root=0.0,
+    full=False,
+    floor=0.0,
+    squash=0.0,
+):
     """Best-first by reach until each root has `budget` network evaluations (or nothing to expand): each
     call takes per root its max(k, g * evaluations so far) unexpanded moves of largest reach, below the
     root at most `width` of them from one node. root > 0: the root's move weights are the mean of

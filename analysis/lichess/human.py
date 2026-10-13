@@ -106,9 +106,7 @@ def score(a):
     lo = 0
     while lo < len(games):
         hi, total = lo, 0
-        while hi < len(games) and (
-            hi == lo or total + len(games[hi]["tokens"]) <= a.tokens
-        ):
+        while hi < len(games) and (hi == lo or total + len(games[hi]["tokens"]) <= a.tokens):
             total += len(games[hi]["tokens"])
             hi += 1
         items = [(Cache(m, len(g["tokens"])), torch.as_tensor(g["tokens"]),
@@ -413,7 +411,8 @@ def fit(a):
         for name, m in strata.items()
     }  # fmt: skip
     report["think"]["guard"] = guard | dict(
-        human_moves_over=round(float((s > hard * guard["share"] + inc)[half == check_half].mean()), 4))
+        human_moves_over=round(float((s > hard * guard["share"] + inc)[half == check_half].mean()), 4)
+    )
 
     # resignation: a discrete-time hazard on both players' opportunities
     R = risk_set(P)
@@ -434,7 +433,9 @@ def fit(a):
     calibration = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         m = te & (h >= lo) & (h <= hi)
-        calibration.append(dict(predicted=round(float(h[m].mean()), 4), observed=round(float(y[m].mean()), 4), n=int(m.sum())))
+        calibration.append(
+            dict(predicted=round(float(h[m].mean()), 4), observed=round(float(y[m].mean()), 4), n=int(m.sum()))
+        )
     rows = np.flatnonzero(R["half"] == check_half)
     key, order, fired = resignations(R, rows, h, floor, rng)
     players = np.unique(key)
@@ -498,9 +499,13 @@ def fit(a):
         draw=dict(coef=dcoef.round(5).tolist(), accept=accept, min_ply=min_ply),
         guard=guard,
         provenance=dict(
-            fit="analysis/lichess/human.py fit", games=int(len(n)), fitted_on="even game ids",
+            fit="analysis/lichess/human.py fit",
+            games=int(len(n)),
+            fitted_on="even game ids",
             source="the main evaluation's games (strat-eval-v1, rows sha256 " + manifest["sha256"][:16] + ")",
-            model=model.get("name"), model_sha256=model.get("checkpoint_sha256"), weights=a.weights,
+            model=model.get("name"),
+            model_sha256=model.get("checkpoint_sha256"),
+            weights=a.weights,
         ),
     )
     Path(a.params).write_text(json.dumps(params, indent=1) + "\n")
@@ -577,7 +582,6 @@ def main():
     f.add_argument("--weights", default="int8 (cpu)", help="precision the heads ran in (provenance)")
     a = p.parse_args()
     {"score": score, "fit": fit, "simulate": simulate, "compare": compare}[a.command](a)
-
 
 
 # ---- fit: everything below reads positions.npz / games.npz on CPU ----------------------------

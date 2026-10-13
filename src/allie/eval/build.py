@@ -47,9 +47,7 @@ def sides(path, skip, clock=False, upper=UPPER):
     ok = g.rated.astype(bool) & ~g.leak & np.array([s not in skip for s in site])
     ok &= (g.fmt >= 1) & (g.fmt <= 4)
     base = (g.fmt.astype(int) - 1) * len(upper)
-    cell = lambda elo, bot: np.where(
-        ok & ~bot, base + np.searchsorted(upper, elo, side="right"), -1
-    )
+    cell = lambda elo, bot: np.where(ok & ~bot, base + np.searchsorted(upper, elo, side="right"), -1)
     plies = np.diff(g.off)
     return (
         g,
@@ -85,11 +83,7 @@ def select(month, skip, side=None, upper=UPPER, target=TARGET):
     """Sampled games in bucket order: [(tokens, labels, side channel or None, site)], the sampling fractions and
     population moves per cell (format x band of upper)."""
     n = 4 * len(upper)
-    buckets = [
-        b
-        for b in json.loads((month / "buckets.json").read_text())
-        if 1 <= b["code"] // 10000 - 1 <= 4
-    ]
+    buckets = [b for b in json.loads((month / "buckets.json").read_text()) if 1 <= b["code"] // 10000 - 1 <= 4]
     rate, total = {}, np.zeros(n)
     for b in buckets:
         _, _, wc, bc, wn, bn = sides(month / b["shards"][0], skip, upper=upper)
@@ -143,12 +137,7 @@ def pack(games, side):
     rlab.append(np.concatenate(lab))
     rclk.append(np.concatenate(clk) if side else None)
     pad = lambda x, v, dt: np.stack(
-        [
-            np.pad(
-                r, [(0, cm.ROW - len(r))] + [(0, 0)] * (r.ndim - 1), constant_values=v
-            )
-            for r in x
-        ]
+        [np.pad(r, [(0, cm.ROW - len(r))] + [(0, 0)] * (r.ndim - 1), constant_values=v) for r in x]
     ).astype(dt)
     rows, rlab = pad(rows, BOS, np.int16), pad(rlab, -1, np.int8)
     if side:
@@ -169,9 +158,7 @@ def build(side=None, month=MONTH, out=OUT, splits=None):
             assert np.array_equal(z["rows"], rows) and np.array_equal(z["labels"], rlab)
         np.savez(out / f"{side}.npz", **{side: rclk})
         manifest = json.loads((out / "manifest.json").read_text())
-        manifest[f"{side}_sha256"] = hashlib.sha256(
-            (out / f"{side}.npz").read_bytes()
-        ).hexdigest()
+        manifest[f"{side}_sha256"] = hashlib.sha256((out / f"{side}.npz").read_bytes()).hexdigest()
         (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         print(f"{side}.npz written for {len(rows)} identical rows")
         return

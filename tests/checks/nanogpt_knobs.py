@@ -43,9 +43,7 @@ def digest(m):
 def train(val, **kw):
     torch.manual_seed(701)
     arch = dict(moe=[16, 2], moe_seq=0.001, moe_update="quantile") | kw
-    cfg = Config(
-        width=128, head_dim=64, layers=8, max_tokens=1024, scheduled_steps=8, arch=arch
-    )
+    cfg = Config(width=128, head_dim=64, layers=8, max_tokens=1024, scheduled_steps=8, arch=arch)
     m = create_model(cfg)
     mgr = TrainingManager(m, cfg, SCHEDULE)
     net = torch.compile(m, dynamic=False, fullgraph=True)
@@ -86,14 +84,10 @@ def schedule():
         135,
         66,
     )
-    assert mx.schedule({}, 4690)[0] == mx.SCHEDULE | dict(
-        warmup_steps=66, mtp_steps=132, split_step=135
-    )
+    assert mx.schedule({}, 4690)[0] == mx.SCHEDULE | dict(warmup_steps=66, mtp_steps=132, split_step=135)
     s, _ = mx.schedule(dict(sched=dict(mtp=0)), 4690)
     assert s["mtp_steps"] == 0 and s["split_step"] == 135, s
-    assert isinstance(
-        mx.schedule(dict(sched=dict(mtp=1e-9)), 4690)[0]["mtp_steps"], int
-    )
+    assert isinstance(mx.schedule(dict(sched=dict(mtp=1e-9)), 4690)[0]["mtp_steps"], int)
     w = Schedule(**s)
     w.validate()
     assert all(w.mtp(i) == [1.0] for i in range(10))
@@ -121,11 +115,7 @@ def main():
         schedule()
         every, mgr = train(val, adam_every=True)
         assert every["moved"] == [True] * 6, every["moved"]
-        halves = [
-            g["initial_lr"] * (1 if o is mgr.muon_opt else 2)
-            for o in mgr.optimizers
-            for g in o.param_groups
-        ]
+        halves = [g["initial_lr"] * (1 if o is mgr.muon_opt else 2) for o in mgr.optimizers for g in o.param_groups]
         assert halves == groups(base, "initial_lr")
         adam = [g for o in (mgr.adam_opt, mgr.scalar_opt) for g in o.param_groups]
         ref = [g for o in (base.adam_opt, base.scalar_opt) for g in o.param_groups]

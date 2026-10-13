@@ -22,10 +22,7 @@ def play(model, games, lengths, steps=10):
     out = [
         step(
             model,
-            [
-                (c, x[0][:n], x[1][:n], x[2][:n])
-                for c, x, n in zip(caches, games, lengths)
-            ],
+            [(c, x[0][:n], x[1][:n], x[2][:n]) for c, x, n in zip(caches, games, lengths)],
         )
     ]
     n = list(lengths)
@@ -77,11 +74,7 @@ def test_fast_engine_and_takeback(tiny_path):
                   for n in range(HEADER, len(x[0]) + 1)]  # fmt: skip
         c.truncate(HEADER + 3)  # takeback, then the same moves again
         n = len(x[0])
-        out[j].append(
-            engine.extend(
-                c, x[0][HEADER + 3 : n], x[1][HEADER + 3 : n], x[2][HEADER + 3 : n]
-            )
-        )
+        out[j].append(engine.extend(c, x[0][HEADER + 3 : n], x[1][HEADER + 3 : n], x[2][HEADER + 3 : n]))
 
     threads = [threading.Thread(target=run, args=(j,)) for j in range(len(games))]
     for t in threads:

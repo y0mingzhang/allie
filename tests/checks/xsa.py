@@ -29,13 +29,9 @@ def digest(m):
 def train(val, **kw):
     torch.manual_seed(701)
     arch = dict(moe=[16, 2], moe_seq=0.001, moe_update="quantile", fp32_small_masters=True) | kw
-    cfg = Config(
-        width=128, head_dim=64, layers=12, max_tokens=1024, scheduled_steps=8, arch=arch
-    )
+    cfg = Config(width=128, head_dim=64, layers=12, max_tokens=1024, scheduled_steps=8, arch=arch)
     m = create_model(cfg)
-    sched = Schedule(
-        warmup_steps=2, mtp_steps=0, split_step=5, batch_rows=2
-    )
+    sched = Schedule(warmup_steps=2, mtp_steps=0, split_step=5, batch_rows=2)
     mgr = TrainingManager(m, cfg, sched, decay_start=2, end_step=8)
     net = torch.compile(m, dynamic=False, fullgraph=True)
     losses = []

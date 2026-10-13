@@ -3,6 +3,7 @@
 Feeds one reconstructed position to `maia3.uci --use_uci_history` and compares its
 MultiPV move probabilities with the ones our scorer computes for the same position.
 """
+
 import argparse
 import sys
 
@@ -58,8 +59,8 @@ def main():
 
     # their own engine object, driven exactly as the UCI loop drives it
     from maia3.uci import Maia3UCIEngine as Engine, parse_args
-    eng = Engine(parse_args(["--model", a.model, "--use_uci_history", "--device", "cpu",
-                             "--temperature", "0"]))
+
+    eng = Engine(parse_args(["--model", a.model, "--use_uci_history", "--device", "cpu", "--temperature", "0"]))
     eng.ensure_model_loaded()
     eng.self_elo, eng.oppo_elo, eng.multipv = self_elo, oppo_elo, 5
     eng.cmd_position("position startpos moves " + " ".join(uci[:ply]))

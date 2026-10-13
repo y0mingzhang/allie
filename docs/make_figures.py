@@ -29,24 +29,18 @@ DATA = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/al
 ORIGINAL = Path(os.environ.get("ALLIE_ORIGINAL", DATA / "original-allie"))
 OUT = ROOT / "docs" / "figures"
 FONTS = ROOT / "docs" / "fonts"
-FINAL = (
-    R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"
-)  # the big run
+FINAL = R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"  # the big run
 ANN = "ann-all-p05-t1907"  # Allie 2.0: the big run's second anneal
 SEARCH = DATA / "maia3-bench/search"
 SWEEP = X / "sweep-readout-c8s200f0v4-w4.json"
-C_ALLIE = (
-    3.142088554411623e20  # the big run's useful training FLOPs (bigrun-trajectory-v2)
-)
+C_ALLIE = 3.142088554411623e20  # the big run's useful training FLOPs (bigrun-trajectory-v2)
 MAIA = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
 
 INK, INK2, MUTED = "#1f2328", "#57534e", "#78716c"
 PAPER, GRID, NEUTRAL, NEUTRAL_DARK = "#f8f7f3", "#e7e4dc", "#c9c3b8", "#8a8378"
 ALLIE, ALLIE_PALE, ALLIE_WASH = "#e4572e", "#f3b49f", "#f9d5c8"
 MINUS = "−"
-WIDTH = (
-    634  # one-panel plot width; every figure renders about 730 px wide (1,460 at 2x)
-)
+WIDTH = 634  # one-panel plot width; every figure renders about 730 px wide (1,460 at 2x)
 
 
 @alt.theme.register("allie", enable=True)
@@ -108,9 +102,7 @@ def title(text, *sub):
 
 
 def panel_title(text):
-    return alt.TitleParams(
-        text, anchor="start", fontSize=13, fontWeight=600, color=INK, offset=10
-    )
+    return alt.TitleParams(text, anchor="start", fontSize=13, fontWeight=600, color=INK, offset=10)
 
 
 def values(rows):
@@ -126,9 +118,7 @@ def diverging(rows, order, dom, nd, ticks, name, highlight, label_axis=True, wid
     bar = b.mark_bar(height=16, cornerRadiusEnd=2).encode(
         y=y, color=alt.condition(highlight, alt.value(ALLIE), alt.value(NEUTRAL)),
         x=alt.X("d:Q", scale=sx, title=None, axis=alt.Axis(values=ticks, grid=True, labelExpr=signed_axis(nd))))  # fmt: skip
-    whisk = b.mark_rule(color=INK, strokeWidth=1.3).encode(
-        y=y, x=alt.X("lo:Q", scale=sx), x2="hi:Q"
-    )
+    whisk = b.mark_rule(color=INK, strokeWidth=1.3).encode(y=y, x=alt.X("lo:Q", scale=sx), x2="hi:Q")
     pos = (
         b.transform_filter(alt.datum.d > 0)
         .mark_text(align="left", dx=7)
@@ -139,14 +129,8 @@ def diverging(rows, order, dom, nd, ticks, name, highlight, label_axis=True, wid
         .mark_text(align="right", dx=-7)
         .encode(y=y, x=alt.X("lo:Q", scale=sx), text="label:N")
     )
-    zero = (
-        values([{"v": 0}])
-        .mark_rule(color=INK, strokeWidth=1.4)
-        .encode(x=alt.X("v:Q", scale=sx))
-    )
-    return (bar + whisk + zero + pos + neg).properties(
-        width=width, height=34 * len(order), title=panel_title(name)
-    )
+    zero = values([{"v": 0}]).mark_rule(color=INK, strokeWidth=1.4).encode(x=alt.X("v:Q", scale=sx))
+    return (bar + whisk + zero + pos + neg).properties(width=width, height=34 * len(order), title=panel_title(name))
 
 
 def allie_n():
@@ -187,9 +171,7 @@ def flops_per():
     """Training FLOPs per parameter and token, by size, as the sweep's runs measured it (experiments.readout);
     held at the end values outside the sweep's sizes."""
     ks = sorted((r["n"], r["c"] / (r["n"] * r["d"])) for r in jload(SWEEP)["runs"])
-    return lambda n: np.interp(
-        np.log(n), np.log([x for x, _ in ks]), [k for _, k in ks]
-    )
+    return lambda n: np.interp(np.log(n), np.log([x for x, _ in ks]), [k for _, k in ks])
 
 
 def optimum(fam, c):
@@ -214,13 +196,9 @@ def law_layers(x, y, key, lab):
         ("s16", ALLIE, "mixture of experts"),
     ):
         last = cells[fam]["1e18"]["c"]
-        law_ = [
-            dict(c=float(c), v=optimum(fam, c)[key])
-            for c in np.geomspace(5e17, C_ALLIE, 60)
-        ]
+        law_ = [dict(c=float(c), v=optimum(fam, c)[key]) for c in np.geomspace(5e17, C_ALLIE, 60)]
         mins = [
-            dict(c=cells[fam][b]["c"], v=cells[fam][b]["l" if key == 0 else "n_opt"])
-            for b in ("1e17", "3e17", "1e18")
+            dict(c=cells[fam][b]["c"], v=cells[fam][b]["l" if key == 0 else "n_opt"]) for b in ("1e17", "3e17", "1e18")
         ]
         layers += [
             values([r for r in law_ if r["c"] <= last]).mark_line(color=color, strokeWidth=2.5).encode(x=x, y=y),
@@ -235,16 +213,11 @@ def law_layers(x, y, key, lab):
 def training():
     """The big run's main-eval CE over training, the scaling law's forecast for it, and Allie 2.0 after the second
     anneal."""
-    rows = sorted(
-        jsonl(X / "maia3-bench/bigrun-trajectory-v2.jsonl"), key=lambda r: r["step"]
-    )
+    rows = sorted(jsonl(X / "maia3-bench/bigrun-trajectory-v2.jsonl"), key=lambda r: r["step"])
     curve = [dict(t=r["tokens"] / 1e9, v=r["golden_macro"]) for r in rows]
     act, _, D = allie_n()
     forecast = law("s16")(act, D)
-    t_ann = (
-        curve[-1]["t"]
-        + jload(R / f"pretrain/{ANN}/done.json")["tokens_processed"] / 1e9
-    )
+    t_ann = curve[-1]["t"] + jload(R / f"pretrain/{ANN}/done.json")["tokens_processed"] / 1e9
     v_ann = jload(R / f"lm-eval/{ANN}/strat-v1.json")["macro"]
     x = alt.X("t:Q", scale=alt.Scale(domain=[20, 80], nice=False), title="Training tokens (billions)",
               axis=alt.Axis(values=[20, 30, 40, 50, 60, 70, 80], grid=False))  # fmt: skip
@@ -290,11 +263,7 @@ def isoflop():
             ("s16", ALLIE, "MoE"),
         ):
             cell = cells[fam][b]
-            runs = [
-                r
-                for r in sweep["runs"]
-                if r["fam"] == fam and r["budget"] == b and r["shape"] in cell["fit"]
-            ]
+            runs = [r for r in sweep["runs"] if r["fam"] == fam and r["budget"] == b and r["shape"] in cell["fit"]]
             n, v = (
                 np.array([r["n"] for r in runs]),
                 np.array([r["y"]["macro"] for r in runs]),
@@ -311,9 +280,7 @@ def isoflop():
             if i == 0:
                 layers.append(
                     values([opt])
-                    .mark_text(
-                        dy=20 if fam == "s16" else -18, color=color, fontWeight=600
-                    )
+                    .mark_text(dy=20 if fam == "s16" else -18, color=color, fontWeight=600)
                     .encode(x=x, y=y, text="t:N")
                 )
             print(f"  {b} {fam:5s} N* {opt['n'] / 1e6:6.1f}M L* {opt['v']:.4f}")
@@ -380,9 +347,7 @@ def frontier():
         "c:Q",
         scale=sx,
         title="Training compute (FLOPs)",
-        axis=alt.Axis(
-            values=[1e18, 1e19, 1e20, 1e21], grid=False, labelExpr=power_axis()
-        ),
+        axis=alt.Axis(values=[1e18, 1e19, 1e20, 1e21], grid=False, labelExpr=power_axis()),
     )
     y = alt.Y(
         "v:Q",
@@ -405,12 +370,8 @@ def frontier():
         "0.032 below its forecast, and below the law's floor."))  # fmt: skip
     save(chart, "frontier")
     l_opt, n_opt, d_opt = optimum("s16", C_ALLIE)
-    print(
-        f"  big run {C_ALLIE:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}"
-    )
-    print(
-        f"  law optimum at that compute: N* {n_opt / 1e9:.2f}B, D* {d_opt / 1e9:.1f}B; floor E {E:.4f}"
-    )
+    print(f"  big run {C_ALLIE:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}")
+    print(f"  law optimum at that compute: N* {n_opt / 1e9:.2f}B, D* {d_opt / 1e9:.1f}B; floor E {E:.4f}")
 
 
 def optimal():
@@ -427,9 +388,7 @@ def optimal():
         "c:Q",
         scale=sx,
         title="Training compute (FLOPs)",
-        axis=alt.Axis(
-            values=[1e18, 1e19, 1e20, 1e21], grid=False, labelExpr=power_axis()
-        ),
+        axis=alt.Axis(values=[1e18, 1e19, 1e20, 1e21], grid=False, labelExpr=power_axis()),
     )
     y = alt.Y(
         "v:Q",
@@ -450,9 +409,7 @@ def optimal():
         "Compute-optimal model size: the sweep's best sizes and each law's optimum, dashed beyond the sweep.",
         "The extrapolation reaches 51 times past the sweep's largest budget."))  # fmt: skip
     save(chart, "optimal")
-    print(
-        f"  law optimum at {C_ALLIE:.3e}: {n_opt / 1e9:.2f}B on {d_opt / 1e9:.1f}B; big run {act / 1e9:.3f}B"
-    )
+    print(f"  law optimum at {C_ALLIE:.3e}: {n_opt / 1e9:.2f}B on {d_opt / 1e9:.1f}B; big run {act / 1e9:.3f}B")
 
 
 # ------------------------------------------------------------------------------------ the model
@@ -518,20 +475,14 @@ def model():
     box(ax, 1.4, 0.2, 4.0, 3.2, ec="#ddd6c8", fc="#f1ede4")
     ax.text(3.4, 3.15, "MoE block  (23 of 24 blocks)", **small)
     box(ax, 1.55, mid - 0.3, 1.15, 0.6, "Attention")
-    ax.plot(
-        [2.7, 2.95, 2.95, 3.75], [mid, mid, 2.6, 2.6], color=ALLIE, lw=1.3, zorder=3
-    )  # the shared expert
+    ax.plot([2.7, 2.95, 2.95, 3.75], [mid, mid, 2.6, 2.6], color=ALLIE, lw=1.3, zorder=3)  # the shared expert
     box(ax, 3.75, 2.45, 1.05, 0.3, ec=ALLIE, fc=ALLIE_WASH)
     ax.text(4.275, 2.82, "shared expert", **small | {"va": "bottom"})
     ax.plot([4.8, 5.15, 5.15], [2.6, 2.6, mid + 0.09], color=ALLIE, lw=1.3, zorder=3)
-    ax.plot(
-        [2.7, 3.25], [mid, mid], color=MUTED, lw=1.3, zorder=3
-    )  # the router and its routed experts
+    ax.plot([2.7, 3.25], [mid, mid], color=MUTED, lw=1.3, zorder=3)  # the router and its routed experts
     ax.add_patch(plt.Circle((3.3, mid), 0.07, fc=MUTED, lw=0, zorder=5))
     ax.text(3.0, mid - 0.12, "router", **small | {"va": "top", "color": MUTED})
-    for on, y in zip(
-        [False, True, None, False, True, False], np.linspace(2.05, 0.75, 6)
-    ):
+    for on, y in zip([False, True, None, False, True, False], np.linspace(2.05, 0.75, 6)):
         if on is None:
             ax.text(4.275, y, "···", **small | {"fontsize": 14, "color": MUTED})
             continue
@@ -580,12 +531,7 @@ def previous(name, positions):
 
 def gflops(name):
     """The original Allie's GFLOPs per move with a key-value cache, counted as for the other models."""
-    return (
-        jload(ORIGINAL / f"flops-{name.split('-')[1]}.json")[
-            "flops_per_move_incremental"
-        ]
-        / 1e9
-    )
+    return jload(ORIGINAL / f"flops-{name.split('-')[1]}.json")["flops_per_move_incremental"] / 1e9
 
 
 def search_index(n):
@@ -598,10 +544,7 @@ def pareto():
     """Legal-move CE against GFLOPs per move, on the 20,000 benchmark positions that search ran on."""
     rep = jload(SEARCH / "report-ann2.json")
     p = rep["points"]
-    pts = [
-        dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name)
-        for m, name in MAIA.items()
-    ]
+    pts = [dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name) for m, name in MAIA.items()]
     for k, t in (("frozen/legal", "Allie 2.0 (raw)"), ("devcal/5", "5 simulations")):
         pts.append(dict(fam="allie", g=p[k]["gflops"], v=p[k]["ce"], t=t))
     ce = previous("allie1-medium", "bench")
@@ -619,9 +562,7 @@ def pareto():
     y = alt.Y("v:Q", scale=alt.Scale(domain=[1.20, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
               axis=alt.Axis(values=[1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
     b = values(pts)
-    maia, allie, orig = (
-        b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "orig")
-    )
+    maia, allie, orig = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "orig"))
     raw = alt.datum.t == "Allie 2.0 (raw)"
     chart = alt.layer(
         maia.mark_line(color=NEUTRAL_DARK, strokeWidth=2).encode(x=x, y=y),
@@ -649,9 +590,7 @@ def protocol_scores():
 
     def read(path):
         with np.load(path) as z:
-            ce, top1 = (
-                (z["ce_legal"], z["top1"]) if "ce_legal" in z else (z["ce"], z["top1"])
-            )
+            ce, top1 = (z["ce_legal"], z["top1"]) if "ce_legal" in z else (z["ce"], z["top1"])
         return (ce, top1) if len(ce) == len(keep) else (ce[keep], top1[keep])
 
     paths = {name: DATA / f"maia3-bench/scores/{m}.npz" for m, name in MAIA.items()}
@@ -667,11 +606,7 @@ def protocol():
     from allie.eval.maia3 import aggregate
 
     res = aggregate.compare(protocol_scores())["maia_protocol"]
-    order = [
-        m
-        for m in ("Allie 2.0", "Maia-3 23M", "Original Allie", "Maia-3 5M")
-        if m in res
-    ]
+    order = [m for m in ("Allie 2.0", "Maia-3 23M", "Original Allie", "Maia-3 5M") if m in res]
     panels = []
     for i, (key, name, dom, nd, ticks, lnd) in enumerate((
         ("d_ce", "Loss difference (nats, lower is better)", [-0.04, 0.10], 2, [-0.04, 0, 0.04, 0.08], 3),
@@ -700,11 +635,7 @@ def protocol():
     print(f"  {res['positions']} positions")
     for n in order + ["Maia-3 79M"]:
         r = res[n]
-        d = (
-            f"  dCE {signed(r['d_ce']['mean'], 4)}  dtop1 {signed(r['d_top1']['mean'], 2)}"
-            if "d_ce" in r
-            else ""
-        )
+        d = f"  dCE {signed(r['d_ce']['mean'], 4)}  dtop1 {signed(r['d_top1']['mean'], 2)}" if "d_ce" in r else ""
         print(f"  {n:16s} CE {r['ce']:.4f} top-1 {r['top1']:.2f}{d}")
 
 
@@ -725,9 +656,7 @@ def versatility():
         panels.append(diverging(rows, order, [-0.37, 0.06], 1, [-0.3, -0.2, -0.1, 0], name, alt.datum.d == alt.datum.d, width=248)
                       .properties(height=34 * 5))  # fmt: skip
         for r in rows:
-            print(
-                f"  {r['name']:11s} dCE {signed(r['d'], 4)} [{signed(r['lo'], 4)}, {signed(r['hi'], 4)}]"
-            )
+            print(f"  {r['name']:11s} dCE {signed(r['d'], 4)} [{signed(r['lo'], 4)}, {signed(r['hi'], 4)}]")
     chart = alt.hconcat(*panels, spacing=34).properties(title=title(
         "Allie 2.0's lead is largest in bullet and in time trouble",
         "Allie 2.0's loss minus Maia-3 79M's; below zero, Allie 2.0 predicts better. Maia-3 never",
@@ -737,25 +666,17 @@ def versatility():
 
 def rating():
     """Legal-move CE minus Maia-3 79M's per 100-point bin of game rating, on every scored blitz move."""
-    rows = [
-        r for r in jload(X / f"bigrun-progress/acc-by-game-rating-{ANN}.json") if r["n"]
-    ]
+    rows = [r for r in jload(X / f"bigrun-progress/acc-by-game-rating-{ANN}.json") if r["n"]]
     x_ = [float(np.mean([float(v) for v in r["bin"].split("-")])) for r in rows]
     ref = np.array([r["models"]["maia3-79m"]["ce"][0] for r in rows])
     pts = []
     for i, r in enumerate(rows):
         d = r["models"][ANN]["d_ce_79m"]
         pts.append(dict(x=x_[i], s="Allie 2.0", d=d[0], lo=d[1], hi=d[2]))
-        pts += [
-            dict(x=x_[i], s=MAIA[m], d=r["models"][m]["ce"][0] - ref[i])
-            for m in ("maia3-5m", "maia3-23m")
-        ]
+        pts += [dict(x=x_[i], s=MAIA[m], d=r["models"][m]["ce"][0] - ref[i]) for m in ("maia3-5m", "maia3-23m")]
     ce = previous("allie1-medium", "rating")
     if ce is not None:
-        pts += [
-            dict(x=x, s="Original Allie", d=float(v))
-            for x, v in zip(x_, binned(ce) - ref)
-        ]
+        pts += [dict(x=x, s="Original Allie", d=float(v)) for x, v in zip(x_, binned(ce) - ref)]
     sx, sy = (
         alt.Scale(domain=[600, 2900], nice=False),
         alt.Scale(domain=[-0.11, 0.16], nice=False),
@@ -764,9 +685,7 @@ def rating():
         "x:Q",
         scale=sx,
         title="Game rating (Lichess blitz)",
-        axis=alt.Axis(
-            values=[800, 1200, 1600, 2000, 2400, 2800], grid=False, format="d"
-        ),
+        axis=alt.Axis(values=[800, 1200, 1600, 2000, 2400, 2800], grid=False, format="d"),
     )
     y = alt.Y(
         "d:Q",

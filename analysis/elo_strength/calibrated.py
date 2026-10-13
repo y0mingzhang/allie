@@ -23,9 +23,7 @@ TAU, K, GAMMA, CAP = (
 LADDER = (0, 8, 32, 128, 256)
 _U = np.log2(1 + np.array(LADDER))
 _BINS = np.arange(63)
-SECONDS = np.where(
-    _BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06)
-)  # think-time head bins
+SECONDS = np.where(_BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06))  # think-time head bins
 
 
 def temperature(rating):
@@ -87,9 +85,7 @@ def coverage(game, n, legal):
     def run():
         tree = Tree(game, z, capacity=4 * n + 256)
         s = Search(tree, threads=4, calibration=par)
-        return s._batch(
-            [row], [feats], "coverage", n, "predicted", False, 0.9, 2.0, 1.25
-        )[0]
+        return s._batch([row], [feats], "coverage", n, "predicted", False, 0.9, 2.0, 1.25)[0]
 
     out = game.engine.run(run)
     by = {MOVES[t - 378]: v for t, v in zip(out["tokens"], out["probabilities"])}

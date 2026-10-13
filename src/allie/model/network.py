@@ -91,9 +91,7 @@ def game_blocks(docs, size=128):
     return (some & ~full).to(torch.int8)[None, None], full.to(torch.int8)[None, None]
 
 
-def make_context(
-    inputs, short_window, long_window, backend=None, host=None, board=True, span=None
-):
+def make_context(inputs, short_window, long_window, backend=None, host=None, board=True, span=None):
     """Inputs are complete original rows (or shorter rows for correctness tests); host is the
     same rows as a numpy array, if at hand, so the board states encode without a device sync.
     board=False skips them (attention-only tests on synthetic rows). span: the longest game a row
@@ -129,9 +127,7 @@ def make_context(
         if window >= min(inputs.size(1), span or inputs.size(1)) - 1:
             if not blocks:
                 blocks.extend(game_blocks(docs))
-            return _create_sparse_block_from_block_mask(
-                tuple(blocks), allowed, (length, length), 128, 128
-            )
+            return _create_sparse_block_from_block_mask(tuple(blocks), allowed, (length, length), 128, 128)
         return create_block_mask(
             allowed,
             1,
@@ -147,9 +143,7 @@ def make_context(
     long = short if short_window == long_window else make(long_window)
     states = None
     if board:
-        states = torch.from_numpy(
-            board_cnn.encode(inputs.cpu().numpy() if host is None else host)
-        )
+        states = torch.from_numpy(board_cnn.encode(inputs.cpu().numpy() if host is None else host))
         if flat.is_cuda:
             states = states.pin_memory()
         states = states.to(flat.device, non_blocking=True).flatten(0, 1)
@@ -178,17 +172,13 @@ def attention_qkv(qkv, context, window, scale, cos, sin, gate, ve, vgate):
 
 
 def configure(cfg, device):
-    assert dist.is_initialized(), (
-        "Upstream optimizer needs a process group even for one GPU"
-    )
+    assert dist.is_initialized(), "Upstream optimizer needs a process group even for one GPU"
     assert cfg.layers >= 8 and cfg.width % cfg.head_dim == 0 and cfg.head_dim % 4 == 0
     assert cfg.width >= 16 and cfg.scheduled_steps > 0
     assert dist.get_world_size() in (1, 2, 4, 8)
     assert cfg.ckpt in ("none", "eager")
     core.device = torch.device(device)
-    core.args = SimpleNamespace(
-        num_layers=cfg.layers, num_iterations=cfg.scheduled_steps
-    )
+    core.args = SimpleNamespace(num_layers=cfg.layers, num_iterations=cfg.scheduled_steps)
     core.medium_attention = attention
     core.medium_attention_qkv = attention_qkv
     core.CKPT = cfg.ckpt
@@ -276,8 +266,7 @@ def ratings(rows):
     starts = np.maximum.accumulate(np.where(rows == BOS, pos, 0), axis=1)
     ar = np.arange(n)[:, None]
     digits = lambda first: sum(
-        rows[ar, np.minimum(starts + k, length - 1)] * p
-        for k, p in zip(range(first, first + 4), (1000, 100, 10, 1))
+        rows[ar, np.minimum(starts + k, length - 1)] * p for k, p in zip(range(first, first + 4), (1000, 100, 10, 1))
     )
     return np.where((pos - starts - 11) % 2 == 0, digits(3), digits(7))[:, 1:]
 
@@ -293,9 +282,7 @@ def move_losses(logits, inputs, targets, context, weights=None, mask=None):
     if mask is not None:
         valid = valid & mask.flatten()
     logz = values.logsumexp(-1)
-    selected = values.gather(
-        1, (y - MOVE_START).clamp(0, MOVE_END - MOVE_START - 1)[:, None]
-    )[:, 0]
+    selected = values.gather(1, (y - MOVE_START).clamp(0, MOVE_END - MOVE_START - 1)[:, None])[:, 0]
     nll = logz - selected
     primary = (nll * valid).sum()
     objective = primary if weights is None else primary * weights[0]
@@ -303,18 +290,11 @@ def move_losses(logits, inputs, targets, context, weights=None, mask=None):
     if weights is not None:
         for offset in range(1, weights.numel()):
             aux_y = y[offset:]
-            aux_valid = (
-                valid[:-offset]
-                & valid[offset:]
-                & (context.documents[:-offset] == target_docs[offset:])
-            )
+            aux_valid = valid[:-offset] & valid[offset:] & (context.documents[:-offset] == target_docs[offset:])
             aux_selected = values[:-offset].gather(
                 1, (aux_y - MOVE_START).clamp(0, MOVE_END - MOVE_START - 1)[:, None]
             )[:, 0]
-            objective = (
-                objective
-                + weights[offset] * ((logz[:-offset] - aux_selected) * aux_valid).sum()
-            )
+            objective = objective + weights[offset] * ((logz[:-offset] - aux_selected) * aux_valid).sum()
     return objective, primary, valid.sum()
 
 
@@ -367,9 +347,7 @@ class TrainingManager(core.TrainingManager):
         # Checkpoint only at completed optimizer boundaries. Even boundaries
         # may legitimately retain gradients for the next odd Adam update.
         for opt in (self.adam_opt, self.scalar_opt):
-            assert not opt._reduce_scatter_futures, (
-                "Checkpoint before optimizer collectives completed"
-            )
+            assert not opt._reduce_scatter_futures, "Checkpoint before optimizer collectives completed"
         return snapshot(
             dict(
                 config=asdict(self.cfg),
@@ -384,9 +362,7 @@ class TrainingManager(core.TrainingManager):
 
     def load_rank_state_dict(self, saved):
         assert saved["config"] == asdict(self.cfg)
-        assert (
-            saved["rank"] == dist.get_rank() and saved["world"] == dist.get_world_size()
-        )
+        assert saved["rank"] == dist.get_rank() and saved["world"] == dist.get_world_size()
         device = next(self.model.parameters()).device
 
         def to_device(value):
@@ -409,9 +385,7 @@ class TrainingManager(core.TrainingManager):
                 for key, value in original.items():
                     if key == "params":
                         continue
-                    group[key] = (
-                        cpu_copy(value) if key.endswith("_cpu") else to_device(value)
-                    )
+                    group[key] = cpu_copy(value) if key.endswith("_cpu") else to_device(value)
                 for param, index in zip(group["params"], original["params"]):
                     if index in state["state"]:
                         opt.state[param] = to_device(state["state"][index])

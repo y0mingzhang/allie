@@ -41,15 +41,11 @@ def main():
     p.add_argument("positions")
     p.add_argument("out")
     p.add_argument("--max-bin", type=int, default=2000)
-    p.add_argument(
-        "--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", "0"))
-    )
+    p.add_argument("--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", "0")))
     p.add_argument("--shards", type=int, default=1)
     p.add_argument("--chunk", type=int, default=1024)
     p.add_argument("--threads", type=int, default=8)
-    p.add_argument(
-        "--limit", type=int, default=0, help="positions per chunk (a timing test)"
-    )
+    p.add_argument("--limit", type=int, default=0, help="positions per chunk (a timing test)")
     a = p.parse_args()
     torch.set_num_threads(a.threads)
     z = np.load(a.positions)
@@ -79,16 +75,11 @@ def main():
             for t in seq[HEADER:]:
                 boards.append(advance(boards[-1], int(t)))
             b = torch.tensor(np.frombuffer(b"".join(boards), np.uint8).reshape(-1, 68))
-            f = torch.tensor(
-                feats[off[longest] : off[longest + 1]], dtype=torch.float32
-            )
+            f = torch.tensor(feats[off[longest] : off[longest + 1]], dtype=torch.float32)
             caches, prev = [Cache(model) for _ in seqs], 0
             for i in members:
                 n = off[i + 1] - off[i]
-                items = [
-                    (c, torch.tensor(s[prev:n]), f[prev:n], b[prev:n])
-                    for c, s in zip(caches, seqs)
-                ]
+                items = [(c, torch.tensor(s[prev:n]), f[prev:n], b[prev:n]) for c, s in zip(caches, seqs)]
                 z_at[i] = step(model, items).double().numpy()
                 ntok += len(seqs) * (n - prev)
                 prev = n

@@ -1,4 +1,5 @@
 """Aggregate the per-position scores into the two report views, with game-clustered CIs."""
+
 import json
 
 import numpy as np
@@ -114,20 +115,34 @@ def main():
         if base in scored:
             report[vname]["paired_vs_" + base] = {
                 name: dict(
-                    d_accuracy=stats(s[vmask, 0],
-                                     (d["top1"][vmask].astype(float) - scored[base]["top1"][vmask]), rng),
+                    d_accuracy=stats(s[vmask, 0], (d["top1"][vmask].astype(float) - scored[base]["top1"][vmask]), rng),
                     d_ce=stats(s[vmask, 0], d["ce"][vmask] - scored[base]["ce"][vmask], rng),
                 )
-                for name, d in scored.items() if name != base
+                for name, d in scored.items()
+                if name != base
             }
     speed = {p.stem: json.loads(p.read_text()) for p in sorted(SCORES.glob("*.json"))}
-    out = dict(views=list(masks), positions=int(len(s)),
-               per_view_counts={k: int(v.sum()) for k, v in masks.items()},
-               report=report, speed=speed)
+    out = dict(
+        views=list(masks),
+        positions=int(len(s)),
+        per_view_counts={k: int(v.sum()) for k, v in masks.items()},
+        report=report,
+        speed=speed,
+    )
     (SCORES / "aggregate.json").write_text(json.dumps(out, indent=2) + "\n")
-    print(json.dumps({v: {m: dict(acc=round(r["macro_accuracy"], 4), ce=round(r["macro_ce"], 4))
-                          for m, r in report[v].items() if not m.startswith("paired")}
-                      for v in report}, indent=2))
+    print(
+        json.dumps(
+            {
+                v: {
+                    m: dict(acc=round(r["macro_accuracy"], 4), ce=round(r["macro_ce"], 4))
+                    for m, r in report[v].items()
+                    if not m.startswith("paired")
+                }
+                for v in report
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

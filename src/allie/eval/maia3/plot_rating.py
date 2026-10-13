@@ -71,9 +71,7 @@ def main():
     rows, centers = [], (EDGES[:-1] + EDGES[1:]) / 2
     for lo, hi in zip(EDGES[:-1], EDGES[1:]):
         k = (rating >= lo) & (rating < hi)
-        r = dict(
-            bin=f"{lo}-{hi}", n=int(k.sum()), games=len(np.unique(game[k])), models={}
-        )
+        r = dict(bin=f"{lo}-{hi}", n=int(k.sum()), games=len(np.unique(game[k])), models={})
         for name, (ce, top1) in sc.items():
             dce, dacc = (
                 ce[k] - sc["maia3-79m"][0][k],
@@ -106,17 +104,13 @@ def main():
                 zorder=3 + (name == big),
             )
             if name in (big, "maia3-79m"):
-                ax.fill_between(
-                    centers, v[:, 1], v[:, 2], color=color, alpha=0.12, lw=0, zorder=2
-                )
+                ax.fill_between(centers, v[:, 1], v[:, 2], color=color, alpha=0.12, lw=0, zorder=2)
             if name == big:
                 ax.plot(centers[thin], v[thin, 0], ls="none", marker="o", ms=7, mfc=surface, mec=color, mew=1.5,
                         zorder=5, label=f"bin with < {MIN_N:,} positions")  # fmt: skip
         ax.set_xticks(np.arange(600, 2901, 200))
         ax.set_xlim(600, 2900)
-        ax.set_xlabel(
-            "Game rating (mean of both players)", color=ink, fontweight="bold"
-        )
+        ax.set_xlabel("Game rating (mean of both players)", color=ink, fontweight="bold")
         ax.set_ylabel(ylabel, color=ink, fontweight="bold")
         ax.grid(True, color=grid, lw=0.8)
         for side in ("top", "right"):
@@ -133,9 +127,7 @@ def main():
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(HERE / f"{stem}.png", facecolor=surface)
 
-    f = lambda t, s=100, fmt="{:+.2f}": (
-        f"{fmt.format(t[0] * s)} [{fmt.format(t[1] * s)}, {fmt.format(t[2] * s)}]"
-    )
+    f = lambda t, s=100, fmt="{:+.2f}": f"{fmt.format(t[0] * s)} [{fmt.format(t[1] * s)}, {fmt.format(t[2] * s)}]"
     names = list(models)
     lines = [
         f"Top-1 accuracy % by game rating ({name}, model sha256 {info['model_sha256'][:12]}); weighted to the natural mover mix. "

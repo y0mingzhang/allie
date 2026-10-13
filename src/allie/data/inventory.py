@@ -80,9 +80,7 @@ def sample(d, b):
     last = b["games"] - cm.SHARD_GAMES * (len(b["shards"]) - 1)
     rel = b["shards"][-1] if last >= min(5000, b["games"]) else b["shards"][0]
     moves = cm.read(d / rel, ["moves"]).column("moves")
-    t = np.minimum(pc.list_value_length(moves).to_numpy() + 12, cm.ROW).astype(
-        np.float64
-    )
+    t = np.minimum(pc.list_value_length(moves).to_numpy() + 12, cm.ROW).astype(np.float64)
     n = b["games"]
     return b["code"], n, n * t.mean(), n * (t * t).mean()
 
@@ -98,19 +96,13 @@ def inventory(pin, out, *token_months):
     bucket = {d: cm.listed(d, ex.get(str(d))) for d in dirs}
     disk = {d: {b["code"]: b["games"] for b in bucket[d]} for d in dirs}
     # whole months' bucket shares, for unbuilt ones
-    have = {
-        m: {b["code"]: b["games"] for b in cm.listed(d)} for m, d in lichess.items()
-    }
+    have = {m: {b["code"]: b["games"] for b in cm.listed(d)} for m, d in lichess.items()}
     pub = published(sorted({str(d.parent) for d in lichess.values()}))
     pool = sorted(m for m in pub if p["first"] <= m != p["held_out"])
     assert set(lichess) <= set(pool), "pinned months outside the pool"
     games = {}
     for m in pool:
-        got = (
-            disk[lichess[m]]
-            if m in have
-            else {c: s * pub[m] for c, s in estimate(m, have).items()}
-        )
+        got = disk[lichess[m]] if m in have else {c: s * pub[m] for c, s in estimate(m, have).items()}
         for c, g in got.items():
             games[c] = games.get(c, 0) + g
     for d in ext:
@@ -130,18 +122,10 @@ def inventory(pin, out, *token_months):
             fallback[coarse(c, k)] = fallback.get(coarse(c, k), 0) + a
     codes = {}
     for c in sorted(games):
-        a = next(
-            x
-            for x in (acc.get(c), *(fallback.get(coarse(c, k)) for k in (3, 2, 1)))
-            if x is not None
-        )
+        a = next(x for x in (acc.get(c), *(fallback.get(coarse(c, k)) for k in (3, 2, 1))) if x is not None)
         on_disk = sum(disk[d].get(c, 0) for d in dirs)
-        codes[str(c)] = dict(
-            games=round(games[c]), disk=on_disk, tok=a[1] / a[0], tok2=a[2] / a[0]
-        )
-    assert {k: v["disk"] for k, v in codes.items() if v["disk"]} == p[
-        "inventory"
-    ], "disk differs from the pin"
+        codes[str(c)] = dict(games=round(games[c]), disk=on_disk, tok=a[1] / a[0], tok2=a[2] / a[0])
+    assert {k: v["disk"] for k, v in codes.items() if v["disk"]} == p["inventory"], "disk differs from the pin"
     unbuilt = sorted(set(pool) - set(lichess))
     inv = dict(
         pin=str(pin),
@@ -217,9 +201,7 @@ class Pool:
     def __init__(self, inv, basis):
         c = inv["codes"]
         self.code = np.array([int(k) for k in c])
-        self.games = np.array(
-            [v["disk" if basis == "disk" else "games"] for v in c.values()], float
-        )
+        self.games = np.array([v["disk" if basis == "disk" else "games"] for v in c.values()], float)
         self.tok = np.array([v["tok"] for v in c.values()])
         self.tok2 = np.array([v["tok2"] for v in c.values()])
         self.src, self.fmt = self.code // 100000, self.code // 10000 % 10 - 1
@@ -260,13 +242,9 @@ def passcap(pool, total, cap=1.0):
         T = pool.drawn(total, w) if w.any() else total
         want = T * (1 - pool.supply[other].sum() / human)
         assert cap * (g * t).sum() >= want, "the cells cannot supply the tokens"
-        lam = bisect(
-            lambda x: (np.minimum(cap * g, x) * t).sum(), want, 0, cap * g.max()
-        )
+        lam = bisect(lambda x: (np.minimum(cap * g, x) * t).sum(), want, 0, cap * g.max())
         per = dict(zip(keys, np.minimum(cap * g, lam) / g))
-        w = np.where(cell, [per.get(k, 0) for k in key], 0) + np.where(
-            other, T / human, 0
-        )
+        w = np.where(cell, [per.get(k, 0) for k in key], 0) + np.where(other, T / human, 0)
     return w
 
 
@@ -276,9 +254,7 @@ def slices(budget, supply, f, cap):
     while free:
         share = {k: s ** (1 - f) for k, s in free.items()}
         left = budget - sum(out.values())
-        full = {
-            k for k in free if left * share[k] / sum(share.values()) > cap * free[k]
-        }
+        full = {k for k in free if left * share[k] / sum(share.values()) > cap * free[k]}
         if not full:
             return out | {k: left * share[k] / sum(share.values()) for k in free}
         out |= {k: cap * free.pop(k) for k in full}
@@ -304,9 +280,7 @@ def elo(pool, total, s, f, engine, cap=8.0):
                 w[m] = want / sup[k]
                 continue
             assert cap * pool.supply[m].sum() >= want, f"format {k} short"
-            e0 = bisect(
-                lambda e0: -(pool.supply[m] * rule(e0)).sum(), -want, -5000, 10000
-            )
+            e0 = bisect(lambda e0: -(pool.supply[m] * rule(e0)).sum(), -want, -5000, 10000)
             w[m] = rule(e0)
     return w
 
@@ -319,9 +293,7 @@ def hand(pool, total, cells, otb=1.0, engine=0.0):
         rel[int(k)] = [float(x) for x in v.split(",")]
     human = pool.supply[~pool.engine].sum()
     other = np.isin(pool.fmt, OTHER) & ~pool.engine
-    base = (
-        rel[pool.fmt, pool.band] * np.where(pool.otb, otb, 1.0) * ~pool.engine * ~other
-    )
+    base = rel[pool.fmt, pool.band] * np.where(pool.otb, otb, 1.0) * ~pool.engine * ~other
     w = base
     for _ in range(5):
         T = pool.drawn(total, w)
@@ -337,25 +309,19 @@ def realized(pool, base, minpool, base_sha256):
     raw = Path(base).read_bytes()
     assert base_sha256 in (None, hashlib.sha256(raw).hexdigest()), "base replay changed"
     rep = json.loads(raw)["buckets"]
-    get = lambda k, d: np.array(
-        [rep.get(str(c), {}).get(k, d) for c in pool.code], float
-    )
+    get = lambda k, d: np.array([rep.get(str(c), {}).get(k, d) for c in pool.code], float)
     seen, ok = get("passes", np.nan), get("pool", 0) >= int(minpool)
     cell = pool.src * 10000 + pool.fmt * 100 + pool.code // 100 % 100 // 2
     for k in np.unique(cell[~ok]):
         m = (cell == k) & ok
-        fill = (
-            np.average(seen[m], weights=pool.supply[m]) if pool.supply[m].sum() else 0.0
-        )
+        fill = np.average(seen[m], weights=pool.supply[m]) if pool.supply[m].sum() else 0.0
         seen[(cell == k) & ~ok] = fill
     return seen
 
 
 def fit(pool, total, w):
     """w(c) at the scale c whose run draws exactly its tokens."""
-    return w(
-        bisect(lambda c: pool.supply @ w(c) / pool.drawn(total, w(c)), 1.0, 0.0, 5.0)
-    )
+    return w(bisect(lambda c: pool.supply @ w(c) / pool.drawn(total, w(c)), 1.0, 0.0, 5.0))
 
 
 def topup(pool, total, base, p, minpool=200, base_sha256=None, elo=2400, otb=0):
@@ -407,9 +373,7 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
     raw = Path(inv_path).read_bytes()
     pool, total = Pool(json.loads(raw), basis), float(tokens)
     args = dict(x.split("=", 1) for x in kv)
-    w = dict(passcap=passcap, elo=elo, hand=hand, topup=topup, anneal=anneal)[kind](
-        pool, total, **args
-    )
+    w = dict(passcap=passcap, elo=elo, hand=hand, topup=topup, anneal=anneal)[kind](pool, total, **args)
     keep = pool.games > 0
     assert np.isfinite(w).all() and (w >= 0).all()
     got = pool.supply @ w / pool.drawn(total, w)
@@ -423,9 +387,7 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
         training_tokens=total,
         inventory_sha256=hashlib.sha256(raw).hexdigest(),
         pin_digest=json.loads(raw)["pin_digest"],
-        history_sha256=hashlib.sha256(hist.read_bytes()).hexdigest()
-        if basis == "full"
-        else None,
+        history_sha256=hashlib.sha256(hist.read_bytes()).hexdigest() if basis == "full" else None,
         summary=summary(pool, w, total),
         weights={str(c): float(x) for c, x in zip(pool.code[keep], w[keep])},
     )
@@ -437,13 +399,9 @@ def recipe(inv_path, basis, tokens, label, kind, *kv):
         path.write_text(text)
     assert path.read_text() == text
     s = body["summary"]
-    print(
-        f"table:{name}  max passes {s['max_passes']:.2f}, engine {s['engine_share']:.3f}, otb {s['otb_share']:.3f}"
-    )
+    print(f"table:{name}  max passes {s['max_passes']:.2f}, engine {s['engine_share']:.3f}, otb {s['otb_share']:.3f}")
     for f, v in s["formats"].items():
-        cells = "  ".join(
-            f"{b} {c['share']:.3f}/{c['passes']:.2f}x" for b, c in v["cells"].items()
-        )
+        cells = "  ".join(f"{b} {c['share']:.3f}/{c['passes']:.2f}x" for b, c in v["cells"].items())
         print(f"  {f:14} {v['share']:.3f}  {cells}")
 
 

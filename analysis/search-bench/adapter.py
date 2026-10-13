@@ -43,8 +43,10 @@ def dev_positions():
     """build_dev.py's calibration positions, in the same form as positions()."""
     z = dict(np.load(DATA / "search" / "dev-positions.npz"))
     o, tokens, feats = z["offsets"], z["tokens"], z["feats"]
-    return [dict(prefix=tokens[a:b].tolist(), features=feats[a:b].copy(), cell=int(c), target=int(t), game=int(g))
-            for a, b, c, t, g in zip(o[:-1], o[1:], z["cell"], z["target"], z["game"])]
+    return [
+        dict(prefix=tokens[a:b].tolist(), features=feats[a:b].copy(), cell=int(c), target=int(t), game=int(g))
+        for a, b, c, t, g in zip(o[:-1], o[1:], z["cell"], z["target"], z["game"])
+    ]
 
 
 class Bench(Search):
@@ -57,17 +59,13 @@ class Bench(Search):
     def predict(self, queries, budget, clock_rule="predicted"):
         if budget in ("legal", "adaptive") or budget in (64, 1000):
             method = "legal" if budget == "legal" else "coverage"
-            return super().predict(
-                queries, method=method, budget=budget, clock_rule=clock_rule
-            )
+            return super().predict(queries, method=method, budget=budget, clock_rule=clock_rule)
         assert budget in POLICY, budget
         rows, feats = [], []
         for q in queries:
             board = from_prefix(np.asarray(q["prefix"]))
             assert board.outcome() < 0
-            rows.append(
-                dict(prefix=list(q["prefix"]), cell=q["cell"], legal=board.legal())
-            )
+            rows.append(dict(prefix=list(q["prefix"]), cell=q["cell"], legal=board.legal()))
             feats.append(np.asarray(q["features"], np.float32))
         out = []
         for lo in range(0, len(rows), self.batch_size):

@@ -42,9 +42,7 @@ def built(m):
     return (
         (m / "stats.json").exists()
         and b.exists()
-        and all(
-            (m / s).exists() for x in json.loads(b.read_text()) for s in x["shards"]
-        )
+        and all((m / s).exists() for x in json.loads(b.read_text()) for s in x["shards"])
     )
 
 

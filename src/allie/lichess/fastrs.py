@@ -117,23 +117,22 @@ class RustFast:
         try:
             import allie_fast
         except ImportError as e:
-            raise ImportError(f"the Rust engine is not installed (allie[fast]; in a clone uv sync --extra fast): {e}") from e
+            raise ImportError(
+                f"the Rust engine is not installed (allie[fast]; in a clone uv sync --extra fast): {e}"
+            ) from e
         if (got := getattr(allie_fast, "INTERFACE", None)) != INTERFACE:
-            raise ImportError(f"the installed Rust engine's interface is {got}, this code's {INTERFACE}: install the engine of this release")
+            raise ImportError(
+                f"the installed Rust engine's interface is {got}, this code's {INTERFACE}: install the engine of this release"
+            )
 
         assert model.device.type == "cpu" and model.dtype == torch.bfloat16
         c, w, n = model.config, model.w, model.layers
         assert model.head_dim % 16 == 0 and model.head_dim <= 256 and model.topk <= 64
-        assert (
-            w["board.first"].shape == (32, 13, 3, 3)
-            and w["board.output"].shape[0] == 544
-        )
+        assert w["board.first"].shape == (32, 13, 3, 3) and w["board.output"].shape[0] == 544
         self.lib, self.model = allie_fast, model
         if threads is not None and threads < 1:
             raise ValueError("threads must be at least 1")
-        self.threads = min(
-            threads or threads_default(), len(cpus())
-        )  # never more than the CPUs
+        self.threads = min(threads or threads_default(), len(cpus()))  # never more than the CPUs
         self.lock = threading.Lock()
         int8 = bool(model.scales)
         ve = [None] * n
@@ -141,9 +140,7 @@ class RustFast:
             ve[j], ve[n - model.ve + j] = j, j
         skip_in = [i * n // 16 for i in (2, 4, 6)]
         skip_out = [9 * n // 16 + i for i in range(3)]
-        dense = next(
-            (w[f"{i}.fc"].shape[0] // 2 for i in range(n) if f"{i}.fc" in w), 0
-        )
+        dense = next((w[f"{i}.fc"].shape[0] // 2 for i in range(n) if f"{i}.fc" in w), 0)
         cfg = [n, model.width, model.heads, model.head_dim, c["vocab"], model.ve, c["experts"],
                model.topk, model.keep, c["expert_hidden"], c["shared_hidden"], dense, int(int8),
                w["cos"].shape[0], skip_out[-1], self.threads, int(model.log_gates)]  # fmt: skip
@@ -206,9 +203,7 @@ class RustFast:
         self.handle, self.stale = self.lib.Server(*self.args, **self.serve), False
         if hasattr(os, "register_at_fork"):
             ref = weakref.ref(self)
-            os.register_at_fork(
-                after_in_child=lambda: ref() is not None and ref().forked()
-            )
+            os.register_at_fork(after_in_child=lambda: ref() is not None and ref().forked())
 
     @property
     def isa(self):
@@ -241,15 +236,8 @@ class RustFast:
         """An item's shapes, and the cache grown for a plain one; its tensors (and a Leaf's tree's) are
         checked by layout()."""
         n = len(ids)
-        if (
-            n < 1
-            or ids.shape != (n,)
-            or feats.shape != (n, 3)
-            or boards.shape != (n, 68)
-        ):
-            raise ValueError(
-                "an item: ids [m], feats [m, 3] and boards [m, 68], m >= 1"
-            )
+        if n < 1 or ids.shape != (n,) or feats.shape != (n, 3) or boards.shape != (n, 68):
+            raise ValueError("an item: ids [m], feats [m, 3] and boards [m, 68], m >= 1")
         if cache.model is not self.model:
             raise ValueError("a cache of another model")
         if not leaf:
@@ -257,9 +245,7 @@ class RustFast:
             return
         tree, path, slot = leaf
         if n != 1 or not all(0 <= r < tree.capacity for r in (slot, *path)):
-            raise ValueError(
-                "a leaf: one token, its path and slot within the tree's capacity"
-            )
+            raise ValueError("a leaf: one token, its path and slot within the tree's capacity")
 
     def layout(self, c, seen):
         """c's k, v and e in the model's layout at c.capacity (a cache or a tree buffer, once a step)."""
@@ -269,12 +255,7 @@ class RustFast:
         m = self.model
         shape = (m.layers, m.heads, c.capacity, m.head_dim)
         for t, s in ((c.k, shape), (c.v, shape), (c.e, (c.capacity, m.width))):
-            if (
-                t.shape != s
-                or t.dtype != m.dtype
-                or t.device.type != "cpu"
-                or not t.is_contiguous()
-            ):
+            if t.shape != s or t.dtype != m.dtype or t.device.type != "cpu" or not t.is_contiguous():
                 raise ValueError("a cache whose tensors are not the model's layout")
 
     @staticmethod
@@ -331,9 +312,7 @@ class RustFast:
             cat(2, torch.float32),
             cat(3, torch.uint8),
         )
-        out = torch.empty(
-            len(items), self.model.config["vocab"], dtype=torch.float32, device="cpu"
-        )
+        out = torch.empty(len(items), self.model.config["vocab"], dtype=torch.float32, device="cpu")
         err = self.handle.step(lo, len(items), ids.data_ptr(), feats.data_ptr(), boards.data_ptr(),
                                meta, caches, paths, out.data_ptr())  # fmt: skip
         if err:

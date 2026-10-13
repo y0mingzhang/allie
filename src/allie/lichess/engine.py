@@ -170,10 +170,7 @@ class Game:
     def update(self, moves, wtime=None, btime=None):
         """The server's move list and clocks (seconds) after its last move."""
         common = 0
-        while (
-            common < min(len(moves), len(self.moves))
-            and moves[common] == self.moves[common]
-        ):
+        while common < min(len(moves), len(self.moves)) and moves[common] == self.moves[common]:
             common += 1
         if common < len(self.moves):  # takeback or a different game state: rewind
             del self.moves[common:], self.clocks[common:]
@@ -336,7 +333,9 @@ def calibrated(game, play, search, clock):
         stop = start + think - calibration.MARGIN if play.think_time else np.inf
         reserve = behaviour.PARAMETERS["guard"]["reserve"]
         e = game.engine
-        n = calibration.affordable(left, reserve, stop - now, min(max(calibration.COST, e.sim_cost), 4 * calibration.COST))
+        n = calibration.affordable(
+            left, reserve, stop - now, min(max(calibration.COST, e.sim_cost), 4 * calibration.COST)
+        )
         if n:
             t, game.last_search = monotonic(), {}
             found = search(game, n, min(t + calibration.limit(left, reserve), stop))
@@ -357,4 +356,3 @@ def calibrated(game, play, search, clock):
 # play.mode -> fn(game, play, search, clock) -> Decision. A mode chooses the move its own way and
 # usually leaves timing, resignation and draws to game.behave.
 MODES = dict(human=human, strongest=strongest, calibrated=calibrated)
-

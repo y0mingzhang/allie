@@ -38,9 +38,7 @@ def load_model(checkpoint, source=None):
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     if "directory" in state:
         checkpoint = checkpoint.parent / state["directory"] / "model.pt"
-        state = torch.load(
-            checkpoint, map_location="cpu", weights_only=False, mmap=True
-        )
+        state = torch.load(checkpoint, map_location="cpu", weights_only=False, mmap=True)
     mm = network(state, source)
     torch.backends.cuda.matmul.allow_tf32 = True  # as in training
 
@@ -116,11 +114,7 @@ def forward(m, ids, pos, feats, boards, previous, attend, last=None):
     skips, backout, j = [], None, 0
     for i, block in enumerate(m.blocks):
         if i in skip_out:
-            gate = (
-                torch.sigmoid(s[3 * n + 2 + j])
-                * 2
-                * torch.sigmoid(m.skip_gates[j](x0[..., :16]))
-            )
+            gate = torch.sigmoid(s[3 * n + 2 + j]) * 2 * torch.sigmoid(m.skip_gates[j](x0[..., :16]))
             x = x + gate * skips.pop()
             j += 1
         if i == 0:
@@ -129,15 +123,11 @@ def forward(m, ids, pos, feats, boards, previous, attend, last=None):
             x = lam[i] * x + x0l[i, 0] * x0 + x0l[i, 1] * x02
         a, h = block.attn, norm(x)
         d, heads, hd = a.dim, a.num_heads, a.head_dim
-        qkv = F.linear(h, sa[i, 0] * a.qkvo_w[: 3 * d].type_as(h)).view(
-            -1, 3 * heads, hd
-        )
+        qkv = F.linear(h, sa[i, 0] * a.qkvo_w[: 3 * d].type_as(h)).view(-1, 3 * heads, hd)
         q, k, v = qkv.chunk(3, dim=-2)
         q, k = rotary(norm(q)), rotary(norm(k))
         if ve[i] is not None:
-            v = v + 2 * torch.sigmoid(a.value_embed_gate(h[..., :16])).view(
-                -1, heads, 1
-            ) * ve[i].view_as(v)
+            v = v + 2 * torch.sigmoid(a.value_embed_gate(h[..., :16])).view(-1, heads, 1) * ve[i].view_as(v)
         y = attend(i, q, k, v)
         if alphas is not None:
             y = xsa(y, v, torch.tanh(alphas[i]).type_as(y))
@@ -157,9 +147,7 @@ def forward(m, ids, pos, feats, boards, previous, attend, last=None):
 class MoEOracle:
     """Owns the model and a slot pool of keys/values. One serial caller; reset() per root batch."""
 
-    def __init__(
-        self, checkpoint, source=None, slots=1 << 18, rows=1 << 17, gather=1 << 18
-    ):
+    def __init__(self, checkpoint, source=None, slots=1 << 18, rows=1 << 17, gather=1 << 18):
         self.model, self.checkpoint = load_model(checkpoint, source)
         m = self.model
         a = m.blocks[0].attn
@@ -198,9 +186,7 @@ class MoEOracle:
         lo = 0
         while lo < len(prefixes):
             hi, total = lo, 0
-            while hi < len(prefixes) and (
-                hi == lo or total + len(prefixes[hi]) <= budget
-            ):
+            while hi < len(prefixes) and (hi == lo or total + len(prefixes[hi]) <= budget):
                 total += len(prefixes[hi])
                 hi += 1
             z, r = self._prefill(prefixes[lo:hi], features[lo:hi], origins[lo:hi])
@@ -216,13 +202,9 @@ class MoEOracle:
         slot, row = self._take(total, count)
         dev = "cuda"
         ids = torch.as_tensor(np.concatenate(prefixes), device=dev)
-        pos = torch.as_tensor(
-            np.concatenate([np.arange(n) + o for n, o in zip(lengths, origins)]), device=dev
-        )
+        pos = torch.as_tensor(np.concatenate([np.arange(n) + o for n, o in zip(lengths, origins)]), device=dev)
         self.origin[row : row + count] = torch.as_tensor(origins, device=dev)
-        feats = torch.as_tensor(
-            np.concatenate(features), dtype=torch.float32, device=dev
-        )
+        feats = torch.as_tensor(np.concatenate(features), dtype=torch.float32, device=dev)
         boards = torch.as_tensor(
             np.concatenate([encode(np.asarray(p)[None])[0] for p in prefixes]),
             device=dev,
@@ -248,12 +230,8 @@ class MoEOracle:
 
         def attend(i, q, k, v):
             self.k[i, slots], self.v[i, slots] = k, v
-            pad = lambda z: torch.cat((z, z.new_zeros(1, *z.shape[1:])))[
-                grid
-            ].transpose(1, 2)
-            y = F.scaled_dot_product_attention(
-                pad(q), pad(k), pad(v), attn_mask=mask[:, None], scale=self.scale
-            )
+            pad = lambda z: torch.cat((z, z.new_zeros(1, *z.shape[1:])))[grid].transpose(1, 2)
+            y = F.scaled_dot_product_attention(pad(q), pad(k), pad(v), attn_mask=mask[:, None], scale=self.scale)
             return y.transpose(1, 2)[valid]
 
         last = torch.as_tensor(starts + np.array(lengths) - 1, device=dev)
@@ -300,9 +278,9 @@ class MoEOracle:
             for ix, keys, live in chunks:
                 kk = self.k[i][keys].transpose(1, 2)
                 vv = self.v[i][keys].transpose(1, 2)
-                y[ix] = F.scaled_dot_product_attention(
-                    q[ix][:, :, None], kk, vv, attn_mask=live, scale=self.scale
-                )[:, :, 0]
+                y[ix] = F.scaled_dot_product_attention(q[ix][:, :, None], kk, vv, attn_mask=live, scale=self.scale)[
+                    :, :, 0
+                ]
             return y
 
         ids = torch.as_tensor(tokens, device=dev, dtype=torch.long)
@@ -349,12 +327,8 @@ class MoEHandles:
         ids, parents, tokens, lengths = h.T
         cap = len(self.rows)
         assert ids.min() >= 0 and parents.min() >= 0 and max(ids.max(), parents.max()) < cap
-        assert (self.rows[ids] < 0).all(), (
-            "a search node must be evaluated exactly once"
-        )
-        assert (self.rows[parents] >= 0).all() and (
-            lengths == self.lengths[parents] + 1
-        ).all()
+        assert (self.rows[ids] < 0).all(), "a search node must be evaluated exactly once"
+        assert (self.rows[parents] >= 0).all() and (lengths == self.lengths[parents] + 1).all()
         assert tokens.min() >= 378 and tokens.max() < 2346 and lengths.max() <= CONTEXT
         self.owners[ids] = self.owners[parents]
         np.add.at(self.per_root_queries, self.owners[ids], 1)
@@ -364,9 +338,7 @@ class MoEHandles:
             self.inc[parents], self.elapsed[parents],
         )  # fmt: skip
         self.inc[ids] = self.inc[parents]
-        z, rows = self.base.extend(
-            self.rows[parents], tokens, lengths, self.feats[ids], self.boards[ids]
-        )
+        z, rows = self.base.extend(self.rows[parents], tokens, lengths, self.feats[ids], self.boards[ids])
         self.rows[ids], self.lengths[ids] = rows, lengths
         if self.clock_rule == "predicted":
             self.elapsed[ids] = predicted_seconds(z)

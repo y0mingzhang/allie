@@ -45,18 +45,14 @@ def strat(min_ply):
                 continue
             w, b = elo(rows[r, g0 + 3 : g0 + 7]), elo(rows[r, g0 + 7 : g0 + 11])
             mover = w if k % 2 == 0 else b
-            pool[labels[r, t] // 4, min(max(mover // 200 * 200, 400), 3000)].append(
-                (r, g0, t, labels[r, t])
-            )
+            pool[labels[r, t] // 4, min(max(mover // 200 * 200, 400), 3000)].append((r, g0, t, labels[r, t]))
     return rows, feats, pool, None
 
 
 def store(month, per, min_ply):
     """Games, their feats and (format, bin) -> [(game, 0, position, cell)]: games drawn like the golden eval's
     with cells format x BINS and ~40 x per moves per cell, every scored move at ply >= min_ply within ROW."""
-    games, _, _ = ev.select(
-        month, ev.excluded(("dev", "dev_expert")), "feats", BINS[1:] + [10**4], 40 * per
-    )
+    games, _, _ = ev.select(month, ev.excluded(("dev", "dev_expert")), "feats", BINS[1:] + [10**4], 40 * per)
     pool = defaultdict(list)
     for n, (t, lab, _, _) in enumerate(games):
         for j in np.flatnonzero(lab[: cm.ROW] >= 0):
@@ -84,9 +80,7 @@ def main():
     p.add_argument("--store", type=Path, help="a finalized held-out month store")
     p.add_argument("--bins", default="400-3000", help="LO-HI: the mover-Elo bins kept")
     a = p.parse_args()
-    rows, feats, pool, sites = (
-        store(a.store, a.per, a.min_ply) if a.store else strat(a.min_ply)
-    )
+    rows, feats, pool, sites = store(a.store, a.per, a.min_ply) if a.store else strat(a.min_ply)
     lo, hi = map(int, a.bins.split("-"))
     rng = np.random.default_rng(a.seed)
     keep = []
@@ -95,9 +89,7 @@ def main():
         take = rng.choice(len(c), min(a.per, len(c)), replace=False)
         keep += [c[i] + key for i in sorted(take)]
         games = len({(r, g) for r, g, *_ in c})
-        print(
-            f"{FORMATS[key[0]]:9s} {key[1]:4d}: {len(c):6d} moves in {games:5d} games -> {len(take)}"
-        )
+        print(f"{FORMATS[key[0]]:9s} {key[1]:4d}: {len(c):6d} moves in {games:5d} games -> {len(take)}")
     tokens, fts, off, meta = [], [], [0], []
     for r, g0, t, cell, f, b in keep:
         tokens.append(rows[r][g0:t])

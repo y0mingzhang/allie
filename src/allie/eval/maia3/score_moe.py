@@ -50,9 +50,7 @@ def main():
     cfg = Config(**state["config"])
     model = create_model(cfg)
     assert not any(getattr(model, k, False) for k in ("use_clock", "use_elo"))
-    model.scalars.data = state["model"]["scalars"].to(
-        device="cuda", dtype=model.scalars.dtype
-    )
+    model.scalars.data = state["model"]["scalars"].to(device="cuda", dtype=model.scalars.dtype)
     model.load_state_dict(state["model"])
     inference = state["inference"]
     model.split_embed = inference["split_embed"]
@@ -61,9 +59,7 @@ def main():
     model.yarn.attn_scale = inference["yarn"]["attn_scale"]
     model.eval()
     net = torch.compile(model, dynamic=False, fullgraph=True)
-    schedule = core.ForwardScheduleConfig(
-        None, inference["ws_short"], inference["ws_long"]
-    )
+    schedule = core.ForwardScheduleConfig(None, inference["ws_short"], inference["ws_long"])
     batch = min(a.batch, cfg.max_tokens // 1024)
     feats_on = getattr(model, "use_feats", False)
 
@@ -130,9 +126,7 @@ def main():
             t = z.gather(1, tgt_t[i][:, None]).squeeze(1)
             ce[i] = (lg.logsumexp(-1) - t).double()
             ce_full[i] = (z.logsumexp(-1) - t).double()
-            top1[i] = (
-                pad_t[i].gather(1, lg.argmax(-1, keepdim=True)).squeeze(1) == tgt_t[i]
-            )
+            top1[i] = pad_t[i].gather(1, lg.argmax(-1, keepdim=True)).squeeze(1) == tgt_t[i]
 
     for lo in range(0, len(srows), batch):
         run_batch(lo)

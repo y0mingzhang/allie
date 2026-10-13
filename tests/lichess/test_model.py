@@ -16,9 +16,7 @@ from .test_tokens import random_game
 def inputs(moves, base=180, inc=2, elo=(1500, 1700)):
     tokens = header(base, inc, *elo) + [MOVE_ID[m] for m in moves]
     clocks = [base - k // 2 for k in range(len(moves))]
-    feats = [[-1] * 3] * (HEADER - 1) + [
-        features(k, base, inc, clocks) for k in range(len(moves) + 1)
-    ]
+    feats = [[-1] * 3] * (HEADER - 1) + [features(k, base, inc, clocks) for k in range(len(moves) + 1)]
     boards = [START] * HEADER
     for t in tokens[HEADER:]:
         boards.append(advance(boards[-1], t))
@@ -83,10 +81,7 @@ def naive_moe(m, i, h, keep):
         g = (s[idx] * m.topk**0.5 / s[idx].sum()).float()
         y = sum(g[j] * F.linear(swiglu(F.linear(t, w[f"{i}.up"][e])), w[f"{i}.down"][e])
                 for j, e in enumerate(idx[:keep].tolist()))  # fmt: skip
-        out.append(
-            y
-            + F.linear(swiglu(F.linear(t, w[f"{i}.shared_up"])), w[f"{i}.shared_down"])
-        )
+        out.append(y + F.linear(swiglu(F.linear(t, w[f"{i}.shared_up"])), w[f"{i}.shared_down"]))
     return torch.stack(out)
 
 

@@ -75,9 +75,7 @@ def prune(out, keep, current):
 
     def checked(path):
         path = path.resolve()
-        assert path.parent == root and re.fullmatch(
-            r"step-\d{8}-[0-9a-f]{8}", path.name
-        )
+        assert path.parent == root and re.fullmatch(r"step-\d{8}-[0-9a-f]{8}", path.name)
         return path
 
     protected = set()
@@ -125,9 +123,7 @@ def durable_save(state, path, tries=4):
         except OSError as e:
             if i + 1 == tries:
                 raise
-            print(
-                f"{path}: {e!r}, retry {i + 1} in {2**i}s", file=sys.stderr, flush=True
-            )
+            print(f"{path}: {e!r}, retry {i + 1} in {2**i}s", file=sys.stderr, flush=True)
             time.sleep(2**i)
 
 
@@ -141,9 +137,7 @@ def pinned(like):
         return torch.empty_like(like, device="cpu")
     pages = mmap.mmap(-1, n, mmap.MAP_PRIVATE)
     storage = torch.frombuffer(pages, dtype=torch.uint8).untyped_storage()
-    buffer = torch.empty(0, dtype=like.dtype).set_(
-        storage, 0, meta.shape, meta.stride()
-    )
+    buffer = torch.empty(0, dtype=like.dtype).set_(storage, 0, meta.shape, meta.stride())
     cudart = torch.cuda.cudart()
     torch.cuda.check_error(cudart.cudaHostRegister(storage.data_ptr(), n, 0))
     weakref.finalize(buffer, cudart.cudaHostUnregister, storage.data_ptr())
@@ -257,9 +251,7 @@ class AsyncSaver:
         flag = torch.tensor(1 if alive else 0 if self.written else 2)
         dist.all_reduce(flag, op=dist.ReduceOp.MAX, group=self.group)
         if flag == 2:
-            raise RuntimeError(
-                "checkpoint write failed; see the failing rank's writer traceback"
-            )
+            raise RuntimeError("checkpoint write failed; see the failing rank's writer traceback")
         if flag == 0:
             commit, self.commit, self.pending = self.commit, None, False
             if commit:

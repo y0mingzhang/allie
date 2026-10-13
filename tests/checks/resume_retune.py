@@ -68,9 +68,7 @@ def masters(manager):
 
 
 def worker(rank, world, port, tmp):
-    dist.init_process_group(
-        "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
-    )
+    dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world)
     torch.set_num_threads(1)
     T.patch()
     val = Packed(T.DATA, "val")
@@ -109,16 +107,12 @@ def worker(rank, world, port, tmp):
     assert T.same(manager.rank_state_dict(), final[1]) == 0.0
     expert_shard.reset()
     del model, manager
-    say(
-        f"unchanged resume at {T.SAVE} -> {T.STEPS} bitwise: losses, model.pt, rank state"
-    )
+    say(f"unchanged resume at {T.SAVE} -> {T.STEPS} bitwise: losses, model.pt, rank state")
 
     model, manager = resume(0.5, True)
     assert T.same(masters(manager), before) == 0.0
     old = [g for o in saved["optimizers"] for g in o["param_groups"]]
-    assert all(
-        g["initial_lr"] == 0.5 * o["initial_lr"] for g, o in zip(groups(manager), old)
-    )
+    assert all(g["initial_lr"] == 0.5 * o["initial_lr"] for g, o in zip(groups(manager), old))
     assert manager.rank_state_dict()["config"]["lr_scale"] == 0.5
     T.train(val, model, manager, range(T.SAVE, T.SAVE + 1))
     factor = manager.schedule.lr(T.SAVE, manager.decay_start, manager.end_step)
@@ -136,9 +130,7 @@ def worker(rank, world, port, tmp):
 
     manager = build(0.5)[1]
     try:
-        manager.load_rank_state_dict(
-            torch.load(f"{tmp}/rank{rank}.pt", weights_only=False)
-        )
+        manager.load_rank_state_dict(torch.load(f"{tmp}/rank{rank}.pt", weights_only=False))
         refused = False
     except AssertionError:
         refused = True
@@ -162,20 +154,14 @@ def mix():
     c = cm.Sampler(TAIL, 42, total_rows=ROWS, **kw)
     c.load_state_dict(state)  # as train.trainer does under --resume-retune
     resumed = draw(c, ROWS - K)
-    assert all(np.array_equal(x, y) for x, y in zip(resumed, tail[K:])), (
-        "the switch is not the tail's own run"
-    )
+    assert all(np.array_equal(x, y) for x, y in zip(resumed, tail[K:])), "the switch is not the tail's own run"
     diff = [i for i in range(ROWS) if not np.array_equal(inner[i], tail[i])]
     assert diff and diff[0] >= ROWS // 2, diff
     frac = state["seen"] / a.total_rows
     assert cm.same_until(INNER, INNER, 1.0) and cm.same_until(INNER, TAIL, frac)
     assert cm.same_until(INNER, TAIL, 0.5) and not cm.same_until(INNER, TAIL, 0.6)
-    assert not cm.same_until(
-        INNER, "recent50(2024-01):up4", frac
-    ) and not cm.same_until(INNER, "up4", frac)
-    assert cm.same_until(INNER, "cool50:up4", frac) and cm.same_until(
-        "up4", "cool50(up4):up8", frac
-    )
+    assert not cm.same_until(INNER, "recent50(2024-01):up4", frac) and not cm.same_until(INNER, "up4", frac)
+    assert cm.same_until(INNER, "cool50:up4", frac) and cm.same_until("up4", "cool50(up4):up8", frac)
     assert not cm.same_until("up4", "cool50:up8", frac)
     # a tail inside a composed policy: compose applies otb_x2 from the start
     assert not cm.same_until(INNER, "cool90:natural+otb_x2", frac)

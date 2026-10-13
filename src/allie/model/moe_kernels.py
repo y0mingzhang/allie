@@ -45,13 +45,25 @@ WIDE = dict(up=UP, dx=DX, scatter=SCATTER, scatter2=SCATTER, up_wgrad=WGRAD, dow
 # hidden tiles, scatter BLOCK_K 64, up wgrad BLOCK_N 256; the down wgrad keeps WGRAD. Tuned on sm_89 at d1536 h192
 # E256 top16, every candidate bitwise. A wgrad's BLOCK_M is free: Triton compiles acc += dot(a, b) as dot(a, b, acc),
 # one k16 chain over all of an expert's rows
-NARROW = dict(up=(256, 64, 64, 8, 2), dx=(64, 64, 128, 8, 2), scatter=(128, 128, 64, 4, 3),
-              scatter2=(128, 128, 64, 4, 3), up_wgrad=(32, 256, 128, 8, 3), down_wgrad=WGRAD)
+NARROW = dict(
+    up=(256, 64, 64, 8, 2),
+    dx=(64, 64, 128, 8, 2),
+    scatter=(128, 128, 64, 4, 3),
+    scatter2=(128, 128, 64, 4, 3),
+    up_wgrad=(32, 256, 128, 8, 3),
+    down_wgrad=WGRAD,
+)
 # --smoe-tuned (bitwise): WIDE's tiles retuned on sm_89 at d2048 h256 E256 top-16, 64K tokens, 4 chunks; the
 # router's one-pass top-ks up to E 256, one-byte sorts, the chunks' rows gathered in the scatter
 TUNED = False
-V3 = WIDE | dict(up=(256, 64, 64, 8, 2), dx=(64, 128, 128, 8, 2), scatter=(64, 128, 32, 4, 3),
-                 scatter2=(128, 256, 32, 8, 4), up_wgrad=(64, 256, 128, 8, 3), down_wgrad=(64, 128, 256, 8, 2))
+V3 = WIDE | dict(
+    up=(256, 64, 64, 8, 2),
+    dx=(64, 128, 128, 8, 2),
+    scatter=(64, 128, 32, 4, 3),
+    scatter2=(128, 256, 32, 8, 4),
+    up_wgrad=(64, 256, 128, 8, 3),
+    down_wgrad=(64, 128, 256, 8, 2),
+)
 
 
 def tiles(h):
@@ -432,8 +444,7 @@ def input_grad(dpre, up, se, order, k):
             torch.sum(scatter(dpre, up, se, d, up.shape[1] // 2, r).view(hi - lo, k, -1), -2, out=dh[lo:hi])
         return dh
     parts = [
-        scatter(dpre, up, se, d, up.shape[1] // 2, r).view(hi - lo, k, -1).sum(-2)
-        for lo, hi, r, d in chunks(order, k)
+        scatter(dpre, up, se, d, up.shape[1] // 2, r).view(hi - lo, k, -1).sum(-2) for lo, hi, r, d in chunks(order, k)
     ]
     return torch.cat(parts) if len(parts) > 1 else parts[0]
 
@@ -483,8 +494,9 @@ def combine_into(expanded, gates, out, bt=8, bd=512, warps=4):
     """out[:] = combine(expanded, gates) for contiguous expanded [T, k, D] and gates [T, k]."""
     t, k, d = expanded.shape
     assert expanded.is_contiguous() and gates.is_contiguous() and out.stride(1) == 1
-    _combine_into[(triton.cdiv(t, bt), triton.cdiv(d, bd))](expanded, gates, out, t, out.stride(0), k, d, bt, bd,
-                                                           num_warps=warps)
+    _combine_into[(triton.cdiv(t, bt), triton.cdiv(d, bd))](
+        expanded, gates, out, t, out.stride(0), k, d, bt, bd, num_warps=warps
+    )
 
 
 @torch.library.custom_op("allie_smoe::routed_out", mutates_args=())

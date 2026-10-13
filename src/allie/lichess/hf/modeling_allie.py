@@ -51,21 +51,13 @@ class AllieModel(PreTrainedModel):
         path = resolve(name, **hub)
         config = config or AllieConfig.from_pretrained(path)
         if isinstance(device_map, dict):
-            raise ValueError(
-                "Allie runs on one device: pass device= or a device string"
-            )
+            raise ValueError("Allie runs on one device: pass device= or a device string")
         device = device or (None if device_map in (None, "auto") else device_map)
-        device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         dtype = kwargs.get("dtype", kwargs.get("torch_dtype"))
         for name in ("dtype", "torch_dtype"):  # set on the config when AutoConfig took it
             dtype = dtype or config.__dict__.get(name)
-        dtype = (
-            torch.bfloat16
-            if dtype in (None, "auto")
-            else DTYPES.get(str(dtype).removeprefix("torch."))
-        )
+        dtype = torch.bfloat16 if dtype in (None, "auto") else DTYPES.get(str(dtype).removeprefix("torch."))
         if dtype is None:
             raise ValueError("dtype must be bfloat16 or float32")
         if int8 is None:
@@ -101,4 +93,3 @@ class AllieModel(PreTrainedModel):
         if not allie:
             return torch.bfloat16
         return torch.int8 if allie.model.scales else allie.model.dtype
-

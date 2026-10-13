@@ -29,15 +29,9 @@ def checkpoint(path, arch):
     s = w["scalars"].clone()
     s[n : 3 * n] = 1
     m = dict(scalars=s, x0_lambdas=w["x0_lambdas"])
-    m |= {
-        f"{k}.weight": w[k]
-        for k in ("embed", "embed2", "lm_head", "feat_embed", "smear_gate")
-    }
+    m |= {f"{k}.weight": w[k] for k in ("embed", "embed2", "lm_head", "feat_embed", "smear_gate")}
     m |= {f"skip_gates.{j}.weight": w[f"skip_gate.{j}"] for j in range(3)}
-    m |= {
-        f"value_embeds.{j}.weight": w[f"value_embed.{j}"]
-        for j in range(c["value_embeds"])
-    }
+    m |= {f"value_embeds.{j}.weight": w[f"value_embed.{j}"] for j in range(c["value_embeds"])}
     m |= {k: v for k, v in w.items() if k.startswith("board.")}
     if "xsa" in w:
         m["xsa_alphas"] = w["xsa"]
@@ -73,9 +67,7 @@ def checkpoint(path, arch):
 def test_convert(tmp_path, arch):
     """A checkpoint of Allie 2.0's or 2.2's switches (XSA, log gates, dense_first 3, centring on the first MoE
     layers) converts to the export it came from; 2.0's has no new keys."""
-    arch, kw = dict(
-        allie20=(ALLIE20, {}), allie22=(ALLIE22, C4X | dict(centre_first=4))
-    )[arch]
+    arch, kw = dict(allie20=(ALLIE20, {}), allie22=(ALLIE22, C4X | dict(centre_first=4)))[arch]
     state, (w, c) = checkpoint(tiny_export(tmp_path, **kw), arch)
     got, config = convert(state)
     n = c["layers"]
@@ -98,8 +90,6 @@ def test_convert_refuses(tmp_path):
         dict(moe_dense_first=2),
         dict(header_feats=2),
     ):
-        s = state | dict(
-            config=state["config"] | dict(arch=state["config"]["arch"] | bad)
-        )
+        s = state | dict(config=state["config"] | dict(arch=state["config"]["arch"] | bad))
         with pytest.raises(AssertionError):
             convert(s)

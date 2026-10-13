@@ -65,13 +65,9 @@ def main():
                 elo=float(info["elo"][sel].mean()),
                 choice=pick,
             )
-            row |= metrics(
-                g, human=H[sel], raw=X[sel, col["raw"], :2], calibrated=X[sel, col[pick], :2]
-            )
+            row |= metrics(g, human=H[sel], raw=X[sel, col["raw"], :2], calibrated=X[sel, col[pick], :2])
             cells[key] = row
-    Path(d / a.out).write_text(
-        json.dumps(dict(cells=cells, slopes=slopes(cells)), indent=1) + "\n"
-    )
+    Path(d / a.out).write_text(json.dumps(dict(cells=cells, slopes=slopes(cells)), indent=1) + "\n")
 
 
 def metrics(game, **sets):
@@ -91,9 +87,7 @@ def metrics(game, **sets):
 def slopes(cells):
     """Per time control and metric, each source's slope against rating and its ratio to the humans'."""
     slopes = {}
-    print(
-        "slope per 1,000 rating points (accuracy points; log blunder rate), and the bot's over the humans'"
-    )
+    print("slope per 1,000 rating points (accuracy points; log blunder rate), and the bot's over the humans'")
     for fmt in cf.FORMATS:
         rows = [c for k, c in cells.items() if k.startswith(fmt + "/")]
         x = [c["elo"] for c in rows]
@@ -108,10 +102,7 @@ def slopes(cells):
                 )
                 for w in ("human", "raw", "calibrated")
             }
-            out[metric] = {
-                w: dict(slope=v[0], se=v[1], ratio=v[0] / s["human"][0])
-                for w, v in s.items()
-            }
+            out[metric] = {w: dict(slope=v[0], se=v[1], ratio=v[0] / s["human"][0]) for w, v in s.items()}
             print(f"  {fmt:9s} {metric:8s} human {s['human'][0]:+7.3f}  raw {s['raw'][0]:+7.3f} ({s['raw'][0] / s['human'][0]:.2f}x)"
                   f"  calibrated {s['calibrated'][0]:+7.3f} ({s['calibrated'][0] / s['human'][0]:.2f}x)")  # fmt: skip
         slopes[fmt] = out

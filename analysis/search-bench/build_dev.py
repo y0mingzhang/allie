@@ -30,11 +30,9 @@ def main():
         for line in open(SPLITS / f"{s}.jsonl")
     }
     shards = [
-        s
-        for b in json.loads((MONTH / "buckets.json").read_text())
-        if b["code"] // 10000 - 1 == 2
-        for s in b["shards"]
+        s for b in json.loads((MONTH / "buckets.json").read_text()) if b["code"] // 10000 - 1 == 2 for s in b["shards"]
     ]
+
     def shard_games(shard):
         """(site, tokens, feats, white bot, black bot, white elo, black elo) of each dev game."""
         site = pq.read_table(MONTH / shard, columns=["site"]).column("site").to_pylist()

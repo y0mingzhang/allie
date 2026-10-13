@@ -20,9 +20,7 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
     config = copy.deepcopy(config)
     config.max_games = max(config.max_games, games)
     config.challenge.per_user = games  # every game comes from the same challenger
-    tokens = {"token-a": "allie-a"} | (
-        {"token-b": "allie-b"} if opponent == "self" else {}
-    )
+    tokens = {"token-a": "allie-a"} | ({"token-b": "allie-b"} if opponent == "self" else {})
     mock = MockLichess(tokens)
     bots = [Bot(config, Lichess(t, mock.url), engine, search) for t in tokens]
     for b in bots:
@@ -31,13 +29,9 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
         time.sleep(0.05)
     challenger = "allie-b" if opponent == "self" else "random"
     for i in range(games):
-        mock.challenge(
-            challenger, "allie-a", base, inc, color=("white", "black")[i % 2]
-        )
+        mock.challenge(challenger, "allie-a", base, inc, color=("white", "black")[i % 2])
     start = time.monotonic()
-    while len(mock.games) < games or any(
-        g.status == "started" for g in mock.games.values()
-    ):
+    while len(mock.games) < games or any(g.status == "started" for g in mock.games.values()):
         if time.monotonic() - start > timeout or mock.declined:
             break
         time.sleep(0.5)
@@ -65,10 +59,7 @@ def selfplay(config, model, search, games, opponent, base, inc, timeout=7200):
     summary = dict(
         games=len(records),
         finished=sum(r["status"] != "started" for r in records),
-        statuses={
-            s: sum(r["status"] == s for r in records)
-            for s in {r["status"] for r in records}
-        },
+        statuses={s: sum(r["status"] == s for r in records) for s in {r["status"] for r in records}},
         plies=sum(r["plies"] for r in records),
         rejected_moves=mock.rejected,
         declined=mock.declined,
@@ -103,11 +94,7 @@ def bench(config, model, search, moves, concurrent=1, base=180, inc=2):
             d = me.decide(play, search, clocks[ply % 2])
             t1 = time.perf_counter()
             if ply >= 2:
-                spent = (
-                    min(d.think, clocks[ply % 2] - 1)
-                    if play.think_time
-                    else rng.uniform(1, 5)
-                )
+                spent = min(d.think, clocks[ply % 2] - 1) if play.think_time else rng.uniform(1, 5)
                 clocks[ply % 2] = max(clocks[ply % 2] - spent, 1.0) + inc
             moves_so_far.append(d.move)
             for g in sides:
@@ -117,9 +104,7 @@ def bench(config, model, search, moves, concurrent=1, base=180, inc=2):
             t3 = time.perf_counter()
             rows.append((ply, 1000 * (t1 - t0), 1000 * (t3 - t2)))
         board = sides[0].board
-        games.append(
-            dict(moves=" ".join(moves_so_far), result=board.result(claim_draw=True))
-        )
+        games.append(dict(moves=" ".join(moves_so_far), result=board.result(claim_draw=True)))
 
     t0 = time.perf_counter()
     threads = [threading.Thread(target=one, args=(i,)) for i in range(concurrent)]

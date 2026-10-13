@@ -3,6 +3,7 @@
 Writes games.npz (move tokens, Elos, time control) and sample.npz (the fixed subsample
 of scored blitz moves every model is scored on).
 """
+
 import json
 import sys
 
@@ -59,18 +60,26 @@ def main():
     assert (counts == expect).all(), (counts, expect)
 
     rng = np.random.default_rng(20260922)
-    keep = np.concatenate(
-        [rng.choice(np.flatnonzero(sel[:, 2] == c), PER_CELL, replace=False) for c in BLITZ]
-    )
+    keep = np.concatenate([rng.choice(np.flatnonzero(sel[:, 2] == c), PER_CELL, replace=False) for c in BLITZ])
     keep.sort()
     OUT.mkdir(parents=True, exist_ok=True)
     np.savez(
-        OUT / "games.npz", moves=gmoves, offsets=goff, meta=gmeta, sel=sel, keep=keep,
+        OUT / "games.npz",
+        moves=gmoves,
+        offsets=goff,
+        meta=gmeta,
+        sel=sel,
+        keep=keep,
         per_cell=PER_CELL,
     )
     meta = dict(
-        source=str(G), strat_sha256=manifest["sha256"], feats_sha256=manifest["feats_sha256"],
-        games=len(gmeta), scored_blitz=len(sel), per_cell=PER_CELL, seed=20260922,
+        source=str(G),
+        strat_sha256=manifest["sha256"],
+        feats_sha256=manifest["feats_sha256"],
+        games=len(gmeta),
+        scored_blitz=len(sel),
+        per_cell=PER_CELL,
+        seed=20260922,
         cells=[manifest["cells"][c] for c in BLITZ],
         counts=counts.tolist(),
     )
@@ -99,8 +108,10 @@ def verify(n=400):
                 checked += 1
             b.push(mv)
     base, inc = SECONDS[meta[pick[0]][0] - 192], INCREMENTS[meta[pick[0]][1] - 10]
-    print(f"replayed {len(pick)} games, {checked} scored targets all legal; e.g. tc {base}+{inc} "
-          f"elos {meta[pick[0]][2]}/{meta[pick[0]][3]}")
+    print(
+        f"replayed {len(pick)} games, {checked} scored targets all legal; e.g. tc {base}+{inc} "
+        f"elos {meta[pick[0]][2]}/{meta[pick[0]][3]}"
+    )
 
 
 if __name__ == "__main__":

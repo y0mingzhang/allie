@@ -5,6 +5,7 @@ legal-move-renormalized policy, and whether the legal argmax is the human move.
 Inputs are built exactly as maia3.uci does: 8 past board tokenizations (each mirrored
 by its own side to move), no clock channel (include_time_info=False), self/opponent Elo.
 """
+
 import argparse
 import json
 import sys
@@ -119,10 +120,20 @@ def main():
 
     out = Path(a.out)
     np.savez(out, keep=keep, ce=ce, top1=top1)
-    info = dict(model=a.model, parameters=int(params), positions=n, seconds=dt, forward_seconds=forward,
-                positions_per_s=n / dt, threads=a.threads, batch=a.batch,
-                unexpected_keys=list(unexpected), history=int(cfg.history),
-                include_time_info=bool(cfg.include_time_info), device=a.device)
+    info = dict(
+        model=a.model,
+        parameters=int(params),
+        positions=n,
+        seconds=dt,
+        forward_seconds=forward,
+        positions_per_s=n / dt,
+        threads=a.threads,
+        batch=a.batch,
+        unexpected_keys=list(unexpected),
+        history=int(cfg.history),
+        include_time_info=bool(cfg.include_time_info),
+        device=a.device,
+    )
     out.with_suffix(".json").write_text(json.dumps(info, indent=2) + "\n")
     print(json.dumps(info), flush=True)
 

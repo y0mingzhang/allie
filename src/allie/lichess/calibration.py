@@ -53,9 +53,7 @@ COST = 0.004  # seconds a KL leaf (16 cpus, 12 threads, a lone search of 128 lea
 MEASURED = 128  # searches of fewer leaves evaluated cost more a leaf (each call's fixed costs) and leave the price be
 MARGIN = 0.3  # seconds a search ends before the think time (10-game load tests: a late request and the move's own work)
 _BINS = np.arange(63)
-SECONDS = np.where(
-    _BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06)
-)  # think-time head bins
+SECONDS = np.where(_BINS < 16, _BINS + 0.5, 16 * np.exp((_BINS - 16) / 7.06))  # think-time head bins
 
 
 def beta(rating, time):

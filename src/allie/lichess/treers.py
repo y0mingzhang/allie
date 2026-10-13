@@ -58,10 +58,7 @@ def reusable(game, games, key, reuse):
     for it is cleared, to be set again by keep()."""
     trees = game.__dict__.setdefault("trees", {})
     old = trees.pop(key, None) if reuse else None
-    if old is not None and all(
-        len(g.used) == len(u) + 2 and g.used[: len(u)] == u
-        for g, u in zip(games, old[1])
-    ):
+    if old is not None and all(len(g.used) == len(u) + 2 and g.used[: len(u)] == u for g, u in zip(games, old[1])):
         return old[0]
     return None
 
@@ -85,9 +82,7 @@ class Coverage:
         if len(game.tokens) >= CONTEXT:  # no room for a node: the policy plays
             return None
         games, zs = games_of(self, game)
-        if (
-            self.views != ("true",) and monotonic() > deadline
-        ):  # a view's first sync prefills the whole game
+        if self.views != ("true",) and monotonic() > deadline:  # a view's first sync prefills the whole game
             return None
         z = game.sync()
         feats = [np.array(g.features(), np.float32) for g in games]
@@ -115,9 +110,7 @@ class Coverage:
         trees = [Tree(g, x, capacity=4 * budget + 256) for g, x in zip(games, zs)]
         for t in trees:
             t.deadline = deadline
-        oracle = (
-            Mixed(trees, z.double().numpy()) if self.views != ("true",) else trees[0]
-        )
+        oracle = Mixed(trees, z.double().numpy()) if self.views != ("true",) else trees[0]
 
         def run():
             oracle.reset()
@@ -156,10 +149,7 @@ class Coverage:
         deadline."""
         key = ("coverage", self.views)
         cov = reusable(game, games, key, self.reuse)
-        if (
-            cov is not None
-            and cov.reroot(game.tokens[-2:], root, feats, budget) is None
-        ):
+        if cov is not None and cov.reroot(game.tokens[-2:], root, feats, budget) is None:
             cov = None
         if cov is None:
             cov = allie_fast.Coverage(
@@ -188,9 +178,7 @@ class Coverage:
         par = self.parameters
         ids = np.array([legal], np.int64) - MOVE_START
         b = par["backup"]
-        q = cov.reduce(np.log(b["tau"]), b["exponent"], b["count_scale"], budget, ids)[
-            0
-        ]
+        q = cov.reduce(np.log(b["tau"]), b["exponent"], b["count_scale"], budget, ids)[0]
         mask = np.ones_like(ids, bool)
         logits = root[None, 378:2346][np.arange(1)[:, None], ids].astype(float)
         prior = softmax(np.where(mask, logits, -np.inf), axis=1)
@@ -199,9 +187,7 @@ class Coverage:
             if simulations in (64, 1000)
             else par["budget_policies"][str(budget or 128)]
         )
-        row = dict(
-            prefix=list(game.tokens), cell=game.cell(game.elo[len(game.moves) % 2])
-        )
+        row = dict(prefix=list(game.tokens), cell=game.cell(game.elo[len(game.moves) % 2]))
         p = policy([row], root[None], q, ids, mask, np.array([feats[-1, 0]]), params)
         return (
             [MOVES[t - MOVE_START] for t in legal],
@@ -247,37 +233,27 @@ class KL:
             clock_rule,
         )
         self.views, self.reuse, self.merged = tuple(views), reuse, merged
-        assert self.views == ("true",) or clock_rule == "zero", (
-            "views keep their own clocks only on the zero rule"
-        )
+        assert self.views == ("true",) or clock_rule == "zero", "views keep their own clocks only on the zero rule"
         self.lag, self.timed = 0.0, 0.0  # seconds the last native request took (any game's), and when
 
     def __call__(self, game, leaves, deadline=np.inf):
         if len(game.tokens) >= CONTEXT:
             return None
         games, zs = games_of(self, game)
-        if (
-            self.views != ("true",) and monotonic() > deadline
-        ):  # a view's first sync prefills the whole game
+        if self.views != ("true",) and monotonic() > deadline:  # a view's first sync prefills the whole game
             game.last_search = dict(searcher="kl", budget=leaves, reused=0, evaluated=0, nodes=0, late=True, full=False)
             return None
         z = game.sync()
         feats = [np.array(g.features(), np.float32) for g in games]
         roots = [x.double().numpy() for x in zs]
-        prior = (
-            None if self.views == ("true",) else z.double().numpy()
-        )  # the game's own prior
+        prior = None if self.views == ("true",) else z.double().numpy()  # the game's own prior
         cap = 2 * leaves + 256
         srv = server(game)
         try:
             if srv is None:
-                forest = self.handles(
-                    game, games, zs, feats, roots, prior, cap, leaves, deadline
-                )
+                forest = self.handles(game, games, zs, feats, roots, prior, cap, leaves, deadline)
             else:
-                forest = self.native(
-                    srv, game, games, feats, roots, prior, cap, leaves, deadline
-                )
+                forest = self.native(srv, game, games, feats, roots, prior, cap, leaves, deadline)
         except Late:
             return None
         if forest is None:
@@ -293,10 +269,7 @@ class KL:
             t.deadline = deadline
 
         def run():
-            bridges = [
-                t.handles([g.tokens], [f], self.clock_rule)
-                for t, g, f in zip(trees, games, feats)
-            ]
+            bridges = [t.handles([g.tokens], [f], self.clock_rule) for t, g, f in zip(trees, games, feats)]
             forest = allie_fast.KL(
                 list(game.tokens),
                 roots,
@@ -325,10 +298,7 @@ class KL:
     def native(self, srv, game, games, feats, roots, prior, cap, leaves, deadline):
         key = ("kl", self.views, self.clock_rule)
         forest = reusable(game, games, key, self.reuse)
-        if (
-            forest is not None
-            and forest.reroot(game.tokens[-2:], roots, prior, feats, cap) is None
-        ):
+        if forest is not None and forest.reroot(game.tokens[-2:], roots, prior, feats, cap) is None:
             forest = None
         if forest is None:
             forest = allie_fast.KL(

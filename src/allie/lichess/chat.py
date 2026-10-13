@@ -194,9 +194,7 @@ class Chat:
     replies: int = 30  # calls for chat messages per game
     gap: float = 4.0  # seconds from our last message to an unprompted one, at least
     linger: float = 120.0  # seconds of answers after the game (+half after a message)
-    poll: float = (
-        5.0  # seconds between chat fetches after the game, once it has no stream
-    )
+    poll: float = 5.0  # seconds between chat fetches after the game, once it has no stream
     hello: str = HELLO  # the first message of each game, fixed ("" = none)
 
 
@@ -223,9 +221,7 @@ def split(events, chat, abandon=None):
                 chat.put(e)
             except Exception:
                 alive[0] = False
-                log.exception(
-                    "game %s chat: failed; the game goes on without it", chat.gid
-                )
+                log.exception("game %s chat: failed; the game goes on without it", chat.gid)
 
     def read():
         try:
@@ -273,9 +269,7 @@ class Chatter:
         self.said = self.answered = 0
         self.kinds = []  # remark kinds used this game
         self.allowed, self.finishing = self.pick()  # the ones it may use
-        self.endgame = self.scrambled = self.closed = (
-            False  # seen; seen; said after the end
-        )
+        self.endgame = self.scrambled = self.closed = False  # seen; seen; said after the end
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
         self.last = 0  # the ply of the last call: no remark before ply `every`
         self.posted, self.until = -math.inf, math.inf
@@ -370,10 +364,7 @@ class Chatter:
         self.streaming = True
         if self.info:  # a reconnect
             return
-        if (
-            e["variant"]["key"] != "standard"
-            or e.get("initialFen", "startpos") != "startpos"
-        ):
+        if e["variant"]["key"] != "standard" or e.get("initialFen", "startpos") != "startpos":
             return self.stop()
         self.info = e
         self.white = (e["white"].get("id") or "").lower() == self.me
@@ -402,9 +393,7 @@ class Chatter:
         ]
         if (r := RECENT.get(self.opp)) and time.monotonic() - r[0] < 900:
             ago = (time.monotonic() - r[0]) / 60
-            header.append(
-                f"You played them {ago:.0f} min ago: {r[1]}. Likely a rematch."
-            )
+            header.append(f"You played them {ago:.0f} min ago: {r[1]}. Likely a rematch.")
         if lines := recent(self.cfg).read():
             header.append("Your unprompted lines in recent games, mostly with other opponents. "
                           "Don't reuse their wording, openings or shape, and don't refer to "
@@ -470,9 +459,7 @@ class Chatter:
     def see(self, moves, w, b):
         """Allie's view after moves, from the chat's own engine Game."""
         g = self.game
-        g.update(
-            moves, None if w is None else w / 1000, None if b is None else b / 1000
-        )
+        g.update(moves, None if w is None else w / 1000, None if b is None else b / 1000)
         try:
             z = g.sync().double()
         except OverflowError:
@@ -509,9 +496,7 @@ class Chatter:
             if 5 <= j < 30 and opening(board):
                 self.moment(t, "opening")
             middle = phase(board, n) == "middlegame"
-            if (
-                middle and not loose and self.rng.random() < PLAN
-            ):  # never with a piece loose
+            if middle and not loose and self.rng.random() < PLAN:  # never with a piece loose
                 self.moment(t, "plan")
         elif j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
             if drop(j - 1) >= SWING and any(x.startswith("takes") for x in did):
@@ -527,11 +512,7 @@ class Chatter:
         tenth of the base time), in a game of 3 minutes or more."""
         base = (self.info.get("clock") or {}).get("initial", 0)
         ours = s["wtime" if self.white else "btime"]
-        if (
-            not self.scrambled
-            and base >= 180_000
-            and ours < max(self.cfg.scramble * 1000, base / 10)
-        ):
+        if not self.scrambled and base >= 180_000 and ours < max(self.cfg.scramble * 1000, base / 10):
             self.scrambled = self.moment(t, "scramble")
 
     def events(self, t, s):
@@ -546,9 +527,7 @@ class Chatter:
         elif self.offer and not flags[f"{them}draw"] and live:
             self.offer = False
             e = score(self.views[max(self.views)].wdl) if self.views else 0.5
-            self.note(
-                f"Event: you declined their draw offer (you felt about {e:.0%} for you)."
-            )
+            self.note(f"Event: you declined their draw offer (you felt about {e:.0%} for you).")
             self.moment(t, "draw", self.cfg.p_draw, spaced=False)
         if new(f"{us}draw"):
             self.note("Event: you offered a draw.")
@@ -566,10 +545,7 @@ class Chatter:
         self.note(f"Event: the game is over: {self.result()}.")
         self.note(self.review())
         self.until = time.monotonic() + self.cfg.linger
-        played = (
-            status not in ("aborted", "noStart")
-            and len(self.sans) >= self.cfg.min_plies
-        )
+        played = status not in ("aborted", "noStart") and len(self.sans) >= self.cfg.min_plies
         if played:
             self.moment(t, "finish", 1.0, spaced=False, budget=False)
 
@@ -592,13 +568,9 @@ class Chatter:
         at = lambda j: f"{num(j - 1)}{sans[j - 1]}"  # the move that led to position j
         hi, lo = max(es, key=es.get), min(es, key=es.get)
         ds = [(es[j + 1] - es[j], j + 1) for j in range(n) if j in es and j + 1 in es]
-        big = ", ".join(
-            f"{at(j)} {d:+.0%}" for d, j in sorted(ds, key=lambda x: -abs(x[0]))[:3]
-        )
+        big = ", ".join(f"{at(j)} {d:+.0%}" for d, j in sorted(ds, key=lambda x: -abs(x[0]))[:3])
         theirs = [j for j in range(n) if (j % 2 == 0) != self.white and j in v]
-        hits = sum(
-            max(v[j].probs, key=v[j].probs.get) == stack[j].uci() for j in theirs
-        )
+        hits = sum(max(v[j].probs, key=v[j].probs.get) == stack[j].uci() for j in theirs)
         return (
             f"Your sense of the game: you felt best ({es[hi]:.0%} for you)"
             f"{' after ' + at(hi) if hi else ''} and worst ({es[lo]:.0%})"
@@ -630,9 +602,7 @@ class Chatter:
             self.talked, self.unreplied = True, 0
             if not self.closed and self.post(GG, room, False) is not None:  # no call
                 self.note(f'You posted: "{GG}"')
-                if (
-                    self.want and self.want[2]
-                ):  # a queued finish would be a second goodbye
+                if self.want and self.want[2]:  # a queued finish would be a second goodbye
                     self.want = None
             return
         if user == self.opp:
@@ -666,12 +636,7 @@ class Chatter:
             return False
         if kind in WEIGHTS and kind not in self.allowed[engaged]:
             return False
-        if (
-            kind == "finish"
-            and not self.finishing
-            or kind in ("takeback", "gone")
-            and not engaged
-        ):
+        if kind == "finish" and not self.finishing or kind in ("takeback", "gone") and not engaged:
             return False
         if budget and self.said >= c.remarks:
             return False
@@ -697,9 +662,7 @@ class Chatter:
         out += [f"Phase: {phase(b, n)}.", f"Material: {material(b, self.white)}."]
         out.append(f"FEN: {b.fen()}.")
         if v and v.probs and side == "them":
-            out.append(
-                f"You expect: {top(b, None, v.probs, None)}; usual {v.think:.0f}s."
-            )
+            out.append(f"You expect: {top(b, None, v.probs, None)}; usual {v.think:.0f}s.")
         if v:
             out.append(f"Feel (win/draw/loss for you): {wdl(v.wdl)}.")
         return " ".join(out)
@@ -800,9 +763,7 @@ class Chatter:
             key = ((x.get("user") or "").lower(), (x.get("text") or "").strip())
             seen[key] += 1
             if seen[key] > self.heard[key]:
-                self.line(
-                    time.monotonic(), "player", x.get("user", ""), x.get("text", "")
-                )
+                self.line(time.monotonic(), "player", x.get("user", ""), x.get("text", ""))
 
 
 def opponent(e, me):
@@ -833,11 +794,7 @@ def gg(text):
 
 
 def quiet(e):
-    return (
-        bool(e)
-        and e.get("type") == "chatLine"
-        and e.get("text", "").strip().lower().startswith("!quiet")
-    )
+    return bool(e) and e.get("type") == "chatLine" and e.get("text", "").strip().lower().startswith("!quiet")
 
 
 def side(e, color):
@@ -871,9 +828,7 @@ def top(board, j, probs, played, k=3):
         b = chess.Board()
         for m in board.move_stack[:j]:
             b.push(m)
-    pct = lambda u: (
-        f"{100 * probs.get(u, 0):.0f}%" if probs.get(u, 0) >= 0.005 else "<1%"
-    )
+    pct = lambda u: f"{100 * probs.get(u, 0):.0f}%" if probs.get(u, 0) >= 0.005 else "<1%"
     say = lambda u: f"{b.san(chess.Move.from_uci(u))}{'*' * (u == played)} {pct(u)}"
     best = sorted(probs, key=probs.get, reverse=True)[:k]
     s = " ".join(map(say, best))
@@ -904,9 +859,7 @@ def opening(board):
 
 
 def phase(board, n):
-    count = lambda c: sum(
-        v * len(board.pieces(p, c)) for p, v in VALUE.items() if p > 1
-    )
+    count = lambda c: sum(v * len(board.pieces(p, c)) for p, v in VALUE.items() if p > 1)
     pieces = count(chess.WHITE) + count(chess.BLACK)
     if n < 20 and pieces > 50:
         return "opening"
@@ -923,11 +876,7 @@ def deeds(board, move):
     if board.is_castling(move):
         out.append(f"castles {'short' if board.is_kingside_castling(move) else 'long'}")
     if board.is_capture(move):
-        taken = (
-            chess.PAWN
-            if board.is_en_passant(move)
-            else board.piece_type_at(move.to_square)
-        )
+        taken = chess.PAWN if board.is_en_passant(move) else board.piece_type_at(move.to_square)
         out.append(f"takes a {NAMES[taken]}")
     if move.promotion:
         out.append(f"promotes to a {NAMES[move.promotion]}")
@@ -942,10 +891,7 @@ def deeds(board, move):
 
 def material_diff(board, white):
     """Material, pawns as 1: white's side (if white) minus the other's."""
-    return sum(
-        v * (len(board.pieces(p, white)) - len(board.pieces(p, not white)))
-        for p, v in VALUE.items()
-    )
+    return sum(v * (len(board.pieces(p, white)) - len(board.pieces(p, not white))) for p, v in VALUE.items())
 
 
 def traded(board):
@@ -955,9 +901,7 @@ def traded(board):
     after = board.piece_type_at(m.to_square)
     board.pop()
     try:
-        taken = (
-            chess.PAWN if board.is_en_passant(m) else board.piece_type_at(m.to_square)
-        )
+        taken = chess.PAWN if board.is_en_passant(m) else board.piece_type_at(m.to_square)
     finally:
         board.push(m)
     return m.to_square if taken and VALUE[taken] >= VALUE.get(after, math.inf) else None
@@ -1011,9 +955,7 @@ class Recent:
                 lines = json.load(f)
         except (FileNotFoundError, ValueError):
             return []  # missing or corrupt: written afresh
-        return (
-            [x for x in lines if isinstance(x, str)] if isinstance(lines, list) else []
-        )
+        return [x for x in lines if isinstance(x, str)] if isinstance(lines, list) else []
 
     def sync(self):
         """On the writer thread: merge the new lines into the file (locked), or just reload
@@ -1033,16 +975,12 @@ class Recent:
                     os.replace(self.path + ".tmp", self.path)
         except OSError as e:
             if not self.failing:
-                log.warning(
-                    "chat: recent lines %s: %s; kept in memory, retrying", self.path, e
-                )
+                log.warning("chat: recent lines %s: %s; kept in memory, retrying", self.path, e)
             self.failing = True
             raise
         self.failing = False
         with self.lock:
-            later = [
-                x for x in self.new if x not in new or self.new.count(x) > new.count(x)
-            ]
+            later = [x for x in self.new if x not in new or self.new.count(x) > new.count(x)]
             self.new = later
             self.lines = [*(x for x in lines if x not in later), *later][-self.n :]
         self.seeded.set()
@@ -1053,9 +991,7 @@ RECENTS, LOCK = {}, threading.Lock()
 
 def recent(cfg):
     """The config's recent lines: recent_file, or recent-lines.json beside the ledger."""
-    path = cfg.recent_file or os.path.join(
-        os.path.dirname(os.path.expanduser(cfg.ledger)), "recent-lines.json"
-    )
+    path = cfg.recent_file or os.path.join(os.path.dirname(os.path.expanduser(cfg.ledger)), "recent-lines.json")
     with LOCK:  # one instance (and writer thread) a file, made once
         if (key := (path, cfg.recent)) not in RECENTS:
             RECENTS[key] = Recent(os.path.expanduser(path), cfg.recent)
@@ -1068,13 +1004,8 @@ def mmss(ms):
 
 
 def material(board, white):
-    d = sum(
-        v * (len(board.pieces(p, white)) - len(board.pieces(p, not white)))
-        for p, v in VALUE.items()
-    )
-    return (
-        "even" if d == 0 else f"you are {'up' if d > 0 else 'down'} {abs(d)} (pawn = 1)"
-    )
+    d = sum(v * (len(board.pieces(p, white)) - len(board.pieces(p, not white))) for p, v in VALUE.items())
+    return "even" if d == 0 else f"you are {'up' if d > 0 else 'down'} {abs(d)} (pawn = 1)"
 
 
 SAN = re.compile(
@@ -1097,20 +1028,14 @@ def played(text, moves):
         pushes |= {chess.square_name(m.to_square) for m in side.pseudo_legal_moves
                    if side.piece_type_at(m.from_square) == chess.PAWN and not m.promotion
                    and not side.is_capture(m)}  # fmt: skip
-    named = {
-        x
-        for x in SAN.findall(text)
-        if not re.fullmatch(r"[a-h][1-8]", x) or x in pushes
-    }
+    named = {x for x in SAN.findall(text) if not re.fullmatch(r"[a-h][1-8]", x) or x in pushes}
     return named <= seen
 
 
 def clean(text):
     """The model's text as one line: no links, markup or wrapping quotes."""
     text = " ".join(re.sub(r"</?[a-z_]+/?>", " ", text.replace("**", "")).split())
-    text = re.sub(
-        r"(?<=[a-z][.!?])(?=[A-Z][a-z])", " ", text
-    )  # "game.Looks": two sentences
+    text = re.sub(r"(?<=[a-z][.!?])(?=[A-Z][a-z])", " ", text)  # "game.Looks": two sentences
     text = text.strip("\"'\u201c\u201d{}")
     link = r"https?://|www\.|\b[a-z0-9-]+\.(?:org|com|net|io|gg|tv|me|co)\b"
     return "" if re.search(link, text, re.IGNORECASE) else text

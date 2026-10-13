@@ -17,7 +17,9 @@ def test_beta_grows_with_rating_and_think_time():
     b = calibration.beta
     assert b(1700, quick) < b(1700, slow) and b(1200, slow) < b(1700, slow) < b(2400, slow)
     t = float(calibration.SECONDS[30])
-    assert b(2700, slow) == pytest.approx(calibration.BETA0 * np.exp(calibration.GAMMA) * (t / 10) ** (calibration.DELTA + calibration.ETA))
+    assert b(2700, slow) == pytest.approx(
+        calibration.BETA0 * np.exp(calibration.GAMMA) * (t / 10) ** (calibration.DELTA + calibration.ETA)
+    )
 
 
 def test_the_clock_caps_the_budget():
@@ -61,7 +63,12 @@ class Search:
             return None
         moves = [m.uci() for m in game.board.legal_moves][::-1]
         first = np.arange(len(moves)) == len(moves) - 1  # the board's first move
-        return moves, first.astype(float), np.full(len(moves), 1 / len(moves)), np.where(np.arange(len(moves)) == 0, 1.0, -1.0)
+        return (
+            moves,
+            first.astype(float),
+            np.full(len(moves), 1 / len(moves)),
+            np.where(np.arange(len(moves)) == 0, 1.0, -1.0),
+        )
 
 
 def test_calibrated_mode(tiny_path, tiny, monkeypatch):
@@ -80,8 +87,12 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     assert game.decide(play, None, 590).move in legal_of(game)  # no searcher: the policy
     betas, beta = [], calibration.beta
     monkeypatch.setattr(calibration, "beta", lambda r, t: betas.append(r) or 40.0)
-    assert game.decide(play, search, 590).move == legal_of(game)[-1]  # the values' tilt, not the calibrated distribution
-    assert search.budgets == [calibration.LADDER[-1]] and betas == [2000]  # the clock allows the top rung; white's rating
+    assert (
+        game.decide(play, search, 590).move == legal_of(game)[-1]
+    )  # the values' tilt, not the calibrated distribution
+    assert search.budgets == [calibration.LADDER[-1]] and betas == [
+        2000
+    ]  # the clock allows the top rung; white's rating
     reserve, rungs = behaviour.PARAMETERS["guard"]["reserve"], calibration.LADDER
     clock = 10 * rungs[-2] * calibration.COST + (reserve + 1) / 2  # a tenth above the reserve just misses rungs[-2]
     assert game.decide(play, search, clock).move == legal_of(game)[-1]
@@ -102,10 +113,16 @@ def test_the_think_time_caps_the_search(tiny_path, monkeypatch):
     pytest.importorskip("allie_fast")
     play = Play(mode="calibrated", think_time=True, resign=False, draws=False)
     search = Search()
-    game = Game(Engine(Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0)
+    game = Game(
+        Engine(Model(tiny_path, dtype=torch.bfloat16, backend="rust", threads=2)), 2000, 2000, 600, 5, "rapid", seed=0
+    )
     game.update(random_game(3, 20), 590, 585)
     sim, margin = calibration.COST, calibration.MARGIN
-    for think, rung in ((256 * sim + margin + 0.05, 256), (256 * sim + margin - 0.01, 128), (8 * sim + margin - 0.001, None)):
+    for think, rung in (
+        (256 * sim + margin + 0.05, 256),
+        (256 * sim + margin - 0.01, 128),
+        (8 * sim + margin - 0.001, None),
+    ):
         draws = iter([think, 1e3])  # a second draw would wait 1,000 s
         monkeypatch.setattr(game, "think", lambda play, clock, time, d=draws: next(d))
         n, t = len(search.budgets), time.monotonic()
@@ -146,4 +163,3 @@ def test_close_serves_queued_requests(tiny):
     for t in (blocker, waiter, closer):
         t.join(5)
     assert got == [42] and not engine.thread.is_alive()
-

@@ -94,9 +94,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
             marks=DATA,
         ),
         check("attn_kernel", marks=GPU + DATA),
-        check(
-            "checkpoint_resume", torchrun=1, marks=GPU + DATA, id="checkpoint_resume-1"
-        ),
+        check("checkpoint_resume", torchrun=1, marks=GPU + DATA, id="checkpoint_resume-1"),
         check(
             "checkpoint_resume",
             torchrun=2,
@@ -115,9 +113,7 @@ def check(name, *args, torchrun=0, env=None, marks=(), id=None):
             id="moe_nongemm-cuda",
         ),
         check("fused_blend", "cuda", marks=GPU + DATA, id="fused_blend-cuda"),
-        check(
-            "game_blocks", "--device", "cuda", marks=GPU + DATA, id="game_blocks-cuda"
-        ),
+        check("game_blocks", "--device", "cuda", marks=GPU + DATA, id="game_blocks-cuda"),
     ],
 )
 def test_check(name, args, torchrun, env):
@@ -129,13 +125,7 @@ def test_check(name, args, torchrun, env):
             "--standalone",
             f"--nproc_per_node={torchrun}",
         ]
-    pythonpath = os.pathsep.join(
-        filter(None, [str(ROOT / "src"), os.environ.get("PYTHONPATH")])
-    )
-    env = (
-        os.environ
-        | {"PYTHONPATH": pythonpath, "CUBLAS_WORKSPACE_CONFIG": ":4096:8"}
-        | env
-    )
+    pythonpath = os.pathsep.join(filter(None, [str(ROOT / "src"), os.environ.get("PYTHONPATH")]))
+    env = os.environ | {"PYTHONPATH": pythonpath, "CUBLAS_WORKSPACE_CONFIG": ":4096:8"} | env
     cmd += [str(CHECKS / f"{name}.py"), *map(str, args)]
     subprocess.run(cmd, env=env, check=True, timeout=3600)

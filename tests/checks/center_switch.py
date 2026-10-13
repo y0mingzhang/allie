@@ -78,9 +78,7 @@ def means(val, model, manager, step):
     def book(m, args):
         if on[0]:
             h = args[0].reshape(-1, args[0].shape[-1])
-            u = torch.cat(
-                (h.float().sum(0), h.new_full((1,), len(h), dtype=torch.float32))
-            )
+            u = torch.cat((h.float().sum(0), h.new_full((1,), len(h), dtype=torch.float32)))
             sums[m] = sums[m] + u if m in sums else u
 
     hooks += [m.register_forward_pre_hook(book) for m in manager.moe]
@@ -93,9 +91,7 @@ def means(val, model, manager, step):
 
 
 def worker(rank, world, port, tmp, remat):
-    dist.init_process_group(
-        "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
-    )
+    dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world)
     torch.set_num_threads(1)
     T.patch()
     moe_kernels.SAVE_EXPANDED, moe_kernels.CHUNKS = not remat, 4 if remat else 1
@@ -119,13 +115,9 @@ def worker(rank, world, port, tmp, remat):
         assert whole.keys() - saved.keys() == fresh and saved.keys() <= whole.keys()
         assert T.same({k: whole[k] for k in saved}, saved) == 0.0
         assert not any(whole[k].any() for k in fresh)
-        assert (
-            whole["blocks.1.mlp.mu_steps"] == SWITCH and whole["blocks.1.mlp.mu"].any()
-        )
+        assert whole["blocks.1.mlp.mu_steps"] == SWITCH and whole["blocks.1.mlp.mu"].any()
     assert T.same(manager.rank_state_dict(), state) == 0.0
-    say(
-        f"switch 1 -> 4 at step {SWITCH}: new {sorted(fresh)} fresh; every saved tensor and the rank state bitwise"
-    )
+    say(f"switch 1 -> 4 at step {SWITCH}: new {sorted(fresh)} fresh; every saved tensor and the rank state bitwise")
 
     (first,), mean = means(val, model, manager, SWITCH)
     assert T.same(first[0], ref[0][0]) == 0.0
@@ -165,9 +157,7 @@ def worker(rank, world, port, tmp, remat):
             refused = False
         except RuntimeError:
             refused = True
-        assert refused, (
-            "B loaded A's weights without centre_more, or without layer 0's mu"
-        )
+        assert refused, "B loaded A's weights without centre_more, or without layer 0's mu"
     expert_shard.reset()
     dist.destroy_process_group()
 

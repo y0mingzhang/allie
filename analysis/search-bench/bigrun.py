@@ -56,9 +56,7 @@ def main():
     mb, md = (json.loads((D / t / "manifest.json").read_text()) for t in (tag, f"{tag}-dev"))
     assert mb["model"] == md["model"] and (mb["set"], md["set"]) == ("bench", "dev"), (mb, md)
     assert sha(Path(mb["model"])) == info["model_sha256"], (mb["model"], report.RAW[tag])
-    f = lambda t, fmt="{:+.4f}": (
-        f"{fmt.format(t[0])} [{fmt.format(t[1])}, {fmt.format(t[2])}]"
-    )
+    f = lambda t, fmt="{:+.4f}": f"{fmt.format(t[0])} [{fmt.format(t[1])}, {fmt.format(t[2])}]"
     out = dict(
         tag=tag,
         n=len(ix),
@@ -85,10 +83,7 @@ def main():
                 nodes=float(runs["frozen", b]["nodes"].mean()),
                 ce=report.ci(game, d, rng),
                 acc=report.ci(game, 100 * (x["top1"].astype(float) - raw["top1"]), rng),
-                bands={
-                    report.BANDS[c]: report.ci(game[cell == c], d[cell == c], rng)
-                    for c in report.BANDS
-                },
+                bands={report.BANDS[c]: report.ci(game[cell == c], d[cell == c], rng) for c in report.BANDS},
             )
             lines.append(
                 f"| {b} | {name} | {g['nodes']:.1f} | {f(g['ce'])} | {f(g['acc'], '{:+.2f}')} | "
@@ -96,10 +91,7 @@ def main():
                 + " |"
             )
     lad = json.loads((D / "ladder.json").read_text())
-    pts = [
-        (LADDER[t], lad[t]["refit"]["gain"], lad[t]["refit"]["gain_2400"], t)
-        for t in LADDER
-    ]
+    pts = [(LADDER[t], lad[t]["refit"]["gain"], lad[t]["refit"]["gain_2400"], t) for t in LADDER]
     if "128/devcal" in out["gains"]:
         g = out["gains"]["128/devcal"]
         e = cell == 7
@@ -107,11 +99,7 @@ def main():
             (
                 info["useful_training_flops"],
                 list(g["ce"]),
-                list(
-                    report.ci(
-                        game[e], (raw["ce"] - runs["devcal", "128"]["ce"])[e], rng
-                    )
-                ),
+                list(report.ci(game[e], (raw["ce"] - runs["devcal", "128"]["ce"])[e], rng)),
                 tag,
             )
         )
@@ -126,9 +114,7 @@ def main():
             rawce = lad[t]["raw"] if t in lad else float(raw["ce"].mean())
             lines.append(f"| {t} | {c:.2e} | {rawce:.4f} | {f(gain)} | {f(g24)} |")
         plot(pts, tag)
-    out["ladder"] = [
-        dict(run=t, flops=c, gain=gain, gain_2400=g24) for c, gain, g24, t in pts
-    ]
+    out["ladder"] = [dict(run=t, flops=c, gain=gain, gain_2400=g24) for c, gain, g24, t in pts]
     (D / f"bigrun-{tag}.json").write_text(json.dumps(out, indent=1) + "\n")
     (report.HERE / f"bigrun-{tag}.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

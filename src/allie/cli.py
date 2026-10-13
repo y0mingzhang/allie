@@ -50,15 +50,11 @@ def torchrun(nproc, target, args, env):
         "--standalone",
         f"--nproc_per_node={nproc}",
     ]
-    return subprocess.call(
-        [*cmd, "-m", target, *map(str, args)], env=ENV | os.environ | env
-    )
+    return subprocess.call([*cmd, "-m", target, *map(str, args)], env=ENV | os.environ | env)
 
 
 def train():
-    p = argparse.ArgumentParser(
-        description="Train from a config file; resumes the run's last checkpoint."
-    )
+    p = argparse.ArgumentParser(description="Train from a config file; resumes the run's last checkpoint.")
     p.add_argument("config", help="e.g. configs/allie-2.0.json")
     p.add_argument("--name", help="run name (default: the config's)")
     p.add_argument("--nproc", type=int, default=8, help="GPUs on this node")
@@ -67,21 +63,15 @@ def train():
     name = a.name or json.loads(config.read_text())["name"]
     args = ["--name", name, *flags(config), *extra]
     last = paths.ROOT / "results/pretrain" / name / "last.pt"
-    if last.exists() and not any(
-        x == "--resume" or x.startswith("--resume=") for x in extra
-    ):
+    if last.exists() and not any(x == "--resume" or x.startswith("--resume=") for x in extra):
         args += ["--resume", last]
     # the config's mix table, unless the environment names another recipe directory
-    env = {
-        "ALLIE_RECIPES": os.environ.get("ALLIE_RECIPES", str(config.parent / "recipes"))
-    }
+    env = {"ALLIE_RECIPES": os.environ.get("ALLIE_RECIPES", str(config.parent / "recipes"))}
     sys.exit(torchrun(a.nproc, "allie.train.trainer", args, env))
 
 
 def evaluate():
-    p = argparse.ArgumentParser(
-        description="Main evaluation (or original validation) of a checkpoint, one GPU."
-    )
+    p = argparse.ArgumentParser(description="Main evaluation (or original validation) of a checkpoint, one GPU.")
     p.add_argument(
         "--checkpoint",
         required=True,

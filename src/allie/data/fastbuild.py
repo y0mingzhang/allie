@@ -154,10 +154,7 @@ def append(r, g):
     g = pa.table(one, schema=cd.SCHEMA).to_pylist()[0]
     s = [g[k] for k in STRS]
     enc = [(x or "").encode() for x in s]
-    mv, clk, ev = (
-        np.array(g[k], t)
-        for k, t in (("moves", np.uint16), ("clocks", np.uint32), ("evals", np.int16))
-    )
+    mv, clk, ev = (np.array(g[k], t) for k, t in (("moves", np.uint16), ("clocks", np.uint32), ("evals", np.int16)))
     nulls = sum(1 << k for k, x in enumerate(s) if x is None)
     nulls |= (g["white_diff"] is None) << 7 | (g["black_diff"] is None) << 8
     bufs = [ctypes.create_string_buffer(e, len(e) + 1) for e in enc]
@@ -214,11 +211,7 @@ def tasks(files, workers, most=128):
     """(seq, file index, row groups): contiguous row group ranges in store order."""
     groups = [pq.ParquetFile(f).metadata.num_row_groups for f in files]
     step = max(1, min(most, -(-sum(groups) // (4 * workers))))
-    out = [
-        (i, range(a, min(a + step, g)))
-        for i, g in enumerate(groups)
-        for a in range(0, g, step)
-    ]
+    out = [(i, range(a, min(a + step, g))) for i, g in enumerate(groups) for a in range(0, g, step)]
     return [(seq, i, rgs) for seq, (i, rgs) in enumerate(out)]
 
 
@@ -267,9 +260,7 @@ def build(a):
             for kind, name in SKIPS.items():
                 if info[kind]:
                     bad[name] += int(info[kind])
-        log.append(
-            json.dumps(dict(chunk=i, source=f.name, games=games, bad=bad)) + "\n"
-        )
+        log.append(json.dumps(dict(chunk=i, source=f.name, games=games, bad=bad)) + "\n")
     cd.write_atomic(root / "build-log.jsonl", "".join(log))
     parts = dict(parts=len(files), chunks=len(files))
     cd.write_atomic(root / "build-complete.json", json.dumps(parts) + "\n")
@@ -460,16 +451,9 @@ def decode(g):
     """A C record as the data.store.record() dict."""
 
     def arr(p, n, t):
-        return (
-            np.ctypeslib.as_array(ctypes.cast(p, ctypes.POINTER(t)), (n,)).tolist()
-            if n
-            else []
-        )
+        return np.ctypeslib.as_array(ctypes.cast(p, ctypes.POINTER(t)), (n,)).tolist() if n else []
 
-    s = [
-        None if g.nulls >> k & 1 else ctypes.string_at(g.s[k], g.len[k]).decode()
-        for k in range(7)
-    ]
+    s = [None if g.nulls >> k & 1 else ctypes.string_at(g.s[k], g.len[k]).decode() for k in range(7)]
     return dict(zip(STRS, s)) | dict(
         white_elo=g.welo,
         black_elo=g.belo,
@@ -495,16 +479,10 @@ def decode(g):
 # int32 / int16 / uint32 boundaries of TimeControl, clocks and mate evals (the first
 # row of the first file with one field replaced), and a locale-sensitive eval
 EDGE = (
-    *(
-        {"TimeControl": t}
-        for t in ("2147483647+32767", "2147483648+0", "4294967296+0", "0+32768")
-    ),
+    *({"TimeControl": t} for t in ("2147483647+32767", "2147483648+0", "4294967296+0", "0+32768")),
     *({"TimeControl": t} for t in ("0+-32768", "0+-32769", "1_0+5", "300+0")),
     *({"movetext": f"e4 {{[%clk {c}]}}"} for c in ("1193046:28:15", "1193046:28:16")),
-    *(
-        {"movetext": f"e4 {{[%eval #{v}]}}"}
-        for v in ("64768", "64769", "-64767", "-64768")
-    ),
+    *({"movetext": f"e4 {{[%eval #{v}]}}"} for v in ("64768", "64769", "-64767", "-64768")),
     {"movetext": "e4 {[%eval 1.25]} e5 {[%eval -0.125]}"},
 )
 
@@ -579,14 +557,10 @@ def check(a):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
-    b.add_argument(
-        "--hf", required=True, help="Lichess/standard-chess-games parquet dir"
-    )
+    b.add_argument("--hf", required=True, help="Lichess/standard-chess-games parquet dir")
     b.add_argument("--out", required=True)
     b.add_argument("--workers", type=int, default=0)
     b.add_argument("--level", type=int, default=1, help="zstd level of the spill")

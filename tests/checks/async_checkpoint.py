@@ -95,9 +95,7 @@ def worker(mode, tmp, rank):
                 }
             ],
             "optimizer_flags": [{"freeze_timer": k, "should_sync": False}],
-            "gradients": OrderedDict(
-                w=r(n, 4, dtype=torch.bfloat16) if k % 2 else None, b=r(4)
-            ),
+            "gradients": OrderedDict(w=r(n, 4, dtype=torch.bfloat16) if k % 2 else None, b=r(4)),
             "split_embed": k > 1,
             "schedule_step": 128 * k,
             "yarn": {
@@ -188,9 +186,7 @@ def worker(mode, tmp, rank):
             return 0
 
         cudart, check = torch.cuda.cudart, torch.cuda.check_error
-        torch.cuda.cudart = lambda: SimpleNamespace(
-            cudaHostRegister=register, cudaHostUnregister=pins.pop
-        )
+        torch.cuda.cudart = lambda: SimpleNamespace(cudaHostRegister=register, cudaHostUnregister=pins.pop)
         torch.cuda.check_error = lambda res: None
         base = torch.randn(6, 8)
         layouts = [
@@ -318,9 +314,7 @@ def worker(mode, tmp, rank):
             return sorted(p.relative_to(out) for p in out.rglob("*") if p.is_file())
 
         assert files(sync) == files(done), (files(sync), files(done))
-        assert all(
-            (sync / f).read_bytes() == (done / f).read_bytes() for f in files(sync)
-        )
+        assert all((sync / f).read_bytes() == (done / f).read_bytes() for f in files(sync))
         kept = sorted(p.name[:13] for p in (done / "checkpoints").iterdir())
         assert kept == ["step-00000256", "step-00000640", "step-00000768"], kept
     dist.barrier()
@@ -369,9 +363,7 @@ def paced(tmp):
 
         return call
 
-    os.fdatasync, os.fsync, os.posix_fadvise = (
-        spy(k, f) for k, f in zip(("fdatasync", "fsync", "fadvise"), real)
-    )
+    os.fdatasync, os.fsync, os.posix_fadvise = (spy(k, f) for k, f in zip(("fdatasync", "fsync", "fadvise"), real))
     time.sleep = lambda s: None
     mc.CHUNK, chunk = 4099, mc.CHUNK
     syncs = ["fdatasync", "fadvise"] * (n // 4099) + ["fsync", "fadvise"]
@@ -416,9 +408,7 @@ def rowlog(tmp):
     log.close()
     echo, sys.stdout = sys.stdout.getvalue(), stdout
     assert echo == "".join(lines)
-    assert (out / "a.jsonl").read_text() == "".join(
-        x for i, x in enumerate(lines) if i % 7
-    )
+    assert (out / "a.jsonl").read_text() == "".join(x for i, x in enumerate(lines) if i % 7)
     assert masks and all(mc.QUIET <= m for m in masks)
     log = mc.RowLog(out / "missing")
     log.put("a.jsonl", lines[0])
@@ -446,10 +436,7 @@ def main():
     paced(tmp)
     rowlog(tmp)
     for mode in ("crash", "check"):
-        procs = [
-            subprocess.Popen([sys.executable, __file__, mode, tmp, str(r)])
-            for r in range(2)
-        ]
+        procs = [subprocess.Popen([sys.executable, __file__, mode, tmp, str(r)]) for r in range(2)]
         assert [p.wait() for p in procs] == [0, 0], mode
     print("passed", tmp)
 

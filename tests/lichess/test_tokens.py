@@ -13,11 +13,7 @@ def random_game(seed, plies=300):
     rng, board = random.Random(seed), chess.Board()
     while not board.is_game_over() and len(board.move_stack) < plies:
         moves = list(board.legal_moves)
-        special = [
-            m
-            for m in moves
-            if m.promotion or board.is_castling(m) or board.is_en_passant(m)
-        ]
+        special = [m for m in moves if m.promotion or board.is_castling(m) or board.is_en_passant(m)]
         board.push(rng.choice(special if special and rng.random() < 0.5 else moves))
     return [m.uci() for m in board.move_stack]
 
@@ -56,9 +52,7 @@ def test_features_match_training_loader():
         ))  # fmt: skip
         expect = Games(table, feats=True).feats(0, HEADER + n, drop=False)
         ours = [features(k, base, inc, clocks) for k in range(n)]
-        np.testing.assert_array_equal(
-            np.array(ours), expect[HEADER - 1 : HEADER - 1 + n]
-        )
+        np.testing.assert_array_equal(np.array(ours), expect[HEADER - 1 : HEADER - 1 + n])
 
 
 def test_features_unknown():

@@ -47,9 +47,7 @@ def wait(cond, timeout=60):
 
 
 def finished(mock, n=1):
-    return len(mock.games) >= n and all(
-        g.status != "started" for g in mock.games.values()
-    )
+    return len(mock.games) >= n and all(g.status != "started" for g in mock.games.values())
 
 
 def challenge(**kw):
@@ -65,10 +63,7 @@ def test_screen():
     assert screen(challenge(), rules, False) is None
     assert screen(challenge(variant=dict(key="chess960")), rules, False) == "standard"
     assert screen(challenge(speed="bullet"), rules, False) == "timeControl"
-    assert (
-        screen(challenge(timeControl=dict(type="unlimited")), rules, False)
-        == "timeControl"
-    )
+    assert screen(challenge(timeControl=dict(type="unlimited")), rules, False) == "timeControl"
     tc = lambda base, inc: dict(type="clock", limit=base, increment=inc)
     assert screen(challenge(timeControl=tc(30, 0)), rules, False) == "tooFast"
     assert screen(challenge(timeControl=tc(5400, 0)), rules, False) == "tooSlow"
@@ -125,6 +120,7 @@ def test_draw_offer_and_resign(engine, monkeypatch):
     wait(lambda: finished(mock))
     g = next(iter(mock.games.values()))
     assert g.status == "draw"
+
     def on_turn_from_ply_2(wdl, ply, *args, on_turn=True):
         return on_turn and ply >= 2
 
@@ -346,9 +342,7 @@ def test_refused_move_resyncs(engine, caplog):
     mock.challenge("random", "allie", 60, 1, color="black")  # the bot is white
     wait(lambda: finished(mock))
     g = next(iter(mock.games.values()))
-    assert g.status != "outoftime" and len(g.board.move_stack) > 10 and not mock.fail[
-        "/api/bot/game/g"
-    ]
+    assert g.status != "outoftime" and len(g.board.move_stack) > 10 and not mock.fail["/api/bot/game/g"]
     assert sum("resyncing" in str(r.exc_info[1]) for r in caplog.records if r.exc_info) == 1
 
 

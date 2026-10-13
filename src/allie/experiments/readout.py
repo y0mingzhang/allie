@@ -73,9 +73,7 @@ def files(paths):
         hits = sorted(glob.glob(str(Path(p) if Path(p).is_absolute() else R / p)))
         assert hits, f"no match: {p}"
         for h in map(Path, hits):
-            yield from (
-                [h] if h.suffix == ".json" else sorted((h / "results").glob("*.json"))
-            )
+            yield from ([h] if h.suffix == ".json" else sorted((h / "results").glob("*.json")))
 
 
 def steady(out, steps):
@@ -83,11 +81,7 @@ def steady(out, steps):
         rows = [json.loads(x) for x in (out / "train.jsonl").read_text().splitlines()]
     except (OSError, ValueError):
         return None
-    v = [
-        x["tokens_per_second"]
-        for x in rows
-        if "tokens_per_second" in x and x["step"] > steps / 4
-    ]
+    v = [x["tokens_per_second"] for x in rows if "tokens_per_second" in x and x["step"] > steps / 4]
     return statistics.median(v) if v else None
 
 
@@ -103,11 +97,7 @@ def load(f, metrics):
     elif dims:
         e, k, routed, shared = dims[:4]
         dense = a.resolve(r["arch"]).get("moe_dense_first", 1)
-        n = (
-            4 * L * d * d
-            + dense * 3 * d * H
-            + (L - dense) * (3 * d * (shared + k * routed) + d * e)
-        )
+        n = 4 * L * d * d + dense * 3 * d * H + (L - dense) * (3 * d * (shared + k * routed) + d * e)
         fam = f"E{e}k{k}sh{round(100 * shared / H)}"
         fam += "q" * (r["arch"].get("moe_update") == "quantile")
     else:
@@ -116,11 +106,7 @@ def load(f, metrics):
         fam = m[1]
     s = r.get("strat") or json.loads((EVAL / r["name"] / "strat-v1.json").read_text())
     out, D = P / r["name"], r.get("tokens") or r["steps"] * 524288
-    gpu = (
-        "orchard H100"
-        if (out / "orchard.json").exists()
-        else r.get("gpu_name") or r.get("gpu")
-    )
+    gpu = "orchard H100" if (out / "orchard.json").exists() else r.get("gpu_name") or r.get("gpu")
     return dict(
         name=r["name"], fam=fam, budget=f"{float(r['budget']):.0e}".replace("e+", "e"), shape=f"{L}x{d}",
         seed=r.get("seed", 42), n=n, d=D, c=r.get("useful_training_flops") or 6 * n * D,
@@ -171,9 +157,7 @@ def cell(rs, m, s, reps, rng, w=0):
         gpu=sorted({r["gpu"] for r in rs}), l=float(y[i]), parabola=False,
     )  # fmt: skip
     if sizes < 3 or span < 1.5:
-        return o | dict(
-            reps=np.stack([np.full(reps, np.log(n[i])), y[i] + rng.normal(0, s, reps)], 1)
-        )
+        return o | dict(reps=np.stack([np.full(reps, np.log(n[i])), y[i] + rng.normal(0, s, reps)], 1))
     k = np.polyfit(x, yw, 2)
     res, dof = yw - np.polyval(k, x), len(yw) - 3
     s = max(s, float(np.sqrt(res @ res / dof)) if dof > 0 else 0.0)
@@ -186,10 +170,7 @@ def cell(rs, m, s, reps, rng, w=0):
             d.append(vertex(np.polyfit(np.log(n[sd]), yd[sd], 2)))
         d = np.array(d)
     else:
-        d = [
-            np.polyfit(x, np.polyval(k, x) + rng.normal(0, s, len(yw)), 2)
-            for _ in range(reps)
-        ]
+        d = [np.polyfit(x, np.polyval(k, x) + rng.normal(0, s, len(yw)), 2) for _ in range(reps)]
         d = np.array([vertex(z) for z in d])
     inside = (d[:, 0] >= x.min()) & (d[:, 0] <= x.max())
     return o | dict(
@@ -212,15 +193,9 @@ def fitlaw(d, shared=False, start=None):
     polished on its objective x1e6 at tight tolerances (see additive()). Returns {key: theta}."""
     b = BOUND(np.concatenate([x[:, 3] for x in d.values()]))
     b = [b[0], *b[1:] * len(d)] if shared else b
-    t = (
-        fit.additive(d, shared)[: len(b)]
-        if start is None
-        else np.clip(start, *np.array(b).T)
-    )
+    t = fit.additive(d, shared)[: len(b)] if start is None else np.clip(start, *np.array(b).T)
     f = lambda t: 1e6 * fit.objective(t, d, shared)
-    t = minimize(
-        f, t, method="L-BFGS-B", bounds=b, options=dict(ftol=1e-15, gtol=1e-12)
-    ).x
+    t = minimize(f, t, method="L-BFGS-B", bounds=b, options=dict(ftol=1e-15, gtol=1e-12)).x
     return {k: v for k, v in fit.unpack(t, shared).items() if k in d} | {"theta": t}
 
 
@@ -239,24 +214,16 @@ def ident(p, a, s, draws):
     Global: 90% bootstrap range and the share of draws at a bound. Not identified: no dof, > 10% of draws at a
     bound, or a 90% range wider than the value (exponents) or than 3x (E, A, B)."""
     h, N, D = 1e-5, a[:, 0], a[:, 1]
-    J = [
-        (fit.predict(p + h * e, N, D) - fit.predict(p - h * e, N, D)) / (2 * h)
-        for e in np.eye(5)
-    ]
+    J = [(fit.predict(p + h * e, N, D) - fit.predict(p - h * e, N, D)) / (2 * h) for e in np.eye(5)]
     J = np.stack(J, 1)
     sv = np.linalg.svd(J / np.linalg.norm(J, axis=0), compute_uv=False)
     cov = s * s * np.linalg.pinv(J.T @ J)
     se = np.sqrt(np.maximum(np.diag(cov), 0))
     corr = cov / np.maximum(np.outer(se, se), 1e-300)
     bd, T = BOUND(a[:, 3]), np.array(draws)
-    hit = [
-        float(np.mean((T[:, j] - bd[j][0] < 1e-3) | (bd[j][1] - T[:, j] < 1e-3)))
-        for j in range(5)
-    ]
+    hit = [float(np.mean((T[:, j] - bd[j][0] < 1e-3) | (bd[j][1] - T[:, j] < 1e-3))) for j in range(5)]
     r90 = [pct(np.exp(T[:, j]) if LOG[j] else T[:, j]) for j in range(5)]
-    wide = lambda j: (
-        r90[j] and (r90[j][1] > 3 * r90[j][0] if LOG[j] else np.ptp(r90[j]) > abs(p[j]))
-    )
+    wide = lambda j: r90[j] and (r90[j][1] > 3 * r90[j][0] if LOG[j] else np.ptp(r90[j]) > abs(p[j]))
     return dict(
         points=len(a), dof=len(a) - 5, rank=int((sv > 1e-8 * sv[0]).sum()), cond=float(sv[0] / sv[-1]),
         se=se.tolist(), at_bound=hit, range90=r90,
@@ -279,27 +246,14 @@ class Readout:
         self.seed_sd = float(np.sqrt(ss / dof)) if dof else None
         self.s = max(a.sigma, self.seed_sd or 0)
         ks = sorted((r["n"], r["c"] / (r["n"] * r["d"])) for r in runs)
-        self.kap = lambda n: np.interp(
-            np.log(n), np.log([x for x, _ in ks]), [k for _, k in ks]
-        )
+        self.kap = lambda n: np.interp(np.log(n), np.log([x for x, _ in ks]), [k for _, k in ks])
         self.data = {
-            f: np.array(
-                [
-                    (r["n"], r["d"], float(r["budget"]), r["y"][m])
-                    for r in runs
-                    if r["fam"] == f
-                ]
-            )
+            f: np.array([(r["n"], r["d"], float(r["budget"]), r["y"][m]) for r in runs if r["fam"] == f])
             for f in self.fams
         }
-        self.noise = {
-            f: self.rng.standard_normal((a.boot, len(x))) for f, x in self.data.items()
-        }
+        self.noise = {f: self.rng.standard_normal((a.boot, len(x))) for f, x in self.data.items()}
         pick = lambda x: np.concatenate(
-            [
-                self.rng.choice(np.flatnonzero(x[:, 2] == b), (x[:, 2] == b).sum())
-                for b in np.unique(x[:, 2])
-            ]
+            [self.rng.choice(np.flatnonzero(x[:, 2] == b), (x[:, 2] == b).sum()) for b in np.unique(x[:, 2])]
         )
         self.picks = {f: [pick(x) for _ in range(a.boot)] for f, x in self.data.items()}
         self.out = dict(
@@ -328,9 +282,7 @@ class Readout:
 
     def isoflop(self):
         m, out = self.m, self.out
-        print(
-            "isoFLOP parabola in log N per family and budget: N* and L* [90%], measured best, residuals x1e3"
-        )
+        print("isoFLOP parabola in log N per family and budget: N* and L* [90%], measured best, residuals x1e3")
         self.cells = {f: {} for f in self.fams}
         for f in self.fams:
             for b in self.budgets:
@@ -338,7 +290,11 @@ class Readout:
                 if not rs:
                     continue
                 c = self.cells[f][b] = cell(rs, m, self.s, self.a.boot, self.rng, self.a.window)
-                sz = f"{c['sizes']} of {c['grid_sizes']} sizes {c['fit'][0]}..{c['fit'][-1]}" if c["window"] else f"{c['sizes']} sizes"
+                sz = (
+                    f"{c['sizes']} of {c['grid_sizes']} sizes {c['fit'][0]}..{c['fit'][-1]}"
+                    if c["window"]
+                    else f"{c['sizes']} sizes"
+                )
                 head = f"  {f:12} {b:5} {c['runs']:2} runs {sz} (N x{c['span']:.2f})"
                 tail = (f"best measured {c['best']} {c['best_y']:.4f}, seed-mean {c['best_mean']} {c['best_mean_y']:.4f}"
                         f"{' (grid edge)' * c['edge']}  {'/'.join(c['gpu'])}")  # fmt: skip
@@ -350,41 +306,24 @@ class Readout:
                 print(f"{head}  N* {c['n_opt'] / 1e6:.1f}M {ci(nci, '{:.1f}')}{' UNBRACKETED' * c['unbracketed']} "
                       f"(in range in {c['inside']:.0%} of draws)  L* {c['l']:.4f} {ci(c['l_ci'], '{:.4f}')}  "
                       f"{tail}  resid {res} (dof {c['dof']})")  # fmt: skip
-            out["cells"][f] = {
-                b: {k: v for k, v in c.items() if k != "reps"}
-                for b, c in self.cells[f].items()
-            }
+            out["cells"][f] = {b: {k: v for k, v in c.items() if k != "reps"} for b, c in self.cells[f].items()}
         print("N*(C) ~ C^a from the bracketed parabola minima")
         for f in self.fams:
-            ok = [
-                (b, c)
-                for b, c in self.cells[f].items()
-                if c["parabola"] and not c["unbracketed"]
-            ]
+            ok = [(b, c) for b, c in self.cells[f].items() if c["parabola"] and not c["unbracketed"]]
             if len(ok) < 2:
                 print(f"  {f:12} not identified: {len(ok)} bracketed budget(s)")
                 continue
             lc = np.log([c["c"] for _, c in ok])
             e = float(np.polyfit(lc, [np.log(c["n_opt"]) for _, c in ok], 1)[0])
             d = np.array([c["reps"][:, 0] for _, c in ok])
-            sl = pct(
-                [
-                    np.polyfit(lc, d[:, j], 1)[0]
-                    for j in range(d.shape[1])
-                    if np.isfinite(d[:, j]).all()
-                ]
-            )
+            sl = pct([np.polyfit(lc, d[:, j], 1)[0] for j in range(d.shape[1]) if np.isfinite(d[:, j]).all()])
             out["nstar"][f] = dict(exponent=e, ci=sl, budgets=[b for b, _ in ok])
             two = " (2 budgets: no residual check)" * (len(ok) == 2)
-            print(
-                f"  {f:12} a = {e:.3f} {ci(sl)} over {' '.join(b for b, _ in ok)}{two}"
-            )
+            print(f"  {f:12} a = {e:.3f} {ci(sl)} over {' '.join(b for b, _ in ok)}{two}")
 
     def laws(self):
         a, out, kap = self.a, self.out, self.kap
-        print(
-            "L(N, D) = E + A (N/1e7)^-alpha + B (D/1e8)^-beta per family (separate E); node-week optimum N*, L*"
-        )
+        print("L(N, D) = E + A (N/1e7)^-alpha + B (D/1e8)^-beta per family (separate E); node-week optimum N*, L*")
         self.th, self.sd = {}, {}
         for f, x in self.data.items():
             if len(x) < 3:
@@ -393,18 +332,11 @@ class Readout:
             self.th[f] = fitlaw({"ours": x})["ours"]
             res = fit.predict(self.th[f], x[:, 0], x[:, 1]) - x[:, 3]
             rms = float(np.sqrt(np.mean(res**2)))
-            self.sd[f] = max(
-                self.s, rms * np.sqrt(len(x) / (len(x) - 5)) if len(x) > 5 else 0.0
-            )
-            out["law"][f] = dict(
-                theta=self.th[f].tolist(), rmse=rms, s=self.sd[f], resid=res.tolist()
-            )
+            self.sd[f] = max(self.s, rms * np.sqrt(len(x) / (len(x) - 5)) if len(x) > 5 else 0.0)
+            out["law"][f] = dict(theta=self.th[f].tolist(), rmse=rms, s=self.sd[f], resid=res.tolist())
         self.draws = {
             mode: [
-                {
-                    f: fitlaw({"ours": self.sample(f, j, mode, p)}, start=p)["ours"]
-                    for f, p in self.th.items()
-                }
+                {f: fitlaw({"ours": self.sample(f, j, mode, p)}, start=p)["ours"] for f, p in self.th.items()}
                 for j in range(a.boot)
             ]
             for mode in ("noise", "runs")
@@ -416,26 +348,18 @@ class Readout:
             tr, te = x[x[:, 2] < x[:, 2].max()], x[x[:, 2] == x[:, 2].max()]
             hold = None
             if len(tr) >= 6 and len(np.unique(tr[:, 2])) >= 2:
-                q = (
-                    fit.predict(fitlaw({"ours": tr})["ours"], te[:, 0], te[:, 1])
-                    - te[:, 3]
-                )
+                q = fit.predict(fitlaw({"ours": tr})["ours"], te[:, 0], te[:, 1]) - te[:, 3]
                 hold = dict(rmse=float(np.sqrt(np.mean(q**2))), bias=float(q.mean()))
             lnw, nnw = best(p, a.nw, kap)
             nd = pct([best(t[f], a.nw, kap)[1] / 1e6 for t in self.draws["noise"]])
             out["law"][f] |= dict(ident=idf, n_exponent=float(p[4] / (p[2] + p[4])), n_exponent_ci=ex,
                                   holdout=hold, node_week=dict(n=nnw, l=lnw, n_ci_M=nd))  # fmt: skip
             v = [np.exp(p[j]) if LOG[j] else p[j] for j in range(5)]
-            pr = "  ".join(
-                f"{k} {w:.3g} {ci(r)}" for k, w, r in zip(PNAMES, v, idf["range90"])
-            )
+            pr = "  ".join(f"{k} {w:.3g} {ci(r)}" for k, w, r in zip(PNAMES, v, idf["range90"]))
             print(f"  {f:12} {pr}  N* ~ C^{p[4] / (p[2] + p[4]):.3f} {ci(ex)}  node-week N* {nnw / 1e6:.0f}M "
                   f"{ci(nd, '{:.0f}')} L* {lnw:.4f}")  # fmt: skip
             cor = ", ".join(f"{i}-{j} {c:+.2f}" for i, j, c in idf["corr"]) or "none"
-            bnd = (
-                ", ".join(f"{k} {h:.0%}" for k, h in zip(PNAMES, idf["at_bound"]) if h)
-                or "none"
-            )
+            bnd = ", ".join(f"{k} {h:.0%}" for k, h in zip(PNAMES, idf["at_bound"]) if h) or "none"
             print(f"  {'':12} {len(x)} runs, dof {idf['dof']}, rmse {1e3 * out['law'][f]['rmse']:.2f}e-3 (noise "
                   f"used {self.sd[f]:.4f}), rank {idf['rank']}/5, cond {idf['cond']:.1e}, SE alpha "
                   f"{idf['se'][2]:.2g} beta {idf['se'][4]:.2g}; |corr| > 0.9: {cor}; draws at a bound: {bnd}")  # fmt: skip
@@ -445,9 +369,7 @@ class Readout:
                 else ""
             )
             res = " ".join(f"{1e3 * w:+.1f}" for w in out["law"][f]["resid"])
-            print(
-                f"  {'':12} NOT IDENTIFIED: {', '.join(idf['not_identified']) or 'none'}{hs}; resid x1e3 {res}"
-            )
+            print(f"  {'':12} NOT IDENTIFIED: {', '.join(idf['not_identified']) or 'none'}{hs}; resid x1e3 {res}")
 
     def pair(self, f, ref, data=None, start=None):
         d = data or self.data
@@ -459,10 +381,7 @@ class Readout:
         if ref not in th:
             print(f"no CM: the reference family {ref} has no law")
             return
-        cs = [
-            (b, statistics.median(r["c"] for r in self.runs if r["budget"] == b))
-            for b in self.budgets
-        ]
+        cs = [(b, statistics.median(r["c"] for r in self.runs if r["budget"] == b)) for b in self.budgets]
         cs += [("1e19 FLOPs", 1e19), ("node-week", a.nw)]
         rc = list(self.cells[ref].values())
         for f in [f for f in th if f != ref]:
@@ -486,10 +405,7 @@ class Readout:
                 row, fc = {}, self.cells[f].get(b)
                 if fc and len(rc) >= 2:
                     L, lcs = [x["l"] for x in rc], np.log([x["c"] for x in rc])
-                    d = [
-                        logc_at(fc["reps"][j, 1], [x["reps"][j, 1] for x in rc], lcs)
-                        for j in range(a.boot)
-                    ]
+                    d = [logc_at(fc["reps"][j, 1], [x["reps"][j, 1] for x in rc], lcs) for j in range(a.boot)]
                     para = fc["parabola"] and all(x["parabola"] for x in rc)
                     row["isoflop"] = dict(
                         cm=float(np.exp(logc_at(fc["l"], L, lcs)) / fc["c"]), ci=pct(np.exp(d) / fc["c"]),
@@ -500,18 +416,17 @@ class Readout:
                     row[k] = dict(
                         cm=cm(p1, p2, c, kap),
                         noise=pct([cm(u, v, c, kap) for u, v in dr["noise"]]),
-                        runs=None
-                        if few
-                        else pct([cm(u, v, c, kap) for u, v in dr["runs"]]),
+                        runs=None if few else pct([cm(u, v, c, kap) for u, v in dr["runs"]]),
                     )
                 out["cm"][f][b] = row | dict(c=c)
                 iso = row.get("isoflop")
                 left = "-"
                 if iso:
-                    left = f"{iso['cm']:.2f}x {ci(iso['ci'], '{:.2f}')}{' extrap.' * iso['extrapolated']} ({iso['basis']})"
+                    left = (
+                        f"{iso['cm']:.2f}x {ci(iso['ci'], '{:.2f}')}{' extrap.' * iso['extrapolated']} ({iso['basis']})"
+                    )
                 lw = [
-                    f"{row[k]['cm']:.2f}x {ci(row[k]['noise'], '{:.2f}')} {ci(row[k]['runs'], '{:.2f}')}"
-                    for k in laws
+                    f"{row[k]['cm']:.2f}x {ci(row[k]['noise'], '{:.2f}')} {ci(row[k]['runs'], '{:.2f}')}" for k in laws
                 ]
                 print(f"  {b:10} {c:.2e} {left:54} | {lw[0]:29} | {lw[1]}")
             shift = {k: {} for k in laws}
@@ -543,9 +458,7 @@ def header(runs, a, metrics):
           f"{ks[-1][1]:.2f} at {ks[-1][0] / 1e6:.0f}M; node-week {a.nw:.2g} FLOPs = {a.nw / top:.0f}x the largest run")  # fmt: skip
     print(f"  {'family':12} {'budget':6} {'shape':8} seed {'N':>7} {'D':>6} {'C':>8}  {'gpu':13} tok/s  "
           + "  ".join(metrics))  # fmt: skip
-    for r in sorted(
-        runs, key=lambda r: (r["fam"], float(r["budget"]), r["n"], r["seed"])
-    ):
+    for r in sorted(runs, key=lambda r: (r["fam"], float(r["budget"]), r["n"], r["seed"])):
         tps = f"{r['tps'] / 1e3:.0f}K" if r["tps"] else "-"
         print(f"  {r['fam']:12} {r['budget']:6} {r['shape']:8} {r['seed']:4} {r['n'] / 1e6:6.1f}M {r['d'] / 1e9:5.2f}B "
               f"{r['c']:.2e}  {r['gpu'] + '*' * r['resumed']:13} {tps:>5}  "
@@ -571,9 +484,7 @@ def header(runs, a, metrics):
 
 
 def main():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("paths", nargs="+")
     p.add_argument("--ref", default="dense")
     p.add_argument("--only", default="")

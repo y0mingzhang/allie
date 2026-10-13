@@ -90,9 +90,7 @@ def index(options, value):
 
 
 def hash64(values):
-    digest = hashlib.blake2b(
-        np.asarray(values, np.uint16).tobytes(), digest_size=8
-    ).digest()
+    digest = hashlib.blake2b(np.asarray(values, np.uint16).tobytes(), digest_size=8).digest()
     return int.from_bytes(digest, "little")
 
 
@@ -162,9 +160,7 @@ def record(h, movetext):
             board.push(m)
     except (ValueError, KeyError):
         return None, "illegal"
-    clocks = [
-        3600 * int(a) + 60 * int(b) + int(c) for a, b, c in CLOCK.findall(movetext)
-    ]
+    clocks = [3600 * int(a) + 60 * int(b) + int(c) for a, b, c in CLOCK.findall(movetext)]
     tc = str(h.get("TimeControl") or "-")
     try:
         base, inc = map(int, tc.split("+", 1)) if "+" in tc else (-1, -1)
@@ -212,13 +208,7 @@ def elo_digits(elo):
 def tokenize(g):
     """lichess_tokens_v2 token ids for one game record."""
     sec = str(g["base"]) if g["base"] >= 0 else "*" if g["base"] == -1 else "?"
-    inc = (
-        str(g["increment"])
-        if g["increment"] >= 0
-        else "*"
-        if g["increment"] == -1
-        else "?"
-    )
+    inc = str(g["increment"]) if g["increment"] >= 0 else "*" if g["increment"] == -1 else "?"
     head = [
         BOS,
         SECONDS_ID.get(sec, UNK),
@@ -377,9 +367,7 @@ def build(a):
     # a part counts as built only with its log line (a kill can fall between the two)
     have = {int(p.stem.split("-")[1]) for p in parts.glob("part-*.parquet")}
     kept = {k: v for k, v in logged(root).items() if k in have}
-    write_atomic(
-        root / "build-log.jsonl", "".join(json.dumps(x) + "\n" for x in kept.values())
-    )
+    write_atomic(root / "build-log.jsonl", "".join(json.dumps(x) + "\n" for x in kept.values()))
     done = set(kept)
     workers = len(os.sched_getaffinity(0))
     with (
@@ -407,17 +395,13 @@ def build(a):
                 drain(finished)
         drain(wait(pending)[0])
     n = len(list(parts.glob("part-*.parquet")))
-    write_atomic(
-        root / "build-complete.json", json.dumps(dict(parts=n, chunks=i + 1)) + "\n"
-    )
+    write_atomic(root / "build-complete.json", json.dumps(dict(parts=n, chunks=i + 1)) + "\n")
 
 
 def val_token_hashes():
     """Hashes of complete validation games (header, moves, termination)."""
     manifest = json.loads((VAL_CACHE / "manifest.json").read_text())
-    rows = np.load(VAL_CACHE / manifest["derived_file"], mmap_mode="r").reshape(
-        -1, 1025
-    )
+    rows = np.load(VAL_CACHE / manifest["derived_file"], mmap_mode="r").reshape(-1, 1025)
     out = set()
     for r in rows:
         b = np.flatnonzero(r == BOS)
@@ -431,9 +415,7 @@ def large(f):
     """f with 64-bit offsets: take() concatenates chunks, and > 2 GB of strings or list values needs them."""
     if f.type == pa.string():
         return f.with_type(pa.large_string())
-    return (
-        f.with_type(pa.large_list(f.type.value_type)) if pa.types.is_list(f.type) else f
-    )
+    return f.with_type(pa.large_list(f.type.value_type)) if pa.types.is_list(f.type) else f
 
 
 def with_annotations(t):
@@ -462,9 +444,7 @@ def finalize(a):
     lo = np.clip(np.minimum(welo, belo) // 200, 3, 14)
     bucket = (fmt + 1) * 10000 + hi * 100 + lo
     leak = np.isin(table["token_hash"].to_numpy(), val_token_hashes())
-    table = table.append_column("val_leak", pa.array(leak)).append_column(
-        "bucket", pa.array(bucket, pa.int32())
-    )
+    table = table.append_column("val_leak", pa.array(leak)).append_column("bucket", pa.array(bucket, pa.int32()))
     stats = summarize(table, welo, belo, fmt, leak, root)
     order = np.lexsort((np.random.default_rng(a.seed).random(len(bucket)), bucket))
     table, bucket = table.take(pa.array(order)), bucket[order]
@@ -507,16 +487,8 @@ def finalize(a):
 def summarize(table, welo, belo, fmt, leak, root):
     plies = pc.list_value_length(table["moves"]).to_numpy().astype(np.int64)
     white_moves, black_moves = (plies + 1) // 2, plies // 2
-    wbot = (
-        pc.equal(table["white_title"], "BOT")
-        .fill_null(False)
-        .to_numpy(zero_copy_only=False)
-    )
-    bbot = (
-        pc.equal(table["black_title"], "BOT")
-        .fill_null(False)
-        .to_numpy(zero_copy_only=False)
-    )
+    wbot = pc.equal(table["white_title"], "BOT").fill_null(False).to_numpy(zero_copy_only=False)
+    bbot = pc.equal(table["black_title"], "BOT").fill_null(False).to_numpy(zero_copy_only=False)
     wdiff = table["white_diff"].fill_null(0).to_numpy().astype(np.int32)
     bdiff = table["black_diff"].fill_null(0).to_numpy().astype(np.int32)
     clocks = pc.list_value_length(table["clocks"]).to_numpy()
@@ -531,26 +503,16 @@ def summarize(table, welo, belo, fmt, leak, root):
         plies=int(plies.sum()),
         tokens=int(plies.sum() + 12 * len(plies)),
         skipped=bad,
-        games_by_format={
-            f: int((fmt == i).sum()) for i, f in enumerate((*FORMATS, "other"))
-        },
+        games_by_format={f: int((fmt == i).sum()) for i, f in enumerate((*FORMATS, "other"))},
         games_by_max_elo_100={
-            int(k) * 100: int(v)
-            for k, v in zip(
-                *np.unique(np.maximum(welo, belo) // 100, return_counts=True)
-            )
+            int(k) * 100: int(v) for k, v in zip(*np.unique(np.maximum(welo, belo) // 100, return_counts=True))
         },
         expert2400_moves_by_mover=expert_moves,
         expert2400_moves_avg_elo_rule=int(plies[(welo + belo) // 2 >= 2400].sum()),
         expert2400_moves_in_avg_elo_below_2400=int(
-            (white_moves * expert_w + black_moves * expert_b)[
-                (welo + belo) // 2 < 2400
-            ].sum()
+            (white_moves * expert_w + black_moves * expert_b)[(welo + belo) // 2 < 2400].sum()
         ),
-        expert2400_bot_moves=int(
-            (white_moves * (expert_w & wbot)).sum()
-            + (black_moves * (expert_b & bbot)).sum()
-        ),
+        expert2400_bot_moves=int((white_moves * (expert_w & wbot)).sum() + (black_moves * (expert_b & bbot)).sum()),
         expert2400_moves_rating_diff_ge_25=int(
             (white_moves * (expert_w & (np.abs(wdiff) >= 25))).sum()
             + (black_moves * (expert_b & (np.abs(bdiff) >= 25))).sum()
@@ -607,16 +569,12 @@ def gate(a):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     src = b.add_mutually_exclusive_group(required=True)
     src.add_argument("--pgn", help="Lichess monthly .pgn.zst")
-    src.add_argument(
-        "--hf", help="directory of Lichess/standard-chess-games parquet files"
-    )
+    src.add_argument("--hf", help="directory of Lichess/standard-chess-games parquet files")
     b.add_argument("--out", required=True)
     f = sub.add_parser("finalize")
     f.add_argument("--out", required=True)

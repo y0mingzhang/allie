@@ -77,9 +77,7 @@ def main():
                 setattr(srv, k, getattr(a, k))
     engine = Engine(m)
     files = sorted(glob.glob(a.pgns))
-    long = [
-        f for f in files if len(read_pgn(f, 10**6)["moves"]) >= a.ply + 2 * a.rounds + 4
-    ]  # mid-game, not over
+    long = [f for f in files if len(read_pgn(f, 10**6)["moves"]) >= a.ply + 2 * a.rounds + 4]  # mid-game, not over
     assert len(long) >= a.games, f"{len(long)} long enough PGNs for {a.games} games"
     games = []
     for f in long:  # a position with a choice to make (not over, not a forced move)
@@ -116,17 +114,13 @@ def main():
             if a.native:
                 leaves.append(game.last_search["evaluated"])
 
-    mover = load_game(
-        engine, read_pgn(long[a.games % len(long)], a.ply + 1)
-    )  # plays a move every 100 ms meanwhile
+    mover = load_game(engine, read_pgn(long[a.games % len(long)], a.ply + 1))  # plays a move every 100 ms meanwhile
     move_ms, stop, clock = [], threading.Event(), [mover.base, mover.base]
 
     def play():
         while not stop.is_set() and not mover.board.is_game_over():
             clock[len(mover.moves) % 2] -= 1
-            mover.update(
-                mover.moves + [next(iter(mover.board.legal_moves)).uci()], *clock
-            )
+            mover.update(mover.moves + [next(iter(mover.board.legal_moves)).uci()], *clock)
             t0 = time.perf_counter()
             mover.sync()  # one new token, queued behind the searches' leaf batches
             move_ms.append(1000 * (time.perf_counter() - t0))
@@ -153,10 +147,7 @@ def main():
     if srv:  # every step runs on the server: its sizes and gather counts
         after = srv.stats()
         sizes = srv.sizes()
-        gather = {
-            k: after[k] - before[k]
-            for k in ("steps", "items", "requests", "waited", "wait_s", "joined")
-        }
+        gather = {k: after[k] - before[k] for k in ("steps", "items", "requests", "waited", "wait_s", "joined")}
         gather.update(
             max_items=srv.max_items,
             min_items=srv.min_items,

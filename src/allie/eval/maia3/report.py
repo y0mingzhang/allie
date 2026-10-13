@@ -50,9 +50,7 @@ REFS = ("maia3-79m", "sw-moe-s42")
 
 def scores(path, keep):
     with np.load(path) as z:
-        ce, top1 = (
-            (z["ce_legal"], z["top1"]) if "ce_legal" in z else (z["ce"], z["top1"])
-        )
+        ce, top1 = (z["ce_legal"], z["top1"]) if "ce_legal" in z else (z["ce"], z["top1"])
     if keep is not None and len(ce) != len(keep):
         ce, top1 = ce[keep], top1[keep]
     return dict(ce=np.asarray(ce, float), top1=np.asarray(top1, float))
@@ -84,11 +82,7 @@ def macro_boot(games, cell, x, rng, reps=2000):
 
 
 def label(lo, hi, unit=""):
-    return (
-        f"{lo}+{unit}"
-        if hi >= 10**4
-        else (f"<{hi}{unit}" if lo == 0 and unit == "" else f"{lo}-{hi}{unit}")
-    )
+    return f"{lo}+{unit}" if hi >= 10**4 else (f"<{hi}{unit}" if lo == 0 and unit == "" else f"{lo}-{hi}{unit}")
 
 
 def macro(s, mask, x):
@@ -115,9 +109,7 @@ def overall(s, masks, sc, rng, out, lines):
             lines += [
                 f"**{name}**",
                 "",
-                "| Model | Params | GFLOPs/move | "
-                + " | ".join(b.split("/")[1] for b in BANDS)
-                + " | macro |",
+                "| Model | Params | GFLOPs/move | " + " | ".join(b.split("/")[1] for b in BANDS) + " | macro |",
                 "|---|---|---:|" + "---:|" * (len(BANDS) + 1),
             ]
             for m in ORDER:
@@ -126,11 +118,7 @@ def overall(s, masks, sc, rng, out, lines):
                     k = vm & (s[:, 2] == c)
                     x = sc[m][metric][k]
                     h = half(s[k, 0], x, rng)
-                    cells.append(
-                        fmt.format(x.mean() * scale)
-                        + " ±"
-                        + fmt.format(h * scale).lstrip("0")
-                    )
+                    cells.append(fmt.format(x.mean() * scale) + " ±" + fmt.format(h * scale).lstrip("0"))
                 mac = macro(s, vm, sc[m][metric])
                 r.setdefault(m, {})[metric] = mac
                 lines.append(
@@ -183,25 +171,14 @@ def sliced(
             continue
         d = rows[g] = dict(
             n=int(k.sum()),
-            models={
-                m: dict(
-                    acc=float(sc[m]["top1"][k].mean()), ce=float(sc[m]["ce"][k].mean())
-                )
-                for m in ORDER
-            },
+            models={m: dict(acc=float(sc[m]["top1"][k].mean()), ce=float(sc[m]["ce"][k].mean())) for m in ORDER},
         )
         for ref in REFS:
-            d[f"d_ce_{ref}"] = stats(
-                games[k], sc["bigrun"]["ce"][k] - sc[ref]["ce"][k], rng
-            )
-        d["d_acc_maia3-79m"] = stats(
-            games[k], sc["bigrun"]["top1"][k] - sc["maia3-79m"]["top1"][k], rng
-        )
+            d[f"d_ce_{ref}"] = stats(games[k], sc["bigrun"]["ce"][k] - sc[ref]["ce"][k], rng)
+        d["d_acc_maia3-79m"] = stats(games[k], sc["bigrun"]["top1"][k] - sc["maia3-79m"]["top1"][k], rng)
         lines.append(
             f"| {g} | {d['n']:,} | "
-            + " | ".join(
-                f"{v['acc'] * 100:.1f} / {v['ce']:.4f}" for v in d["models"].values()
-            )
+            + " | ".join(f"{v['acc'] * 100:.1f} / {v['ce']:.4f}" for v in d["models"].values())
             + f" | {ci(d['d_ce_maia3-79m'])} | {ci(d['d_acc_maia3-79m'], 100, '{:+.2f}')} | {ci(d['d_ce_sw-moe-s42'])} |"
         )
     lines.append("")
@@ -217,10 +194,7 @@ def main():
     rng = np.random.default_rng(7)
     s, masks, cached = load()
     keep = np.load(DATA / "games.npz")["keep"]
-    sc = {
-        m: dict(ce=cached[m]["ce"].astype(float), top1=cached[m]["top1"].astype(float))
-        for m in ORDER[:-1]
-    }
+    sc = {m: dict(ce=cached[m]["ce"].astype(float), top1=cached[m]["top1"].astype(float)) for m in ORDER[:-1]}
     sc["bigrun"] = scores(bench, keep)
     fl = json.loads((HERE / "flops.json").read_text())
     GFLOPS.update({m: fl[m]["flops_per_move"] / 1e9 for m in ORDER[:3]})
@@ -276,10 +250,7 @@ def main():
     sliced(
         "ply",
         "By ply (0-based half-move index)",
-        [
-            (f"{a}+" if b >= 10**6 else f"{a}-{b - 1}", (ply >= a) & (ply < b), g)
-            for a, b in PLY
-        ],
+        [(f"{a}+" if b >= 10**6 else f"{a}-{b - 1}", (ply >= a) & (ply < b), g) for a, b in PLY],
         sc,
         rng,
         out,
@@ -294,9 +265,7 @@ def main():
         fsc["bigrun"] = scores(f, None)
         # one sample: the 12 other cells (5,000 each) and the blitz benchmark (20,000 each); games are disjoint
         # across the two files, so offset the companion's game ids
-        cat = {
-            m: {k: np.r_[fsc[m][k], sc[m][k]] for k in ("ce", "top1")} for m in ORDER
-        }
+        cat = {m: {k: np.r_[fsc[m][k], sc[m][k]] for k in ("ce", "top1")} for m in ORDER}
         games = np.r_[fs[:, 0] + s[:, 0].max() + 1, s[:, 0]]
         cell = np.r_[fs[:, 2], s[:, 2]]
         rows = out["slices"]["format"] = {}
@@ -324,10 +293,7 @@ def main():
                 d[f"d_{key}_{ref}"] = dict(mean=mac(x), lo=float(lo), hi=float(hi))
             lines.append(
                 f"| {name} | {d['n']:,} | "
-                + " | ".join(
-                    f"{v['acc'] * 100:.1f} / {v['ce']:.4f}"
-                    for v in d["models"].values()
-                )
+                + " | ".join(f"{v['acc'] * 100:.1f} / {v['ce']:.4f}" for v in d["models"].values())
                 + f" | {ci(d['d_ce_maia3-79m'])} | {ci(d['d_top1_maia3-79m'], 100, '{:+.2f}')} |"
                 f" {ci(d['d_ce_sw-moe-s42'])} |"
             )
@@ -338,9 +304,7 @@ def main():
             "| cell | n | " + " | ".join(LABEL[m].strip("*") for m in ORDER) + " |",
             "|---|---:|" + "---:|" * len(ORDER),
         ]
-        names = json.loads(
-            (DATA.parent / "strat-eval-v1" / "manifest.json").read_text()
-        )["cells"]
+        names = json.loads((DATA.parent / "strat-eval-v1" / "manifest.json").read_text())["cells"]
         for c in range(16):
             k = cell == c
             lines.append(

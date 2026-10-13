@@ -77,16 +77,12 @@ def interpret():
     def f32(t):
         if t.dtype.scalar != tl.bfloat16:
             return t
-        return ip.TensorHandle(
-            (t.data.astype(np.uint32) << 16).view(np.float32), tl.float32
-        )
+        return ip.TensorHandle((t.data.astype(np.uint32) << 16).view(np.float32), tl.float32)
 
     def to_bf16(self, src, ty):
         if src.dtype.scalar == tl.float32 and ty.scalar == tl.bfloat16:
             x = torch.from_numpy(np.ascontiguousarray(src.data)).bfloat16()
-            return ip.TensorHandle(
-                x.view(torch.int16).numpy().view(np.uint16), tl.bfloat16
-            )
+            return ip.TensorHandle(x.view(torch.int16).numpy().view(np.uint16), tl.bfloat16)
         return cast(self, src, ty)
 
     b.create_dot = lambda self, x, y, *rest: dot(self, f32(x), f32(y), *rest)
@@ -96,9 +92,7 @@ def interpret():
 
 def base_scripts(base):
     out = tempfile.mkdtemp()
-    repo = os.environ.get(
-        "ALLIE_PROJECT_ROOT", HERE.parent
-    )  # for a git-archived copy of scripts/
+    repo = os.environ.get("ALLIE_PROJECT_ROOT", HERE.parent)  # for a git-archived copy of scripts/
     git = ["git", "-C", str(repo), "archive", f"{base}:scripts"]
     tar = subprocess.run(git, capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-f", "-", "-C", out], input=tar, check=True)
@@ -127,9 +121,7 @@ def run(a):
         assert hasattr(importlib.import_module(mod), name), target
         setattr(importlib.import_module(mod), name, ast.literal_eval(value))
     backend = "nccl" if DEV == "cuda" else "gloo"
-    dist.init_process_group(
-        backend, init_method=f"file://{a.dump}.store", rank=0, world_size=1
-    )
+    dist.init_process_group(backend, init_method=f"file://{a.dump}.store", rank=0, world_size=1)
     torch.use_deterministic_algorithms(True)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.manual_seed(0)
@@ -157,9 +149,7 @@ def run(a):
     fn = block if DEV == "cpu" else torch.compile(block, dynamic=False, fullgraph=True)
 
     def forward(x):
-        return torch.utils.checkpoint.checkpoint(
-            fn, x, use_reentrant=False, context_fn=moe_layer.replay_context
-        )
+        return torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False, context_fn=moe_layer.replay_context)
 
     gen = torch.Generator(DEV).manual_seed(1)
 
@@ -199,9 +189,7 @@ def layer(a):
     assert base.keys() == new.keys()
     diff = {k: bitdiff(base[k], new[k]) for k in base}
     bad = {k: v for k, v in diff.items() if v}
-    print(
-        f"{'FAIL' if bad else 'PASS'} layer vs {a.base} ({DEV}): {len(diff)} tensors {bad or ''}"
-    )
+    print(f"{'FAIL' if bad else 'PASS'} layer vs {a.base} ({DEV}): {len(diff)} tensors {bad or ''}")
     return not bad
 
 
@@ -222,9 +210,7 @@ def kernels(a):
 
     gen = torch.Generator(DEV).manual_seed(2)
     ok = True
-    shapes = (
-        ((96, 1536, 512, 4, 8192), (128, 768, 256, 4, 4096)) if DEV == "cuda" else ()
-    )
+    shapes = ((96, 1536, 512, 4, 8192), (128, 768, 256, 4, 4096)) if DEV == "cuda" else ()
     # (CHUNKS, TUNED); chunked shapes are T % 3 == 0
     settings = ((1, False), (3, True))
     for (e, d, h, k, t), (chunks, tuned) in itertools.product(
@@ -269,17 +255,13 @@ def kernels(a):
         ).backward(dy)
         remat = all(torch.equal(u.grad, v.grad) for u, v in zip(leaves, kept))
         with torch.no_grad():
-            y0 = moe_kernels.routed(
-                x, up.transpose(1, 2), down, k, flat[order], order, offsets, gates
-            )
+            y0 = moe_kernels.routed(x, up.transpose(1, 2), down, k, flat[order], order, offsets, gates)
         refs = [v.float().requires_grad_() for v in (x, up, down, gates)]
         r = reference(*refs[:3], k, flat, refs[3])
         r.backward(dy.float())
         errs = [
             ((u.float() - v).norm() / v.norm()).item()
-            for u, v in zip(
-                (y, *(p.grad for p in leaves)), (r, *(p.grad for p in refs))
-            )
+            for u, v in zip((y, *(p.grad for p in leaves)), (r, *(p.grad for p in refs)))
         ]
         exact = torch.equal(y0, y.detach())
         good = max(errs) < 2e-2 and exact and remat
@@ -307,11 +289,7 @@ def aten_row(row, key, k):
             for t in range(16):
                 p, up = 2 * t - (t & (stride - 1)), size < 32 and t & (size // 2) != 0
                 a, b = slot[p], slot[p + stride]
-                swap = (
-                    b is None
-                    or a is not None
-                    and (row[a] != row[a] and row[b] == row[b] or row[a] > row[b])
-                )
+                swap = b is None or a is not None and (row[a] != row[a] and row[b] == row[b] or row[a] > row[b])
                 if swap == up:
                     slot[p], slot[p + stride] = b, a
             stride //= 2
@@ -348,9 +326,7 @@ def topk_at(t, e, k, gen):
     live = torch.sigmoid(8 * rand(t, e) - 4), 0.02 * rand(e) - 0.01
     grid = (torch.randint(0, 6, (t, e), device=DEV, generator=gen) / 8).float()
     ties = grid, torch.randint(-2, 3, (e,), device=DEV, generator=gen) / 8
-    odd = torch.tensor(
-        [0.0, -0.0, float("inf"), -float("inf"), float("nan"), 0.5, 2**-149]
-    )
+    odd = torch.tensor([0.0, -0.0, float("inf"), -float("inf"), float("nan"), 0.5, 2**-149])
     pick = torch.randint(0, len(odd), (t, e), device=DEV, generator=gen)
     special = (
         torch.where(rand(t, e) < 0.3, odd.to(DEV)[pick], grid),
@@ -365,13 +341,9 @@ def topk_at(t, e, k, gen):
         zeros = moe_kernels.route(s, bias, k, False)
         diff.append(bitdiff(want[0].cpu(), zeros[0].cpu()))
         diff.append(max(z.abs().max().item() for z in zeros[1:]))
-        print(
-            f"  {name}: routing idx, stats values, stats idx, no-stats idx, no-stats zeros: {diff}"
-        )
+        print(f"  {name}: routing idx, stats values, stats idx, no-stats idx, no-stats zeros: {diff}")
         ok &= not any(diff)
-    print(
-        f"{'PASS' if ok else 'FAIL'} router top-k at {t} x {e}, k {k}: bitwise torch.topk"
-    )
+    print(f"{'PASS' if ok else 'FAIL'} router top-k at {t} x {e}, k {k}: bitwise torch.topk")
     return ok
 
 
@@ -385,9 +357,7 @@ def counts(a):
     ok = True
     for e, k, t in itertools.product((64, 96, 128), (4, 8), (1024, 65536)):
         torch._dynamo.reset()
-        compiled = torch.compile(
-            lambda f, e=e: new(f[f.argsort(stable=True)], e), fullgraph=True
-        )
+        compiled = torch.compile(lambda f, e=e: new(f[f.argsort(stable=True)], e), fullgraph=True)
         s = torch.rand(t, e, generator=g)
         few = torch.randperm(e, generator=g) < 2 * k
         routings = (
@@ -401,16 +371,12 @@ def counts(a):
             want = old(flat, e)
             for c in (new(flat[flat.argsort(stable=True)], e), compiled(flat)):
                 ok &= c.dtype == want.dtype and torch.equal(c, want)
-    print(
-        f"{'PASS' if ok else 'FAIL'} counts vs scatter_add_ ({DEV}), eager and compiled"
-    )
+    print(f"{'PASS' if ok else 'FAIL'} counts vs scatter_add_ ({DEV}), eager and compiled")
     return ok
 
 
 def main():
-    if (
-        DEV == "cpu" and os.environ.get("TRITON_INTERPRET") != "1"
-    ):  # before triton's import
+    if DEV == "cpu" and os.environ.get("TRITON_INTERPRET") != "1":  # before triton's import
         env = os.environ | {"TRITON_INTERPRET": "1"}
         os.execve(sys.executable, [sys.executable, *sys.argv], env)
     if DEV == "cpu":
@@ -421,12 +387,8 @@ def main():
     p.add_argument("--impl")
     p.add_argument("--dump", help="layer: keep the two records in this directory")
     p.add_argument("--base", default=BASE, help="layer: the reference commit")
-    p.add_argument(
-        "--set", action="append", default=[], help="layer: MOD.NAME=VALUE (base side)"
-    )
-    p.add_argument(
-        "--experts", type=int, default=0, help="layer: E (default 96, CPU 16)"
-    )
+    p.add_argument("--set", action="append", default=[], help="layer: MOD.NAME=VALUE (base side)")
+    p.add_argument("--experts", type=int, default=0, help="layer: E (default 96, CPU 16)")
     p.add_argument("--topk", type=int, default=4, help="layer: k")
     p.add_argument("--width", type=int, default=0, help="layer: d (default 1536, CPU 64)")
     p.add_argument("--both", action="append", default=[], help="layer: MOD.NAME=VALUE (both sides)")

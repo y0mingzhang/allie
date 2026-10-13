@@ -29,9 +29,7 @@ def _load():
         assert hashlib.sha256(src.read_bytes()).hexdigest() == CPP_SHA
         table_file = SOURCE / "move-table.json"
         assert hashlib.sha256(table_file.read_bytes()).hexdigest() == TABLE_SHA
-        cache = Path(
-            os.environ.get("ALLIE_BOARD_CACHE", "/scratch/yimingz3/allie/board-encoder")
-        )
+        cache = Path(os.environ.get("ALLIE_BOARD_CACHE", "/scratch/yimingz3/allie/board-encoder"))
         cache = cache / CPP_SHA
         cache.mkdir(parents=True, exist_ok=True)
         lib = cache / "encoder.so"
@@ -52,9 +50,7 @@ def _load():
             )
             tmp.replace(lib)
         fn = ctypes.CDLL(str(lib)).encode_boards
-        fn.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64] + [
-            ctypes.c_void_p
-        ] * 3
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64] + [ctypes.c_void_p] * 3
         fn.restype = ctypes.c_int
         sq = lambda f, r: ord(f) - 97 + (int(r) - 1) * 8
         table = np.full((2350, 3), -1, np.int32)
@@ -73,13 +69,9 @@ def encode(inputs):
     fn, table = _load()
     x = np.ascontiguousarray(inputs, np.int64)
     out, err = np.empty((*x.shape, 68), np.uint8), np.zeros(3, np.int64)
-    code = fn(
-        x.ctypes.data, *x.shape, table.ctypes.data, out.ctypes.data, err.ctypes.data
-    )
+    code = fn(x.ctypes.data, *x.shape, table.ctypes.data, out.ctypes.data, err.ctypes.data)
     if code:
-        raise ValueError(
-            f"invalid token rows: code {code}, row/column/token {err.tolist()}"
-        )
+        raise ValueError(f"invalid token rows: code {code}, row/column/token {err.tolist()}")
     return out
 
 
@@ -109,22 +101,14 @@ class Conv3(torch.autograd.Function):
         gx = torch.nn.grad.conv2d_input(x.shape, w, g, padding=1)
         (t, c), o = x.shape[:2], g.shape[1]
         c8, split = -c % 8, 1024  # GEMM alignment; row chunks
-        rows = (
-            -(-(t * 100) // split) * split
-        )  # all gradient rows, rounded up to whole chunks
-        extra = (
-            -(-(rows + 22) // 100) - t
-        )  # zero boards covering the rounding and the 22-row shift
-        xp = F.pad(x.permute(0, 2, 3, 1), (0, c8, 1, 1, 1, 1, 0, extra)).reshape(
-            -1, c + c8
-        )
+        rows = -(-(t * 100) // split) * split  # all gradient rows, rounded up to whole chunks
+        extra = -(-(rows + 22) // 100) - t  # zero boards covering the rounding and the 22-row shift
+        xp = F.pad(x.permute(0, 2, 3, 1), (0, c8, 1, 1, 1, 1, 0, extra)).reshape(-1, c + c8)
         gp = F.pad(g.permute(0, 2, 3, 1), (0, 0, 0, 2, 0, 2, 0, extra)).reshape(-1, o)
         gm = gp[:rows].view(split, -1, o).transpose(1, 2)
         gw = torch.stack(
             [
-                torch.bmm(
-                    gm, xp[10 * i + j : 10 * i + j + rows].view(split, -1, c + c8)
-                )
+                torch.bmm(gm, xp[10 * i + j : 10 * i + j + rows].view(split, -1, c + c8))
                 .to(torch.promote_types(x.dtype, torch.float32))
                 .sum(0)
                 for i in range(3)
@@ -142,24 +126,15 @@ class BoardConv(nn.Module):
     def __init__(self, width):
         super().__init__()
         self.first = nn.Parameter(torch.empty(32, 13, 3, 3))
-        self.residual = nn.ParameterList(
-            nn.Parameter(torch.empty(32, 32, 3, 3)) for _ in range(2)
-        )
+        self.residual = nn.ParameterList(nn.Parameter(torch.empty(32, 32, 3, 3)) for _ in range(2))
         self.squeeze = nn.Parameter(torch.empty(8, 32, 1, 1))
         for w in (self.first, *self.residual, self.squeeze):
             nn.init.kaiming_uniform_(w, a=5**0.5)  # nn.Conv2d's default init
-        self.meta = nn.Parameter(
-            torch.randn(32, 32) * 0.02
-        )  # side, castling, ep one-hot rows, padded to 32
+        self.meta = nn.Parameter(torch.randn(32, 32) * 0.02)  # side, castling, ep one-hot rows, padded to 32
         self.output = nn.Parameter(torch.zeros(544, width))
 
     def forward(self, states, dtype):
-        x = (
-            F.one_hot(states[:, :64].long(), 13)
-            .to(dtype)
-            .reshape(-1, 8, 8, 13)
-            .permute(0, 3, 1, 2)
-        )
+        x = F.one_hot(states[:, :64].long(), 13).to(dtype).reshape(-1, 8, 8, 13).permute(0, 3, 1, 2)
         x = F.gelu(Conv3.apply(x, self.first.type(dtype)), approximate="tanh")
         for w in self.residual:
             x = x + F.gelu(Conv3.apply(x, w.type(dtype)), approximate="tanh")

@@ -125,8 +125,7 @@ class Allie:
             raise ValueError("the game is over")
         tokens = header(base, inc, white_elo, black_elo) + [MOVE_ID[m] for m in ucis]
         feats = [
-            features(p - HEADER + 1, known, inc, clocks) if p >= HEADER - 1 else [-1] * 3
-            for p in range(len(tokens))
+            features(p - HEADER + 1, known, inc, clocks) if p >= HEADER - 1 else [-1] * 3 for p in range(len(tokens))
         ]
         z = self._logits(tokens, feats).double()
         p = torch.softmax(z[[MOVE_ID[m] for m in legal]], 0).tolist()
@@ -198,19 +197,13 @@ def main(argv=None):
     import argparse
 
     p = argparse.ArgumentParser(prog="allie-predict", description=main.__doc__)
-    p.add_argument(
-        "moves", nargs="?", default="", help='PGN or moves, e.g. "1. e4 e5 2. Nf3"'
-    )
+    p.add_argument("moves", nargs="?", default="", help='PGN or moves, e.g. "1. e4 e5 2. Nf3"')
     p.add_argument("--elo", type=int, default=1500, help="both players' rating")
     p.add_argument("--white-elo", type=int)
     p.add_argument("--black-elo", type=int)
     p.add_argument("--tc", help='time control, e.g. "180+2"')
-    p.add_argument(
-        "--clocks", help="each mover's seconds left after each move, comma-separated"
-    )
-    p.add_argument(
-        "--model", default=REPO, help="Hugging Face repo or export directory"
-    )
+    p.add_argument("--clocks", help="each mover's seconds left after each move, comma-separated")
+    p.add_argument("--model", default=REPO, help="Hugging Face repo or export directory")
     p.add_argument("--device")
     p.add_argument("--bf16", action="store_true", help="BF16 weights on CPU (default int8)")
     p.add_argument("--active-experts", type=int, help="routed experts per token (default 16)")
@@ -218,9 +211,7 @@ def main(argv=None):
     p.add_argument("--threads", type=int, help="CPU threads")
     p.add_argument("--top", type=int, default=5)
     a = p.parse_args(argv)
-    clocks = (
-        [float(c) if c else None for c in a.clocks.split(",")] if a.clocks else None
-    )
+    clocks = [float(c) if c else None for c in a.clocks.split(",")] if a.clocks else None
     allie = Allie.from_pretrained(a.model, a.device, int8=False if a.bf16 else None, active_experts=a.active_experts,
                                   backend=a.backend, threads=a.threads)  # fmt: skip
     white, black = a.white_elo or a.elo, a.black_elo or a.elo
@@ -229,15 +220,11 @@ def main(argv=None):
     for m in parse_moves(a.moves)[0]:
         board.push_uci(m)
     side = "white" if board.turn else "black"
-    print(
-        f"{side} to move, Elo {white} (white) vs {black} (black), time control {a.tc or '?'}"
-    )
+    print(f"{side} to move, Elo {white} (white) vs {black} (black), time control {a.tc or '?'}")
     for m, q in list(out["moves"].items())[: a.top]:
         print(f"  {board.san(chess.Move.from_uci(m)):<7} {m:<6} {100 * q:5.1f}%")
     w, d, loss = out["wdl"]
-    print(
-        f"{side} wins / draws / loses: {100 * w:.0f}% / {100 * d:.0f}% / {100 * loss:.0f}%"
-    )
+    print(f"{side} wins / draws / loses: {100 * w:.0f}% / {100 * d:.0f}% / {100 * loss:.0f}%")
     if out["think_time"] is not None:
         print(f"expected think time: {out['think_time']:.1f} s")
 

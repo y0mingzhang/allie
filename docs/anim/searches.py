@@ -124,26 +124,16 @@ class Plot:
                     stroke_width=2,
                 )
             )
-            g.add(
-                text(xfmt(v), 18, MUTED).next_to(
-                    [self.x(v), b - 0.08, 0], DOWN, buff=0.08
-                )
-            )
+            g.add(text(xfmt(v), 18, MUTED).next_to([self.x(v), b - 0.08, 0], DOWN, buff=0.08))
         if xlabel:
             g.add(text(xlabel, 20, INK2).move_to([(x0 + r) / 2, b - 0.62, 0]))
         if ylabel:
-            g.add(
-                text(ylabel, 20, INK2).move_to(
-                    [x0 + 0.02, t + 0.32, 0], aligned_edge=LEFT
-                )
-            )
+            g.add(text(ylabel, 20, INK2).move_to([x0 + 0.02, t + 0.32, 0], aligned_edge=LEFT))
         return g
 
     def line(self, xs, ys, color, width=4, r=0.055):
         pts = [self.p(x, y) for x, y in zip(xs, ys)]
-        path = VMobject(stroke_color=color, stroke_width=width).set_points_as_corners(
-            pts
-        )
+        path = VMobject(stroke_color=color, stroke_width=width).set_points_as_corners(pts)
         dots = VGroup(*[Dot(q, radius=r, color=color) for q in pts])
         return VGroup(path, dots)
 
@@ -158,19 +148,9 @@ def cxy(r, c):
 
 def grid_labels():
     rows = VGroup(
-        *[
-            text(f, 24, INK2).move_to(
-                cxy(r, 0) + LEFT * (CW / 2 + 0.16), aligned_edge=RIGHT
-            )
-            for r, f in enumerate(FMTS)
-        ]
+        *[text(f, 24, INK2).move_to(cxy(r, 0) + LEFT * (CW / 2 + 0.16), aligned_edge=RIGHT) for r, f in enumerate(FMTS)]
     )
-    cols = VGroup(
-        *[
-            text(str(b), 20, MUTED).move_to(cxy(0, c) + UP * (CH / 2 + 0.24))
-            for c, b in enumerate(BINS)
-        ]
-    )
+    cols = VGroup(*[text(str(b), 20, MUTED).move_to(cxy(0, c) + UP * (CH / 2 + 0.24)) for c, b in enumerate(BINS)])
     return VGroup(rows, cols)
 
 
@@ -222,11 +202,7 @@ def board(size=2.4):
             if ch.isdigit():
                 j += int(ch)
                 continue
-            g.add(
-                text(GLYPH[ch], 27, INK, font="DejaVu Sans", weight="NORMAL").move_to(
-                    at(i, j)
-                )
-            )
+            g.add(text(GLYPH[ch], 27, INK, font="DejaVu Sans", weight="NORMAL").move_to(at(i, j)))
             j += 1
     return g
 
@@ -254,9 +230,7 @@ class Bars(VGroup):
         self.bars = self.make(S["p"], RULE)
         self.labels = VGroup(
             *[
-                text(m, 20, INK, font=MONO, weight="MEDIUM").move_to(
-                    [x, base - 0.26, 0]
-                )
+                text(m, 20, INK, font=MONO, weight="MEDIUM").move_to([x, base - 0.26, 0])
                 for x, m in zip(self.xs, S["moves"])
             ]
         )
@@ -264,9 +238,7 @@ class Bars(VGroup):
         if q:
             self.q = VGroup(
                 *[
-                    text(num(v, "{:+.2f}"), 17, BLUE, font=MONO).move_to(
-                        [x, base - 0.58, 0]
-                    )
+                    text(num(v, "{:+.2f}"), 17, BLUE, font=MONO).move_to([x, base - 0.58, 0])
                     for x, v in zip(self.xs, S["q"])
                 ]
             )
@@ -309,20 +281,14 @@ class Gauge(VGroup):
         super().__init__()
         self.x0, self.y0, self.k = left, y, k
         self.raw = -np.log(S["p"][S["human"]])
-        self.title = text(label, 20, INK2).move_to(
-            [left, y + 0.55, 0], aligned_edge=LEFT
-        )
+        self.title = text(label, 20, INK2).move_to([left, y + 0.55, 0], aligned_edge=LEFT)
         x = left + k * self.raw
-        self.tick = Line(
-            [x, y - 0.35, 0], [x, y + 0.32, 0], stroke_color=INK, stroke_width=3
-        )
+        self.tick = Line([x, y - 0.35, 0], [x, y + 0.32, 0], stroke_color=INK, stroke_width=3)
         self.tlabel = text("raw policy", 18, INK).next_to(self.tick, DOWN, buff=0.08)
         self.add(self.title, self.tick, self.tlabel)
 
     def bar(self, ce):
-        color = (
-            RULE if abs(ce - self.raw) < 1e-6 else (BLUE if ce < self.raw else ORANGE)
-        )
+        color = RULE if abs(ce - self.raw) < 1e-6 else (BLUE if ce < self.raw else ORANGE)
         return Rectangle(
             width=self.k * ce,
             height=0.36,
@@ -343,9 +309,7 @@ def node(x, y, v, r, hi):
 
 
 def hollow(x, y, r):
-    return Circle(
-        radius=r, fill_color=BG, fill_opacity=1, stroke_color=OFF_EDGE, stroke_width=1.5
-    ).move_to([x, y, 0])
+    return Circle(radius=r, fill_color=BG, fill_opacity=1, stroke_color=OFF_EDGE, stroke_width=1.5).move_to([x, y, 0])
 
 
 def edge(a, b, dashed=False):
@@ -393,9 +357,7 @@ class Title(Scene):
             text("How Allie", 76, INK, weight="SEMIBOLD"),
             text("Searches", 76, ORANGE, weight="SEMIBOLD"),
         )
-        title.arrange(DOWN, aligned_edge=LEFT, buff=0.12).move_to(
-            [-6.1, 0.9, 0], aligned_edge=LEFT
-        )
+        title.arrange(DOWN, aligned_edge=LEFT, buff=0.12).move_to([-6.1, 0.9, 0], aligned_edge=LEFT)
         sub = VGroup(
             *[
                 text(s, 26, INK2)
@@ -407,16 +369,12 @@ class Title(Scene):
             ]
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.1)
         sub.next_to(title, DOWN, aligned_edge=LEFT, buff=0.45)
-        tag = text("Allie 2.0 · github.com/y0mingzhang/allie", 18, MUTED).move_to(
-            [-6.1, -3.2, 0], aligned_edge=LEFT
-        )
+        tag = text("Allie 2.0 · github.com/y0mingzhang/allie", 18, MUTED).move_to([-6.1, -3.2, 0], aligned_edge=LEFT)
 
         cx, top = 3.6, 2.5
         p, q = np.array(S["p"]), np.array(S["q"])
         xs = cx + np.linspace(-2.6, 2.6, len(p))
-        root = Circle(
-            radius=0.16, fill_color=INK, fill_opacity=1, stroke_width=0
-        ).move_to([cx, top, 0])
+        root = Circle(radius=0.16, fill_color=INK, fill_opacity=1, stroke_width=0).move_to([cx, top, 0])
         kids = [node(x, 1.35, v, 0.13, ORANGE) for x, v in zip(xs, q)]
         e1 = [edge(root, k) for k in kids]
         rng = np.random.default_rng(1)
@@ -487,9 +445,7 @@ class Why(Scene):
         cap = Captions(self, wps=2.6)
         k = kicker("Why search")
         b = board().move_to([-4.8, 0.1, 0])
-        blabel = text("position · both ratings · clocks", 20, MUTED).next_to(
-            b, DOWN, buff=0.22
-        )
+        blabel = text("position · both ratings · clocks", 20, MUTED).next_to(b, DOWN, buff=0.22)
         allie = allie_box().move_to([-1.35, 0.1, 0])
         bars = Bars(1.25, 0.72, -1.3, 7.0)
         a1 = Arrow(
@@ -522,11 +478,7 @@ class Why(Scene):
             run_time=1.2,
         )
         cap.hold()
-        self.play(
-            *cap(
-                "Sample a move straight from that prediction (T = 1): that is the raw policy"
-            )
-        )
+        self.play(*cap("Sample a move straight from that prediction (T = 1): that is the raw policy"))
         self.play(bars.bars[0].animate.set_fill(ORANGE), run_time=0.5)
         cap.hold()
         self.play(FadeOut(VGroup(b, blabel, a1, a2, allie, bars)), run_time=0.7)
@@ -544,17 +496,11 @@ class Why(Scene):
             P.line(BINS, acc("human_acc"), INK),
             P.line(BINS, acc("raw_acc"), DENSE),
         )
-        hl = text("humans", 22, INK, weight="SEMIBOLD").next_to(
-            hum[1][-1], RIGHT, buff=0.15
-        )
-        rl = text("Allie, raw", 22, DENSE, weight="SEMIBOLD").next_to(
-            raw[1][-1], RIGHT, buff=0.15
-        )
+        hl = text("humans", 22, INK, weight="SEMIBOLD").next_to(hum[1][-1], RIGHT, buff=0.15)
+        rl = text("Allie, raw", 22, DENSE, weight="SEMIBOLD").next_to(raw[1][-1], RIGHT, buff=0.15)
         self.play(
             FadeIn(fr),
-            *cap(
-                "Stockfish scores every move: humans get more accurate as their rating rises"
-            ),
+            *cap("Stockfish scores every move: humans get more accurate as their rating rises"),
             run_time=0.8,
         )
         self.play(
@@ -564,9 +510,7 @@ class Why(Scene):
             run_time=1.6,
         )
         cap.hold()
-        self.play(
-            *cap("Allie's raw policy keeps pace at low ratings, then falls behind")
-        )
+        self.play(*cap("Allie's raw policy keeps pace at low ratings, then falls behind"))
         self.play(
             Create(raw[0]),
             LaggedStart(*[GrowFromCenter(d) for d in raw[1]], lag_ratio=0.08),
@@ -606,20 +550,13 @@ class Why(Scene):
             for f in shades
         }
         names = VGroup(
-            *[
-                text(f, 20, shades[f], weight="SEMIBOLD").next_to(
-                    lines[f][1][-1], RIGHT, buff=0.15
-                )
-                for f in shades
-            ]
+            *[text(f, 20, shades[f], weight="SEMIBOLD").next_to(lines[f][1][-1], RIGHT, buff=0.15) for f in shades]
         )
         unstack(names)
         zero = Line(E.p(800, 0), E.p(2600, 0), stroke_color=INK, stroke_width=4)
         zl = text("humans", 20, INK, weight="SEMIBOLD").next_to(zero, RIGHT, buff=0.15)
         means = [-D["raw"][f]["mean"] for f in ("blitz", "rapid", "classical")]
-        worst = min(
-            -CELLS[f"{f}/2600"]["raw_elo"] for f in ("blitz", "rapid", "classical")
-        )
+        worst = min(-CELLS[f"{f}/2600"]["raw_elo"] for f in ("blitz", "rapid", "classical"))
         self.play(
             FadeOut(fr),
             FadeIn(fr2),
@@ -645,21 +582,14 @@ class Why(Scene):
         cap.hold(0.5)
         self.play(
             FadeOut(VGroup(fr2, zero, zl, *lines.values(), names)),
-            *cap(
-                "Strong players calculate before they move. Search adds the calculation"
-            ),
+            *cap("Strong players calculate before they move. Search adds the calculation"),
             run_time=0.8,
         )
         allie = allie_box().move_to([-2.2, 0.4, 0])
         root = Dot([0.4, 0.4, 0], radius=0.11, color=INK)
-        link = Line(
-            allie.get_right(), root.get_center(), stroke_color=RULE, stroke_width=3
-        )
+        link = Line(allie.get_right(), root.get_center(), stroke_color=RULE, stroke_width=3)
         rng = np.random.default_rng(5)
-        kids = [
-            node(1.7, 0.4 + y, rng.uniform(-0.5, 0.5), 0.09, ORANGE)
-            for y in np.linspace(-1.5, 1.5, 7)
-        ]
+        kids = [node(1.7, 0.4 + y, rng.uniform(-0.5, 0.5), 0.09, ORANGE) for y in np.linspace(-1.5, 1.5, 7)]
         ek = [
             Line(
                 root.get_center(),
@@ -708,16 +638,12 @@ class Target(Scene):
         def acc_tile(r, c):
             v = CELLS[f"{FMTS[r]}/{BINS[c]}"]["human_acc"]
             t = (v - 84) / 11
-            return tile(
-                r, c, f"{v:.1f}", mix(OFF, DENSE, 0.85 * t), OFF if t > 0.6 else INK
-            )
+            return tile(r, c, f"{v:.1f}", mix(OFF, DENSE, 0.85 * t), OFF if t > 0.6 else INK)
 
         def blunder_tile(r, c):
             v = CELLS[f"{FMTS[r]}/{BINS[c]}"]["human_blunder"]
             t = v / 12
-            return tile(
-                r, c, f"{v:.1f}", mix(OFF, ORANGE, 0.9 * t), OFF if t > 0.6 else INK
-            )
+            return tile(r, c, f"{v:.1f}", mix(OFF, ORANGE, 0.9 * t), OFF if t > 0.6 else INK)
 
         idx = [(r, c) for r in range(len(FMTS)) for c in range(len(BINS))]
         accs = VGroup(*[acc_tile(r, c) for r, c in idx])
@@ -725,16 +651,12 @@ class Target(Scene):
         unit = text("human move accuracy, %", 22, INK2, weight="SEMIBOLD").move_to(
             [X0 - CW / 2, -1.85, 0], aligned_edge=LEFT
         )
-        unit2 = text(
-            "human blunder rate, % of moves", 22, ORANGE, weight="SEMIBOLD"
-        ).move_to(unit, aligned_edge=LEFT)
+        unit2 = text("human blunder rate, % of moves", 22, ORANGE, weight="SEMIBOLD").move_to(unit, aligned_edge=LEFT)
         npos = f"{D['positions']:,}"
         self.play(
             FadeIn(k),
             FadeIn(labels),
-            *cap(
-                f"{npos} Lichess positions from {D['month']}, in {D['n_cells']} cells: time control × rating"
-            ),
+            *cap(f"{npos} Lichess positions from {D['month']}, in {D['n_cells']} cells: time control × rating"),
         )
         self.play(
             LaggedStart(*[FadeIn(t, scale=0.9) for t in accs], lag_ratio=0.015),
@@ -743,17 +665,13 @@ class Target(Scene):
         cap.hold()
         self.play(
             FadeIn(unit),
-            *cap(
-                "Each cell sets a target: how accurately its humans move, scored by Stockfish"
-            ),
+            *cap("Each cell sets a target: how accurately its humans move, scored by Stockfish"),
         )
         cap.hold()
         self.play(
             LaggedStart(*[swap(a, b) for a, b in zip(accs, blunders)], lag_ratio=0.012),
             swap(unit, unit2),
-            *cap(
-                f"and how often they blunder: give up {D['blunder_drop']} or more points of win chance"
-            ),
+            *cap(f"and how often they blunder: give up {D['blunder_drop']} or more points of win chance"),
             run_time=1.2,
         )
         cap.hold()
@@ -766,9 +684,7 @@ class Target(Scene):
             focus.animate.move_to([-5.2, 2.0, 0]),
             run_time=0.9,
         )
-        head = text("rapid · 2400", 30, INK, weight="SEMIBOLD").next_to(
-            focus, RIGHT, buff=0.3
-        )
+        head = text("rapid · 2400", 30, INK, weight="SEMIBOLD").next_to(focus, RIGHT, buff=0.3)
         cols = VGroup(
             text("humans", 24, INK, weight="SEMIBOLD"),
             text("Allie, raw policy", 24, DENSE, weight="SEMIBOLD"),
@@ -807,9 +723,7 @@ class Target(Scene):
             FadeIn(head),
             FadeIn(cols),
             FadeIn(rows),
-            *cap(
-                f"Rapid 2400: the raw policy blunders {ratio:.1f}× as often as the humans it imitates"
-            ),
+            *cap(f"Rapid 2400: the raw policy blunders {ratio:.1f}× as often as the humans it imitates"),
             run_time=0.8,
         )
         self.play(
@@ -888,15 +802,11 @@ class Rule(Scene):
             FadeIn(schematic()),
             run_time=0.6,
         )
-        qhead = text("Q", 20, BLUE, font=MONO, weight="MEDIUM").next_to(
-            bars.q[0], LEFT, buff=0.25
-        )
+        qhead = text("Q", 20, BLUE, font=MONO, weight="MEDIUM").next_to(bars.q[0], LEFT, buff=0.25)
         self.play(
             FadeIn(bars.q, lag_ratio=0.1),
             FadeIn(qhead),
-            *cap(
-                "Search gives each move a value Q: how well it turns out for the mover"
-            ),
+            *cap("Search gives each move a value Q: how well it turns out for the mover"),
             run_time=1.2,
         )
         cap.hold()
@@ -909,32 +819,22 @@ class Rule(Scene):
             markup=True,
         ).move_to([0, 2.55, 0])
         readout = always_redraw(
-            lambda: text(
-                f"β = {beta.get_value():.1f}", 34, ORANGE, font=MONO, weight="MEDIUM"
-            ).move_to([1.2, 0.3, 0], aligned_edge=LEFT)
+            lambda: text(f"β = {beta.get_value():.1f}", 34, ORANGE, font=MONO, weight="MEDIUM").move_to(
+                [1.2, 0.3, 0], aligned_edge=LEFT
+            )
         )
         self.play(
             FadeIn(formula, shift=0.15 * DOWN),
-            *cap(
-                "One rule turns any search into moves: tilt the prediction p by exp(βQ)"
-            ),
+            *cap("One rule turns any search into moves: tilt the prediction p by exp(βQ)"),
             run_time=1.0,
         )
         cap.hold()
-        bars.bars.add_updater(
-            lambda m: m.become(
-                bars.make(cur(), mix(RULE, ORANGE, beta.get_value() / 1.5))
-            )
-        )
-        bars.marker.add_updater(
-            lambda m: m.move_to(bars.place_marker(cur()).get_center())
-        )
+        bars.bars.add_updater(lambda m: m.become(bars.make(cur(), mix(RULE, ORANGE, beta.get_value() / 1.5))))
+        bars.marker.add_updater(lambda m: m.move_to(bars.place_marker(cur()).get_center()))
         self.play(FadeIn(readout), *cap("β = 0 is the raw policy"), run_time=0.6)
         cap.hold()
         self.play(
-            *cap(
-                "A little β moves weight to good moves; the human's move gets likelier"
-            ),
+            *cap("A little β moves weight to good moves; the human's move gets likelier"),
             run_time=0.6,
         )
         self.play(beta.animate.set_value(S["beta"]), run_time=2.5)
@@ -943,9 +843,7 @@ class Rule(Scene):
         self.play(beta.animate.set_value(S["beta_engine"]), run_time=2.0)
         cap.hold()
         self.play(
-            *cap(
-                "So each cell gets its own β, fit so Allie matches the humans' strength"
-            ),
+            *cap("So each cell gets its own β, fit so Allie matches the humans' strength"),
             run_time=0.6,
         )
         self.play(beta.animate.set_value(S["beta"]), run_time=1.5)
@@ -970,9 +868,7 @@ class Trees(Scene):
 
         def panel(cx, color, name, rule):
             xs = cx + np.linspace(-2.75, 2.75, n)
-            root = Circle(
-                radius=0.17, fill_color=INK, fill_opacity=1, stroke_width=0
-            ).move_to([cx, ys[0], 0])
+            root = Circle(radius=0.17, fill_color=INK, fill_opacity=1, stroke_width=0).move_to([cx, ys[0], 0])
             head = text(name, 30, color, weight="SEMIBOLD").move_to([cx, 2.95, 0])
             sub = text(rule, 18, MUTED).next_to(head, DOWN, buff=0.1)
             return xs, root, VGroup(head, sub)
@@ -983,9 +879,7 @@ class Trees(Scene):
             "Coverage",
             "Allie's original: spread visits over plausible moves",
         )
-        lxs, lroot, lhead = panel(
-            3.6, ORANGE, "Lookahead", "score every move, then extend the best lines"
-        )
+        lxs, lroot, lhead = panel(3.6, ORANGE, "Lookahead", "score every move, then extend the best lines")
         sep = Line([0, 2.6, 0], [0, -2.5, 0], stroke_color=PANEL, stroke_width=3)
         chol = [hollow(x, ys[1], 0.12) for x in cxs]
         lhol = [hollow(x, ys[1], 0.12) for x in lxs]
@@ -1078,18 +972,13 @@ class Trees(Scene):
             *[ReplacementTransform(le1[i], le1s[i]) for i in range(n)],
             count(BLUE, "8 simulations"),
             count(ORANGE, "call 1"),
-            *cap(
-                "Coverage visits the plausible moves; lookahead scores every move in one call"
-            ),
+            *cap("Coverage visits the plausible moves; lookahead scores every move in one call"),
             run_time=1.2,
         )
         cap.hold()
         top = sorted(np.argsort(-(np.log(p) + 4 * q), kind="stable")[:8])
         rest = [i for i in range(n) if i not in top]
-        rings = [
-            Circle(radius=0.19, stroke_color=INK, stroke_width=2.5).move_to(lfill[i])
-            for i in top
-        ]
+        rings = [Circle(radius=0.19, stroke_color=INK, stroke_width=2.5).move_to(lfill[i]) for i in top]
         self.play(
             *[GrowFromCenter(r) for r in rings],
             *[m.animate.set_opacity(0.3) for i in rest for m in (lfill[i], le1s[i])],
@@ -1104,9 +993,7 @@ class Trees(Scene):
             LaggedStart(*[GrowFromCenter(m) for m in l2], lag_ratio=0.02),
             count(BLUE, "32 simulations"),
             count(ORANGE, "call 2"),
-            *cap(
-                "Coverage digs under each plausible move; lookahead adds 2 replies per line"
-            ),
+            *cap("Coverage digs under each plausible move; lookahead adds 2 replies per line"),
             run_time=1.3,
         )
         cap.hold()
@@ -1122,8 +1009,7 @@ class Trees(Scene):
         l3 = grow(
             ln,
             None,
-            [(i, 0, j) for i in deep for j in (0, 1)]
-            + [(i, j) for i in wide for j in (2, 3)],
+            [(i, 0, j) for i in deep for j in (0, 1)] + [(i, j) for i in wide for j in (2, 3)],
             lxs,
             ORANGE,
         )
@@ -1132,22 +1018,17 @@ class Trees(Scene):
             LaggedStart(*[GrowFromCenter(m) for m in l3], lag_ratio=0.015),
             count(BLUE, "128 simulations"),
             count(ORANGE, "call 3"),
-            *cap(
-                "Lookahead goes deeper where one reply stands out, and wider where it doesn't"
-            ),
+            *cap("Lookahead goes deeper where one reply stands out, and wider where it doesn't"),
             run_time=1.3,
         )
         c4 = grow(
             cn,
             None,
-            [(i, 0, 0, j) for i in (0, 2) for j in (0, 1)]
-            + [(i, 0, 1, 0) for i in plaus],
+            [(i, 0, 0, j) for i in (0, 2) for j in (0, 1)] + [(i, 0, 1, 0) for i in plaus],
             cxs,
             BLUE,
         )
-        l4 = grow(
-            ln, None, [(i, 0, 0, j) for i in deep[:4] for j in (0, 1)], lxs, ORANGE
-        )
+        l4 = grow(ln, None, [(i, 0, 0, j) for i in deep[:4] for j in (0, 1)], lxs, ORANGE)
         self.play(
             LaggedStart(*[GrowFromCenter(m) for m in c4], lag_ratio=0.02),
             LaggedStart(*[GrowFromCenter(m) for m in l4], lag_ratio=0.02),
@@ -1159,28 +1040,15 @@ class Trees(Scene):
 
         def flash(mobs, color):
             lines = [m for m in mobs if isinstance(m, Line)]
-            ups = [
-                Line(e.get_end(), e.get_start(), stroke_color=color, stroke_width=8)
-                for e in lines
-            ]
+            ups = [Line(e.get_end(), e.get_start(), stroke_color=color, stroke_width=8) for e in lines]
             return [ShowPassingFlash(u, time_width=0.6) for u in ups]
 
         shift = rng.normal(0, 0.2, n)
         self.play(
             *flash([*c2, *c3, *c4, *ce1s], BLUE),
             *flash([*l2, *l3, *l4, *le1s], ORANGE),
-            *[
-                cfill[i].animate.set_fill(
-                    node(0, 0, q[i] + shift[i], 0.1, BLUE).get_fill_color()
-                )
-                for i in plaus
-            ],
-            *[
-                lfill[i].animate.set_fill(
-                    node(0, 0, q[i] + shift[i], 0.1, ORANGE).get_fill_color()
-                )
-                for i in top
-            ],
+            *[cfill[i].animate.set_fill(node(0, 0, q[i] + shift[i], 0.1, BLUE).get_fill_color()) for i in plaus],
+            *[lfill[i].animate.set_fill(node(0, 0, q[i] + shift[i], 0.1, ORANGE).get_fill_color()) for i in top],
             *cap("Both back the values up to the root moves, then apply the same tilt"),
             run_time=1.4,
         )
@@ -1221,9 +1089,7 @@ class Trees(Scene):
         cards.arrange(RIGHT, buff=0.8).move_to([0, 0.2, 0])
         self.play(
             LaggedStart(*[FadeIn(c, shift=0.2 * UP) for c in cards], lag_ratio=0.3),
-            *cap(
-                f"On the {v['cells']} searching cells they tie, so coverage, already in the bot, ships"
-            ),
+            *cap(f"On the {v['cells']} searching cells they tie, so coverage, already in the bot, ships"),
             run_time=1.2,
         )
         cap.hold(1.0)
@@ -1251,14 +1117,12 @@ class Results(Scene):
                 fill, ink = heat(v["elo"])
                 return tile(r, c, num(v["elo"]), fill, ink).set_opacity(0.35)
             fill, ink = heat(v["elo"])
-            return tile(
-                r, c, num(v["elo"]), fill, ink, sub=f"cov {v['sims']}", stroke=BLUE
-            )
+            return tile(r, c, num(v["elo"]), fill, ink, sub=f"cov {v['sims']}", stroke=BLUE)
 
         raws = VGroup(*[raw_tile(r, c) for r, c in idx])
-        unit = text(
-            "Elo vs the humans in each cell", 22, INK2, weight="SEMIBOLD"
-        ).move_to([X0 - CW / 2, -1.85, 0], aligned_edge=LEFT)
+        unit = text("Elo vs the humans in each cell", 22, INK2, weight="SEMIBOLD").move_to(
+            [X0 - CW / 2, -1.85, 0], aligned_edge=LEFT
+        )
         self.play(
             FadeIn(k),
             FadeIn(labels),
@@ -1271,32 +1135,24 @@ class Results(Scene):
             run_time=1.6,
         )
         cap.hold()
-        search = [
-            i for i, (r, c) in enumerate(idx) if CELLS[key(r, c)]["choice"] != "raw"
-        ]
+        search = [i for i, (r, c) in enumerate(idx) if CELLS[key(r, c)]["choice"] != "raw"]
         ships = VGroup(*[ship_tile(r, c) for r, c in idx])
         self.play(
             LaggedStart(*[swap(raws[i], ships[i]) for i in search], lag_ratio=0.06),
-            *cap(
-                f"After: {D['n_search']} cells search, all with coverage, at 32 to 256 simulations"
-            ),
+            *cap(f"After: {D['n_search']} cells search, all with coverage, at 32 to 256 simulations"),
             run_time=2.4,
         )
         cap.hold()
         lo, hi = D["ce_range"]
         self.play(
-            *cap(
-                f"Each predicts human moves better than raw: CE {num(lo, '{:+.3f}')} to {num(hi, '{:+.3f}')} nats"
-            ),
+            *cap(f"Each predicts human moves better than raw: CE {num(lo, '{:+.3f}')} to {num(hi, '{:+.3f}')} nats"),
             run_time=0.6,
         )
         cap.hold()
         rest = [i for i in range(len(idx)) if i not in search]
         self.play(
             *[swap(raws[i], ships[i]) for i in rest],
-            *cap(
-                "No search in bullet; at lower ratings none clears the bar, or raw is close"
-            ),
+            *cap("No search in bullet; at lower ratings none clears the bar, or raw is close"),
             run_time=1.0,
         )
         cap.hold()
@@ -1328,28 +1184,22 @@ class Results(Scene):
                 Transform(bar, nb),
                 swap(
                     val,
-                    text(f"{a} → {b}", 20, BLUE, font=MONO, weight="MEDIUM").next_to(
-                        nb, RIGHT, buff=0.12
-                    ),
+                    text(f"{a} → {b}", 20, BLUE, font=MONO, weight="MEDIUM").next_to(nb, RIGHT, buff=0.12),
                 ),
             ]
-        rt = text(
-            "typical miss, Elo (RMS over cells)", 20, INK2, weight="SEMIBOLD"
-        ).move_to([X0 - CW / 2, -1.62, 0], aligned_edge=LEFT)
+        rt = text("typical miss, Elo (RMS over cells)", 20, INK2, weight="SEMIBOLD").move_to(
+            [X0 - CW / 2, -1.62, 0], aligned_edge=LEFT
+        )
         self.play(FadeOut(unit), FadeIn(rows), FadeIn(rt), run_time=0.6)
         rr = [D["raw"][f]["rms"] for f in ("blitz", "rapid", "classical")]
         ss = [D["shipped"][f]["rms"] for f in ("blitz", "rapid", "classical")]
         self.play(
             *anims,
-            *cap(
-                f"The typical miss falls from {min(rr)}–{max(rr)} Elo to {min(ss)}–{max(ss)}"
-            ),
+            *cap(f"The typical miss falls from {min(rr)}–{max(rr)} Elo to {min(ss)}–{max(ss)}"),
             run_time=1.5,
         )
         cap.hold()
-        weak = [
-            FMTS.index("classical") * len(BINS) + BINS.index(b) for b in (2400, 2600)
-        ]
+        weak = [FMTS.index("classical") * len(BINS) + BINS.index(b) for b in (2400, 2600)]
         ring = RoundedRectangle(
             corner_radius=0.1,
             width=2 * CW + GAP + 0.2,
@@ -1360,9 +1210,7 @@ class Results(Scene):
         e1, e2 = (CELLS[f"classical/{b}"]["elo"] for b in (2400, 2600))
         self.play(
             Create(ring),
-            *cap(
-                f"Still short: classical 2400 and 2600, at {num(e1)} and {num(e2)} Elo"
-            ),
+            *cap(f"Still short: classical 2400 and 2600, at {num(e1)} and {num(e2)} Elo"),
             run_time=0.8,
         )
         cap.hold(0.6)
@@ -1397,9 +1245,7 @@ class Ceiling(Scene):
         self.play(
             FadeIn(k),
             FadeIn(cards, shift=0.2 * UP),
-            *cap(
-                "Why do classical 2400 and 2600 stay short: too little search, or bad values?"
-            ),
+            *cap("Why do classical 2400 and 2600 stay short: too little search, or bad values?"),
             run_time=0.9,
         )
         cap.hold()
@@ -1441,9 +1287,7 @@ class Ceiling(Scene):
         yard.arrange(RIGHT, buff=0.7).move_to([0, 0.3, 0])
         self.play(
             FadeIn(yard[0], shift=0.2 * UP),
-            *cap(
-                "Yardstick: with Stockfish's values as Q, the same tilt reaches human strength"
-            ),
+            *cap("Yardstick: with Stockfish's values as Q, the same tilt reaches human strength"),
             run_time=0.9,
         )
         cap.hold()
@@ -1453,9 +1297,7 @@ class Ceiling(Scene):
             run_time=0.9,
         )
         cap.hold()
-        self.play(
-            *cap("The search and the tilt work. Allie's value estimate is the limit")
-        )
+        self.play(*cap("The search and the tilt work. Allie's value estimate is the limit"))
         cap.hold()
         self.play(FadeOut(yard), run_time=0.6)
 
@@ -1473,9 +1315,7 @@ class Ceiling(Scene):
         qaxis = VGroup(
             Line(Qp.p(0, 0), Qp.p(1, 0), stroke_color=PANEL, stroke_width=2),
             text("Q", 22, BLUE, font=MONO, weight="MEDIUM").move_to([-5.3, Qp.y(0), 0]),
-            text("π", 22, ORANGE, font=MONO, weight="MEDIUM").move_to(
-                [-5.3, base + 0.6, 0]
-            ),
+            text("π", 22, ORANGE, font=MONO, weight="MEDIUM").move_to([-5.3, base + 0.6, 0]),
             Line([-4.75, base, 0], [2.65, base, 0], stroke_color=RULE, stroke_width=2),
         )
 
@@ -1496,9 +1336,7 @@ class Ceiling(Scene):
 
         def draw(s, seed):
             z = nq + np.random.default_rng(seed).normal(0, s, m)
-            dots = VGroup(
-                *[Dot([x, Qp.y(v), 0], radius=0.09, color=BLUE) for x, v in zip(xs, z)]
-            )
+            dots = VGroup(*[Dot([x, Qp.y(v), 0], radius=0.09, color=BLUE) for x, v in zip(xs, z)])
             pi = tilt(np_, z, nb)
             bars = VGroup(
                 *[
@@ -1514,9 +1352,7 @@ class Ceiling(Scene):
             )
             return VGroup(dots, bars)
 
-        tag = text(f"β = {nb}", 28, ORANGE, font=MONO, weight="MEDIUM").move_to(
-            [4.4, 1.2, 0]
-        )
+        tag = text(f"β = {nb}", 28, ORANGE, font=MONO, weight="MEDIUM").move_to([4.4, 1.2, 0])
         views = text("1 view", 26, BLUE, weight="SEMIBOLD").move_to([4.4, 0.4, 0])
         stag = VGroup(
             schematic(),
@@ -1543,16 +1379,12 @@ class Ceiling(Scene):
             FadeIn(tag),
             FadeIn(views),
             FadeIn(stag),
-            *cap(
-                "Allie's Q is a noisy estimate, and strong classical needs a big β (8 to 12)"
-            ),
+            *cap("Allie's Q is a noisy estimate, and strong classical needs a big β (8 to 12)"),
             run_time=0.9,
         )
         cap.hold(0.2)
         self.play(
-            *cap(
-                "A big β turns small errors in Q into big swings in which move gets played"
-            ),
+            *cap("A big β turns small errors in Q into big swings in which move gets played"),
             run_time=0.5,
         )
         for seed in (1, 2, 3, 4):
@@ -1567,9 +1399,7 @@ class Ceiling(Scene):
                 views,
                 views2 := text("2 views", 26, BLUE, weight="SEMIBOLD").move_to(views),
             ),
-            *cap(
-                "Average two views (true ratings, 2800 header): part of the noise cancels"
-            ),
+            *cap("Average two views (true ratings, 2800 header): part of the noise cancels"),
             run_time=0.9,
         )
         for seed in (6, 7, 8, 9):
@@ -1588,9 +1418,7 @@ class Ceiling(Scene):
             ylabel="classical 2400: CE above raw at human strength, nats",
         )
         bar = Line(P.p(32, 0), P.p(4096, 0), stroke_color=INK, stroke_width=4)
-        barl = text("the bar", 20, INK, weight="SEMIBOLD").next_to(
-            bar, RIGHT, buff=0.15
-        )
+        barl = text("the bar", 20, INK, weight="SEMIBOLD").next_to(bar, RIGHT, buff=0.15)
         sf = DashedLine(
             P.p(32, C["stockfish_ce"]),
             P.p(4096, C["stockfish_ce"]),
@@ -1604,9 +1432,7 @@ class Ceiling(Scene):
 
         def series(rows, color, width=4):
             rows = [r for r in rows if r["ce"] is not None and r["ce"] <= 0.45]
-            return P.line(
-                [r["leaves"] for r in rows], [r["ce"] for r in rows], color, width
-            ), rows
+            return P.line([r["leaves"] for r in rows], [r["ce"] for r in rows], color, width), rows
 
         la, lar = series(C["lookahead"], ORANGE)
         cv, cvr = series(C["coverage"], PALE_BLUE)
@@ -1621,12 +1447,8 @@ class Ceiling(Scene):
             .next_to(la[1][-1], UP, buff=0.15)
             .shift(0.4 * LEFT)
         )
-        cvl = text("coverage, 1 view", 20, BLUE_TXT, weight="SEMIBOLD").next_to(
-            cv[1][1], RIGHT, buff=0.15
-        )
-        tvl = text("coverage, 2 views", 20, BLUE, weight="SEMIBOLD").next_to(
-            tv[1][1], DOWN + LEFT, buff=0.1
-        )
+        cvl = text("coverage, 1 view", 20, BLUE_TXT, weight="SEMIBOLD").next_to(cv[1][1], RIGHT, buff=0.15)
+        tvl = text("coverage, 2 views", 20, BLUE, weight="SEMIBOLD").next_to(tv[1][1], DOWN + LEFT, buff=0.1)
         self.play(
             FadeIn(fr),
             Create(bar),
@@ -1656,9 +1478,7 @@ class Ceiling(Scene):
             Create(cv[0]),
             FadeIn(cv[1]),
             FadeIn(cvl),
-            *cap(
-                "Coverage averages more evaluations per move as it grows; CE creeps down"
-            ),
+            *cap("Coverage averages more evaluations per move as it grows; CE creeps down"),
             run_time=1.6,
         )
         cap.hold()
@@ -1668,9 +1488,7 @@ class Ceiling(Scene):
         assert one["budget"] == 1024 and two["budget"] == 512 and last["budget"] == 1024
 
         def ring(r, color):
-            return Circle(radius=0.11, stroke_color=color, stroke_width=3).move_to(
-                P.p(r["leaves"], r["ce"])
-            )
+            return Circle(radius=0.11, stroke_color=color, stroke_width=3).move_to(P.p(r["leaves"], r["ce"]))
 
         def note(s, color):
             return text(s, 19, color, font=MONO, weight="MEDIUM")
@@ -1718,9 +1536,7 @@ class Ceiling(Scene):
         cap.hold(0.6)
         self.play(*wipe(self, cap, keep=[k]), run_time=0.8)
 
-        motto = text(
-            "Stockfish measures. It never teaches.", 48, ORANGE, weight="SEMIBOLD"
-        ).move_to([0, 0.5, 0])
+        motto = text("Stockfish measures. It never teaches.", 48, ORANGE, weight="SEMIBOLD").move_to([0, 0.5, 0])
         sub = text(
             "Allie learns only from human games; a better value has to come from them too",
             24,
@@ -1771,15 +1587,11 @@ class Live(Scene):
                 stroke_width=0,
             )
             legend.add(VGroup(sw, text(label, 20, INK2).next_to(sw, RIGHT, buff=0.12)))
-        legend.arrange(RIGHT, buff=0.45).move_to(
-            [X0 - CW / 2, -1.9, 0], aligned_edge=LEFT
-        )
+        legend.arrange(RIGHT, buff=0.45).move_to([X0 - CW / 2, -1.9, 0], aligned_edge=LEFT)
         self.play(
             FadeIn(k),
             FadeIn(labels),
-            *cap(
-                "Each game plays in the cell of its time control and the opponent's rating"
-            ),
+            *cap("Each game plays in the cell of its time control and the opponent's rating"),
             run_time=0.8,
         )
         self.play(
@@ -1789,16 +1601,12 @@ class Live(Scene):
         )
         cap.hold()
         self.play(
-            *cap(
-                f"{D['n_search']} cells search with coverage; bullet and lower ratings play the raw policy"
-            ),
+            *cap(f"{D['n_search']} cells search with coverage; bullet and lower ratings play the raw policy"),
             run_time=0.6,
         )
         cap.hold()
         self.play(
-            *cap(
-                "A search gets a tenth of the clock; past a fifth, Allie plays the policy"
-            ),
+            *cap("A search gets a tenth of the clock; past a fifth, Allie plays the policy"),
             run_time=0.6,
         )
         cap.hold()
@@ -1809,12 +1617,8 @@ class Live(Scene):
         cap.hold()
         self.play(FadeOut(VGroup(tiles, labels, legend)), *cap.clear(), run_time=0.8)
         url = text(L["url"], 44, INK, font=MONO, weight="MEDIUM").move_to([0, 0.5, 0])
-        pre = text("Play Allie", 28, ORANGE, weight="SEMIBOLD").next_to(
-            url, UP, buff=0.35
-        )
-        repo = text("github.com/y0mingzhang/allie", 24, MUTED, font=MONO).next_to(
-            url, DOWN, buff=0.45
-        )
+        pre = text("Play Allie", 28, ORANGE, weight="SEMIBOLD").next_to(url, UP, buff=0.35)
+        repo = text("github.com/y0mingzhang/allie", 24, MUTED, font=MONO).next_to(url, DOWN, buff=0.45)
         self.play(FadeIn(pre), FadeIn(url, shift=0.15 * UP), run_time=0.9)
         self.play(FadeIn(repo), run_time=0.6)
         self.wait(3.0)

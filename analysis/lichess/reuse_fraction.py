@@ -49,17 +49,10 @@ def main():
     m = Model(a.model, "cpu", torch.bfloat16, None, True, "rust", a.threads)
     engine = Engine(m)
     searchers = {
-        name: [cls(reuse=False), cls(reuse=True)]
-        for name, cls in (("coverage", treers.Coverage), ("kl", treers.KL))
+        name: [cls(reuse=False), cls(reuse=True)] for name, cls in (("coverage", treers.Coverage), ("kl", treers.KL))
     }
-    rows = {
-        name: [] for name in searchers
-    }  # per turn: reused, evaluated, kept_pulls, ms off, ms on
-    files = [
-        f
-        for f in sorted(glob.glob(a.pgns))
-        if len(read_pgn(f, 10**6)["moves"]) >= a.start + 2 * a.turns + 1
-    ]
+    rows = {name: [] for name in searchers}  # per turn: reused, evaluated, kept_pulls, ms off, ms on
+    files = [f for f in sorted(glob.glob(a.pgns)) if len(read_pgn(f, 10**6)["moves"]) >= a.start + 2 * a.turns + 1]
     t0 = time.perf_counter()
     for f in files[: a.games]:
         g = read_pgn(f, 10**6)
@@ -71,9 +64,7 @@ def main():
                 break
             for name, (off, on) in searchers.items():
                 ms = {}
-                for s, label in ((off, "off"), (on, "on"))[
-                    :: 1 if turn % 2 == 0 else -1
-                ]:
+                for s, label in ((off, "off"), (on, "on"))[:: 1 if turn % 2 == 0 else -1]:
                     t1 = time.perf_counter()
                     res = s(game, a.budget)
                     ms[label] = 1000 * (time.perf_counter() - t1)
@@ -110,9 +101,7 @@ def main():
     )
     for name, r in rows.items():
         frac = np.array([x["reused"] for x in r]) / a.budget
-        later = (
-            np.array([x["reused"] for x in r if not x["first"]]) / a.budget
-        )  # a game's first turn is always fresh
+        later = np.array([x["reused"] for x in r if not x["first"]]) / a.budget  # a game's first turn is always fresh
         q = lambda v: dict(
             mean=round(float(v.mean()), 3),
             median=round(float(np.median(v)), 3),
@@ -126,9 +115,7 @@ def main():
             fresh_starts=int((frac == 0).sum()),
             fresh_after_first=int((later == 0).sum()),
             turns_after_first=len(later),
-            leaves_evaluated=dict(
-                off=a.budget, on=round(float(np.mean([x["evaluated"] for x in r])), 1)
-            ),
+            leaves_evaluated=dict(off=a.budget, on=round(float(np.mean([x["evaluated"] for x in r])), 1)),
             ms_per_move=dict(
                 off=q(np.array([x["off"] for x in r])),
                 on=q(np.array([x["on"] for x in r])),

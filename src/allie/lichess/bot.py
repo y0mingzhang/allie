@@ -235,9 +235,7 @@ class Match:
         inc = clock["increment"] // 1000 if clock else None
         if self.game is None:
             elo = (ours, them) if self.white else (them, ours)
-            self.game = Game(
-                self.bot.engine, *elo, base, inc, event.get("speed", "blitz")
-            )
+            self.game = Game(self.bot.engine, *elo, base, inc, event.get("speed", "blitz"))
             log.info("game %s: %s as %s, Elo %s vs %s, %s+%s", self.gid, play.mode,
                      "white" if self.white else "black", ours, them, base, inc)  # fmt: skip
             if self.bot.config.greeting and not event["state"]["moves"]:
@@ -247,9 +245,7 @@ class Match:
     def on_state(self, s):
         start = time.monotonic()
         if s["status"] not in ("created", "started"):
-            log.info(
-                "game %s over: %s, winner %s", self.gid, s["status"], s.get("winner")
-            )
+            log.info("game %s over: %s, winner %s", self.gid, s["status"], s.get("winner"))
             self.over = True
             return
         moves = s["moves"].split()
@@ -283,7 +279,11 @@ class Match:
                 d = Decision(random.choice(legal).uci(), 0.0, (0, 1, 0), 0.0)
         spent = time.monotonic() - start
         self.stats.append(spent)
-        searched = f" search {d.sims} {1000 * d.searched:.0f} ms{' stopped' if d.stopped else ' cut' if d.cut else ''}" if d.sims else ""
+        searched = (
+            f" search {d.sims} {1000 * d.searched:.0f} ms{' stopped' if d.stopped else ' cut' if d.cut else ''}"
+            if d.sims
+            else ""
+        )
         log.info("game %s ply %d: %s p=%.2f wdl=%.2f/%.2f/%.2f %.0f ms think %.1f s%s", self.gid,
                  len(moves), d.move, d.probability, *d.wdl, 1000 * spent, d.think, searched)  # fmt: skip
         if d.resign:

@@ -59,9 +59,7 @@ def check_game(native, moves):
     ref = board.encode(np.array([tokens]))[0]
     np.testing.assert_array_equal(fast.encode_boards(np.array(tokens)), ref)
     np.testing.assert_array_equal(fast.encode_boards(tokens), ref)
-    np.testing.assert_array_equal(
-        np.frombuffer(b"".join(states), np.uint8).reshape(-1, 68), ref
-    )
+    np.testing.assert_array_equal(np.frombuffer(b"".join(states), np.uint8).reshape(-1, 68), ref)
     return len(moves) + 1, py.outcome(claim_draw=False)
 
 
@@ -140,16 +138,13 @@ def test_checkmate_and_stalemate(native):
         ("f3 e5 g4 Qh4#", 0.0),
         ("e4 e5 Qh5 Nc6 Bc4 Nf6 Qxf7#", 1.0),
         (
-            "e3 a5 Qh5 Ra6 Qxa5 h5 h4 Rah6 Qxc7 f6 Qxd7+ Kf7 Qxb7 Qd3 "
-            "Qxb8 Qh7 Qxc8 Kg6 Qe6",
+            "e3 a5 Qh5 Ra6 Qxa5 h5 h4 Rah6 Qxc7 f6 Qxd7+ Kf7 Qxb7 Qd3 Qxb8 Qh7 Qxc8 Kg6 Qe6",
             0.5,
         ),
     ):
         moves = san_game(sans)
         check_game(native, moves)
-        p = fast.Position.from_tokens(
-            header(180, 2, 1500, 1500) + [MOVE_ID[m] for m in moves]
-        )
+        p = fast.Position.from_tokens(header(180, 2, 1500, 1500) + [MOVE_ID[m] for m in moves])
         assert p.outcome() == score and p.legal() == []
 
 
@@ -168,11 +163,7 @@ def shuffle_game(seed):
     draw."""
     rng, b = random.Random(seed), chess.Board()
     while not b.is_game_over():
-        moves = [
-            m
-            for m in b.legal_moves
-            if not b.is_capture(m) and b.piece_type_at(m.from_square) != chess.PAWN
-        ]
+        moves = [m for m in b.legal_moves if not b.is_capture(m) and b.piece_type_at(m.from_square) != chess.PAWN]
         rng.shuffle(moves)
         for m in moves:
             b.push(m)

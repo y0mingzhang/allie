@@ -19,9 +19,7 @@ from pathlib import Path
 import numpy as np
 
 PATH = Path(__file__).with_name("behaviour.json")
-PARAMETERS = (
-    json.loads(PATH.read_text()) if PATH.exists() else {}
-)  # empty only while fitting
+PARAMETERS = json.loads(PATH.read_text()) if PATH.exists() else {}  # empty only while fitting
 # allie.search's formats: bullet, blitz, rapid, classical
 FORMATS = dict(ultraBullet=0, bullet=0, blitz=1, rapid=2, classical=3, correspondence=3)
 KEYS = ("resign", "draw", "guard")
@@ -75,9 +73,7 @@ def think(time_probs, rng, clock, increment, ply, lag=0.0):
     then uniform within it), less the lag the network and server add (human times are server
     side, their lag included), under a soft guard fitted on human time use (a share of the
     clock plus the increment) and a hard cap that always leaves the reserve on the clock."""
-    if (
-        ply < 2
-    ):  # no think time is recorded for each side's first move; humans move fast
+    if ply < 2:  # no think time is recorded for each side's first move; humans move fast
         t = float(rng.uniform(0.5, 2.0))
     else:
         p = np.asarray(time_probs, np.float64)

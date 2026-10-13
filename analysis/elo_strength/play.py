@@ -94,11 +94,7 @@ class UCI:
         while line := self.p.stdout.readline():
             if line.startswith("info") and " multipv 1 " in line:
                 if m := re.search(r"score (cp|mate) (-?\d+)", line):
-                    score = (
-                        int(m[2])
-                        if m[1] == "cp"
-                        else 100000 * (1 if int(m[2]) > 0 else -1)
-                    )
+                    score = int(m[2]) if m[1] == "cp" else 100000 * (1 if int(m[2]) > 0 else -1)
             elif line.startswith("bestmove"):
                 return line.split()[1], score
         raise RuntimeError(f"{self.p.args[0]} exited")
@@ -116,9 +112,7 @@ def stockfish(elo=None):
     opts = [("Threads", 1), ("Hash", 16)]
     if elo is None:
         return UCI([SF], opts, depth=None)
-    return UCI(
-        [SF], opts + [("UCI_LimitStrength", "true"), ("UCI_Elo", elo)], sf_depth(elo)
-    )
+    return UCI([SF], opts + [("UCI_LimitStrength", "true"), ("UCI_Elo", elo)], sf_depth(elo))
 
 
 def maia3(elo, seed):
@@ -144,9 +138,7 @@ def parse(spec):
         return "allie", Play(mode="strongest", rating=int(m[2]), search=int(m[1]))
     if m := re.fullmatch(r"allie-c(\d+)", spec):  # calibrated.py's mode
         return "allie", Play(mode="calibrated", rating=int(m[1]))
-    if m := re.fullmatch(
-        r"allie-t([0-9.]+)-(\d+)", spec
-    ):  # sampling at a fixed temperature
+    if m := re.fullmatch(r"allie-t([0-9.]+)-(\d+)", spec):  # sampling at a fixed temperature
         return "allie", Play(mode="human", rating=int(m[2]), temperature=float(m[1]))
     raise ValueError(spec)
 
@@ -189,9 +181,7 @@ def play(task, ctx, book):
     ]
     board, moves, clocks, history = chess.Board(), [], [float(base), float(base)], []
     t0 = time.monotonic()
-    while (outcome := board.outcome(claim_draw=True)) is None and len(
-        moves
-    ) < MAX_PLIES:
+    while (outcome := board.outcome(claim_draw=True)) is None and len(moves) < MAX_PLIES:
         ply = len(moves)
         me, other = sides[ply % 2], sides[1 - ply % 2]
         if ply < len(opening["moves"]):
@@ -199,11 +189,7 @@ def play(task, ctx, book):
         else:
             uci, think = me.choose(ctx, moves, clocks[ply % 2])
             if think is None:
-                think = (
-                    other.opponent_think(clocks[ply % 2])
-                    if other.kind == "allie"
-                    else 0.0
-                )
+                think = other.opponent_think(clocks[ply % 2]) if other.kind == "allie" else 0.0
         if ply >= 2:
             clocks[ply % 2] = clocks[ply % 2] - think + inc
         board.push_uci(uci)
@@ -236,9 +222,7 @@ class Context:
         if (kind, elo) in pool:
             pool[kind, elo] = pool.pop((kind, elo))  # most recently used last
         else:
-            if (
-                len(pool) >= 4
-            ):  # bound each thread's processes: close the least recently used
+            if len(pool) >= 4:  # bound each thread's processes: close the least recently used
                 pool.pop(next(iter(pool))).close()
             seed = threading.get_ident() % 2**31 ^ os.getpid()
             pool[kind, elo] = stockfish(elo) if kind == "sf" else maia3(elo, seed)
@@ -249,12 +233,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("tasks")
     p.add_argument("out")
-    p.add_argument(
-        "--book", default=None, help="openings.json (default: next to tasks)"
-    )
-    p.add_argument(
-        "--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", "0"))
-    )
+    p.add_argument("--book", default=None, help="openings.json (default: next to tasks)")
+    p.add_argument("--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", "0")))
     p.add_argument("--shards", type=int, default=1)
     p.add_argument("--model", default=MODEL)
     p.add_argument("--device", default="cpu")
@@ -263,17 +243,10 @@ def main():
     p.add_argument("--limit", type=int, default=0)
     a = p.parse_args()
     tasks = [json.loads(line) for line in open(a.tasks)][a.shard :: a.shards]
-    book = json.loads(
-        Path(a.book or Path(a.tasks).with_name("openings.json")).read_text()
-    )
+    book = json.loads(Path(a.book or Path(a.tasks).with_name("openings.json")).read_text())
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    done = {
-        json.loads(line)["id"]
-        for f in out.glob("*.jsonl")
-        for line in open(f)
-        if line.strip()
-    }
+    done = {json.loads(line)["id"] for f in out.glob("*.jsonl") for line in open(f) if line.strip()}
     tasks = [t for t in tasks if t["id"] not in done]
     if a.limit:
         tasks = tasks[: a.limit]
@@ -299,10 +272,7 @@ def main():
             search = Coverage()
     ctx = Context(engine, search)
     lock = threading.Lock()
-    path = (
-        out
-        / f"{Path(a.tasks).stem}-{a.shard:03d}-{os.environ.get('SLURM_JOB_ID', os.getpid())}.jsonl"
-    )
+    path = out / f"{Path(a.tasks).stem}-{a.shard:03d}-{os.environ.get('SLURM_JOB_ID', os.getpid())}.jsonl"
 
     def run(task):
         try:

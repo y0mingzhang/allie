@@ -11,8 +11,4 @@ include = Path(
         Path(__file__).resolve().parents[2] / "src/allie/search/native/chess-library",
     )
 )
-collect_ignore_glob = (
-    []
-    if importlib.util.find_spec("pybind11") and (include / "chess.hpp").exists()
-    else ["test_*.py"]
-)
+collect_ignore_glob = [] if importlib.util.find_spec("pybind11") and (include / "chess.hpp").exists() else ["test_*.py"]

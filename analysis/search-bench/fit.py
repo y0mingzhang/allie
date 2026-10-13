@@ -77,16 +77,12 @@ def rows(d, keep):
 
 
 def logprob(par, d, norm):
-    x = torch.tensor(
-        np.c_[np.ones(len(d["f"])), np.clip((d["f"] - norm[0]) / norm[1], -3, 3)]
-    )
+    x = torch.tensor(np.c_[np.ones(len(d["f"])), np.clip((d["f"] - norm[0]) / norm[1], -3, 3)])
     z, q, mask = (torch.tensor(d[k]) for k in ("logp", "q", "mask"))
     b = torch.tensor(d["band"])
     a, beta = par["alpha"][b], par["beta"][b]
     # finite fill: -inf would put 0 * inf = NaN into the backward pass
-    comp = (a[None, :, None] * z + (F[:, None] * beta)[:, :, None] * q).masked_fill(
-        ~mask, -1e9
-    )
+    comp = (a[None, :, None] * z + (F[:, None] * beta)[:, :, None] * q).masked_fill(~mask, -1e9)
     comp = comp.log_softmax(-1)
     mu = (x @ par["gate"]) * torch.tensor(d["known"])
     lw = (-0.5 * F.log()[None] ** 2 + mu[:, None] * F.log()).log_softmax(-1)
@@ -107,9 +103,7 @@ def fit(d, only_alpha=False):
     free = [par["alpha"]] if only_alpha else list(par.values())
     for p in free:
         p.requires_grad_(True)
-    opt = torch.optim.LBFGS(
-        free, max_iter=500, tolerance_grad=1e-9, line_search_fn="strong_wolfe"
-    )
+    opt = torch.optim.LBFGS(free, max_iter=500, tolerance_grad=1e-9, line_search_fn="strong_wolfe")
     t = torch.tensor(d["target"])
 
     def loss():

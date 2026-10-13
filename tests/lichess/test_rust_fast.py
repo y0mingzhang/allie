@@ -54,10 +54,7 @@ def replay(model, n=64):
     out.append(step(model, [item(j, pos[j], pos[j] + 1 + j % 2) for j in range(n)]))
     for j in range(n):
         pos[j] += 1 + j % 2
-    rows = [
-        (c.k[:, :, : c.n].clone(), c.v[:, :, : c.n].clone(), c.e[: c.n].clone())
-        for c in caches
-    ]
+    rows = [(c.k[:, :, : c.n].clone(), c.v[:, :, : c.n].clone(), c.e[: c.n].clone()) for c in caches]
     assert all(c.n == p for c, p in zip(caches, pos))
     return out, rows
 
@@ -66,15 +63,11 @@ def same(a, b):
     (oa, ra), (ob, rb) = a, b
     for i, (x, y) in enumerate(zip(oa, ob)):
         bad = (x != y).sum().item()
-        assert bad == 0, (
-            f"step {i}: {bad} of {x.numel()} logits differ, max {(x - y).abs().max().item()}"
-        )
+        assert bad == 0, f"step {i}: {bad} of {x.numel()} logits differ, max {(x - y).abs().max().item()}"
     for j, (x, y) in enumerate(zip(ra, rb)):
         for name, s, t in zip("kve", x, y):
             bad = (s != t).sum().item()
-            assert bad == 0, (
-                f"game {j} cache {name}: {bad} of {s.numel()} elements differ"
-            )
+            assert bad == 0, f"game {j} cache {name}: {bad} of {s.numel()} elements differ"
 
 
 def digest(out):
@@ -210,9 +203,7 @@ class Slots:
 
     def __init__(self, model, capacity):
         kw = dict(dtype=model.dtype, device=model.device)
-        self.k = torch.full(
-            (model.layers, model.heads, capacity, model.head_dim), torch.nan, **kw
-        )
+        self.k = torch.full((model.layers, model.heads, capacity, model.head_dim), torch.nan, **kw)
         self.v, self.e = (
             torch.full_like(self.k, torch.nan),
             torch.full((capacity, model.width), torch.nan, **kw),
@@ -225,11 +216,7 @@ def random_tree(rng, nodes, depth):
     chains with probability 0.4, else a random shallower node."""
     parent, dep = np.zeros(nodes + 1, np.int64), np.zeros(nodes + 1, np.int64)
     for i in range(1, nodes + 1):
-        p = (
-            i - 1
-            if rng.random() < 0.4 and dep[i - 1] < depth
-            else rng.choice(np.flatnonzero(dep[:i] < depth))
-        )
+        p = i - 1 if rng.random() < 0.4 and dep[i - 1] < depth else rng.choice(np.flatnonzero(dep[:i] < depth))
         parent[i], dep[i] = p, dep[p] + 1
     return parent, dep
 
@@ -317,9 +304,7 @@ def same_leaves(a, b):
     (za, sa, ga), (zb, sb, gb) = a, b
     for i, (x, y) in enumerate(zip(za, zb)):
         bad = (x != y).sum().item()
-        assert bad == 0, (
-            f"batch {i}: {bad} of {x.numel()} logits differ, max {(x - y).abs().max().item()}"
-        )
+        assert bad == 0, f"batch {i}: {bad} of {x.numel()} logits differ, max {(x - y).abs().max().item()}"
     for r, (x, y) in enumerate(zip(sa, sb)):
         for name in "kve":
             s, t = getattr(x, name)[..., 1:, :], getattr(y, name)[..., 1:, :]
@@ -338,9 +323,7 @@ def test_rust_leaves_match_copied_bitwise(export, isa, int8, monkeypatch, reques
     zs, slots, rows = leaves_both_ways(m)
     same_leaves((zs[0], slots[0], rows), (zs[1], slots[1], rows))
     assert all(torch.isfinite(z).all() for z in zs[0]) and len(zs[0]) == 40
-    assert all(
-        torch.isnan(s.k[:, :, 0]).all() for s in slots[0]
-    )  # the root's slot is never touched
+    assert all(torch.isnan(s.k[:, :, 0]).all() for s in slots[0])  # the root's slot is never touched
 
 
 def test_rust_leaves_thread_count_does_not_change_results(tiny_path, monkeypatch):
@@ -396,9 +379,7 @@ def test_rust_after_fork(tiny_path):
     x = inputs(random_game(3, 10))
     want = step(m, [(Cache(m), *x)])[0]
     FORKED.update(model=m, x=x)
-    with (
-        m.fast.lock
-    ):  # another thread mid-step at the fork: the child must not wait for it
+    with m.fast.lock:  # another thread mid-step at the fork: the child must not wait for it
         with multiprocessing.get_context("fork").Pool(1) as pool:
             got = pool.apply_async(_forked_step).get(timeout=120)
     assert torch.equal(got, want)
@@ -435,7 +416,17 @@ def test_rust_rejects_aliasing_items(tiny_path):
     tp = [t.k.data_ptr(), t.v.data_ptr(), t.e.data_ptr()]
     one_leaf = [c.n, 1, c.capacity, 0, t.capacity, 0, 0, 2]
     out2 = torch.empty(2, 2432)  # alive for the whole call: the step writes it (a temporary's pointer dangles)
-    args = lambda m_, p_, pa=[]: e.step(len(m_) // 8, len(m_) // 8, ids[4:6].data_ptr(), feats[4:6].data_ptr(), boards[4:6].data_ptr(), m_, p_, pa, out2.data_ptr())  # noqa: E731
+    args = lambda m_, p_, pa=[]: e.step(
+        len(m_) // 8,
+        len(m_) // 8,
+        ids[4:6].data_ptr(),
+        feats[4:6].data_ptr(),
+        boards[4:6].data_ptr(),
+        m_,
+        p_,
+        pa,
+        out2.data_ptr(),
+    )  # noqa: E731
     assert args(one_leaf, cp + cp) == 4
     assert args(one_leaf, cp + [t.k.data_ptr(), c.v.data_ptr(), t.e.data_ptr()]) == 4
     assert args([c.n, 1, c.capacity, 0, 0, 0, 0, 0], [cp[0], cp[0], cp[2], 0, 0, 0]) == 4
@@ -459,7 +450,12 @@ def test_rust_rejects_overflowing_spans(tiny_path):
     ptrs = [c.k.data_ptr(), c.v.data_ptr(), c.e.data_ptr(), 0, 0, 0]
     for meta in ([2**63 - 1, 1, c.capacity, 0, 0, 0, 0, 0], [0, 2**63 - 1, c.capacity, 0, 0, 0, 0, 0],
                  [0, 1, 2**62, 0, 0, 0, 0, 0], [2**63 - 1, 1, c.capacity, 0, 8, 1, 0, 1], [0, 1, c.capacity, 0, 8, 2**63 - 1, 0, 1]):  # fmt: skip
-        assert e.step(1, 1, ids[:1].data_ptr(), feats[:1].data_ptr(), boards[:1].data_ptr(), meta, ptrs, [1], out.data_ptr()) == 3, meta
+        assert (
+            e.step(
+                1, 1, ids[:1].data_ptr(), feats[:1].data_ptr(), boards[:1].data_ptr(), meta, ptrs, [1], out.data_ptr()
+            )
+            == 3
+        ), meta
 
 
 def test_rust_leaf_before_cache_growth_in_one_step(tiny_path):
@@ -474,7 +470,9 @@ def test_rust_leaf_before_cache_growth_in_one_step(tiny_path):
         t = Slots(m, 16)
         if grow_early:
             root.reserve(12)
-        z = step(m, [Leaf(root, ids[4:5], feats[4:5], boards[4:5], t, (), 1), (root, ids[5:13], feats[5:13], boards[5:13])])
+        z = step(
+            m, [Leaf(root, ids[4:5], feats[4:5], boards[4:5], t, (), 1), (root, ids[5:13], feats[5:13], boards[5:13])]
+        )
         assert torch.isfinite(z).all() and root.n == 12
         out.append((z, t.k[:, :, 1].clone(), t.v[:, :, 1].clone(), t.e[1].clone()))
     for a, b in zip(*out):

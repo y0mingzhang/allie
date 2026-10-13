@@ -245,11 +245,7 @@ def wave(
 
 
 def bad_nodes():
-    return ",".join(
-        x.split("#")[0].strip()
-        for x in BAD_NODES.read_text().splitlines()
-        if x.split("#")[0].strip()
-    )
+    return ",".join(x.split("#")[0].strip() for x in BAD_NODES.read_text().splitlines() if x.split("#")[0].strip())
 
 
 def name(w, r):
@@ -402,11 +398,7 @@ def submitted(token, since):
     t0 = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(since - 60))
     acct = ["sacct", "-X", "-n", "-P", "-S", t0, "--format=JobID,SubmitLine"]
     live = ["squeue", "--me", "-h", "-o", "%i|%k"]
-    rows = [
-        x
-        for c in (acct, live)
-        for x in subprocess.check_output(c, text=True).split("\n")
-    ]
+    rows = [x for c in (acct, live) for x in subprocess.check_output(c, text=True).split("\n")]
     return sorted({x.split("|")[0].split("_")[0] for x in rows if token in x})
 
 
@@ -417,9 +409,7 @@ def submit(key):
     in flight or unaccounted): check by hand, then delete submitting.json."""
     study = STUDIES / WAVES[key]["study"]
     with open(study / ".submit.lock", "w") as lock:
-        fcntl.flock(
-            lock, fcntl.LOCK_EX | fcntl.LOCK_NB
-        )  # raises if another submit runs
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if another submit runs
         assert not (study / "submitted.json").exists(), "already submitted"
         intent = study / "submitting.json"
         if intent.exists():
@@ -514,10 +504,7 @@ def session(sid):
     out = []
     for d in Path("/proc").iterdir():
         try:
-            if (
-                d.name.isdigit()
-                and int((d / "stat").read_text().rsplit(")", 1)[1].split()[3]) == sid
-            ):
+            if d.name.isdigit() and int((d / "stat").read_text().rsplit(")", 1)[1].split()[3]) == sid:
                 out.append(int(d.name))
         except (OSError, IndexError, ValueError):
             pass
@@ -541,9 +528,7 @@ def run(cmd, env, log, watch=None, limit=None):
     A stalled or overdue child is killed and raises TimeoutError."""
     cmd = [str(x) for x in cmd]
     with open(log, "a") as f:
-        p = subprocess.Popen(
-            cmd, env=env, stdout=f, stderr=subprocess.STDOUT, start_new_session=True
-        )
+        p = subprocess.Popen(cmd, env=env, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
     CHILDREN[p] = known = {}
     start = last = time.monotonic()
 
@@ -587,9 +572,7 @@ def task(key):
     w = WAVES[key]
     study = STUDIES / w["study"]
     plan = json.loads((study / "plan.json").read_text())
-    bad = [
-        k for k, v in plan["hashes"].items() if k != "baseline" and sha(study / k) != v
-    ]
+    bad = [k for k, v in plan["hashes"].items() if k != "baseline" and sha(study / k) != v]
     assert not bad, f"frozen copies changed since plan: {sorted(bad)}"
     i, k = int(os.environ["SLURM_ARRAY_TASK_ID"]), w["pack"]
     mine = plan["runs"][i * k : (i + 1) * k]
@@ -614,10 +597,7 @@ TRIES = 3  # failed attempts of a run before its task stops requeueing
 def looping(study, r):
     """Its last two failures resumed from the checkpoint it is still at: a crash loop, which requeueing repeats."""
     step = checkpoint_step(r)
-    return (
-        step is not None
-        and [x.get("step") for x in failures(study, r)[-2:]] == [step] * 2
-    )
+    return step is not None and [x.get("step") for x in failures(study, r)[-2:]] == [step] * 2
 
 
 def alert(study, r):
@@ -767,9 +747,7 @@ def pooled_controls(study, controls):
                 old = cs / EVALUATOR
                 why += ["evaluator"] * (not old.exists() or sha(old) != ev)
                 why += ["baseline"] * (res.get("baseline") != base["baseline"])
-                why += [
-                    k for k in ("wsd_fork_from", "wsd_continue_from") if args.get(k)
-                ]
+                why += [k for k in ("wsd_fork_from", "wsd_continue_from") if args.get(k)]
                 why += ["continuation"] * bool(config.get("continuation_provenance"))
                 if why:
                     print(f"not pooled: {res['name']} ({', '.join(why)})")
@@ -901,9 +879,7 @@ def run_one(study, r, gpu):
                 ROOT / "results/pretrain" / f["parent"] / f"fork-{f['at']}.pt",
             ]
         run(cmd, train_env, f"{log}.train.log", watch=tout / "train.jsonl")
-        if json.loads(done.read_text())["stop_reason"] != (
-            "stop_after" if leg else "steps"
-        ):
+        if json.loads(done.read_text())["stop_reason"] != ("stop_after" if leg else "steps"):
             return False
         if tout != out:  # done.json last, so a partial copy never looks finished
             rsync = ["rsync", "-a", "--exclude", "rank*.pt", "--exclude", "done.json"]
@@ -946,9 +922,7 @@ def status(key):
         res = study / "results" / f"{r['name']}.json"
         if res.exists():
             s = json.loads(res.read_text())["strat"]
-            print(
-                f"{r['name']:42} golden {s['macro']:.4f} expert {s['expert_macro']:.4f}"
-            )
+            print(f"{r['name']:42} golden {s['macro']:.4f} expert {s['expert_macro']:.4f}")
             continue
         log = ROOT / "results/pretrain" / r["name"] / "train.jsonl"
         rows = log.read_text().splitlines() if log.exists() else []
@@ -988,9 +962,7 @@ def table(*keys, controls=()):
                 loss = float(np.mean([r["strat"][field] for r in mine]))
                 delta = loss - float(np.mean(ctrl))
                 row = out.setdefault((*group, v), {})
-                row["flops"] = (
-                    np.mean([r["useful_training_flops"] for r in mine]) / flops
-                )
+                row["flops"] = np.mean([r["useful_training_flops"] for r in mine]) / flops
                 row[field] = (
                     loss,
                     delta,
@@ -1002,14 +974,9 @@ def table(*keys, controls=()):
         "| golden expert | Δ | Δ/σ | CM |\n|---|---|---|---|---|---|---|---|---|---|---|---|"
     )
     for (group, budget, v), m in out.items():
-        cells = " | ".join(
-            "{:.4f} | {:+.4f} | {:+.1f} | {:.2f}x".format(*m[f])
-            for f in ("macro", "expert_macro")
-        )
+        cells = " | ".join("{:.4f} | {:+.4f} | {:+.1f} | {:.2f}x".format(*m[f]) for f in ("macro", "expert_macro"))
         print(f"| {group} | {budget} | {v} | {m['flops']:.3f} | {cells} |")
-    print(
-        "FLOPs are logged useful training FLOPs; MoE counts k routed experts per token"
-    )
+    print("FLOPs are logged useful training FLOPs; MoE counts k routed experts per token")
 
 
 def main():

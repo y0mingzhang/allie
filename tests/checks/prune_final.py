@@ -30,9 +30,7 @@ def main():
                 f.write(json.dumps({"directory": f"checkpoints/{name}"}) + "\n")
         publish(out, out / "checkpoints" / dirs[0], 2, 1, ["last.pt"])
         for keep in (2, 3):
-            current = (
-                out / "checkpoints" / dirs[-1]
-            )  # the rerun's final save, lowest id of the step-3 ones
+            current = out / "checkpoints" / dirs[-1]  # the rerun's final save, lowest id of the step-3 ones
             publish(out, current, 3, 1, ["final.pt"])
             prune(out, keep, current)
             left = {p.name for p in (out / "checkpoints").iterdir()}

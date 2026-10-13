@@ -71,11 +71,7 @@ def main():
     )
     a = p.parse_args()
     meta = np.load(a.positions)["meta"]
-    chunks = [
-        np.load(f)
-        for f in sorted(Path(a.search).glob("[0-9]*.npz"))
-        if ".partial" not in f.name
-    ]
+    chunks = [np.load(f) for f in sorted(Path(a.search).glob("[0-9]*.npz")) if ".partial" not in f.name]
     cal = json.loads(Path(a.base).read_text())
     old = cal["budget_policies"]
     results = {}
@@ -99,9 +95,7 @@ def main():
         model=a.model,
         refit=(
             "budget_policies 128 and 256 refit on this model's dev search outputs (calib_outcal.py with "
-            "search-bench fit.py's form and optimizer); 5 from "
-            + a.five
-            + "; router, backup, cpuct and "
+            "search-bench fit.py's form and optimizer); 5 from " + a.five + "; router, backup, cpuct and "
             "old_parameters as " + a.base
         ),  # fmt: skip
         dev="data/dev.jsonl + data/dev_expert.jsonl (July 2026 blitz, disjoint from strat-eval-v1), 3000 positions per mover band",

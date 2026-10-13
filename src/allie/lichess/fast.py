@@ -23,18 +23,14 @@ class Graphs:
 
     def __init__(self, model, slots=None, strict=False):
         m, ctx = model, model.w["cos"].shape[0]
-        per = (
-            2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width
-        )  # elements per slot
+        per = 2 * m.layers * m.heads * ctx * m.head_dim + ctx * m.width  # elements per slot
         size = per * torch.tensor([], dtype=m.dtype).element_size()
         if slots is None:  # a third of the free memory, at most 64 games
             slots = min(64, int(torch.cuda.mem_get_info(m.device)[0] / 3 // size))
         if slots < 1:
             raise RuntimeError("no GPU memory for a cache pool")
         kw = dict(dtype=m.dtype, device=m.device)
-        self.k = torch.zeros(
-            m.layers, slots + 1, m.heads, ctx, m.head_dim, **kw
-        )  # last: padding
+        self.k = torch.zeros(m.layers, slots + 1, m.heads, ctx, m.head_dim, **kw)  # last: padding
         self.v = torch.zeros_like(self.k)
         self.e = torch.zeros(slots + 1, ctx, m.width, **kw)
         self.model, self.slots, self.ctx = m, slots, ctx
@@ -78,9 +74,7 @@ class Graphs:
             return y[:, :, 0]
 
         def run():
-            return m.forward(
-                x["ids"], x["pos"], x["feats"], x["boards"], previous, attend
-            )
+            return m.forward(x["ids"], x["pos"], x["feats"], x["boards"], previous, attend)
 
         side = self.stream
         side.wait_stream(torch.cuda.current_stream(dev))

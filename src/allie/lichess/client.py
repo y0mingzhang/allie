@@ -61,9 +61,7 @@ class Lichess:
         return self.call("POST", f"/api/challenge/{challenge}/accept")
 
     def decline(self, challenge, reason="generic"):
-        return self.call(
-            "POST", f"/api/challenge/{challenge}/decline", {"reason": reason}
-        )
+        return self.call("POST", f"/api/challenge/{challenge}/decline", {"reason": reason})
 
     def move(self, game, move, draw=False):
         q = "?offeringDraw=true" if draw else ""
@@ -76,17 +74,13 @@ class Lichess:
         return self.call("POST", f"/api/bot/game/{game}/resign")
 
     def draw(self, game, accept):
-        return self.call(
-            "POST", f"/api/bot/game/{game}/draw/{'yes' if accept else 'no'}"
-        )
+        return self.call("POST", f"/api/bot/game/{game}/draw/{'yes' if accept else 'no'}")
 
     def claim_victory(self, game):
         return self.call("POST", f"/api/bot/game/{game}/claim-victory")
 
     def chat_lines(self, game, retries=None):
-        return self.call(
-            "GET", f"/api/bot/game/{game}/chat", retries=retries, timeout=5
-        )
+        return self.call("GET", f"/api/bot/game/{game}/chat", retries=retries, timeout=5)
 
     def chat(self, game, text, room="player", retries=None):
         data = {"room": room, "text": text}

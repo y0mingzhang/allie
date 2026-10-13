@@ -4,6 +4,7 @@ Allie's MCTS for comparison.
 An oracle implements reset(), new_tokens and handles(prefixes, features, clock_rule), which returns the root
 logits and a callable that evaluates search nodes. Every batch starts from a reset oracle.
 """
+
 import json
 from pathlib import Path
 import numpy as np
@@ -23,8 +24,18 @@ class Search:
         if not np.isfinite(self.parameters["cpuct"]) or self.parameters["cpuct"] < 0:
             raise ValueError("coverage cpuct must be finite and nonnegative")
 
-    def predict(self, queries, *, method="coverage", budget="adaptive", clock_rule="predicted",
-                project=False, allie_alpha=.9, allie_beta=2., allie_cpuct=1.25):
+    def predict(
+        self,
+        queries,
+        *,
+        method="coverage",
+        budget="adaptive",
+        clock_rule="predicted",
+        project=False,
+        allie_alpha=0.9,
+        allie_beta=2.0,
+        allie_cpuct=1.25,
+    ):
         """Return one distribution per query, in native legal-move order.
 
         Each query: prefix (11 header tokens + past moves), cell (0..15),
@@ -41,8 +52,12 @@ class Search:
             raise ValueError("no frozen calibration for this coverage budget")
         if method == "allie" and (not isinstance(budget, int) or not 0 <= budget <= 1000):
             raise ValueError("Allie requires a fixed budget in 0..1000")
-        if method == "allie" and (not np.isfinite([allie_alpha, allie_beta, allie_cpuct]).all()
-                                  or allie_alpha <= 0 or allie_beta < 0 or allie_cpuct < 0):
+        if method == "allie" and (
+            not np.isfinite([allie_alpha, allie_beta, allie_cpuct]).all()
+            or allie_alpha <= 0
+            or allie_beta < 0
+            or allie_cpuct < 0
+        ):
             raise ValueError("Allie alpha must be positive; beta and cpuct nonnegative; all finite")
         rows, features = [], []
         for q in queries:
@@ -51,9 +66,12 @@ class Search:
                 raise ValueError("prefix must contain 11..1024 integer tokens")
             if ((prefix < 0) | (prefix >= 2350)).any():
                 raise ValueError("invalid input token")
-            if (prefix[0] != 2348 or not (192 <= prefix[1] < 378 or prefix[1] == 2349)
-                    or not (10 <= prefix[2] < 192 or prefix[2] == 2349)
-                    or ((prefix[3:11] < 0) | (prefix[3:11] > 9)).any()):
+            if (
+                prefix[0] != 2348
+                or not (192 <= prefix[1] < 378 or prefix[1] == 2349)
+                or not (10 <= prefix[2] < 192 or prefix[2] == 2349)
+                or ((prefix[3:11] < 0) | (prefix[3:11] > 9)).any()
+            ):
                 raise ValueError("header must be START, base-time token, increment token, and eight Elo digits")
             cell = q["cell"]
             if not isinstance(cell, (int, np.integer)) or not 0 <= cell < 16:
@@ -61,15 +79,26 @@ class Search:
             board = from_prefix(prefix)
             if board.outcome() >= 0:
                 raise ValueError("terminal position has no human-move prediction")
-            feat = np.asarray(q.get("features", np.full((len(prefix), 3), -1.)), np.float32)
+            feat = np.asarray(q.get("features", np.full((len(prefix), 3), -1.0)), np.float32)
             if feat.shape != (len(prefix), 3) or not np.isfinite(feat).all() or ((feat < 0) & (feat != -1)).any():
                 raise ValueError("features must be finite (prefix length,3), seconds >=0 or missing -1")
             rows.append(dict(prefix=prefix.tolist(), cell=int(cell), legal=board.legal()))
             features.append(feat)
         result = []
         for lo in range(0, len(rows), self.batch_size):
-            result.extend(self._batch(rows[lo:lo+self.batch_size], features[lo:lo+self.batch_size],
-                                      method, budget, clock_rule, project, allie_alpha, allie_beta, allie_cpuct))
+            result.extend(
+                self._batch(
+                    rows[lo : lo + self.batch_size],
+                    features[lo : lo + self.batch_size],
+                    method,
+                    budget,
+                    clock_rule,
+                    project,
+                    allie_alpha,
+                    allie_beta,
+                    allie_cpuct,
+                )
+            )
         return result
 
     def _batch(self, rows, features, method, budget, clock_rule, project, alpha, beta, cpuct):
@@ -84,8 +113,8 @@ class Search:
         ids = np.zeros((n, width), np.int32)
         mask = np.zeros((n, width), bool)
         for i, r in enumerate(rows):
-            ids[i, :len(r["legal"])] = np.array(r["legal"]) - 378
-            mask[i, :len(r["legal"])] = True
+            ids[i, : len(r["legal"])] = np.array(r["legal"]) - 378
+            mask[i, : len(r["legal"])] = True
         logits = root[:, 378:2346][np.arange(n)[:, None], ids].astype(float)
         legal = softmax(np.where(mask, logits, -np.inf), axis=1)
         forced = mask.sum(1) == 1
@@ -103,8 +132,9 @@ class Search:
                 allocated.fill(budget)
             allocated[forced] = 0
             initial = np.minimum(allocated, 128) if budget == "adaptive" else allocated
-            tree = load().Coverage([r["prefix"] for r in rows], root, initial.tolist(),
-                                   [par["cpuct"]]*n, self.threads)
+            tree = load().Coverage(
+                [r["prefix"] for r in rows], root, initial.tolist(), [par["cpuct"]] * n, self.threads
+            )
             self._advance(tree, bridge)
             if budget == "adaptive":
                 tree.grow(allocated.tolist())
@@ -123,30 +153,49 @@ class Search:
             for b in np.unique(allocated):
                 take = allocated == b
                 key = str(b if b else 128)
-                params = par["old_parameters"]["lambda3"] if project else (
-                    par["old_parameters"]["unchanged"] if budget in (64, 1000) else par["budget_policies"][key])
-                probability[take] = policy([rows[i] for i in np.flatnonzero(take)], root[take], q[take],
-                                           ids[take], mask[take], seconds[take], params)
+                params = (
+                    par["old_parameters"]["lambda3"]
+                    if project
+                    else (par["old_parameters"]["unchanged"] if budget in (64, 1000) else par["budget_policies"][key])
+                )
+                probability[take] = policy(
+                    [rows[i] for i in np.flatnonzero(take)],
+                    root[take],
+                    q[take],
+                    ids[take],
+                    mask[take],
+                    seconds[take],
+                    params,
+                )
         elif method == "allie":
             allocated.fill(budget)
             allocated[forced] = 0
-            tree = load().Allie([r["prefix"] for r in rows], root, allocated.tolist(), [cpuct]*n)
+            tree = load().Allie([r["prefix"] for r in rows], root, allocated.tolist(), [cpuct] * n)
             tree.first_prior = tree.preserve_depth = True
             self._advance(tree, bridge)
             for i, (moves, counts, values, prior) in enumerate(tree.summaries()):
                 # Native root edges use the same deterministic legal order.
-                np.testing.assert_array_equal(moves, ids[i, :mask[i].sum()])
-                q[i, :len(moves)] = values
+                np.testing.assert_array_equal(moves, ids[i, : mask[i].sum()])
+                q[i, : len(moves)] = values
             probability = output(logits, q, mask, alpha, beta)
             nodes = np.asarray(bridge.per_root_queries)
         if int(nodes.sum()) != bridge.queries:
             raise RuntimeError("node accounting mismatch")
-        return [dict(tokens=r["legal"], probabilities=probability[i, mask[i]].copy(),
-                     legal_prior=legal[i, mask[i]].copy(), values=q[i, mask[i]].copy(),
-                     root_wdl=softmax(root[i, 2413:2416].astype(float)),
-                     nodes=int(nodes[i]), simulations=int(allocated[i]), prefill_tokens=len(r["prefix"]),
-                     batch_prefill_tokens=int(prefill), method=method)
-                for i, r in enumerate(rows)]
+        return [
+            dict(
+                tokens=r["legal"],
+                probabilities=probability[i, mask[i]].copy(),
+                legal_prior=legal[i, mask[i]].copy(),
+                values=q[i, mask[i]].copy(),
+                root_wdl=softmax(root[i, 2413:2416].astype(float)),
+                nodes=int(nodes[i]),
+                simulations=int(allocated[i]),
+                prefill_tokens=len(r["prefix"]),
+                batch_prefill_tokens=int(prefill),
+                method=method,
+            )
+            for i, r in enumerate(rows)
+        ]
 
     @staticmethod
     def _advance(tree, bridge):

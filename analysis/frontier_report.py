@@ -34,12 +34,7 @@ def gflops(run):
     arch = dict(c["arch"])
     keep = arch.pop("moe_keep", 0)  # routed through the best keep of its top-k experts
     gates = L + 2 * min(5, L // 2)
-    f = (
-        24 * L * d * d
-        + 2 * d * 2432
-        + 2 * (gates * heads * 16 + 64)
-        + extra_flops(arch, d, L)
-    )
+    f = 24 * L * d * d + 2 * d * 2432 + 2 * (gates * heads * 16 + 64) + extra_flops(arch, d, L)
     if keep:
         _, k, routed, *_ = moe_dims(d, arch)
         f -= 6 * (L - 1) * d * routed * (k - keep)
@@ -83,9 +78,7 @@ def main():
         p = BIG / f"step-{step:08d}" / "scores.npz"
         if p.exists():
             info = json.loads(p.with_suffix(".json").read_text())
-            rows[f"bigrun-{step}"] = dict(
-                scores=load(p), gflops=1.389, golden=golden("", info)
-            )
+            rows[f"bigrun-{step}"] = dict(scores=load(p), gflops=1.389, golden=golden("", info))
     big = gflops("bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42")
     per_expert = 2 * 23 * 3 * 1536 * 192 / 1e9  # one routed expert in the 23 MoE layers, width 1536, expert width 192
     for p in sorted(SCORES.glob("*.npz")):
@@ -113,9 +106,7 @@ def main():
     for n, r in rows.items():
         ce, top1 = r["scores"]
         assert len(ce) == len(s), (n, len(ce))
-        res = dict(
-            gflops=r["gflops"], ce=ce.mean(), acc=100 * top1.mean(), golden=r["golden"]
-        )
+        res = dict(gflops=r["gflops"], ce=ce.mean(), acc=100 * top1.mean(), golden=r["golden"])
         refs = [x for x in ("maia3-23m", "maia3-79m") if x != n]
         if m := re.match(r"kd-s(\d+)-", n):
             refs.append(f"base-s{m[1]}")
@@ -147,26 +138,16 @@ def main():
     for n, r in out.items():
         g = r["golden"]
         gl = [f"{g[k]:.4f}" for k in ("macro", "expert", *FORMATS)] if g else ["-"] * 6
-        lines.append(
-            f"| {n} | {r['gflops']:.2f} | {r['ce']:.4f} | {r['acc']:.2f} | "
-            + " | ".join(gl)
-            + " |"
-        )
+        lines.append(f"| {n} | {r['gflops']:.2f} | {r['ce']:.4f} | {r['acc']:.2f} | " + " | ".join(gl) + " |")
     lines += ["", "| model | vs | dCE | dAcc pp | d golden macro | d expert | " + " | ".join(FORMATS) + " |",
               "|---|---|---:|---:|---:|---:|" + "---:|" * len(FORMATS)]  # fmt: skip
     for n, r in out.items():
         for k, v in r.items():
             if k.startswith("vs "):
                 g = v.get("golden")
-                gl = (
-                    [f"{g[x]:+.4f}" for x in ("macro", "expert", *FORMATS)]
-                    if g
-                    else ["-"] * 6
-                )
+                gl = [f"{g[x]:+.4f}" for x in ("macro", "expert", *FORMATS)] if g else ["-"] * 6
                 lines.append(
-                    f"| {n} | {k[3:]} | {iv(v['dce'], '.4f')} | {iv(v['dacc'], '.2f')} | "
-                    + " | ".join(gl)
-                    + " |"
+                    f"| {n} | {k[3:]} | {iv(v['dce'], '.4f')} | {iv(v['dacc'], '.2f')} | " + " | ".join(gl) + " |"
                 )
     (HERE / "tables.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
@@ -183,7 +164,9 @@ def plot(out):
     kinds = {"Maia-3": "#2a78d6", "big run": "#eb6834", "students": "#1baf7a"}
     hidden = ("-renorm", "ann2-k", "ann-all-on2-", "ann-all-p2-", "bigrun-132096", "-k1-")
     shown = lambda n: not any(h in n for h in hidden)
-    kind = lambda n: "Maia-3" if n.startswith("maia") else "big run" if n.startswith(("bigrun", "ann", "final-k")) else "students"
+    kind = lambda n: (
+        "Maia-3" if n.startswith("maia") else "big run" if n.startswith(("bigrun", "ann", "final-k")) else "students"
+    )
     plt.rcParams.update({"font.size": 8, "axes.edgecolor": "#8a8984", "axes.labelcolor": "#52514e",
                          "xtick.color": "#52514e", "ytick.color": "#52514e"})  # fmt: skip
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.2), facecolor="#fcfcfb")
@@ -194,7 +177,11 @@ def plot(out):
             pts = [(r["gflops"], r[key]) for n, r in out.items() if kind(n) == k and shown(n)]
             if pts:
                 ax.scatter(*zip(*pts), s=40, color=color, edgecolor="#fcfcfb", linewidth=1.5, zorder=3, label=k)
-        trunc = sorted((r["gflops"], r[key]) for n, r in out.items() if (n.startswith("final-k") and n.endswith("-trunc") and shown(n)) or n == f"bigrun-{FINAL}")
+        trunc = sorted(
+            (r["gflops"], r[key])
+            for n, r in out.items()
+            if (n.startswith("final-k") and n.endswith("-trunc") and shown(n)) or n == f"bigrun-{FINAL}"
+        )
         if trunc:
             ax.plot(*zip(*trunc), color=kinds["big run"], linewidth=1, alpha=0.6, zorder=2)
         best = min((r["ce"], n) for n, r in out.items() if kind(n) == "students")[1]
@@ -209,7 +196,9 @@ def plot(out):
                 else None
             )  # fmt: skip
             if name:
-                ax.annotate(name, (r["gflops"], r[key]), fontsize=7, color="#52514e", xytext=(5, 3), textcoords="offset points")
+                ax.annotate(
+                    name, (r["gflops"], r[key]), fontsize=7, color="#52514e", xytext=(5, 3), textcoords="offset points"
+                )
         ax.set_xscale("log")
         ax.set_xlabel("GFLOPs per move (log)")
         ax.set_ylabel(label)

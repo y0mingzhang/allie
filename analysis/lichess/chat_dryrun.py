@@ -95,16 +95,10 @@ def replay(c, posts, path, rated, plies, script):
     winner = {"1-0": "white", "0-1": "black"}.get(h["Result"]) if full_game else None
     if winner is None and not full_game:
         e = chat.score(c.views[max(c.views)].wdl) if c.views else 0.5  # ours
-        winner = (
-            ("white" if white else "black")
-            if e >= 0.5
-            else ("black" if white else "white")
-        )
+        winner = ("white" if white else "black") if e >= 0.5 else ("black" if white else "white")
     status = "mate" if board.is_checkmate() else "outoftime" if "Time" in h.get(
         "Termination", "") else "draw" if winner is None else "resign"  # fmt: skip
-    who = (
-        "Allie" if winner and (winner == "white") != white else opp
-    )  # the side that ended it
+    who = "Allie" if winner and (winner == "white") != white else opp  # the side that ended it
     posts.append((len(moves), who if winner else "--", f"({status})"))
     feed(state(len(moves), status=status, winner=winner), chat.END)
     for text in after:
@@ -119,9 +113,7 @@ def main():
     p.add_argument("--llm", choices=["claude", "mock"], default="mock")
     p.add_argument("--ledger", help="the spend ledger (default: the config's)")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument(
-        "--recent", help="the recent-lines file (default: a new temporary one)"
-    )
+    p.add_argument("--recent", help="the recent-lines file (default: a new temporary one)")
     p.add_argument("--prompts", action="store_true", help="print each call's new turn")
     p.add_argument("games", nargs="+", help="PGN:casual|rated:plies")
     a = p.parse_args()
@@ -147,13 +139,9 @@ def main():
         posts, turns = [], []
         ref = {}
         at = lambda ref=ref: len(ref["c"].sans) + bool(ref["c"].status)
-        post = lambda gid, text, room, posts=posts, at=at, **kw: posts.append(
-            (at(), BOT, text)
-        )
+        post = lambda gid, text, room, posts=posts, at=at, **kw: posts.append((at(), BOT, text))
         client = SimpleNamespace(chat_lines=lambda gid, **kw: [], chat=post)
-        bot = SimpleNamespace(
-            me=BOT.lower(), config=config, client=client, engine=engine
-        )
+        bot = SimpleNamespace(me=BOT.lower(), config=config, client=client, engine=engine)
         match = SimpleNamespace(bot=bot, gid=f"dry{i}", over=False)
 
         def logged(system, messages, turns=turns, posts=posts, at=at):
@@ -176,13 +164,7 @@ def main():
         k = 0
         for ply, who, text in posts:
             k = k if ply is None else ply
-            where = (
-                "start"
-                if k == 0
-                else f"{chat.num(k - 1)}{sans[k - 1]}"
-                if k <= len(sans)
-                else "after"
-            )
+            where = "start" if k == 0 else f"{chat.num(k - 1)}{sans[k - 1]}" if k <= len(sans) else "after"
             print(f"  [{where:>14}] {who}: {text}")
         print("  replies:")
         for t in c.timings:

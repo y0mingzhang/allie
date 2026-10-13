@@ -21,10 +21,7 @@ def published(stores):
             break
     else:
         text = urllib.request.urlopen(COUNTS).read().decode()
-    return {
-        m[1]: int(m[2])
-        for m in re.finditer(r"rated_(\d{4}-\d{2})\.pgn\.zst\s+(\d+)", text)
-    }
+    return {m[1]: int(m[2]) for m in re.finditer(r"rated_(\d{4}-\d{2})\.pgn\.zst\s+(\d+)", text)}
 
 
 def main(out, *stores):

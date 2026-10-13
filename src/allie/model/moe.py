@@ -48,9 +48,7 @@ class AddLoss(torch.autograd.Function):
         return grad, torch.ones((), dtype=torch.float32, device=grad.device)
 
 
-STATS_REPS = (
-    1  # times a training forward adds its loads and stats (replay_context: 2, then 0)
-)
+STATS_REPS = 1  # times a training forward adds its loads and stats (replay_context: 2, then 0)
 
 
 @contextlib.contextmanager
@@ -173,9 +171,7 @@ def qb_shift(hist, k):
 
 
 @torch.library.custom_op("allie_moe::qb_book", mutates_args={"hist"})
-def qb_book(
-    hist: torch.Tensor, s: torch.Tensor, bias: torch.Tensor, idx: torch.Tensor
-) -> None:
+def qb_book(hist: torch.Tensor, s: torch.Tensor, bias: torch.Tensor, idx: torch.Tensor) -> None:
     if not STATS_REPS:
         return
     if s.is_cuda:
@@ -202,9 +198,7 @@ class MoE(nn.Module):
         self.down = nn.Parameter(torch.zeros(experts, expert_hidden, dim))
         self.shared = shared_hidden > 0
         if self.shared:
-            self.shared_up = nn.Parameter(
-                torch.empty(2 * shared_hidden, dim).uniform_(-bound, bound)
-            )
+            self.shared_up = nn.Parameter(torch.empty(2 * shared_hidden, dim).uniform_(-bound, bound))
             self.shared_down = nn.Parameter(torch.zeros(shared_hidden, dim))
             self.shared_up.label, self.shared_down.label = "mlp_shared_up", "mlp_shared"
             self.shared_down.lr_mul = 2.0  # the dense MLP's c_proj multiplier
@@ -215,15 +209,11 @@ class MoE(nn.Module):
         )
         # NorMuon stacks a label's params and orthogonalizes each expert matrix
         self.up.label, self.down.label, self.down.lr_mul = "moe_up", "moe", 2.0
-        self.register_buffer(
-            "bias", torch.zeros(experts)
-        )  # selection only; checkpointed
+        self.register_buffer("bias", torch.zeros(experts))  # selection only; checkpointed
         # accumulated over a step's micro-batches: assignments per expert, dropped assignments,
         # tokens whose bias changed their top-k, tokens, summed k-th vs (k+1)-th affinity margins
         self.register_buffer("load", torch.zeros(experts + 4), persistent=False)
-        self.register_buffer(
-            "stats", torch.tensor([1.0, 1, 0, 0, 0, 0, 0]), persistent=False
-        )
+        self.register_buffer("stats", torch.tensor([1.0, 1, 0, 0, 0, 0, 0]), persistent=False)
         # qb_counts over a step's micro-batches
         hist = torch.zeros(experts, moe_kernels.QB_BINS, dtype=torch.int32)
         self.register_buffer("hist", hist, persistent=False)
@@ -306,18 +296,9 @@ class MoE(nn.Module):
             # additive over rows, hence independent of how rows are split into micro-batches
             assert t % 1024 == 0
             sel = torch.zeros_like(s).scatter_(1, idx, 1.0).view(-1, 1024, e).mean(1)
-            prob = (
-                torch.softmax(F.logsigmoid(z), -1)
-                if self.log_gates
-                else s / self.floored(s.sum(-1, keepdim=True))
-            )
+            prob = torch.softmax(F.logsigmoid(z), -1) if self.log_gates else s / self.floored(s.sum(-1, keepdim=True))
             prob = prob.view(-1, 1024, e).mean(1)
-            loss = (
-                self.seq
-                * (dist.get_world_size() / 8)
-                * 1024
-                * (sel * e / k * prob).sum()
-            )
+            loss = self.seq * (dist.get_world_size() / 8) * 1024 * (sel * e / k * prob).sum()
             out = AddLoss.apply(out, loss)
         return out
 
@@ -358,4 +339,3 @@ class MoE(nn.Module):
             )
         )  # fmt: skip
         self.load.zero_()
-

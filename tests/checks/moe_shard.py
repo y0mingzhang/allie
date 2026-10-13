@@ -103,9 +103,7 @@ def patch():
     dist.all_gather_into_tensor = all_gather_into_tensor
 
     def experts(offsets):
-        return torch.repeat_interleave(
-            torch.arange(len(offsets)), offsets.diff(prepend=offsets.new_zeros(1))
-        )
+        return torch.repeat_interleave(torch.arange(len(offsets)), offsets.diff(prepend=offsets.new_zeros(1)))
 
     def mm(a, w):
         return torch.bmm(a.float()[:, None], w.float())[:, 0]
@@ -123,9 +121,7 @@ def patch():
         acc = mm(gated(dy, gates, order), w[experts(offsets)]).to(dy.dtype).float()
         a, b = pre.float().chunk(2, -1)
         s = torch.sigmoid(a)
-        return torch.cat((acc * b * s * (a * (1 - s) + 1), acc * a * s), -1).to(
-            pre.dtype
-        )
+        return torch.cat((acc * b * s * (a * (1 - s) + 1), acc * a * s), -1).to(pre.dtype)
 
     def scatter(x, w, se, order, h, rows=None):
         if rows is not None:
@@ -168,9 +164,7 @@ def build(shard):
         ckpt="eager", ckpt_frac=0.5, arch=ARCH | dict(moe_shard=shard),
     )  # fmt: skip
     model = create_model(cfg, device="cpu")
-    assert all(
-        (m.pos is not None) == shard for m in model.modules() if isinstance(m, core.MoE)
-    )
+    assert all((m.pos is not None) == shard for m in model.modules() if isinstance(m, core.MoE))
     manager = TrainingManager(model, cfg, SCHEDULE)
     manager.reverse = EARLY  # --optimizers-reversed with the other knobs
     return model, manager
@@ -225,15 +219,11 @@ def check_masters(manager):
         for g in opt.param_groups:
             lo = 0 if opt.local else dist.get_rank() * g["chunk_size"]
             for i, m in enumerate(g.get("master", ())):
-                assert torch.equal(m.bfloat16(), g["params"][lo + i]), g["params"][
-                    0
-                ].label
+                assert torch.equal(m.bfloat16(), g["params"][lo + i]), g["params"][0].label
 
 
 def worker(rank, world, port, tmp):
-    dist.init_process_group(
-        "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
-    )
+    dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world)
     torch.set_num_threads(1)
     patch()
     if world == 4:
@@ -247,13 +237,9 @@ def worker(rank, world, port, tmp):
     got = train(val, model, manager, range(STEPS))
     check_masters(manager)
     for step, ((la, wa), (lb, wb)) in enumerate(zip(ref, got)):
-        diff = torch.tensor(
-            [abs(x - y) for x, y in zip(la, lb)] + [same(wa, wb) if rank == 0 else 0.0]
-        )
+        diff = torch.tensor([abs(x - y) for x, y in zip(la, lb)] + [same(wa, wb) if rank == 0 else 0.0])
         dist.all_reduce(diff)
-        say(
-            f"step {step + 1}: replicated vs sharded, loss diff {diff[:-1].max():.3g}, param diff {diff[-1]:.3g}"
-        )
+        say(f"step {step + 1}: replicated vs sharded, loss diff {diff[:-1].max():.3g}, param diff {diff[-1]:.3g}")
         assert not diff.any(), "every step must be bitwise"
     final = got[-1][1], manager.rank_state_dict()
     del model, manager

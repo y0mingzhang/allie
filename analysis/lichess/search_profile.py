@@ -51,11 +51,7 @@ def read_pgn(path, ply):
     h = g.headers
     base, inc = map(int, h["TimeControl"].split("+"))
     speed = next(
-        (
-            s
-            for s in ("bullet", "blitz", "rapid", "classical")
-            if s in h.get("Event", "").lower()
-        ),
+        (s for s in ("bullet", "blitz", "rapid", "classical") if s in h.get("Event", "").lower()),
         "rapid",
     )
     moves, clocks, node = [], [], g
@@ -108,11 +104,7 @@ def weight_bytes(m):
         + (m.scales[k].numel() * m.scales[k].element_size() if k in m.scales else 0)
     )
     rows = ("embed", "embed2", "value_embed", "cos", "sin")
-    dense = sum(
-        size(k)
-        for k in m.w
-        if k.split(".")[-1] not in ("up", "down") and not k.startswith(rows)
-    )
+    dense = sum(size(k) for k in m.w if k.split(".")[-1] not in ("up", "down") and not k.startswith(rows))
     experts = sum(size(k) for k in m.w if k.split(".")[-1] in ("up", "down"))
     return dense, experts
 
@@ -177,11 +169,7 @@ def plain_steps(m, game, batches=(1, 8, 24), reps=5):
         for j, c in enumerate(caches):
             mv = legal[j % len(legal)]
             tok = tree.MOVE_START + tree.MOVES.index(mv)
-            board = (
-                np.frombuffer(tree.advance(game.boards[-1], tok), np.uint8)
-                .reshape(1, 68)
-                .copy()
-            )
+            board = np.frombuffer(tree.advance(game.boards[-1], tok), np.uint8).reshape(1, 68).copy()
             feats = torch.tensor(game.features()[-1:], dtype=torch.float32)
             items.append((c, torch.tensor([tok]), feats, torch.tensor(board)))
         times = []
@@ -239,12 +227,7 @@ def main():
         backend=a.backend,
         threads=m.fast.threads,
         torch_threads=torch.get_num_threads(),
-        cpu=open("/proc/cpuinfo")
-        .read()
-        .split("model name")[1]
-        .split("\n")[0]
-        .split(":")[1]
-        .strip(),
+        cpu=open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].split(":")[1].strip(),
         load_s=round(time.perf_counter() - t0, 1),
         config=dict(
             layers=m.layers,
@@ -266,9 +249,7 @@ def main():
     for name in a.searchers.split(","):
         for budget in map(int, a.budgets.split(",")):
             mod = treers if a.native else tree
-            searcher = (
-                mod.Coverage(views=views) if name == "coverage" else mod.KL(views=views)
-            )
+            searcher = mod.Coverage(views=views) if name == "coverage" else mod.KL(views=views)
             meter = Meter(m)
             before = srv.stats() if srv else None
             m.fast.profile(True)  # resets the phase clocks
@@ -284,10 +265,7 @@ def main():
             meter.close()
             if srv:  # every step runs on the server: its counts (the native loop makes no Python calls)
                 after = srv.stats()
-                d = {
-                    k: after[k] - before[k]
-                    for k in ("steps", "items", "waited", "wait_s", "joined")
-                }
+                d = {k: after[k] - before[k] for k in ("steps", "items", "waited", "wait_s", "joined")}
                 meter.n["steps"], meter.n["items"] = d["steps"], d["items"]
                 if a.native:
                     meter.n["leaves"], meter.n["calls"] = (
@@ -314,11 +292,7 @@ def main():
                 tree_ms_per_leaf=ms(wall - meter.t["oracle"]),
                 bookkeeping_ms_per_leaf=ms(meter.t["oracle"] - meter.t["fast"]),
                 phase_ms_per_leaf={
-                    k: ms(v)
-                    for k, v in zip(
-                        PHASES, phases.values() if isinstance(phases, dict) else phases
-                    )
-                    if v
+                    k: ms(v) for k, v in zip(PHASES, phases.values() if isinstance(phases, dict) else phases) if v
                 },
                 moves=None if res is None else len(res[0]),
             )

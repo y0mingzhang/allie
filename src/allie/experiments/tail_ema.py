@@ -26,9 +26,7 @@ def main():
     study = ROOT / "results/recipe10x" / study  # or an absolute path
     run = ROOT / "results/pretrain" / run
     pointer = torch.load(run / "last.pt", weights_only=False)
-    state = torch.load(
-        run / pointer["directory"] / "model.pt", map_location="cpu", weights_only=False
-    )
+    state = torch.load(run / pointer["directory"] / "model.pt", map_location="cpu", weights_only=False)
     scratch = Path(tempfile.mkdtemp(dir=os.environ.get("TMPDIR", "/scratch/yimingz3")))
     out = {}
     try:
@@ -59,9 +57,7 @@ def main():
                 cmd += ["--split", "strat", "--batch", 16]
                 subprocess.run([str(c) for c in cmd], check=True, env=env)
                 shutil.rmtree(d)
-                s = json.loads(
-                    (ROOT / "results/lm-eval" / name / "strat-v1.json").read_text()
-                )
+                s = json.loads((ROOT / "results/lm-eval" / name / "strat-v1.json").read_text())
                 out[name] = dict(macro=s["macro"], expert_macro=s["expert_macro"])
                 print(json.dumps({name: out[name]}), flush=True)
     finally:

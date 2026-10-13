@@ -57,9 +57,7 @@ def child(fixed):
     os.kill(os.getpid(), signal.SIGUSR1)
     if not fixed:
         assert seen == [], f"Expected the pinned Triton 3.6 bug, got {seen}"
-        print(
-            json.dumps(dict(mode="unfixed", triton=triton.__version__, swallowed=True))
-        )
+        print(json.dumps(dict(mode="unfixed", triton=triton.__version__, swallowed=True)))
         return
     assert seen == [signal.SIGUSR1], seen
     os.kill(os.getpid(), signal.SIGTERM)

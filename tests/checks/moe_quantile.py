@@ -50,9 +50,7 @@ def main():
     ok &= same
     edges = mm.qb_edges(device).float()
     mid, n = edges[1:-2], moe_kernels.QB_LEVELS
-    key = torch.arange(
-        1, len(edges) - 2, device=device
-    )  # x at an edge: [lo, hi) above 0, (lo, hi] below
+    key = torch.arange(1, len(edges) - 2, device=device)  # x at an edge: [lo, hi) above 0, (lo, hi] below
     want = torch.where(mid < 0, key - 1, key)
     extra = torch.tensor([0.0, -0.0, 1e-30, -1e-30, 32.0, -32.0], device=device)
     same = torch.equal(mm.qb_bin(mid), want) and mm.qb_bin(extra).tolist() == [

@@ -32,9 +32,7 @@ LADDER = {  # family -> [(training FLOPs, tag, run)]
 
 def arrays(folder):
     z = [np.load(f) for f in sorted(folder.glob("[0-9]*[0-9].npz"))]
-    return {
-        k: np.concatenate([x[k] for x in z]) for k in ("index", "ce", "top1", "nodes")
-    }
+    return {k: np.concatenate([x[k] for x in z]) for k in ("index", "ce", "top1", "nodes")}
 
 
 def reference(tag):
@@ -56,9 +54,7 @@ def main():
             cal = dict(np.load(D / tag / "devcal-128.npz"))
             n = min(len(raw["ce"]), len(frozen["ce"]), len(cal["ce"]))
             ix = raw["index"][:n]
-            assert np.array_equal(frozen["index"][:n], ix) and np.array_equal(
-                cal["index"][:n], ix
-            )
+            assert np.array_equal(frozen["index"][:n], ix) and np.array_equal(cal["index"][:n], ix)
             game, e = s[ix, 0], s[ix, 2] == 7
             ref = reference(tag)
             r = dict(
@@ -68,9 +64,7 @@ def main():
                 n=int(n),
                 raw=float(raw["ce"][:n].mean()),
                 raw_acc=float(100 * raw["top1"][:n].mean()),
-                parity=float((raw["ce"][:n] - ref[ix]).mean())
-                if ref is not None
-                else None,
+                parity=float((raw["ce"][:n] - ref[ix]).mean()) if ref is not None else None,
                 nodes=float(frozen["nodes"][:n].mean()),
             )
             for name, x in (("refit", cal), ("frozen", frozen)):
@@ -78,24 +72,16 @@ def main():
                     ce=float(x["ce"][:n].mean()),
                     acc=float(100 * x["top1"][:n].mean()),
                     gain=report.ci(game, raw["ce"][:n] - x["ce"][:n], rng),
-                    gain_2400=report.ci(
-                        game[e], raw["ce"][:n][e] - x["ce"][:n][e], rng
-                    ),
-                    acc_gain=report.ci(
-                        game, 100 * (x["top1"][:n].astype(float) - raw["top1"][:n]), rng
-                    ),
+                    gain_2400=report.ci(game[e], raw["ce"][:n][e] - x["ce"][:n][e], rng),
+                    acc_gain=report.ci(game, 100 * (x["top1"][:n].astype(float) - raw["top1"][:n]), rng),
                 )
             out[tag] = r
-            f = lambda t, fmt="{:+.4f}": (
-                f"{fmt.format(t[0])} [{fmt.format(t[1])}, {fmt.format(t[2])}]"
-            )
+            f = lambda t, fmt="{:+.4f}": f"{fmt.format(t[0])} [{fmt.format(t[1])}, {fmt.format(t[2])}]"
             rows.append(
-                f"| {family} | {f"{flops:.0e}".replace("e+", "e")} | {run} | {r['raw']:.4f} / {r['raw_acc']:.2f} | "
+                f"| {family} | {f'{flops:.0e}'.replace('e+', 'e')} | {run} | {r['raw']:.4f} / {r['raw_acc']:.2f} | "
                 f"{r['refit']['ce']:.4f} / {r['refit']['acc']:.2f} | {f(r['refit']['gain'])} | "
                 f"{f(r['refit']['gain_2400'])} | {f(r['refit']['acc_gain'], '{:+.2f}')} | "
-                f"{f(r['frozen']['gain'])} | "
-                + ("-" if r["parity"] is None else f"{r['parity']:+.4f}")
-                + " |"
+                f"{f(r['frozen']['gain'])} | " + ("-" if r["parity"] is None else f"{r['parity']:+.4f}") + " |"
             )
     head = [
         "| Family | Train FLOPs | Run | Raw CE / acc | 128 sims refit CE / acc | CE gain (refit) | "
@@ -119,11 +105,7 @@ def plot(out):
     ):
         ax.set_facecolor(surface)
         for family, color in hue.items():
-            pts = sorted(
-                (r["flops"], r["refit"][key])
-                for r in out.values()
-                if r["family"] == family
-            )
+            pts = sorted((r["flops"], r["refit"][key]) for r in out.values() if r["family"] == family)
             if not pts:
                 continue
             x = [p[0] for p in pts]

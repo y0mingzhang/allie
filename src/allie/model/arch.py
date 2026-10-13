@@ -77,9 +77,7 @@ def resolve(arch):
     assert not unknown, f"unknown arch keys {sorted(unknown)}"
     retired = {k: v for k, v in arch.items() if k in SHIPPED and v != SHIPPED[k]}
     shipped = {k: SHIPPED[k] for k in retired}
-    assert not retired, (
-        f"retired arch switches {retired}: this code builds only {shipped}"
-    )
+    assert not retired, f"retired arch switches {retired}: this code builds only {shipped}"
     # an MoE config without moe_update balanced by the retired default rule (prop)
     assert not arch.get("moe") or "moe_update" in arch, "MoE configs set moe_update"
     out = DEFAULTS | {k: v for k, v in arch.items() if k in DEFAULTS}

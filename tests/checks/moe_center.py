@@ -37,13 +37,9 @@ def routed_ref(x, up_t, down, k, se, order, offsets, gates, remat=True):
 
 
 def reference(rev):
-    src = subprocess.check_output(
-        ["git", "-C", HERE, "show", f"{rev}:scripts/modded_moe.py"]
-    )
+    src = subprocess.check_output(["git", "-C", HERE, "show", f"{rev}:scripts/modded_moe.py"])
     path = Path(tempfile.mkdtemp()) / "ref_moe.py"
-    path.write_bytes(
-        src.replace(b"allie_moe::", b"ref_moe::")
-    )  # custom op names are global
+    path.write_bytes(src.replace(b"allie_moe::", b"ref_moe::"))  # custom op names are global
     legacy.alias()
     spec = importlib.util.spec_from_file_location("ref_moe", path)
     mod = importlib.util.module_from_spec(spec)
@@ -75,13 +71,8 @@ def main():
     os.environ.setdefault("MASTER_PORT", "29583")
     dist.init_process_group("gloo", rank=0, world_size=1)
     gen = torch.Generator().manual_seed(0)
-    xs = [
-        (torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16)
-        for _ in range(3)
-    ]
-    dys = [
-        torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16) for _ in range(3)
-    ]
+    xs = [(torch.randn(1, 1024, D, generator=gen) + 0.5).to(DEV, torch.bfloat16) for _ in range(3)]
+    dys = [torch.randn(1, 1024, D, generator=gen).to(DEV, torch.bfloat16) for _ in range(3)]
     ok = True
 
     moe_kernels.routed = routed_ref
@@ -94,9 +85,7 @@ def main():
     got = [step(m, x, dy) for m in (old, new) for x, dy in zip(xs, dys)]
     off = all(same(a, b) for a, b in zip(got[:3], got[3:]))
     off &= same(old.state_dict(), new.state_dict())
-    print(
-        f"center off: bitwise {rev}'s MoE over 3 steps (outputs, grads, buffers, state dict): {off}"
-    )
+    print(f"center off: bitwise {rev}'s MoE over 3 steps (outputs, grads, buffers, state dict): {off}")
     ok &= off
 
     beta = 0.9
@@ -122,9 +111,7 @@ def main():
         m(xs[2])
         s = torch.sigmoid((h.float() - m.mu) @ m.router.float().T)
         idx = torch.topk(s + m.bias, K, dim=-1).indices
-        routed = torch.equal(
-            m.load[:E], torch.bincount(idx.flatten(), minlength=E).float()
-        )
+        routed = torch.equal(m.load[:E], torch.bincount(idx.flatten(), minlength=E).float())
     print(f"routing = top-k of sigmoid(W (h - mu)) + bias: {routed}")
     ok &= routed
 
@@ -142,9 +129,7 @@ def main():
     once.rebalance()
     twice.rebalance()
     replay = torch.equal(once.mu, twice.mu)
-    print(
-        f"replay_context over 3 micro-batches (doubled forward, skipped recompute): mu bitwise equal {replay}"
-    )
+    print(f"replay_context over 3 micro-batches (doubled forward, skipped recompute): mu bitwise equal {replay}")
     ok &= replay
     dist.destroy_process_group()
     print("PASS" if ok else "FAIL")

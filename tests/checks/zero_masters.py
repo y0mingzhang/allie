@@ -44,9 +44,7 @@ def patch():
         t.copy_(buf / dist.get_world_size() if op == dist.ReduceOp.AVG else buf)
         return Done() if async_op else None
 
-    def reduce_scatter_tensor(
-        out, inp, op=dist.ReduceOp.SUM, group=None, async_op=False
-    ):
+    def reduce_scatter_tensor(out, inp, op=dist.ReduceOp.SUM, group=None, async_op=False):
         buf = inp.float().clone()
         all_reduce(buf, op)
         out.copy_(buf.chunk(dist.get_world_size())[dist.get_rank()])
@@ -80,9 +78,7 @@ def patch():
     bcast = dist.broadcast
     dist.all_reduce, dist.reduce_scatter_tensor = all_reduce, reduce_scatter_tensor
     dist.all_gather_into_tensor, dist.reduce = all_gather_into_tensor, reduce_to
-    dist.broadcast = lambda t, src, group=None, async_op=False: (
-        bcast(t.view(torch.uint8), src) or Done()
-    )
+    dist.broadcast = lambda t, src, group=None, async_op=False: bcast(t.view(torch.uint8), src) or Done()
     core.polar_express = polar_express
 
 
@@ -103,9 +99,7 @@ def train(model, manager, steps, accum=2):
         for micro in range(accum):
             if micro == accum - 1:
                 manager.activate_hooks(step)
-            g = torch.Generator().manual_seed(
-                1000 * step + 10 * micro + dist.get_rank()
-            )
+            g = torch.Generator().manual_seed(1000 * step + 10 * micro + dist.get_rank())
             loss = 0
             for p in model.parameters():
                 x = (1e-2 * torch.randn(p.shape, generator=g)).bfloat16()
@@ -121,9 +115,7 @@ def check(manager):
     for g in manager.muon_opt.param_groups:
         lo = rank * g["chunk_size"]
         for i, m in enumerate(g.get("master", ())):
-            assert (
-                m.dtype == torch.float32 and g["params"][lo + i].dtype == torch.bfloat16
-            )
+            assert m.dtype == torch.float32 and g["params"][lo + i].dtype == torch.bfloat16
             assert torch.equal(m.bfloat16(), g["params"][lo + i]), g["params"][0].label
     world = dist.get_world_size()
     for p, st in manager.adam_opt.state.items():
@@ -154,11 +146,7 @@ def test_resume(arch):
     assert not any(hasattr(p, "fp32") for p in full.parameters())  # init stash gone
     train(full, full_mgr, range(STEPS))
     init = build(arch)[0]
-    moved = {
-        p.label
-        for p, q in zip(full.parameters(), init.parameters())
-        if not torch.equal(p, q)
-    }
+    moved = {p.label for p, q in zip(full.parameters(), init.parameters()) if not torch.equal(p, q)}
     assert set(mm.MASTER_LABELS) <= moved, moved
     part, part_mgr = build(arch)
     train(part, part_mgr, range(4))
@@ -182,17 +170,13 @@ def test_resume(arch):
 
 
 def worker(rank, world, port):
-    dist.init_process_group(
-        "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
-    )
+    dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world)
     torch.set_num_threads(1)
     patch()
     for arch in (ARCH, ARCH | dict(fp32_small_masters=True)):
         test_resume(arch)
         if rank == 0:
-            print(
-                f"world {world} {arch}: ok ({STEPS} steps, resume at 4, split at {SPLIT})"
-            )
+            print(f"world {world} {arch}: ok ({STEPS} steps, resume at 4, split at {SPLIT})")
     dist.destroy_process_group()
 
 

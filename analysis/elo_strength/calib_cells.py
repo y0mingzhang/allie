@@ -36,6 +36,8 @@ def names():
                 + [f"coverage {n}f b{b:g}" for n in COV for b in BETAS if FILL]
                 + [f"coverage {n}a b{b:g}" for n in COV for b in BETAS if ATANH]
                 + [f"lookahead {c} b{b:g}" for c in CALLS for b in BETAS])  # fmt: skip
+
+
 # ms of one search alone, 4 threads, int8, a 6-CPU preempt node (EPYC 9354; bench/searchcost.py, median
 # of 6 positions); coverage 8 extrapolated
 COST = {("coverage", 8): 200, ("coverage", 32): 741, ("coverage", 128): 2832, ("coverage", 256): 5388,
@@ -189,9 +191,7 @@ def rows(d, coverage, la, ex=(), off=None):
 
         def put(names, P, ce0, r=None, betas=None):
             P = np.atleast_2d(P)
-            x[[col[n] for n in names]] = np.c_[
-                P @ mm.T, -np.log(np.maximum(P[:, h], 1e-12)) - ce0
-            ]
+            x[[col[n] for n in names]] = np.c_[P @ mm.T, -np.log(np.maximum(P[:, h], 1e-12)) - ce0]
             if r is not None:
                 for bt, row in zip(betas, np.c_[P @ mm.T, P[:, h]], strict=True):
                     rung.setdefault(r, {})[bt] = row
@@ -203,12 +203,22 @@ def rows(d, coverage, la, ex=(), off=None):
             put(
                 [f"coverage {n} b{b:g}" for b in BETAS],
                 tilted(lp, dd[f"cov_q{n}"].astype(float)),
-                ce0, str(n), BETAS,
+                ce0,
+                str(n),
+                BETAS,
             )
             if FILL:
-                put([f"coverage {n}f b{b:g}" for b in BETAS], tilted(lp, filled(dd[f"cov_q{n}"], dd["heads"], raw)), ce0)
+                put(
+                    [f"coverage {n}f b{b:g}" for b in BETAS], tilted(lp, filled(dd[f"cov_q{n}"], dd["heads"], raw)), ce0
+                )
             if ATANH:
-                put([f"coverage {n}a b{b:g}" for b in BETAS], tilted(lp, dd[f"cov_q{n}"].astype(float), True), ce0, f"{n}a", BETAS)
+                put(
+                    [f"coverage {n}a b{b:g}" for b in BETAS],
+                    tilted(lp, dd[f"cov_q{n}"].astype(float), True),
+                    ce0,
+                    f"{n}a",
+                    BETAS,
+                )
         if i in la:
             legal, prior, qs = la[i]
             order = {t: k for k, t in enumerate(legal)}
@@ -296,9 +306,7 @@ def score(X, H, elo, human, f, games):
         h0 = H[:, j].mean()
         if cf.METRICS[k] in cf.LOG:
             gm, se = np.log(np.maximum(h0 + gm, 1e-9) / h0), se / h0
-        s = cf.slope(
-            human, f, k, elo
-        )  # the human curve's: gap / slope is + when it plays stronger
+        s = cf.slope(human, f, k, elo)  # the human curve's: gap / slope is + when it plays stronger
         out[:, 2 * j], out[:, 2 * j + 1] = gm / s, np.abs(se / s)
     out[:, 4], out[:, 5] = clustered(X[:, :, 2], games)
     return out
@@ -330,7 +338,13 @@ def describe(name):
     beta = float(p[2][1:]) if len(p) > 2 else None
     kind_ = "coverage" if kind == "capped" else kind
     n = int(budget.rstrip("fa")) if isinstance(budget, str) and budget.rstrip("fa").isdigit() else budget  # 128f: 128's
-    ms = 0 if kind == "offset" else COST.get((kind_, n), round(COST["coverage", 256] / 256 * leaves(str(budget))) if kind_ == "coverage" else 0)
+    ms = (
+        0
+        if kind == "offset"
+        else COST.get(
+            (kind_, n), round(COST["coverage", 256] / 256 * leaves(str(budget))) if kind_ == "coverage" else 0
+        )
+    )
     return kind, budget, beta, ms
 
 
@@ -342,8 +356,16 @@ def main():
     p.add_argument("--offset", help="calib_offset.py's chunk dir: the policy at shifted header ratings, as candidates")
     p.add_argument("--extra", nargs="*", default=[], help="other coverage runs' chunk dirs (cov_q{tag}, cov_p{tag})")
     p.add_argument("--out", default="cells.json")
-    p.add_argument("--search-bullet", action="store_true", help="else bullet plays the policy: a search's seconds exceed its think times")
-    p.add_argument("--ladder", action="append", help="coverage tags by cost, comma-separated (repeatable); default 8,32,128,256,1024")
+    p.add_argument(
+        "--search-bullet",
+        action="store_true",
+        help="else bullet plays the policy: a search's seconds exceed its think times",
+    )
+    p.add_argument(
+        "--ladder",
+        action="append",
+        help="coverage tags by cost, comma-separated (repeatable); default 8,32,128,256,1024",
+    )
     p.add_argument("--atanh", type=float, default=0.0, help="also tilt on arctanh(A Q) (e.g. 0.99): tags 128a, ...")
     p.add_argument("--sim", type=float, default=SIM, help="seconds a coverage simulation, for --think")
     p.add_argument("--think", action="store_true", help="also each beta under the bot's think-time cap (capped T bB)")
@@ -363,7 +385,9 @@ def main():
     names()
     d = Path(a.dir)
     la = lookahead(Path(a.lookahead)) if a.lookahead else {}
-    info, X, H = rows(d, a.coverage, la, [extra(Path(e)) for e in a.extra], offsets(Path(a.offset)) if a.offset else None)
+    info, X, H = rows(
+        d, a.coverage, la, [extra(Path(e)) for e in a.extra], offsets(Path(a.offset)) if a.offset else None
+    )
     present = np.isfinite(X[:, :, 0]).sum(1)
     human = cf.summarize(
         cf.table(
@@ -392,7 +416,9 @@ def main():
             cv = []
             for h in (0, 1):
                 tr, te = sel & (info["half"] == h), sel & (info["half"] != h)
-                ch = select(score(X[tr], H[tr], info["elo"][tr].mean(), human, f, info["game"][tr]), f > 0 or a.search_bullet)
+                ch = select(
+                    score(X[tr], H[tr], info["elo"][tr].mean(), human, f, info["game"][tr]), f > 0 or a.search_bullet
+                )
                 cv.append(
                     (
                         NAMES[ch],

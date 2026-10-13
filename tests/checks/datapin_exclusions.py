@@ -54,11 +54,7 @@ def games(rows):
     out = []
     for r in rows:
         b = np.flatnonzero(r == BOS)
-        out += [
-            r[s:e]
-            for s, e in zip(b, [*b[1:], len(r)])
-            if e - s > 1 and r[e - 1] in (TERM_NORMAL, TERM_OTHER)
-        ]
+        out += [r[s:e] for s, e in zip(b, [*b[1:], len(r)]) if e - s > 1 and r[e - 1] in (TERM_NORMAL, TERM_OTHER)]
     return out
 
 
@@ -130,9 +126,7 @@ def draws(july, spec, golden):
         log.append((int(self.code), hash64(out[0])))
         return out
 
-    new = lambda e: cm.Sampler(
-        "natural", 42, months=[july], exclusions={july: e}, pool_frac=PF, chunk=CHUNK
-    )
+    new = lambda e: cm.Sampler("natural", 42, months=[july], exclusions={july: e}, pool_frac=PF, chunk=CHUNK)
     cm.Games.tokens = spy
     try:
         a = new(spec)
@@ -158,9 +152,7 @@ def draws(july, spec, golden):
         "mask_bites": drawn > 0,
         "same_draws": Counter(got) == Counter(x for x in ref if x[1] not in gold),
         "batch_accepted": bool(batch) and set(batch) <= hashes,
-        "accepted": {
-            datapin.FORMATS[k]: v for k, v in Counter(fmt(c) for c, _ in got).items()
-        },
+        "accepted": {datapin.FORMATS[k]: v for k, v in Counter(fmt(c) for c, _ in got).items()},
     }
 
 

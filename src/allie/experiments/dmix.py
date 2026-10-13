@@ -16,10 +16,7 @@ from scipy.optimize import brentq
 
 from allie.experiments.isoflop import additive
 
-ROOT = (
-    Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
-    / "results/recipe10x"
-)
+ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie")) / "results/recipe10x"
 EVAL = ROOT.parent / "lm-eval"
 
 
@@ -35,9 +32,7 @@ def law(metric):
     if metric in ("move", "expert2400"):
         f = json.loads((ROOT / f"isoflop-v1/fit-{metric}.json").read_text())
         f = f["shared_E"]["fit"]["ours"]
-        return np.array(
-            [np.log(f["E"]), np.log(f["A"]), f["alpha"], np.log(f["B"]), f["beta"]]
-        )
+        return np.array([np.log(f["E"]), np.log(f["A"]), f["alpha"], np.log(f["B"]), f["beta"]])
     pts = []
     for p in sorted((ROOT / "isoflop-v1/results").glob("iso-ours-*.json")):
         r = json.loads(p.read_text())

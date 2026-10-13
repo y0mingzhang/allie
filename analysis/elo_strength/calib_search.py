@@ -22,7 +22,10 @@ from search import Search  # noqa: E402
 from search.native import from_prefix, load  # noqa: E402
 
 # the bot's output calibration and backup (this checkout's; ALLIE_SRC overrides it)
-CALIBRATION = Path(os.environ.get("ALLIE_SRC", Path(__file__).resolve().parents[2] / "src")) / "allie/lichess/calibration-allie-2.0.json"
+CALIBRATION = (
+    Path(os.environ.get("ALLIE_SRC", Path(__file__).resolve().parents[2] / "src"))
+    / "allie/lichess/calibration-allie-2.0.json"
+)
 
 
 class Capture:
@@ -124,15 +127,9 @@ def main():
                     1.25,
                 )
                 heads.append(oracle.root[:, 2350:2416].astype(np.float32))
-            res[f"cov_q{b}"] = np.concatenate([x["values"] for x in r]).astype(
-                np.float32
-            )
-            res[f"cov_p{b}"] = np.concatenate([x["probabilities"] for x in r]).astype(
-                np.float32
-            )
-            res["prior"] = np.concatenate([x["legal_prior"] for x in r]).astype(
-                np.float32
-            )
+            res[f"cov_q{b}"] = np.concatenate([x["values"] for x in r]).astype(np.float32)
+            res[f"cov_p{b}"] = np.concatenate([x["probabilities"] for x in r]).astype(np.float32)
+            res["prior"] = np.concatenate([x["legal_prior"] for x in r]).astype(np.float32)
             res["heads"] = np.concatenate(heads)
             timing[f"cov{b}"] = time.monotonic() - t
         for b in [int(x) for x in a.mcts.split(",") if x]:
@@ -149,11 +146,7 @@ def main():
                  seconds=json.dumps(timing), **res)  # fmt: skip
         tmp.replace(dst)
         print(
-            json.dumps(
-                dict(
-                    chunk=lo, n=len(idx), **{k: round(v, 1) for k, v in timing.items()}
-                )
-            ),
+            json.dumps(dict(chunk=lo, n=len(idx), **{k: round(v, 1) for k, v in timing.items()})),
             flush=True,
         )
 

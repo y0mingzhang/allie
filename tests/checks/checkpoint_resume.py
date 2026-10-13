@@ -57,9 +57,7 @@ def build():
 
 
 def batch(val, step, micro):
-    rows = torch.as_tensor(
-        val.rows(np.array([100 * step + 10 * micro + dist.get_rank()]))
-    )
+    rows = torch.as_tensor(val.rows(np.array([100 * step + 10 * micro + dist.get_rank()])))
     return rows[:, :-1].cuda(), rows[:, 1:].cuda()
 
 
@@ -107,9 +105,7 @@ def recompute(val, checkpointed):
         ORIGINAL
         if checkpointed
         else torch.compiler.disable(
-            lambda module, x, attn_args, blend, ckpt=True: ORIGINAL(
-                module, x, attn_args, blend, ckpt=False
-            )
+            lambda module, x, attn_args, blend, ckpt=True: ORIGINAL(module, x, attn_args, blend, ckpt=False)
         )
     )
     m, mgr, net = build()
@@ -138,9 +134,7 @@ def recompute(val, checkpointed):
 
 def main():
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
-    dist.init_process_group(
-        "nccl", device_id=torch.device("cuda", int(os.environ["LOCAL_RANK"]))
-    )
+    dist.init_process_group("nccl", device_id=torch.device("cuda", int(os.environ["LOCAL_RANK"])))
     torch.set_num_threads(4)
     torch.use_deterministic_algorithms(True)
     torch.backends.cuda.matmul.allow_tf32 = True

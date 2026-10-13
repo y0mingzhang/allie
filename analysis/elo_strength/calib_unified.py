@@ -26,9 +26,7 @@ import calib_fit as cf
 import calib_plotdata as cp
 from allie.lichess.tokens import SECONDS
 
-G = np.exp(
-    np.linspace(np.log(0.02), np.log(64), 33)
-)  # beta grid the fit interpolates in log beta
+G = np.exp(np.linspace(np.log(0.02), np.log(64), 33))  # beta grid the fit interpolates in log beta
 
 
 def tilt_metrics(lp, v, mm, h):
@@ -88,12 +86,7 @@ def load(d, ladder, extras, sim):
                 for e in ex:
                     if i in e and base in e[i][2]:
                         legal, prior, runs = e[i]
-                        perm = np.array(
-                            [
-                                {t: j for j, t in enumerate(legal)}[t]
-                                for t in dd["legal"]
-                            ]
-                        )
+                        perm = np.array([{t: j for j, t in enumerate(legal)}[t] for t in dd["legal"]])
                         vals, lpk = (
                             runs[base][1][perm],
                             np.log(np.maximum(prior[perm], 1e-300)),
@@ -116,9 +109,7 @@ def load(d, ladder, extras, sim):
             tok - 10 if 10 <= tok <= 190 else 0,
             cost,
         )
-        for k in range(
-            K - 1, -1, -1
-        ):  # a rung without values: its draws fall to the next lower one
+        for k in range(K - 1, -1, -1):  # a rung without values: its draws fall to the next lower one
             if not have[k]:
                 w[k] += w[k + 1]
                 w[k + 1] = 0.0
@@ -145,9 +136,7 @@ def mixed(A, beta):
     a = (t - j)[:, None, None]
     n = np.arange(len(beta))[:, None]
     k = np.arange(A["R"].shape[1])[None]
-    rb = (1 - a) * A["R"][n, k, j[:, None]] + a * A["R"][
-        n, k, j[:, None] + 1
-    ]  # [N, K, 3]
+    rb = (1 - a) * A["R"][n, k, j[:, None]] + a * A["R"][n, k, j[:, None] + 1]  # [N, K, 3]
     mix = A["W"][:, :1] * A["base"] + (A["W"][:, 1:, None] * rb).sum(1)
     return np.c_[mix[:, :2], -np.log(np.maximum(mix[:, 2], 1e-12)) - A["ce0"]]
 
@@ -178,9 +167,7 @@ def cell_stats(A, X, sel, human):
             s = sel & (A["f"] == f) & (A["bin"] == b)
             if s.sum() < 100:
                 continue
-            out[f, b] = cc.score(
-                X[s][:, None, :], A["H"][s], A["elo"][s].mean(), human, f, A["game"][s]
-            )[0]
+            out[f, b] = cc.score(X[s][:, None, :], A["H"][s], A["elo"][s].mean(), human, f, A["game"][s])[0]
     return out
 
 
@@ -255,12 +242,7 @@ def report(st, label):
                                    worst_ce=float(max(s[4] for s in v)))  # fmt: skip
     print(
         label,
-        json.dumps(
-            {
-                k: {a: round(b, 4) if isinstance(b, float) else b for a, b in r.items()}
-                for k, r in rows.items()
-            }
-        ),
+        json.dumps({k: {a: round(b, 4) if isinstance(b, float) else b for a, b in r.items()} for k, r in rows.items()}),
     )
     return rows
 
@@ -271,8 +253,15 @@ def main():
     p.add_argument("--ladder", required=True)
     p.add_argument("--extra", nargs="*", default=[])
     p.add_argument("--sim", type=float, default=0.004, help="seconds a leaf (allie.lichess.calibration.COST)")
-    p.add_argument("--margin", type=float, default=0.3, help="seconds a search ends before the think time (calibration.MARGIN)")
-    p.add_argument("--ce", choices=["mean", "cells"], default="mean", help="the cross-entropy bar: on the cells' mean or on every cell")
+    p.add_argument(
+        "--margin", type=float, default=0.3, help="seconds a search ends before the think time (calibration.MARGIN)"
+    )
+    p.add_argument(
+        "--ce",
+        choices=["mean", "cells"],
+        default="mean",
+        help="the cross-entropy bar: on the cells' mean or on every cell",
+    )
     p.add_argument("--ce-z", type=float, default=0.0, help="--ce cells: each cell's gap less this many standard errors")
     p.add_argument(
         "--cells",
@@ -342,9 +331,7 @@ def main():
             if ph is None:
                 print(f"{form}: half {h}: no parameters on the grid hold the cross-entropy bar")
                 break
-            st = cell_stats(
-                A, mixed(A, betas(A, ph, form)), sel & (A["half"] != h), human
-            )
+            st = cell_stats(A, mixed(A, betas(A, ph, form)), sel & (A["half"] != h), human)
             for c, v in st.items():
                 held.setdefault(c, []).append((ph, v))
         else:

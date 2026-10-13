@@ -60,10 +60,7 @@ def _whole(p):
 def _launch(i):
     m = SHARDED[i]
     out = [_whole(p) for p in (m.up, m.down)]
-    works = [
-        dist.all_gather_into_tensor(t, p.detach(), async_op=True)
-        for t, p in zip(out, (m.up, m.down))
-    ]
+    works = [dist.all_gather_into_tensor(t, p.detach(), async_op=True) for t, p in zip(out, (m.up, m.down))]
     return works, *out
 
 

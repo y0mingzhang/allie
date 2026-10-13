@@ -17,9 +17,7 @@ def main():
     K, MODE = int(os.environ["TOPK"]), os.environ["MODE"]
     assert MODE in ("trunc", "renorm") and 0 < K <= 16
     if "--source" in sys.argv:
-        sys.path.insert(
-            0, str(Path(sys.argv[sys.argv.index("--source") + 1]).resolve())
-        )
+        sys.path.insert(0, str(Path(sys.argv[sys.argv.index("--source") + 1]).resolve()))
         import modded_moe as moe_layer
         import modded_smoe as kernels
     else:

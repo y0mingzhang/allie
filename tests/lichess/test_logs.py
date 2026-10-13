@@ -64,11 +64,7 @@ def test_uncaught_thread_errors_are_logged(tmp_path, restore):
     logging.getLogger("allie").info("still logging")
     listener.stop()
     text = path.read_text()
-    assert (
-        "thread game-x died" in text
-        and "ZeroDivisionError" in text
-        and "still logging" in text
-    )
+    assert "thread game-x died" in text and "ZeroDivisionError" in text and "still logging" in text
 
 
 def test_bad_records_do_not_stop_the_log(tmp_path, restore):

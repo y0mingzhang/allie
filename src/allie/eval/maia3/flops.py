@@ -1,4 +1,5 @@
 """Measured matmul FLOPs per scored move for each model (torch FlopCounterMode)."""
+
 import json
 import sys
 
@@ -18,6 +19,7 @@ def maia(name):
     import argparse
     from maia3.model_registry import resolve_model_spec
     from maia3.models import MAIA3Model
+
     spec = resolve_model_spec(name)
     cfg = argparse.Namespace(**spec.config)
     model = MAIA3Model(cfg).eval()
@@ -31,12 +33,13 @@ def maia(name):
 def ours(length):
     from allie.search.model import DenseBackend, load_checkpoint
     from allie.search.board import encode
-    ckpt = (paths.ROOT / "results/pretrain/msh-3e17-model-pf115h-s42/"
-            "checkpoints/step-00004974-298d0686/model.pt")
+
+    ckpt = paths.ROOT / "results/pretrain/msh-3e17-model-pf115h-s42/checkpoints/step-00004974-298d0686/model.pt"
     model, _ = load_checkpoint(ckpt, "cpu")
     model = model.float()
     import chess
     from allie.data.vocab import MOVE_ID
+
     b, moves = chess.Board(), []
     while len(moves) < length - 11 and b.legal_moves.count():
         mv = next(iter(b.legal_moves))
@@ -55,19 +58,22 @@ def main():
     out = {}
     for n in ("maia3-5m", "maia3-23m", "maia3-79m"):
         p, fl = maia(n)
-        out[n] = dict(parameters=p, flops_per_move=fl,
-                      note="one 64-square encoder forward = one move")
+        out[n] = dict(parameters=p, flops_per_move=fl, note="one 64-square encoder forward = one move")
     with np.load(DATA / "games.npz") as z:
         lens = np.diff(z["offsets"]) + 11
     L = int(np.median(lens))
     p, fl, n = ours(L)
     out["ours-129m"] = dict(
-        parameters=p, prefix_tokens=n, flops_whole_game=fl,
+        parameters=p,
+        prefix_tokens=n,
+        flops_whole_game=fl,
         flops_per_move_rescoring=fl / (n - 11),
         flops_per_move_incremental=fl / n,
-        note=("full-prefix teacher-forced rescoring of a median-length blitz game "
-              f"({L} tokens); rescoring divides the whole-game forward by its moves, "
-              "incremental is the per-token cost a KV-cached server pays"),
+        note=(
+            "full-prefix teacher-forced rescoring of a median-length blitz game "
+            f"({L} tokens); rescoring divides the whole-game forward by its moves, "
+            "incremental is the per-token cost a KV-cached server pays"
+        ),
     )
     OUT.write_text(json.dumps(out, indent=2) + "\n")
     print(json.dumps(out, indent=2))

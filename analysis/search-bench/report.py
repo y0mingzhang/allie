@@ -55,9 +55,7 @@ def load(tag):
         files = sorted((DATA / "search" / tag / b).glob("[0-9]*[0-9].npz"))
         if files:
             z = [np.load(f) for f in files]
-            runs["frozen", b] = {
-                k: np.concatenate([x[k] for x in z]) for k in KEYS + ("prefill",)
-            }
+            runs["frozen", b] = {k: np.concatenate([x[k] for x in z]) for k in KEYS + ("prefill",)}
             runs["frozen", b]["seconds"] = np.concatenate(
                 [np.full(len(x["ce"]), x["seconds"] / len(x["ce"])) for x in z]
             )
@@ -79,9 +77,7 @@ def ci(games, x, rng):
 def points(tag, runs, ix):
     label, layers, width = MODEL[tag]
     per_eval = FLOPS[tag]["flops_per_move"] / 1e9
-    attn = (
-        4 * layers * width * (runs["frozen", "legal"]["prefill"] + 1).mean() / 1e9
-    )  # QK + AV, cached token
+    attn = 4 * layers * width * (runs["frozen", "legal"]["prefill"] + 1).mean() / 1e9  # QK + AV, cached token
     pts = {
         ("maia", m): dict(
             label=l,
@@ -95,18 +91,14 @@ def points(tag, runs, ix):
     for (group, b), r in runs.items():
         name = {"legal": "raw", "adaptive": "search Elo-adaptive"}.get(b, f"search {b}")
         if group == "devcal":
-            name = (
-                "raw + dev temperature" if b == "legal" else name + ", dev-calibrated"
-            )
+            name = "raw + dev temperature" if b == "legal" else name + ", dev-calibrated"
         pts[group, b] = dict(
             label=f"Ours {label}, {name}",
             nodes=float(r["nodes"].mean()),
             gflops=(1 + r["nodes"].mean()) * (per_eval + attn),
             ce=r["ce"],
             top1=r["top1"].astype(float),
-            ms=1e3 * runs["frozen", b]["seconds"].mean()
-            if ("frozen", b) in runs
-            else None,
+            ms=1e3 * runs["frozen", b]["seconds"].mean() if ("frozen", b) in runs else None,
         )
     return pts, attn
 
@@ -143,10 +135,7 @@ def table(tag):
             ce=float(p["ce"].mean()),
             acc=float(100 * p["top1"].mean()),
             d_ce={m: ci(game, p["ce"] - pts["maia", m]["ce"], rng) for m in MAIA},
-            d_acc={
-                m: ci(game, 100 * (p["top1"] - pts["maia", m]["top1"]), rng)
-                for m in MAIA
-            },
+            d_acc={m: ci(game, 100 * (p["top1"] - pts["maia", m]["top1"]), rng) for m in MAIA},
             bands={
                 BANDS[c]: dict(
                     ce=ci(game[cell == c], p["ce"][cell == c], rng),
@@ -161,9 +150,7 @@ def table(tag):
             f"{p['ce'][e].mean():.4f} | {100 * p['top1'][e].mean():.2f} | "
             + " | ".join(f(r["d_ce"][m], "{:+.4f}") for m in ("maia3-79m", "maia3-23m"))
             + " | "
-            + " | ".join(
-                f(r["d_acc"][m], "{:+.2f}") for m in ("maia3-79m", "maia3-23m")
-            )
+            + " | ".join(f(r["d_acc"][m], "{:+.2f}") for m in ("maia3-79m", "maia3-23m"))
             + " |"
         )
     lines += [
@@ -193,19 +180,14 @@ def table(tag):
         cheaper = [r for r in ours if r["gflops"] < mm["gflops"]]
         both = [r for r in cheaper if r["ce"] < mm["ce"] and r["acc"] > mm["acc"]]
         if not cheaper:
-            lines.append(
-                f"- {l} ({mm['gflops']:.2f} GFLOPs): no point of ours is cheaper"
-            )
+            lines.append(f"- {l} ({mm['gflops']:.2f} GFLOPs): no point of ours is cheaper")
             continue
         best = min(cheaper, key=lambda r: r["ce"])
         lines.append(
             f"- {l} ({mm['gflops']:.2f} GFLOPs, {mm['ce']:.4f} / {mm['acc']:.2f}%): "
             + (
                 "cheaper with lower CE and higher accuracy: "
-                + "; ".join(
-                    f"{r['label']} ({r['gflops']:.2f}, {r['ce']:.4f} / {r['acc']:.2f}%)"
-                    for r in both
-                )
+                + "; ".join(f"{r['label']} ({r['gflops']:.2f}, {r['ce']:.4f} / {r['acc']:.2f}%)" for r in both)
                 if both
                 else f"none; lowest-CE cheaper point is {best['label']} ({best['gflops']:.2f} GFLOPs, "
                 f"{best['ce']:.4f} / {best['acc']:.2f}%)"
@@ -279,15 +261,9 @@ def plot(results):
                 ("devcal", "-", "dev-calibrated"),
                 ("frozen", "--", "frozen calibration"),
             ):
-                if (
-                    big and tag != results[0][0] and group == "frozen"
-                ):  # big-run figure: references dev-calibrated only
+                if big and tag != results[0][0] and group == "frozen":  # big-run figure: references dev-calibrated only
                     continue
-                keys = [("frozen", "legal")] + [
-                    k
-                    for k in res
-                    if k[0] == group and k[1] not in ("legal", "adaptive")
-                ]
+                keys = [("frozen", "legal")] + [k for k in res if k[0] == group and k[1] not in ("legal", "adaptive")]
                 if len(keys) < 2:
                     continue
                 ax.plot(

@@ -38,9 +38,7 @@ class TailEMA:
         self.seconds = 0.0  # host time in update(), this leg
 
     def due(self, step):
-        return step > self.start and (
-            (step - self.start - 1) % self.every == 0 or step == self.total
-        )
+        return step > self.start and ((step - self.start - 1) % self.every == 0 or step == self.total)
 
     @torch.no_grad()
     def update(self, step):
@@ -49,9 +47,7 @@ class TailEMA:
             return
         t0 = time.monotonic()
         if self.ema is None:  # also a resume that could not restore them
-            self.ema = [
-                [p.detach().to("cpu", torch.float32, copy=True) for _, p in self.mine] for _ in self.horizons
-            ]
+            self.ema = [[p.detach().to("cpu", torch.float32, copy=True) for _, p in self.mine] for _ in self.horizons]
             self.ema_from = self.last = step
             self.seconds += time.monotonic() - t0
             return

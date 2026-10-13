@@ -3,6 +3,7 @@ into a cache keyed by their source, the chess-library header, Python and pybind1
 
 A built module loads without the cache's file lock, and a process's threads load it once: a contended flock
 on an NFS cache waits out the client's retry backoff (30 s a round), which stalled live searches."""
+
 import fcntl
 import hashlib
 import importlib.util
@@ -30,6 +31,7 @@ def _load(kind):
     if kind not in ("tree", "value"):
         raise ValueError("native module must be tree or value")
     import pybind11
+
     source = SOURCE / (kind + ".cpp")
     include = Path(os.environ.get("ALLIE_CHESS_INCLUDE", str(SOURCE / "chess-library")))
     parts = [source.read_bytes(), sys.version.encode(), pybind11.__version__.encode()]
@@ -58,9 +60,23 @@ def build(source, include, cache, target):
         if not target.exists():
             temp = cache / (target.name + f".{os.getpid()}.tmp")
             try:
-                subprocess.run(["c++", "-O3", "-fopenmp", "-std=c++17", "-shared", "-fPIC", str(source),
-                                "-I" + pybind11.get_include(), "-I" + sysconfig.get_path("include"),
-                                "-I" + str(include), "-o", str(temp)], check=True)
+                subprocess.run(
+                    [
+                        "c++",
+                        "-O3",
+                        "-fopenmp",
+                        "-std=c++17",
+                        "-shared",
+                        "-fPIC",
+                        str(source),
+                        "-I" + pybind11.get_include(),
+                        "-I" + sysconfig.get_path("include"),
+                        "-I" + str(include),
+                        "-o",
+                        str(temp),
+                    ],
+                    check=True,
+                )
                 temp.replace(target)
             finally:
                 temp.unlink(missing_ok=True)

@@ -28,9 +28,7 @@ def game(n=80, seed=0):
             moves.append(m.uci())
     tokens = header(180, 2, 1500, 1500) + [MOVE_ID[m] for m in moves]
     clocks = [180 - k for k in range(len(moves))]
-    feats = [[-1] * 3] * (HEADER - 1) + [
-        features(k, 180, 2, clocks) for k in range(len(moves) + 1)
-    ]
+    feats = [[-1] * 3] * (HEADER - 1) + [features(k, 180, 2, clocks) for k in range(len(moves) + 1)]
     boards = [START] * HEADER
     for t in tokens[HEADER:]:
         boards.append(advance(boards[-1], t))
@@ -46,8 +44,9 @@ def traffic(m, b, n):
     """Bytes a step of b games, each n tokens into its cache, reads: every matrix but the
     experts, the experts the batch routes to (expected number of distinct ones), embedding rows,
     and the caches' keys and values."""
-    size = lambda k: m.w[k].numel() * m.w[k].element_size() + (
-        m.scales[k].numel() * m.scales[k].element_size() if k in m.scales else 0
+    size = lambda k: (
+        m.w[k].numel() * m.w[k].element_size()
+        + (m.scales[k].numel() * m.scales[k].element_size() if k in m.scales else 0)
     )
     rows = ("embed", "embed2", "value_embed", "cos", "sin")
     dense = sum(size(k) for k in m.w if k.split(".")[-1] not in ("up", "down") and not k.startswith(rows))
@@ -92,10 +91,7 @@ def main():
             t = time.perf_counter()
             step(
                 m,
-                [
-                    (c, x[0][i : i + 1], x[1][i : i + 1], x[2][i : i + 1])
-                    for c, x in zip(caches, games)
-                ],
+                [(c, x[0][i : i + 1], x[1][i : i + 1], x[2][i : i + 1]) for c, x in zip(caches, games)],
             )
             sync()
             times.append(1000 * (time.perf_counter() - t))
@@ -119,9 +115,7 @@ def main():
         print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=25))
     import resource
 
-    out["max_rss_gb"] = round(
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20, 2
-    )
+    out["max_rss_gb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20, 2)
     print(json.dumps(out))
 
 

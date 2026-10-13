@@ -12,17 +12,12 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import brentq, minimize, minimize_scalar
 
-STUDY = (
-    Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
-    / "results/recipe10x/isoflop-v1"
-)
+STUDY = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie")) / "results/recipe10x/isoflop-v1"
 RECIPES = ("ours", "ref")  # this recipe and the reference it is compared with
 
 
 def load(metric):
-    rows = [
-        json.loads(p.read_text()) for p in sorted((STUDY / "results").glob("*.json"))
-    ]
+    rows = [json.loads(p.read_text()) for p in sorted((STUDY / "results").glob("*.json"))]
     return {
         r: np.array(
             [
@@ -72,11 +67,7 @@ def isoflop(data):
 
 
 def predict(p, n, d):
-    return (
-        np.exp(p[0])
-        + np.exp(p[1]) * (n / 1e7) ** -p[2]
-        + np.exp(p[3]) * (d / 1e8) ** -p[4]
-    )
+    return np.exp(p[0]) + np.exp(p[1]) * (n / 1e7) ** -p[2] + np.exp(p[3]) * (d / 1e8) ** -p[4]
 
 
 def unpack(theta, shared):
@@ -87,15 +78,8 @@ def unpack(theta, shared):
 
 def objective(theta, data, shared, delta=1e-3):
     ps = unpack(theta, shared)
-    r = np.concatenate(
-        [
-            np.log(predict(ps[k], d[:, 0], d[:, 1])) - np.log(d[:, 3])
-            for k, d in data.items()
-        ]
-    )
-    return np.where(
-        np.abs(r) <= delta, 0.5 * r * r, delta * (np.abs(r) - 0.5 * delta)
-    ).sum()
+    r = np.concatenate([np.log(predict(ps[k], d[:, 0], d[:, 1])) - np.log(d[:, 3]) for k, d in data.items()])
+    return np.where(np.abs(r) <= delta, 0.5 * r * r, delta * (np.abs(r) - 0.5 * delta)).sum()
 
 
 def additive(data, shared, starts=None):
@@ -116,9 +100,7 @@ def additive(data, shared, starts=None):
     # unscaled, a warm start (bootstrap) stops where it began and the spread is 5-15x too narrow
     f = lambda t: 1e6 * objective(t, data, shared)
     opts = dict(ftol=1e-15, gtol=1e-12)
-    fits = [
-        minimize(f, s, method="L-BFGS-B", bounds=bounds, options=opts) for s in starts
-    ]
+    fits = [minimize(f, s, method="L-BFGS-B", bounds=bounds, options=opts) for s in starts]
     return min(fits, key=lambda m: m.fun).x
 
 
@@ -143,9 +125,7 @@ def describe(theta, data, shared):
 
 def best_loss(p, c):
     f = lambda x: predict(p, np.exp(x), c / np.exp(x))
-    return minimize_scalar(
-        f, bounds=(np.log(1e4), np.log(c / 1e4)), method="bounded"
-    ).fun
+    return minimize_scalar(f, bounds=(np.log(1e4), np.log(c / 1e4)), method="bounded").fun
 
 
 def multiplier(theta, shared, c):
@@ -162,15 +142,7 @@ def holdout(data, shared):
     ps = unpack(additive(train, shared), shared)
     return {
         r: float(
-            np.sqrt(
-                np.mean(
-                    (
-                        predict(ps[r], d[d[:, 2] == top, 0], d[d[:, 2] == top, 1])
-                        - d[d[:, 2] == top, 3]
-                    )
-                    ** 2
-                )
-            )
+            np.sqrt(np.mean((predict(ps[r], d[d[:, 2] == top, 0], d[d[:, 2] == top, 1]) - d[d[:, 2] == top, 3]) ** 2))
         )
         for r, d in data.items()
     }
@@ -184,29 +156,20 @@ def bootstrap(data, theta, shared, budgets, n, seed=0):
         t = additive(sample, shared, starts=[theta])
         samples.append(
             [
-                *[
-                    v
-                    for p in unpack(t, shared).values()
-                    for v in (np.exp(p[0]), p[2], p[4], p[4] / (p[2] + p[4]))
-                ],
+                *[v for p in unpack(t, shared).values() for v in (np.exp(p[0]), p[2], p[4], p[4] / (p[2] + p[4]))],
                 *[multiplier(t, shared, c) or np.nan for c in budgets],
             ]
         )
     s = np.array(samples, dtype=float)
-    keys = [
-        f"{r}_{k}" for r in RECIPES for k in ("E", "alpha", "beta", "n_opt_exponent")
-    ] + [f"cm_{c:.0e}" for c in budgets]
-    return {
-        k: [float(np.nanpercentile(s[:, i], 5)), float(np.nanpercentile(s[:, i], 95))]
-        for i, k in enumerate(keys)
-    }
+    keys = [f"{r}_{k}" for r in RECIPES for k in ("E", "alpha", "beta", "n_opt_exponent")] + [
+        f"cm_{c:.0e}" for c in budgets
+    ]
+    return {k: [float(np.nanpercentile(s[:, i], 5)), float(np.nanpercentile(s[:, i], 95))] for i, k in enumerate(keys)}
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--metric", choices=("move", "expert2400", "expert2600"), default="move"
-    )
+    p.add_argument("--metric", choices=("move", "expert2400", "expert2600"), default="move")
     p.add_argument("--boot", type=int, default=200)
     a = p.parse_args()
     data = load(a.metric)
@@ -225,9 +188,7 @@ def main():
             multiplier={f"{c:.0e}": multiplier(theta, shared, c) for c in budgets},
         )
         if shared and a.boot:
-            report[key]["bootstrap_90"] = bootstrap(
-                data, theta, shared, budgets, a.boot
-            )
+            report[key]["bootstrap_90"] = bootstrap(data, theta, shared, budgets, a.boot)
     (STUDY / f"fit-{a.metric}.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

@@ -32,15 +32,12 @@ def _moves():
 MOVES = _moves()
 MOVE_ID = {m: MOVE_START + i for i, m in enumerate(MOVES)}
 _sq = lambda f, r: ord(f) - 97 + (int(r) - 1) * 8
-TABLE = [
-    (_sq(m[0], m[1]), _sq(m[2], m[3]), " nbrq".index(m[4]) + 1 if len(m) == 5 else 0)
-    for m in MOVES
-]
+TABLE = [(_sq(m[0], m[1]), _sq(m[2], m[3]), " nbrq".index(m[4]) + 1 if len(m) == 5 else 0) for m in MOVES]
 # squares 0..63 (1-6 white PNBRQK, 7-12 black), white to move, castling rights (1 K, 2 Q, 4 k, 8 q),
 # en-passant file + 1, inside a game
-START = bytes(
-    [4, 2, 3, 5, 6, 3, 2, 4, *[1] * 8, *[0] * 32, *[7] * 8, 10, 8, 9, 11, 12, 9, 8, 10]
-) + bytes([1, 15, 0, 1])
+START = bytes([4, 2, 3, 5, 6, 3, 2, 4, *[1] * 8, *[0] * 32, *[7] * 8, 10, 8, 9, 11, 12, 9, 8, 10]) + bytes(
+    [1, 15, 0, 1]
+)
 CORNERS = ((0, 2), (7, 1), (56, 8), (63, 4))
 
 

@@ -59,9 +59,7 @@ class Captions:
         if t.width > self.WIDE:
             w = re.split(r" (?![^<]*>)", s)  # spaces outside markup tags
             n = len(plain(s))
-            cut = min(
-                range(1, len(w)), key=lambda i: abs(len(plain(" ".join(w[:i]))) - n / 2)
-            )
+            cut = min(range(1, len(w)), key=lambda i: abs(len(plain(" ".join(w[:i]))) - n / 2))
             s = " ".join(w[:cut]) + "\n" + " ".join(w[cut:])
             t = text(s, self.px, self.color, markup=markup, line_spacing=0.9)
         one = text("Hx", self.px).height
@@ -83,9 +81,7 @@ class Captions:
 
     def hold(self, extra=0.0, floor=1.6):
         """Wait until the caption has been up words / wps seconds (at least floor), plus extra."""
-        left = (
-            max(floor, self.words / self.wps) + extra - (self.scene.time - self.since)
-        )
+        left = max(floor, self.words / self.wps) + extra - (self.scene.time - self.since)
         if left > 0.05:
             self.scene.wait(left)
 

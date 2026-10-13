@@ -90,9 +90,7 @@ def patch():
     dist.all_gather_into_tensor = all_gather_into_tensor
 
     def experts(offsets):
-        return torch.repeat_interleave(
-            torch.arange(len(offsets)), offsets.diff(prepend=offsets.new_zeros(1))
-        )
+        return torch.repeat_interleave(torch.arange(len(offsets)), offsets.diff(prepend=offsets.new_zeros(1)))
 
     def mm(a, w):
         return torch.bmm(a.float()[:, None], w.float())[:, 0]
@@ -110,9 +108,7 @@ def patch():
         acc = mm(gated(dy, gates, order), w[experts(offsets)]).to(dy.dtype).float()
         a, b = pre.float().chunk(2, -1)
         s = torch.sigmoid(a)
-        return torch.cat((acc * b * s * (a * (1 - s) + 1), acc * a * s), -1).to(
-            pre.dtype
-        )
+        return torch.cat((acc * b * s * (a * (1 - s) + 1), acc * a * s), -1).to(pre.dtype)
 
     def scatter(x, w, se, order, h, rows=None):
         if rows is not None:
@@ -192,9 +188,7 @@ def same(a, b):
 
 
 def worker(rank, world, port):
-    dist.init_process_group(
-        "gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world
-    )
+    dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{port}", rank=rank, world_size=world)
     torch.set_num_threads(1)
     patch()
     val = Packed(DATA, "val")

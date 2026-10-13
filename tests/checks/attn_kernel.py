@@ -39,9 +39,7 @@ def synthetic(rng, n, length):
             rows[r, pos] = mm.BOS
             pos += int(rng.choice([1, 2, 5, 60, 127, 128, 129, 300, 700, 2000]))
     rows[0, [63, 64, 127, 128, 255, 256, length - 1]] = mm.BOS
-    rows[1] = rng.integers(
-        0, mm.BOS, size=length
-    )  # no game start: the row start splits
+    rows[1] = rng.integers(0, mm.BOS, size=length)  # no game start: the row start splits
     rows[2] = mm.BOS  # every token starts a game
     return rows
 
@@ -63,17 +61,12 @@ def reference(q, k, v, gate, do, docs, window, row):
     t = torch.arange(row, device="cuda")
     for r in range(q.shape[1] // row):
         s = slice(r * row, (r + 1) * row)
-        qq, kk, vv, gg = (
-            None if x is None else x[0, s].float().detach().requires_grad_()
-            for x in (q, k, v, gate)
-        )
+        qq, kk, vv, gg = (None if x is None else x[0, s].float().detach().requires_grad_() for x in (q, k, v, gate))
         d = docs[s]
         allow = (t[None] <= t[:, None]) & (t[:, None] - t[None] <= window)
         allow &= d[:, None] == d[None]
         p = torch.einsum("thd,shd->hts", qq, kk) * SCALE
-        o = torch.einsum(
-            "hts,shd->thd", p.masked_fill(~allow, -torch.inf).softmax(-1), vv
-        )
+        o = torch.einsum("hts,shd->thd", p.masked_fill(~allow, -torch.inf).softmax(-1), vv)
         wrt = (qq, kk, vv) if gate is None else (qq, kk, vv, gg)
         o = o if gate is None else o * gg
         grads = torch.autograd.grad(o, wrt, do[0, s].float())
@@ -107,10 +100,7 @@ def check(rows, windows, what, gated=False):
         ref = reference(q, k, v, g, do, flex.documents, w, row)
         det = all(torch.equal(a, b) for a, b in zip(t, again))
         names = "o dq dk dv" + " dgate" * gated
-        print(
-            f"{what}{' gated' * gated} window {w} ({names} max abs/rel err;"
-            f" triton rerun bitwise {det})"
-        )
+        print(f"{what}{' gated' * gated} window {w} ({names} max abs/rel err; triton rerun bitwise {det})")
         for label, a, b in (
             ("triton-flex", t, f),
             ("triton-fp32", t, ref),
@@ -175,17 +165,11 @@ def check_qkv(rows, window):
         s = slice(r * row, (r + 1) * row)
         rl = [x[0, s].float().detach().requires_grad_() for x in leaves]
         d = flex.documents[s]
-        allow = (
-            (tt[None] <= tt[:, None])
-            & (tt[:, None] - tt[None] <= window)
-            & (d[:, None] == d[None])
-        )
+        allow = (tt[None] <= tt[:, None]) & (tt[:, None] - tt[None] <= window) & (d[:, None] == d[None])
 
         def attend(q, k, v):
             p = torch.einsum("bthd,bshd->bhts", q, k) * SCALE
-            return torch.einsum(
-                "bhts,bshd->bthd", p.masked_fill(~allow, -torch.inf).softmax(-1), v
-            )
+            return torch.einsum("bhts,bshd->bthd", p.masked_fill(~allow, -torch.inf).softmax(-1), v)
 
         y = model_path(
             rl[0][None],
@@ -194,9 +178,7 @@ def check_qkv(rows, window):
             *(x[None] for x in rl[1:]),
             attend,
         )
-        for out, x in zip(
-            ref, (y[0], *torch.autograd.grad(y, rl, dy[0, s].float()[None]))
-        ):
+        for out, x in zip(ref, (y[0], *torch.autograd.grad(y, rl, dy[0, s].float()[None]))):
             out.append(x.detach())
     ref = [torch.cat(x)[None] for x in ref]
     print(f"real qkv-fused window {window} (y dqkv dgate dve dvgate max abs/rel err)")

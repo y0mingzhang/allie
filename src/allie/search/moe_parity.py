@@ -47,15 +47,9 @@ def compare(ref, got, target=None):
         kl_p99=float(np.quantile(kl, 0.99)),
         kl_max=float(kl.max()),
         top1=float((lr.argmax(1) == lg.argmax(1)).mean()),
-        wdl_prob_max=float(
-            np.abs(softmax(ref[:, 2413:2416], 1) - softmax(got[:, 2413:2416], 1)).max()
-        ),
-        seconds_max=float(
-            np.abs(predicted_seconds(ref) - predicted_seconds(got)).max()
-        ),
-        seconds_mean=float(
-            np.abs(predicted_seconds(ref) - predicted_seconds(got)).mean()
-        ),
+        wdl_prob_max=float(np.abs(softmax(ref[:, 2413:2416], 1) - softmax(got[:, 2413:2416], 1)).max()),
+        seconds_max=float(np.abs(predicted_seconds(ref) - predicted_seconds(got)).max()),
+        seconds_mean=float(np.abs(predicted_seconds(ref) - predicted_seconds(got)).mean()),
     )
     if target is not None:
         t = np.asarray(target)
@@ -86,9 +80,7 @@ def main():
         rows = z["rows"][: a.rows].astype(np.int64)
     with np.load(G / "feats.npz") as z:
         feats = z["feats"][: a.rows, :-1].astype(np.int64)
-    inf = torch.load(
-        oracle.checkpoint, map_location="cpu", weights_only=False, mmap=True
-    )["inference"]
+    inf = torch.load(oracle.checkpoint, map_location="cpu", weights_only=False, mmap=True)["inference"]
     ws = (inf["ws_short"] * 128, inf["ws_long"] * 128)
     schedule = mm.core.ForwardScheduleConfig(None, inf["ws_short"], inf["ws_long"])
     net = torch.compile(m, dynamic=False, fullgraph=True)
@@ -113,9 +105,7 @@ def main():
     same = context.same_previous[:, None]
 
     def attend(i, q, k, v):
-        return mm.attention(
-            q[None], k[None], v[None], context, ws[i in long], m.yarn.attn_scale
-        )[0]
+        return mm.attention(q[None], k[None], v[None], context, ws[i in long], m.yarn.attn_scale)[0]
 
     def previous(e):
         return torch.cat((e[:1] * 0, e[:-1])) * same
@@ -146,9 +136,7 @@ def main():
                 games.append((r, int(s), k))
     cuts = [int(rng.integers(11, k - 2)) for _, _, k in games]
     prefixes = [rows[r, s : s + c] for (r, s, _), c in zip(games, cuts)]
-    pfeats = [
-        feats[r, s : s + c].astype(np.float32) for (r, s, _), c in zip(games, cuts)
-    ]
+    pfeats = [feats[r, s : s + c].astype(np.float32) for (r, s, _), c in zip(games, cuts)]
     at = np.array([(r, s + c - 1) for (r, s, _), c in zip(games, cuts)]).T
 
     def run(origins):
@@ -161,16 +149,12 @@ def main():
             live = [i for i, (_, _, k) in enumerate(games) if length[i] < k]
             if not live:
                 break
-            spans = [
-                (games[i][0], games[i][1], games[i][1] + length[i] + 1) for i in live
-            ]
+            spans = [(games[i][0], games[i][1], games[i][1] + length[i] + 1) for i in live]
             lens = np.array([length[i] + 1 for i in live])
             toks = np.array([rows[r, e - 1] for r, _, e in spans])
             ff = np.stack([feats[r, e - 1] for r, _, e in spans]).astype(np.float32)
             bb = np.stack([encode(rows[r, s:e][None])[0, -1] for r, s, e in spans])
-            zz, new = oracle.extend(
-                np.array([rowof[i] for i in live]), toks, lens, ff, bb
-            )
+            zz, new = oracle.extend(np.array([rowof[i] for i in live]), toks, lens, ff, bb)
             chain.extend(spans)
             got.extend(zz)
             for j, i in enumerate(live):
@@ -178,11 +162,7 @@ def main():
         alt, par, toks, lens, ff, bb = [], [], [], [], [], []
         brng = np.random.default_rng(2)
         for i, pre in enumerate(prefixes):
-            legal = [
-                t
-                for t in from_prefix(pre).legal()
-                if t != rows[games[i][0], games[i][1] + cuts[i]]
-            ]
+            legal = [t for t in from_prefix(pre).legal() if t != rows[games[i][0], games[i][1] + cuts[i]]]
             if legal:
                 t = int(brng.choice(legal))
                 q = np.append(pre, t)
@@ -192,9 +172,7 @@ def main():
                 lens.append(len(q))
                 ff.append(pfeats[i][-1])
                 bb.append(encode(q[None])[0, -1])
-        branch, _ = oracle.extend(
-            np.array(par), np.array(toks), np.array(lens), np.stack(ff), np.stack(bb)
-        )
+        branch, _ = oracle.extend(np.array(par), np.array(toks), np.array(lens), np.stack(ff), np.stack(bb))
         return z, chain, np.stack(got), alt, branch
 
     t0 = time.perf_counter()
@@ -214,17 +192,13 @@ def main():
     origins = [r * 1024 + s for r, s, _ in games]
     mz, mchain, mgot, _, _ = run(origins)
     assert mchain == chain
-    report["C_matched_prefill_vs_train"] = compare(
-        ref[at[0], at[1]], mz, rows[at[0], at[1] + 1]
-    )
+    report["C_matched_prefill_vs_train"] = compare(ref[at[0], at[1]], mz, rows[at[0], at[1] + 1])
     report["C_matched_chain_vs_train"] = compare(ref[cr, cc], mgot, target)
     report["C_matched_chain_vs_eager"] = compare(eager[cr, cc], mgot, target)
     # D
     report["D_prefill_vs_train"] = compare(ref[at[0], at[1]], z, rows[at[0], at[1] + 1])
     report["D_chain_vs_train"] = compare(ref[cr, cc], got, target)
-    report["D_scale_train_vs_repacked"] = compare(
-        ref[cr, cc], ref2[cr, cc + SHIFT], target
-    )
+    report["D_scale_train_vs_repacked"] = compare(ref[cr, cc], ref2[cr, cc + SHIFT], target)
     report["D_scale_train_vs_eager"] = compare(ref[cr, cc], eager[cr, cc], target)
     report.update(games=len(games), seconds=seconds, checkpoint=str(oracle.checkpoint), source=a.source,
                   tf32=torch.backends.cuda.matmul.allow_tf32, device=torch.cuda.get_device_name(0))  # fmt: skip

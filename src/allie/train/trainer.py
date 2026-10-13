@@ -86,9 +86,7 @@ def restore(model, state):
     real = 3 * model.num_layers + 5
     pad = weights["scalars"][real:]
     assert (pad == 1).all(), "scalars padding was trained"
-    weights["scalars"] = torch.cat(
-        (weights["scalars"][:real], pad.new_ones(model.scalars.numel() - real))
-    )
+    weights["scalars"] = torch.cat((weights["scalars"][:real], pad.new_ones(model.scalars.numel() - real)))
     model.load_state_dict(weights)
     inference = state["inference"]
     model.split_embed = inference["split_embed"]
@@ -134,10 +132,7 @@ def evaluate(model, manager, rows, batch):
         logits = model(x.flatten(), context, manager.get_forward_args())
         values = logits.flatten(0, 1)[:, 378:2346].float()
         targets = y.flatten()
-        losses = (
-            values.logsumexp(-1)
-            - values.gather(1, (targets - 378).clamp(0, 1967)[:, None])[:, 0]
-        )
+        losses = values.logsumexp(-1) - values.gather(1, (targets - 378).clamp(0, 1967)[:, None])[:, 0]
         valid = (targets >= 378) & (targets < 2346)
         elo = torch.as_tensor(ratings(data), device="cuda").flatten()
         for i, mask in enumerate((valid, valid & (elo >= 2400), valid & (elo >= 2600))):
@@ -148,10 +143,7 @@ def evaluate(model, manager, rows, batch):
     return {
         key: vals[2 * i] / max(1, vals[2 * i + 1])
         for i, key in enumerate(("move_ce", "expert2400_ce", "expert2600_ce"))
-    } | {
-        key: int(vals[2 * i + 1])
-        for i, key in enumerate(("move_count", "expert2400_count", "expert2600_count"))
-    }
+    } | {key: int(vals[2 * i + 1]) for i, key in enumerate(("move_count", "expert2400_count", "expert2600_count"))}
 
 
 def to_gpu(x):
@@ -201,16 +193,12 @@ def continuation(shared, local, args, config, output, pointer):
     assert old["scheduled_steps"] == shared["args"]["steps"]
     assert config["scheduled_steps"] == args["steps"]
     assert 0 < shared["step"] < args["wsd_end_step"] <= args["steps"]
-    assert args["wsd_decay_start"] == -1 or args["wsd_decay_start"] >= shared["step"], (
-        "Cannot change past LR updates"
-    )
+    assert args["wsd_decay_start"] == -1 or args["wsd_decay_start"] >= shared["step"], "Cannot change past LR updates"
     assert shared["tokens"] == local["data"]["seen"] * args["row_tokens"]
     assert shared["step"] <= shared["args"]["wsd_end_step"]
     assert local["manager"]["schedule_step"] == shared["step"] - 1
     assert Path(pointer).resolve().parent != Path(output).resolve()
-    assert not (Path(output) / "last.pt").exists(), (
-        "Continue into a fresh run; use resume thereafter"
-    )
+    assert not (Path(output) / "last.pt").exists(), "Continue into a fresh run; use resume thereafter"
     # Tensor states, moments, gradients, RNG and loader state are unchanged.
     migrated = dict(local, manager=dict(local["manager"], config=dict(config)))
     provenance = dict(
@@ -221,9 +209,7 @@ def continuation(shared, local, args, config, output, pointer):
         parent_config=old,
         parent_source_sha256=shared["source_sha256"],
         previous=shared.get("continuation_provenance"),
-        changed_configuration_fields=["scheduled_steps"]
-        if old["scheduled_steps"] != config["scheduled_steps"]
-        else [],
+        changed_configuration_fields=["scheduled_steps"] if old["scheduled_steps"] != config["scheduled_steps"] else [],
         accounting="Inherited tokens/model FLOPs include the already-paid prefix; new allocation elapsed time starts at zero.",
     )
     return migrated, provenance
@@ -335,9 +321,7 @@ def main():
         default=0,
         help="hard-link the first model.pt at or after each multiple of this step into kept/ (never pruned)",
     )
-    p.add_argument(
-        "--keep-model-dir", help="move the kept copies to DIR/NAME (another filesystem)"
-    )
+    p.add_argument("--keep-model-dir", help="move the kept copies to DIR/NAME (another filesystem)")
     p.add_argument("--val-rows", type=int, default=1024)
     p.add_argument("--max-seconds", type=int, default=3600)
     p.add_argument("--stop-after", type=int, default=0)
@@ -369,15 +353,9 @@ def main():
     p.add_argument("--mix", required=True, help="data.mix policy")
     p.add_argument("--mix-stores", default="", help="comma-separated data-v1 stores")
     p.add_argument("--mix-pool-frac", type=float, default=1.0)
-    p.add_argument(
-        "--mix-history", default="", help="all-history bucket counts for repetition"
-    )
-    p.add_argument(
-        "--mix-months", default="", help="comma-separated month dirs (else all built)"
-    )
-    p.add_argument(
-        "--mix-exclusions", default="", help="a data pin whose exclusions to honour"
-    )
+    p.add_argument("--mix-history", default="", help="all-history bucket counts for repetition")
+    p.add_argument("--mix-months", default="", help="comma-separated month dirs (else all built)")
+    p.add_argument("--mix-exclusions", default="", help="a data pin whose exclusions to honour")
     p.add_argument(
         "--attn-kernel",
         action="store_true",
@@ -439,9 +417,7 @@ def main():
         help="step NorMuon (expert shards first) before Adam, so the backward's last reduces finish under it "
         "(bitwise: disjoint parameters)",
     )
-    p.add_argument(
-        "--arch", default="{}", help="architecture switches, JSON (model.arch.DEFAULTS)"
-    )
+    p.add_argument("--arch", default="{}", help="architecture switches, JSON (model.arch.DEFAULTS)")
     p.add_argument(
         "--clock-feats",
         type=int,
@@ -449,15 +425,11 @@ def main():
         choices=(0, 1, 3),
         help="continuous clock features: 1 = own time left, 3 = + opponent's, previous think",
     )
-    p.add_argument(
-        "--input-lr-mul", type=float, default=75.0, help="clock feature table lr mul"
-    )
+    p.add_argument("--input-lr-mul", type=float, default=75.0, help="clock feature table lr mul")
     p.add_argument("--aux-time", type=float, default=0.0, help="think-time CE weight")
     p.add_argument("--aux-wdl", type=float, default=0.0, help="game-outcome CE weight")
     p.add_argument("--deterministic", action="store_true")
-    p.add_argument(
-        "--wsd-schedule", required=True, help="Frozen JSON absolute schedule"
-    )
+    p.add_argument("--wsd-schedule", required=True, help="Frozen JSON absolute schedule")
     p.add_argument("--wsd-end-step", type=int, required=True)
     p.add_argument("--wsd-decay-start", type=int, default=-1)
     p.add_argument("--wsd-fork-from")
@@ -493,9 +465,7 @@ def main():
     assert 0 < a.wsd_end_step <= a.steps
     assert sum(bool(x) for x in (a.resume, a.wsd_fork_from, a.wsd_continue_from)) <= 1
     assert a.resume or not (a.resume_new_source or a.resume_retune)
-    fork_steps = (
-        set(map(int, a.wsd_fork_steps.split(","))) if a.wsd_fork_steps else set()
-    )
+    fork_steps = set(map(int, a.wsd_fork_steps.split(","))) if a.wsd_fork_steps else set()
     assert all(0 < s <= a.wsd_end_step for s in fork_steps)
     if a.wsd_decay_start >= 0:
         assert schedule.warmup_steps <= a.wsd_decay_start < a.wsd_end_step
@@ -606,16 +576,13 @@ def main():
         pointer = torch.load(load_path, weights_only=False, map_location="cpu")
         assert pointer["format"] == "allie-modded-medium-1"
         directory = Path(load_path).resolve().parent / pointer["directory"]
-        shared = torch.load(
-            directory / "model.pt", weights_only=False, map_location="cpu", mmap=True
-        )
-        local = torch.load(
-            directory / f"rank{rank}.pt", weights_only=False, map_location="cpu"
-        )
+        shared = torch.load(directory / "model.pt", weights_only=False, map_location="cpu", mmap=True)
+        local = torch.load(directory / f"rank{rank}.pt", weights_only=False, map_location="cpu")
         source_changes = shared.get("source_changes", [])
         # retune rewrites the rank state's lr_scale and loads its sampler state under another policy: both the parent's
         assert not a.resume_retune or (local["manager"]["config"], local["data"]["policy"]) == (
-            shared["config"], shared["args"]["mix"]
+            shared["config"],
+            shared["args"]["mix"],
         ), "rank state is not the checkpoint's"
         for key in SAME:
             old, new = shared["args"][key], vars(a)[key]
@@ -627,13 +594,9 @@ def main():
                 same = key == "lr_scale" or same_until(old, new, frac)
                 source_changes = [*source_changes, dict(step=shared["step"], changed=key, parent=old, now=new)]
             assert same, f"Resume changes {key}"
-        assert not shared["args"].get("kd_teacher"), (
-            "a distillation run: resume it with the trainer that trained it"
-        )
+        assert not shared["args"].get("kd_teacher"), "a distillation run: resume it with the trainer that trained it"
         for key, default in SAME_SINCE.items():
-            assert shared["args"].get(key, default) == vars(a).get(key, default), (
-                f"Resume changes {key}"
-            )
+            assert shared["args"].get(key, default) == vars(a).get(key, default), f"Resume changes {key}"
         old_row = shared["args"].get("row_tokens", 1024)
         assert old_row == a.row_tokens, "Resume changes row_tokens"
         if shared["source_sha256"] != sources or shared["args"]["arch"] != a.arch:
@@ -649,9 +612,7 @@ def main():
             ]
             # the rank state is the parent's (whose arch differs from this run's only as migratable admits,
             # checked through args.arch above): take this run's arch, the rest stays asserted on load
-            assert local["manager"]["config"] == shared["config"], (
-                "Rank/model configuration mismatch"
-            )
+            assert local["manager"]["config"] == shared["config"], "Rank/model configuration mismatch"
             local["manager"]["config"] = dict(local["manager"]["config"], arch=cfg.arch)
             first = [model_arch.resolve(x)["moe_router_center_first"] for x in (shared["config"]["arch"], cfg.arch)]
             if first[0] != first[1]:
@@ -660,26 +621,16 @@ def main():
                 shared["model"] = centre_more(model, shared["model"], first[0])
         if shared["args"]["lr_scale"] != a.lr_scale:  # --resume-retune, admitted above
             manager.retune(local["manager"])
-        assert shared["runtime"] == runtime, (
-            "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
-        )
+        assert shared["runtime"] == runtime, "Exact continuation requires the same PyTorch/Triton/CUDA runtime"
         if a.wsd_continue_from:
-            local, continuation_provenance = continuation(
-                shared, local, vars(a), asdict(cfg), out, load_path
-            )
+            local, continuation_provenance = continuation(shared, local, vars(a), asdict(cfg), out, load_path)
         else:
             assert shared["args"]["steps"] == a.steps, "Resume changes steps"
             continuation_provenance = shared.get("continuation_provenance")
             if a.wsd_fork_from:
-                assert shared["args"]["wsd_decay_start"] == -1, (
-                    "Only stable mainlines can be forked"
-                )
-                assert shared["step"] == a.wsd_decay_start, (
-                    "Fork must begin at its exact decay boundary"
-                )
-                assert not (out / "last.pt").exists(), (
-                    "Cannot fork over an existing run"
-                )
+                assert shared["args"]["wsd_decay_start"] == -1, "Only stable mainlines can be forked"
+                assert shared["step"] == a.wsd_decay_start, "Fork must begin at its exact decay boundary"
+                assert not (out / "last.pt").exists(), "Cannot fork over an existing run"
                 assert Path(load_path).resolve().parent != out.resolve()
             else:
                 for key in (
@@ -726,10 +677,7 @@ def main():
         args=vars(a),
         config=config_dict(cfg),
         world_size=world,
-        parameters=sum(
-            p.numel() * (world if getattr(p, "local", False) else 1)
-            for p in model.parameters()
-        ),
+        parameters=sum(p.numel() * (world if getattr(p, "local", False) else 1) for p in model.parameters()),
         source_sha256=sources,
         runtime=runtime,
         dataset=json.loads((ROOT / "results/original-data.json").read_text()),
@@ -746,9 +694,7 @@ def main():
         gradient_normalization="Global summed objective /8, matching upstream fixed grad_accum_steps=8/world_size; physical microbatch accumulation does not change normalization",
     )
     if rank == 0:
-        (out / ("resume-config.json" if a.resume else "config.json")).write_text(
-            json.dumps(metadata, indent=2) + "\n"
-        )
+        (out / ("resume-config.json" if a.resume else "config.json")).write_text(json.dumps(metadata, indent=2) + "\n")
         print(json.dumps(metadata | {"val_indices": len(val_idx)}), flush=True)
 
     # checkpoints are written from a thread; pointers move once every rank's files are durable
@@ -877,8 +823,7 @@ def main():
         if a.profile and index + 1 == a.profile:
             shapes = bool(os.environ.get("ALLIE_SHAPES"))
             prof = torch.profiler.profile(
-                activities=[torch.profiler.ProfilerActivity.CUDA]
-                + [torch.profiler.ProfilerActivity.CPU] * shapes,
+                activities=[torch.profiler.ProfilerActivity.CUDA] + [torch.profiler.ProfilerActivity.CPU] * shapes,
                 record_shapes=shapes,
             )
             prof.__enter__()
@@ -887,9 +832,7 @@ def main():
         assert accum * world * a.micro_batch * a.row_tokens == manager.batch_size > 0
         for micro in range(accum):
             rows = train.batch(a.micro_batch, rank, world)
-            flops_local += useful_flops(
-                rows, cfg, manager.ws_short * 128, manager.ws_long * 128
-            )
+            flops_local += useful_flops(rows, cfg, manager.ws_short * 128, manager.ws_long * 128)
             data = to_gpu(rows)
             x, y = data[:, :-1], data[:, 1:]
             context = make_context(
@@ -911,14 +854,9 @@ def main():
                 feat_seq=feat,
             )
             mask = to_gpu(train.last["mask"][:, 1:])
-            loss, primary, count = move_losses(
-                logits, x, y, context, manager.mtp_weights, mask
-            )
+            loss, primary, count = move_losses(logits, x, y, context, manager.mtp_weights, mask)
             if aux:
-                t, w = (
-                    to_gpu(train.last[k][:, :-1].astype(np.int64)).flatten()
-                    for k in ("time", "wdl")
-                )
+                t, w = (to_gpu(train.last[k][:, :-1].astype(np.int64)).flatten() for k in ("time", "wdl"))
                 parts = aux_losses(logits, t, w, mask.flatten())
                 loss = loss + a.aux_time * parts[0] + a.aux_wdl * parts[2]
                 aux_sum += torch.stack([p.detach().float() for p in parts])
@@ -944,9 +882,7 @@ def main():
             prof.__exit__(None, None, None)
             if rank == 0:
                 print(
-                    prof.key_averages().table(
-                        sort_by="self_cuda_time_total", row_limit=40
-                    ),
+                    prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=40),
                     flush=True,
                 )
                 if os.environ.get("ALLIE_TRACE"):
@@ -1021,10 +957,7 @@ def main():
             stop_code = (
                 2
                 if termination[0]
-                else int(
-                    time.monotonic() - start >= a.max_seconds
-                    or (a.stop_after and step >= a.stop_after)
-                )
+                else int(time.monotonic() - start >= a.max_seconds or (a.stop_after and step >= a.stop_after))
             )
             flag = torch.tensor(stop_code, device="cpu")
             dist.all_reduce(flag, op=dist.ReduceOp.MAX, group=cpu)
@@ -1032,17 +965,13 @@ def main():
         if stop_code and os.environ.get("ALLIE_NO_SAVE"):  # throughput probes
             break
         metrics = None
-        if stop_code != 2 and (
-            step % a.eval_every == 0 or step == total_steps or stop_code
-        ):
+        if stop_code != 2 and (step % a.eval_every == 0 or step == total_steps or stop_code):
             total_flops = torch.tensor(flops_local, device="cuda", dtype=torch.float64)
             dist.all_reduce(total_flops)
             if sharded and rank:
                 evaluate(net, manager, vrows, a.micro_batch * a.row_tokens // 1024)
             if rank == 0:
-                metrics = evaluate(
-                    net, manager, vrows, a.micro_batch * a.row_tokens // 1024
-                )
+                metrics = evaluate(net, manager, vrows, a.micro_batch * a.row_tokens // 1024)
                 best = min(best, metrics["move_ce"])
                 append(
                     "validation.jsonl",

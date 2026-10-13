@@ -31,9 +31,7 @@ TGRID = np.exp(np.linspace(np.log(0.3), np.log(2.0), 25))
 K = [cf.METRICS.index(m) for m in ("accuracy", "blunder", "top1")]
 FIT = (0, 1)  # of K: accuracy and blunder rate
 NO_BULLET = False  # --no-bullet-search: N = 0 in bullet
-HW = (
-    np.inf
-)  # --hw: at most this many simulations per predicted second (the live bot's speed)
+HW = np.inf  # --hw: at most this many simulations per predicted second (the live bot's speed)
 
 
 def precompute(d, dirs=("search-human", "search-human-256")):
@@ -45,18 +43,12 @@ def precompute(d, dirs=("search-human", "search-human-256")):
     out = {k: [] for k in ("f", "bin", "elo", "half", "think", "human", "grid", "raw", "clock")}
     for i, dd in dists.items():
         cps, m = mpv.get(i), meta[i]
-        if (
-            cps is None
-            or f"cov_p{LADDER[-1]}" not in dd
-            or set(dd["legal"].tolist()) != set(cps)
-        ):
+        if cps is None or f"cov_p{LADDER[-1]}" not in dd or set(dd["legal"].tolist()) != set(cps):
             continue
         mm = cf.move_metrics([cps[t] for t in dd["legal"]])[K]
         mm = np.where(np.isnan(mm), 0, mm)
         logs = [np.log(np.maximum(dd["prior"].astype(float), 1e-30))]
-        logs += [
-            np.log(np.maximum(dd[f"cov_p{n}"].astype(float), 1e-30)) for n in LADDER[1:]
-        ]
+        logs += [np.log(np.maximum(dd[f"cov_p{n}"].astype(float), 1e-30)) for n in LADDER[1:]]
         z = np.stack(logs)[None] / TGRID[:, None, None]  # [T, ladder, moves]
         p = np.exp(z - z.max(-1, keepdims=True))
         p /= p.sum(-1, keepdims=True)
@@ -123,7 +115,9 @@ def gaps(A, v, keep):
     ids = np.where(keep, A["ids"], -1)
     m = ids >= 0
     ids = ids[m]
-    dv = np.concatenate([v[m][:, : len(K)] - A["human"][m], (-np.log(np.maximum(v[m][:, -1], 1e-12)) - A["raw"][m])[:, None]], 1)
+    dv = np.concatenate(
+        [v[m][:, : len(K)] - A["human"][m], (-np.log(np.maximum(v[m][:, -1], 1e-12)) - A["raw"][m])[:, None]], 1
+    )
     n = np.bincount(ids, minlength=len(BINS)).astype(float)
     s1 = np.stack([np.bincount(ids, dv[:, j], len(BINS)) for j in range(dv.shape[1])], 1)
     s2 = np.stack([np.bincount(ids, dv[:, j] ** 2, len(BINS)) for j in range(dv.shape[1])], 1)
@@ -184,9 +178,7 @@ def report(gp):
 
 
 GRIDS = {
-    "temp0": dict(
-        tau0=[0.0], tau=np.linspace(-1.5, 0.5, 41), k=[0], gamma=[0.0], cap=[256]
-    ),
+    "temp0": dict(tau0=[0.0], tau=np.linspace(-1.5, 0.5, 41), k=[0], gamma=[0.0], cap=[256]),
     "temp": dict(
         tau0=np.linspace(-0.6, 0.3, 19),
         tau=np.linspace(-1.5, 0.5, 41),
@@ -231,7 +223,9 @@ GRIDS = {
 def fit(A, family, keep):
     best = (np.inf, None)
     g = GRIDS[family]
-    for par in itertools.product(g["tau0"], g["tau"], g["k"], g["gamma"], g["cap"], g.get("x0", [None]), g.get("alpha", [1.0])):
+    for par in itertools.product(
+        g["tau0"], g["tau"], g["k"], g["gamma"], g["cap"], g.get("x0", [None]), g.get("alpha", [1.0])
+    ):
         c = chi2(gaps(A, values(A, *par), keep))
         if c < best[0]:
             best = (c, par)
@@ -245,7 +239,9 @@ def main():
     p.add_argument("--out", default="rule.json")
     p.add_argument("--no-bullet-search", action="store_true")
     p.add_argument("--dists", default="search-human,search-human-256", help="search output dirs")
-    p.add_argument("--ce-weight", type=float, default=0.0, help="penalty on cells whose cross-entropy exceeds the raw policy's")
+    p.add_argument(
+        "--ce-weight", type=float, default=0.0, help="penalty on cells whose cross-entropy exceeds the raw policy's"
+    )
     p.add_argument(
         "--hw",
         type=float,
@@ -284,17 +280,12 @@ def main():
     for f in range(4):
         print(
             f"  {cf.FORMATS[f]}: "
-            + " ".join(
-                f"{b}:{((A['f'] == f) & (A['bin'] == b)).sum()}"
-                for b in range(800, 2601, 200)
-            )
+            + " ".join(f"{b}:{((A['f'] == f) & (A['bin'] == b)).sum()}" for b in range(800, 2601, 200))
         )
     out = {}
     prepare(A, human)
     base = gaps(A, values(A, 0, 0, 0, 0, 256), np.ones(len(A["elo"]), bool))
-    out["current"] = dict(
-        params=(0, 0, 0, 0, 256), chi2=chi2(base), report=report(base)
-    )
+    out["current"] = dict(params=(0, 0, 0, 0, 256), chi2=chi2(base), report=report(base))
     print("current (T = 1, no search):", json.dumps(out["current"]["report"]), flush=True)
     for fam in a.families.split(","):
         res = {}
@@ -320,7 +311,10 @@ def main():
         sc = [sum((r[j][0] / r[j][1]) ** 2 for r in gaps(A, values(A, *res[h]["params"]), A["half"] != h).values() for j in FIT)
               for h in (0, 1)]  # fmt: skip
         res["strength_cv_chi2"] = float(sum(sc))
-        print(f"       strength-only cross-validated chi2 {sum(sc):7.0f}; cross-entropy vs raw: {json.dumps(res['all']['ce'])}", flush=True)
+        print(
+            f"       strength-only cross-validated chi2 {sum(sc):7.0f}; cross-entropy vs raw: {json.dumps(res['all']['ce'])}",
+            flush=True,
+        )
     (d / a.out).write_text(json.dumps(out, indent=1) + "\n")
 
 

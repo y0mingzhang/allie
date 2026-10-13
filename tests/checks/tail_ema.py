@@ -72,9 +72,7 @@ def run(rank, world, out, steps, state=None, every=EVERY, total=TOTAL):
     if steps == total:
         tail.write(out, total)
     s = tail.state_dict()
-    return (
-        None if s is None else s | dict(ema=[[t.clone() for t in e] for e in s["ema"]])
-    )
+    return None if s is None else s | dict(ema=[[t.clone() for t in e] for e in s["ema"]])
 
 
 def steps_done(state):
@@ -159,9 +157,7 @@ def worker(rank, world, port, out):
                 assert torch.allclose(w.float(), v.to(dtypes[k]).float(), **tol), k
             back = torch.load(resumed / f"tail-ema-{f:g}.pt", weights_only=False)
             assert back["ema_from"] == window
-            assert all(
-                torch.equal(back["ema"][k], got["ema"][k]) for k in got["ema"]
-            ), "resume not exact"
+            assert all(torch.equal(back["ema"][k], got["ema"][k]) for k in got["ema"]), "resume not exact"
             again = torch.load(restarted / f"tail-ema-{f:g}.pt", weights_only=False)
             assert again["ema_from"] == 19 != again["window_from"], again["ema_from"]
         print(f"world {world}: PASS", flush=True)

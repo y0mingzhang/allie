@@ -65,9 +65,7 @@ def cell(code):
     src, fmt, hi = code // 100000, code // 10000 % 10 - 1, code // 100 % 100 * 100
     if src:
         return "otb" if src in cm.OTB else "engine"
-    return (
-        f"{NAMES[fmt]}/{BANDS[np.searchsorted((1400, 2000, 2400), hi, side='right')]}"
-    )
+    return f"{NAMES[fmt]}/{BANDS[np.searchsorted((1400, 2000, 2400), hi, side='right')]}"
 
 
 def weights(s, t, rng):
@@ -134,9 +132,7 @@ def shares(s, chunks, seed):
             ok &= old == 0
         elif recent + old >= 400:
             ok &= abs(frac[c] - p) <= 4 * np.sqrt(p * (1 - p) / (recent + old)) + 0.01
-    return dict(
-        cells_within_5sigma=bool(within), recent_frac=frac, recent_frac_ok=bool(ok)
-    )
+    return dict(cells_within_5sigma=bool(within), recent_frac=frac, recent_frac_ok=bool(ok))
 
 
 def strip(state):
@@ -173,9 +169,7 @@ def run(policy, kw):
     except ValueError:
         late = True
     recent = [m >= SINCE for code, m in shards if code in a.split]
-    return dict(
-        before_bitwise=before, switch_bitwise=after, tail_bites=bites, late_refused=late
-    ), recent
+    return dict(before_bitwise=before, switch_bitwise=after, tail_bites=bites, late_refused=late), recent
 
 
 def main():
@@ -199,12 +193,8 @@ def main():
         )
         r |= shares(s, 2000, 1)
         checks, recent = run(policy, kw)
-        r |= checks | dict(
-            tail_split_shards=dict(recent=sum(recent), old=len(recent) - sum(recent))
-        )
-        r["tail_shards_ok"] = bool(recent) and (
-            all(recent) if name == "hard" else not all(recent) and any(recent)
-        )
+        r |= checks | dict(tail_split_shards=dict(recent=sum(recent), old=len(recent) - sum(recent)))
+        r["tail_shards_ok"] = bool(recent) and (all(recent) if name == "hard" else not all(recent) and any(recent))
         out[name] = r
     print(json.dumps(out, indent=1))
     flags = lambda r: [v for k, v in r.items() if isinstance(v, bool)]
