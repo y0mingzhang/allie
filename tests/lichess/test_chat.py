@@ -112,14 +112,19 @@ def test_clean_and_played():
         ("Nice! \u25ca", "Nice!"),
         ("Fair \u200bgame \U0001f642", "Fair game"),
         ("I'm worse now.'s the pattern, but here", "I'm worse now."),
+        ("Nice game.Me too!", "Nice game. Me too!"),
+        ("Strong try. \u00f0\u0178\u2122\u201a", "Strong try."),
+        ("Nice rook lift.','speak':true", "Nice rook lift."),
     ):
         assert clean(junk) == want, junk
     for fine in ("e.g. a quiet move.", "Nice. 1.e4 e5 2.Nf3", "Wait... what a move!", "\u00a1Buena partida!",
-                 "Nice game. I liked Nf3", "Thanks, you too :)"):  # fmt: skip
+                 "Nice game. I liked Nf3", "Thanks, you too :)", "Your 15...Qh4 was strong", "(Nice move.)",
+                 "\u4f60\u597d!\u6211\u662fAllie", "Caf\u00e9 time, \u00a1ol\u00e9!"):  # fmt: skip
         assert clean(fine) == fine
     assert chat.repeats("Thanks for the game, Bob. Nice fight!", ["Thanks for the game, Ann."])
     assert chat.repeats("Sharp endgame. Good luck next!", ["Fun one. Good luck next!"])
     assert not chat.repeats("A sharp fight today.", ["Thanks for the game."]) and not chat.repeats("gg", ["gg"])
+    assert not chat.repeats("This is the Sicilian.", ["This is the London."])  # stopwords only
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
     for t in (
         "why did you say gg?",
@@ -314,6 +319,11 @@ def test_unprompted_lines_vary_and_name_played_moves(engine, tmp_path):
     h.chatter(m).talked = True
     h.feed(h.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
     assert len(m.calls) == 2 and h.posts == []  # an unplayed move
+    m.text = "I liked Nf3 in that spot. " + "The middlegame was long and full of tension for both sides. " * 3
+    k = Game(engine, opp="split", hello="", p_end=1, min_plies=2, linger=5)
+    k.chatter(m).talked = True
+    k.feed(k.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
+    assert len(m.calls) == 3 and k.posts == []  # never the second half alone
     m.text = "Maybe Nf3 was better."
     start = time.monotonic()
     h.feed(h.say("what should I have played?"))

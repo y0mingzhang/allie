@@ -232,7 +232,7 @@ class Bot:
                         feed.abandon()
                     log.warning("game %s stream: %s; retry in %d s", gid, e, backoff)
                     self.stopped.wait(backoff)
-                    backoff = min(2 * backoff, 30)
+                    backoff = min(2 * backoff, 5 if match.to_move() else 30)  # its clock may be running
                 except Exception:
                     if feed:
                         feed.abandon()
@@ -284,8 +284,9 @@ class Match:
                 self.on_state(event)
             case "opponentGone":
                 self.on_gone(event)
-            case "chatLine" if (event.get("username") or "").lower() not in (self.bot.me, "lichess"):
-                self.chatted = time.monotonic()
+            case "chatLine" if event.get("room") == "player":
+                if (event.get("username") or "").lower() not in (self.bot.me, "lichess"):
+                    self.chatted = time.monotonic()
 
     def on_full(self, event):
         play = self.bot.config.play
@@ -336,7 +337,7 @@ class Match:
         the opponent's draw offer, decide the move, and send it once its think time is up. An offer is answered
         only before the bot moves: after a move, Lichess has declined it, and a yes would offer a draw."""
         s = self.state
-        if self.over or s is None:
+        if self.over or self.ended or s is None:
             return
         game, play, n = self.game, self.bot.config.play, len(self.game.moves)
         clock = (s["wtime"] if self.white else s["btime"]) / 1000
@@ -357,7 +358,8 @@ class Match:
             if accept:
                 self.due, self.moved, self.sent = None, n, (time.monotonic(), n, False)
                 return
-        if self.due is None and not self.decide(s, clock):
+        if self.due is None:  # then back to the stream: events that came during the search go first
+            self.decide(s, clock)
             return
         when, d, _ = self.due
         if time.monotonic() < when:
@@ -372,8 +374,7 @@ class Match:
             self.due = None
 
     def decide(self, s, clock):
-        """The bot's move here, due its think time after the position arrived; or its resignation. Whether a
-        move is due."""
+        """The bot's move here, due its think time after the position arrived; or its resignation."""
         game, play, n = self.game, self.bot.config.play, len(self.game.moves)
         start = time.monotonic()
         try:
@@ -398,9 +399,8 @@ class Match:
         if d.resign:
             self.call(self.bot.client.resign, self.gid)
             self.moved, self.sent = n, (time.monotonic(), n, False)
-            return False
+            return
         self.due = (self.since + d.think, d, s["moves"])
-        return True
 
     def wait(self):
         """Seconds the game thread may wait for an event: until the move is due, at most one (tick())."""

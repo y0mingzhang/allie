@@ -70,7 +70,7 @@ MUTED = set()  # opponents who typed !quiet, for the life of the process
 RECENT = {}  # opponent -> (time, how the last game with them ended), for rematches
 HELLO = "Hi, I'm Allie, a bot that learned chess from human games. Good luck! (AI-written chat, !quiet to mute)"
 RESTING = "Hi, I'm Allie, a bot that learned chess from human games. Good luck!"  # the hello once chat is off
-REST = "My chat is off for the rest of the day, sorry. Enjoy the game!"  # once a game, to a message then
+REST = "Sorry, my chat is off for now."  # once a game, to a message then
 QUIET = "Okay, I'll stay quiet. Good luck!"
 GG = "Good game, thanks!"  # the reply to their gg when nothing was said after the game
 STALE = 15.0  # seconds: a reply this long after the message it answers is not posted
@@ -668,7 +668,8 @@ class Chatter:
         text = recase(clean(r.text), self.board) if r.speak else ""
         posted = None
         for part in parts(text):
-            posted = self.post(part, room, unprompted, then, t)
+            if (posted := self.post(part, room, unprompted, then, t)) is None:
+                break  # never the second half alone
         total = time.monotonic() - t
         self.timings.append({"reason": reason, "wait": start - t, "first": r.first,
                              "model": r.seconds, "post": posted, "total": total,
@@ -697,7 +698,7 @@ class Chatter:
             and time.monotonic() - asked > STALE
             else "an unplayed move" if (unprompted or self.info.get("rated") and not self.status)
             and text != QUIET and not played(text, now)
-            else "a repeat" if unprompted and repeats(text, recent(self.cfg).read(0))
+            else "a repeat" if unprompted and repeats(text, recent(self.cfg).read(0)[-10:])
             else None
         )  # fmt: skip
         if why:
@@ -740,7 +741,8 @@ class Chatter:
             key = ((x.get("user") or "").lower(), (x.get("text") or "").strip())
             seen[key] += 1
             if seen[key] > self.heard[key]:
-                self.interval = self.cfg.poll
+                if key[0] != self.me:
+                    self.interval = self.cfg.poll
                 self.line(time.monotonic(), "player", x.get("user", ""), x.get("text", ""))
 
 
@@ -1014,27 +1016,37 @@ def clean(text):
     """The model's text as one line: no links, markup, emoji, invisible characters or wrapping quotes,
     and none of the junk live replies sometimes trailed ("...ahead. text", "...squares.CHESS",
     "...endgame.s well played.s", " %")."""
-    link = r"https?://|www\.|\b[a-z0-9-]+\.(?:org|com|net|io|gg|tv|me|co)\b"
-    if re.search(link, text, re.IGNORECASE):
-        return ""
+    try:
+        text = text.encode("cp1252").decode()  # mojibake ("\u00f0\u0178\u2122\u201a" for an emoji) back
+    except UnicodeError:
+        pass
     text = "".join(c for c in text if unicodedata.category(c) not in ("So", "Cf", "Co", "Cs", "Cn"))
     text = " ".join(re.sub(r"</?[a-z_]+/?>|`+", " ", text.replace("**", "")).split())
     text = re.sub(r"(?<=[a-z][.!?])(?=[A-Z][a-z])", " ", text)  # "game.Looks": two sentences
-    text = text.strip("\"'\u201c\u201d{}")
+    link = r"https?://|www\.|\b[a-z0-9-]+\.(?:org|com|net|io|gg|tv|me|co)\b"
+    if re.search(link, text, re.IGNORECASE):
+        return ""
     text = re.sub(r"(?<=[^\W\d_]{2}[.!?])['\u2019]?[a-z].*", "", text)  # "endgame.s ...": a word glued on
-    if m := re.search(r"(?<!\d)[.!?\u2026](?=[^.!?\u2026]*$)", text):  # after the last sentence: a fragment, glued
-        tail = text[m.end() :]  # on or one word long, or no word at all
-        if tail and (tail[0] != " " or len(tail.split()) < 2 or not re.search(r"[^\W\d_]", tail)):
+    # an ASCII fragment after the last sentence (not a move number's dots): glued on, one word or no word
+    if m := re.search(r"(?<![\d.])[.!?\u2026][)\]\"'\u201d\u2019]*(?=[^.!?\u2026]*$)", text):
+        tail = text[m.end() :]
+        if tail.isascii() and tail and (tail[0] != " " or len(tail.split()) < 2 or not re.search("[A-Za-z]", tail)):
             text = text[: m.end()]
-    return text
+    return text.strip("\"'\u201c\u201d{} ")
+
+
+STOP = set("a an and as at be but by for from here how i i'm im in is it its me my now of on or our so that the "
+           "there this to was we what with you your".split())  # fmt: skip
 
 
 def repeats(text, lines, k=3):
-    """Does text open or close with the same k words as one of lines? (Live, a fifth of the lines opened
-    "Thanks for the game, <name>." or closed "Good luck next!", the recent lines in the prompt notwithstanding.)"""
+    """Does text open or close with the same k words, not all stopwords, as one of lines? (Live, a fifth of the
+    lines opened "Thanks for the game, <name>." or closed "Good luck next!", the recent lines in the prompt
+    notwithstanding.)"""
     words = lambda t: re.findall(r"[^\W_]+", t.lower())
+    same = lambda x, y: x == y and not set(x) <= STOP
     a = words(text)
-    return len(a) >= k and any(len(b := words(x)) >= k and (b[:k] == a[:k] or b[-k:] == a[-k:]) for x in lines)
+    return len(a) >= k and any(len(b := words(x)) >= k and (same(b[:k], a[:k]) or same(b[-k:], a[-k:])) for x in lines)
 
 
 def recase(text, board):

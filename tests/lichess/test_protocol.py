@@ -441,6 +441,8 @@ def test_offers_are_answered_only_before_the_bots_move(engine, monkeypatch):
 
     m, calls = match(engine)
     m.on_event(full())
+    m.act()  # decides, then reads the stream once more
+    assert not calls
     m.act()
     (_, _, first, offer), = calls  # fmt: skip
     assert offer is False
@@ -450,6 +452,7 @@ def test_offers_are_answered_only_before_the_bots_move(engine, monkeypatch):
     m.on_event(state(first))
     m.act()
     m.on_event(state(f"{first} e7e5", bdraw=True))  # a live offer, declined (too early)
+    m.act()
     m.act()
     assert calls[1] == ("draw", "g1", False) and calls[2][0] == "move" and calls[2][3] is False
     monkeypatch.setattr(behaviour, "accept_draw", lambda wdl, ply: True)
@@ -475,6 +478,7 @@ def test_resend_after_reconnect_and_resync(engine, monkeypatch):
     monkeypatch.setattr(botmod, "LATE", 0.2)
     m, calls = match(engine)
     m.on_event(full())
+    m.act()
     m.act()
     m.tick()
     time.sleep(0.3)
