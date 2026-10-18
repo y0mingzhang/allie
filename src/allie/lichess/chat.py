@@ -1035,8 +1035,8 @@ def clean(text):
     return text.strip("\"'\u201c\u201d{} ")
 
 
-STOP = set("a an and as at be but by for from here how i i'm im in is it its me my now of on or our so that the "
-           "there this to was we what with you your".split())  # fmt: skip
+STOP = set("a an and as at be but by d for from here how i in is it its ll m me my now of on or our re s so t that "
+           "the there this to ve was we what with you your".split())  # fmt: skip
 
 
 def repeats(text, lines, k=3):

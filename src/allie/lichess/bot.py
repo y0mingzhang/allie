@@ -404,7 +404,7 @@ class Match:
 
     def wait(self):
         """Seconds the game thread may wait for an event: until the move is due, at most one (tick())."""
-        if self.due is None or self.moved == self.ply:
+        if self.due is None or self.moved == self.ply or self.ended:
             return 1.0
         return min(max(self.due[0] - time.monotonic(), 0.005), 1.0)
 
