@@ -5,10 +5,13 @@ analysis/lichess/human.py fits behaviour.json on half of the main evaluation's J
 - resignation: a per-position hazard for each player, on its turn (instead of moving) or right
   after its own move, logistic in the model's win / draw / loss probabilities for that player,
   the ply, its rating, the format and its clock; never below the P(loss) under which humans
-  almost never resign (the 5th percentile of their resignations);
+  almost never resign (the 5th percentile of their resignations), nor before ply 20 (6% of human
+  resignations come earlier, at a median P(loss) of 0.74: opening blunders that could be played on;
+  live, the bot resigned at move 3);
 - draws: a hazard of the same form for ending a game by agreement on one's turn (the data show
   agreements, not offers, so this is a heuristic policy), and the expected score up to which
-  humans agree;
+  humans agree, from ply 30 (83% of human agreements come later; live, a bot that accepted any
+  offer in a level opening was offered draws at move 3);
 - think time: a soft guard from human time use, under a hard cap that keeps a reserve.
 """
 
@@ -83,17 +86,23 @@ def think(time_probs, rng, clock, increment, ply, lag=0.0):
         t = max(t - lag, 0.0)
     if clock is None:
         return t
-    g = PARAMETERS["guard"]
-    hard = max(0.0, clock - g["reserve"])
-    return min(t, hard * g["share"] + (increment or 0), hard)
+    return min(t, float(guard(clock, increment or 0, **PARAMETERS["guard"])))
+
+
+def guard(clock, increment, reserve, share):
+    """The longest a move may take: `share` of the clock above the reserve plus the increment (half the share
+    under a minute: live, single long thinks late in bullet games and the lag of the moves after them flagged
+    the bot), and never the clock above the reserve (the increment comes after the move). Arrays too."""
+    hard = np.maximum(clock - reserve, 0.0)
+    return np.minimum(hard * share * np.clip(clock / 120, 0.5, 1.0) + increment, hard)
 
 
 def resign(wdl, ply, elo, fmt, clock, base, rng, on_turn=True):
     """Resign now, as a human of this rating would here? on_turn: instead of moving; otherwise
     right after one's own move, with wdl that player's view of the new position."""
-    if ply < 2 or wdl[2] < PARAMETERS["resign"]["floor"]:
-        return False
     r = PARAMETERS["resign"]
+    if ply < r["min_ply"] or wdl[2] < r["floor"]:
+        return False
     x = resign_features(wdl, ply, elo, fmt, clock, base, on_turn, r["knots"])
     return rng.random() < hazard("resign", x)
 
@@ -105,8 +114,9 @@ def offer_draw(wdl, ply, elo, fmt, clock, base, rng):
     return rng.random() < hazard("draw", features(wdl, ply, elo, fmt, clock, base))
 
 
-def accept_draw(wdl):
-    """Accept an offer unless clearly better (three quarters of human agreements happen at or
-    below this expected score for the better side)."""
+def accept_draw(wdl, ply):
+    """Accept an offer from accept_min_ply on, unless clearly better (three quarters of human agreements
+    happen at or below this expected score for the better side)."""
     w, d, _ = wdl
-    return w + d / 2 <= PARAMETERS["draw"]["accept"]
+    p = PARAMETERS["draw"]
+    return ply >= p["accept_min_ply"] and w + d / 2 <= p["accept"]

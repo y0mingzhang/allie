@@ -128,7 +128,7 @@ def main():
     from allie.lichess.engine import Engine
 
     config = load(a.config)
-    config.chat.enabled, config.chat.llm, config.chat.gap = True, a.llm, 0.0
+    config.chat.enabled, config.chat.llm, config.chat.gap, config.chat.typing = True, a.llm, 0.0, 0.0
     if a.ledger:
         config.chat.ledger = a.ledger
     config.chat.recent_file = a.recent or tempfile.mktemp(suffix=".json")

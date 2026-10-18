@@ -135,9 +135,9 @@ def test_exit_with_a_stuck_writer(tmp_path, monkeypatch, capsys, restore, stuck)
 
 
 def test_chat_reader_stops_when_abandoned():
-    from allie.lichess.chat import split
+    from allie.lichess.bot import Feed
 
-    fed, abandon, gate = [], threading.Event(), threading.Event()
+    fed, gate = [], threading.Event()
 
     class Chat:
         gid, done = "g", False
@@ -151,9 +151,9 @@ def test_chat_reader_stops_when_abandoned():
         yield {"type": "gameState", "n": 2}
         yield {"type": "gameState", "n": 3}
 
-    stream = split(events(), Chat(), abandon)
-    assert next(stream)["n"] == 1
-    abandon.set()  # the game thread resumes on a new stream
+    feed = Feed(events(), Chat())
+    assert feed.get(5)["n"] == 1
+    feed.abandon()  # the game thread resumes on a new stream
     gate.set()
     threading.Event().wait(0.5)  # the reader has seen events 2 and 3 by now, and stopped
     assert [e["n"] for e in fed] == [1]  # nothing after the abandon, not even the end

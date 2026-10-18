@@ -128,6 +128,7 @@ def setup(path=None, level=logging.INFO, fmt="%(asctime)s %(message)s"):
     root = logging.getLogger()
     root.handlers[:] = [logging.handlers.QueueHandler(q)]
     root.setLevel(level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # a line per chat model call otherwise
 
     if not path:  # stderr gets every uncaught exception already
         return listener

@@ -3,16 +3,18 @@
 import http.client
 import json
 import logging
+import queue
 import random
 import threading
 import time
 import urllib.error
 from dataclasses import replace
 
-from .chat import Chatter, split
+from .chat import END, Chatter
 from .engine import Decision, Game
 
 log = logging.getLogger(__name__)
+NETWORK = (OSError, urllib.error.URLError, json.JSONDecodeError, http.client.HTTPException)
 
 
 def screen(c, rules, busy):
@@ -41,16 +43,73 @@ def screen(c, rules, busy):
 
 
 ERRORS = 5  # unexpected errors in one game, with no move of the bot's between, before it resigns
+LATE = 3.0  # seconds within which Lichess's state shows the bot's move, draw acceptance or resignation
+
+
+def patience(abort, base):
+    """Seconds to wait for the opponent's first move: `abort` up to a 5-minute base, 3x from 15 minutes (live,
+    opponents of slow games were often still there, chatting, when the bot aborted at 30 s)."""
+    return abort * min(max((base or 0) / 300, 1.0), 3.0)
+
+
+class Feed:
+    """A game stream read on its own thread: the game thread takes its events with a timeout, so a think-time
+    wait never stops it reading, and the chat gets each event at once. The reader outlives the game thread's
+    loop while the chat lingers after the game, unless abandoned (the game thread resumed on a new stream:
+    this one would feed the chat twice). A chat that fails is left behind, logged once."""
+
+    def __init__(self, events, chat=None, name="game"):
+        self.q, self.chat, self.abandoned = queue.Queue(), chat, threading.Event()
+        threading.Thread(target=self.read, args=(events,), daemon=True, name=f"read-{name}").start()
+
+    def feed(self, e):
+        if self.chat is not None:
+            try:
+                self.chat.put(e)
+            except Exception:
+                log.exception("game %s chat: failed; the game goes on without it", self.chat.gid)
+                self.chat = None
+
+    def read(self, events):
+        try:
+            for e in events:
+                if self.abandoned.is_set():
+                    break
+                if e:
+                    self.feed(e)
+                self.q.put(e)
+                if self.chat is not None and self.chat.done:
+                    break
+        except Exception as e:  # noqa: BLE001 - the game thread raises it
+            self.q.put(e)
+        finally:
+            self.q.put(END)
+            if not self.abandoned.is_set():  # an abandoned stream's end is not the game's
+                self.feed(END)
+            if close := getattr(events, "close", None):
+                close()
+
+    def get(self, timeout=None):
+        """The next event: None for a keepalive or after `timeout` seconds, END once the stream ended; the
+        stream's error is raised."""
+        try:
+            e = self.q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if isinstance(e, Exception):
+            raise e
+        return e
+
+    def empty(self):
+        return self.q.empty()
+
+    def abandon(self):
+        self.abandoned.set()
 
 
 class Bot:
     def __init__(self, config, client, engine, search=None):
-        self.config, self.client, self.engine, self.search = (
-            config,
-            client,
-            engine,
-            search,
-        )
+        self.config, self.client, self.engine, self.search = config, client, engine, search
         self.games, self.finished, self.lock = {}, {}, threading.Lock()
         self.pending = {}  # accepted challenge id -> (challenger, time accepted)
         self.threads = []
@@ -74,8 +133,7 @@ class Bot:
                                 self.stop()
                     if self.stopped.is_set():
                         break
-            except (OSError, urllib.error.URLError, json.JSONDecodeError,
-                    http.client.HTTPException) as e:  # fmt: skip
+            except NETWORK as e:
                 log.warning("event stream: %s; reconnecting in %d s", e, backoff)
                 self.stopped.wait(backoff)
                 backoff = min(2 * backoff, 60)
@@ -99,11 +157,11 @@ class Bot:
         self.draining = True
 
     def opponents(self):
-        """Under the lock: the opponents of current games and of accepted challenges whose
-        game has not started yet (a challenge's game has its id; reservations last a minute)."""
+        """Under the lock: the opponents of current games (not yet reported finished) and of accepted
+        challenges whose game has not started yet (a challenge's game has its id; reservations last a minute)."""
         now = time.monotonic()
         self.pending = {c: v for c, v in self.pending.items() if now - v[1] < 60}
-        return [m.opponent for m in self.games.values()] + [u for u, _ in self.pending.values()]
+        return [m.opponent for m in self.games.values() if not m.ended] + [u for u, _ in self.pending.values()]
 
     def on_event(self, event):
         match event["type"]:
@@ -144,38 +202,42 @@ class Bot:
                     t = threading.Thread(target=self.play, args=(match,), name=gid, daemon=True)
                     self.threads.append(t)
                 t.start()
+            case "gameFinish":  # ahead of the game's own stream: a rematch challenge right after is not "later"
+                g = event["game"]
+                with self.lock:
+                    if m := self.games.get(g.get("gameId") or g["id"]):
+                        m.ended = True
 
     def play(self, match):
         """Serve one game's stream until it ends. Network errors reconnect; any other error
         is logged and the game resumes from a fresh stream. After ERRORS of them with no move of
         the bot's between (a persistent bug), the bot resigns on its own turn rather than leave
         the game to time out; on the opponent's turn its clock is not running, so it waits."""
-        gid, backoff, errors, since = match.gid, 1, 0, match.moved
+        gid, backoff, errors, since, feed = match.gid, 1, 0, match.sends, None
         try:
             while not match.over and not self.stopped.is_set():
                 try:
-                    abandon = threading.Event()  # set: the chat's reader of this stream stops
-                    events = self.client.stream(f"/api/bot/game/stream/{gid}")
-                    for event in split(events, match.chat, abandon) if match.chat else events:
+                    feed = Feed(self.client.stream(f"/api/bot/game/stream/{gid}"), match.chat, gid)
+                    while not match.over and not self.stopped.is_set():
+                        if (event := feed.get(match.wait())) is END:
+                            raise ConnectionError("game stream closed")
                         if event:
                             match.on_event(event)
                             backoff = 1
+                        if feed.empty():  # act on the latest state only
+                            match.act()
                         match.tick()
-                        if match.over or self.stopped.is_set():
-                            break
-                    else:
-                        if not match.over and not self.stopped.is_set():
-                            raise ConnectionError("game stream closed")
-                except (OSError, urllib.error.URLError, json.JSONDecodeError,
-                        http.client.HTTPException) as e:  # fmt: skip
-                    abandon.set()  # a failed move POST, too: the stream may still be up
+                except NETWORK as e:
+                    if feed:  # a failed move POST, too: the stream may still be up
+                        feed.abandon()
                     log.warning("game %s stream: %s; retry in %d s", gid, e, backoff)
                     self.stopped.wait(backoff)
                     backoff = min(2 * backoff, 30)
                 except Exception:
-                    abandon.set()
-                    if match.moved != since:  # the game went on since the last error
-                        errors, since = 0, match.moved
+                    if feed:
+                        feed.abandon()
+                    if match.sends != since:  # the game went on since the last error
+                        errors, since = 0, match.sends
                     errors = min(errors + 1, ERRORS)  # the opponent's turn holds it at ERRORS
                     log.exception("game %s: error %d of %d; resuming", gid, errors, ERRORS)
                     if errors >= ERRORS and match.to_move():
@@ -188,6 +250,8 @@ class Bot:
                     self.stopped.wait(min(backoff, 5))  # the bot's clock may be running
                     backoff = min(2 * backoff, 5)
         finally:
+            if feed and not match.chat:
+                feed.abandon()
             with self.lock:
                 self.games.pop(gid, None)
                 self.finished[gid] = match.stats
@@ -195,14 +259,18 @@ class Bot:
 
 
 class Match:
-    """One game's protocol state: color, answered offers, the move already sent."""
+    """One game's protocol state: color, the latest state, the move decided and when it is due."""
 
     def __init__(self, bot, gid):
         self.bot, self.gid = bot, gid
-        self.game, self.white, self.over, self.opponent = None, None, False, None
+        self.game, self.white, self.over, self.ended, self.opponent = None, None, False, False, None
+        # plies: the bot's last move sent (or draw accepted, resignation sent), offer answered, resignation weighed
         self.moved = self.answered = self.conceded = -1
-        self.claim, self.waiting = None, None  # waiting: since when the opponent owes a first move
-        self.refused, self.ply = None, 0  # refused: when Lichess refused the bot's last move
+        self.state, self.since, self.ply, self.sends = None, 0.0, 0, 0  # since: when the position arrived
+        self.due = None  # (when, Decision, moves): the move decided at this position, kept to resend
+        self.sent = None  # (when, ply, refused): the last action, until a state moves past its ply
+        self.claim, self.waiting, self.chatted = None, None, 0.0  # waiting: since when the opponent owes a first move
+        self.patience = bot.config.abort
         self.stats = []
         self.chat = Chatter(self) if bot.config.chat.enabled else None
 
@@ -216,6 +284,8 @@ class Match:
                 self.on_state(event)
             case "opponentGone":
                 self.on_gone(event)
+            case "chatLine" if (event.get("username") or "").lower() not in (self.bot.me, "lichess"):
+                self.chatted = time.monotonic()
 
     def on_full(self, event):
         play = self.bot.config.play
@@ -225,48 +295,87 @@ class Match:
             self.over = True
             return
         self.white = event["white"].get("id") == self.bot.me
-        self.opponent = event["black" if self.white else "white"].get("id")
-        them = event["black" if self.white else "white"].get("rating")
-        ours = them if play.rating == "opponent" else play.rating
-        them = them or ours or 1500
-        ours = ours or them
+        side = event["black" if self.white else "white"]
+        self.opponent = side.get("id")
+        ours, them = play.ratings(side.get("rating"))
         clock = event.get("clock")
         base = clock["initial"] // 1000 if clock else None
         inc = clock["increment"] // 1000 if clock else None
         if self.game is None:
             elo = (ours, them) if self.white else (them, ours)
             self.game = Game(self.bot.engine, *elo, base, inc, event.get("speed", "blitz"))
-            log.info("game %s: %s as %s, Elo %s vs %s, %s+%s", self.gid, play.mode,
-                     "white" if self.white else "black", ours, them, base, inc)  # fmt: skip
+            self.patience = patience(self.bot.config.abort, base)
+            title = f" {t}" if (t := side.get("title")) else ""
+            log.info("game %s: %s as %s, Elo %s vs %s%s, %s+%s, %s", self.gid, play.mode,
+                     "white" if self.white else "black", ours, them, title, base, inc,
+                     "rated" if event.get("rated") else "casual")  # fmt: skip
             if self.bot.config.greeting and not event["state"]["moves"]:
                 self.call(self.bot.client.chat, self.gid, self.bot.config.greeting)
+        # the server's state is the truth: on the bot's turn, its last move did not arrive (live RtI5RtnK lost
+        # on time with 327 s left after a move posted into a Lichess restart)
+        self.moved, self.sent = -1, None
         self.on_state(event["state"])
 
     def on_state(self, s):
-        start = time.monotonic()
         if s["status"] not in ("created", "started"):
             log.info("game %s over: %s, winner %s", self.gid, s["status"], s.get("winner"))
             self.over = True
             return
         moves = s["moves"].split()
+        if self.state is None or self.state["moves"] != s["moves"]:
+            self.since = time.monotonic()
+        if self.due and self.due[2] != s["moves"]:
+            self.due = None
+        self.state = s
         first = len(moves) < 2 and (len(moves) % 2 == 0) != self.white
         self.waiting = (self.waiting or time.monotonic()) if first else None
-        game, play = self.game, self.bot.config.play
-        game.update(moves, s["wtime"] / 1000, s["btime"] / 1000)
-        if s.get("bdraw" if self.white else "wdraw") and self.answered != len(moves):
-            self.answered = len(moves)
-            self.call(self.bot.client.draw, self.gid, game.accept_draw(play, self.white))
-        if (len(moves) % 2 == 0) != self.white:
-            # the bot's own move joins the cache while the opponent thinks; a human might
-            # resign right after a move that turns out badly
-            clock = (s["wtime"] if self.white else s["btime"]) / 1000
-            if self.conceded < len(moves) and game.concede(play, clock, self.white):
-                self.call(self.bot.client.resign, self.gid)
-            self.conceded = len(moves)
+        self.game.update(moves, s["wtime"] / 1000, s["btime"] / 1000)
+
+    def act(self):
+        """On the latest state (no event waiting): weigh resigning after the bot's own move; on its turn answer
+        the opponent's draw offer, decide the move, and send it once its think time is up. An offer is answered
+        only before the bot moves: after a move, Lichess has declined it, and a yes would offer a draw."""
+        s = self.state
+        if self.over or s is None:
             return
-        if self.moved == len(moves):
-            return
+        game, play, n = self.game, self.bot.config.play, len(self.game.moves)
         clock = (s["wtime"] if self.white else s["btime"]) / 1000
+        if (n % 2 == 0) != self.white:  # a human might resign right after a move that turns out badly
+            if self.conceded < n:
+                self.conceded = n
+                if game.concede(play, clock, self.white):
+                    log.info("game %s ply %d: resigning after its move", self.gid, n)
+                    self.call(self.bot.client.resign, self.gid)
+            return
+        if self.moved == n:
+            return
+        if s.get("bdraw" if self.white else "wdraw") and self.answered != n:
+            self.answered = n
+            accept = game.accept_draw(play, self.white)
+            log.info("game %s ply %d: draw offer %s", self.gid, n, "accepted" if accept else "declined")
+            self.call(self.bot.client.draw, self.gid, accept)
+            if accept:
+                self.due, self.moved, self.sent = None, n, (time.monotonic(), n, False)
+                return
+        if self.due is None and not self.decide(s, clock):
+            return
+        when, d, _ = self.due
+        if time.monotonic() < when:
+            return
+        if self.answered == n and d.offer_draw:  # it declined theirs: no offer of its own
+            d = replace(d, offer_draw=False)
+        ok = self.call(self.bot.client.move, self.gid, d.move, d.offer_draw) is not None
+        self.moved, self.sent = n, (time.monotonic(), n, not ok)
+        if ok:
+            self.sends += 1
+        else:  # mostly the opponent resigned meanwhile; else tick() resyncs
+            self.due = None
+
+    def decide(self, s, clock):
+        """The bot's move here, due its think time after the position arrived; or its resignation. Whether a
+        move is due."""
+        game, play, n = self.game, self.bot.config.play, len(self.game.moves)
+        start = time.monotonic()
         try:
             d = game.decide(play, self.bot.search, clock)
         except BaseException:  # a Rust panic too (pyo3's PanicException): the policy, else a random move, loudly
@@ -284,35 +393,41 @@ class Match:
             if d.sims
             else ""
         )
-        log.info("game %s ply %d: %s p=%.2f wdl=%.2f/%.2f/%.2f %.0f ms think %.1f s%s", self.gid,
-                 len(moves), d.move, d.probability, *d.wdl, 1000 * spent, d.think, searched)  # fmt: skip
+        log.info("game %s ply %d: %s p=%.2f wdl=%.2f/%.2f/%.2f %.0f ms think %.1f s%s%s", self.gid, n, d.move,
+                 d.probability, *d.wdl, 1000 * spent, d.think, searched, "; resigning" * d.resign)  # fmt: skip
         if d.resign:
             self.call(self.bot.client.resign, self.gid)
-            return
-        if d.think > spent:
-            self.bot.stopped.wait(d.think - spent)
-        if self.call(self.bot.client.move, self.gid, d.move, d.offer_draw) is None:
-            self.refused = time.monotonic(), self.ply  # mostly the opponent resigned: see tick()
-            return
-        self.moved, self.refused = len(moves), None
+            self.moved, self.sent = n, (time.monotonic(), n, False)
+            return False
+        self.due = (self.since + d.think, d, s["moves"])
+        return True
+
+    def wait(self):
+        """Seconds the game thread may wait for an event: until the move is due, at most one (tick())."""
+        if self.due is None or self.moved == self.ply:
+            return 1.0
+        return min(max(self.due[0] - time.monotonic(), 0.005), 1.0)
 
     def to_move(self):
         """Whether the bot's clock runs, by Lichess's last state (unknown color: assume so)."""
         return self.white is None or (self.ply % 2 == 0) == self.white
 
     def tick(self):
-        """Abort a game whose opponent has not made a first move in config.abort seconds:
-        Lichess can leave it open for an hour, holding a slot and blocking a drain. Resync a
-        game that goes on after Lichess refused the bot's move: the board must disagree."""
-        late = self.refused and time.monotonic() - self.refused[0] > 3
-        if late and self.refused[1] == self.ply and not self.over:  # no state since
-            self.refused = None
-            raise RuntimeError("move refused and the game goes on; resyncing")
-        wait = self.bot.config.abort
-        if self.waiting and wait and not self.over and time.monotonic() - self.waiting > wait:
-            log.info("game %s: no first move from the opponent in %g s; aborting", self.gid, wait)
-            self.waiting = time.monotonic()  # if the abort fails, retry a period later
-            self.call(self.bot.client.abort, self.gid)
+        """Resync a game whose state shows no move LATE seconds after the bot's action: refused, the board must
+        disagree; accepted, Lichess lost it. Abort a game whose opponent has not made a first move in its
+        patience (longer while they chat): Lichess can leave it open for an hour, holding a slot and a drain."""
+        now = time.monotonic()
+        if self.sent and not self.over and self.ply == self.sent[1] and now - self.sent[0] > LATE:
+            refused, self.sent = self.sent[2], None
+            if refused:
+                raise RuntimeError("move refused and the game goes on; resyncing")
+            raise ConnectionError(f"no new state {LATE:g} s after the bot's move; resyncing")
+        if self.waiting and self.patience and not self.over:
+            if now - max(self.waiting, self.chatted) > self.patience or now - self.waiting > 3 * self.patience:
+                log.info("game %s: no first move from the opponent in %.0f s; aborting", self.gid,
+                         now - self.waiting)  # fmt: skip
+                self.waiting = self.chatted = now  # if the abort fails, retry a period later
+                self.call(self.bot.client.abort, self.gid)
 
     def on_gone(self, event):
         if self.claim:

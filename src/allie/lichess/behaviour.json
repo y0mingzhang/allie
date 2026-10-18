@@ -33,7 +33,8 @@
    0.95,
    0.99,
    0.999
-  ]
+  ],
+  "min_ply": 20
  },
  "draw": {
   "coef": [
@@ -50,10 +51,11 @@
    0.0
   ],
   "accept": 0.621,
-  "min_ply": 20
+  "min_ply": 20,
+  "accept_min_ply": 30
  },
  "guard": {
-  "reserve": 2.5,
+  "reserve": 5.0,
   "share": 0.5
  },
  "provenance": {

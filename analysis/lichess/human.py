@@ -316,6 +316,9 @@ def risk_set(P):
 
 
 KNOTS = (0.5, 0.7, 0.85, 0.95, 0.99, 0.999)
+# no resignation before ply 20 (6% of human resignations, at a median P(loss) of 0.74), no agreed draw before
+# ply 30 (17% of human agreements): early ones read as a bot giving up or as an exploitable one
+RESIGN_PLY, ACCEPT_PLY = 20, 30
 
 
 def design(R, knots=None):
@@ -357,7 +360,7 @@ def resignations(R, rows, h, floor, rng):
         prev = last.get(key_o[i])
         run[i] = (run[prev] + 1 if prev is not None and bad[prev] else 1) if bad[i] else 0
         last[key_o[i]] = i
-    hazard = np.where(loss >= floor, h[order], 0.0)
+    hazard = np.where((loss >= floor) & (R["k"][order] >= RESIGN_PLY), h[order], 0.0)
     keys = np.full(R["game"].max() * 2 + 2, -1)
     keys[key_o] = 1
     fire = dict(
@@ -388,14 +391,14 @@ def fit(a):
     t = sample_time(P["time"][played], rng)
     s, c = P["spent"][played].astype(float), P["clock"][played].astype(float)
     inc, half = P["inc"][played], P["half"][played]
-    # the reserve covers live lag: Lichess charged the bot 0.33 s more than its own think time
-    # per move on average, 2.2 s at the 99th percentile (634 moves, 2026-10-04)
-    reserve = 2.5
+    # the reserve covers live lag: Lichess charged the bot 0.33 s more than its own think time per move on
+    # average, 2.2 s at the 99th percentile (634 moves, 2026-10-04); 2.5 s still flagged 5% of the bot's
+    # bullet games, its clock spent by the lag of the moves at the reserve (2026-10-18 audit)
+    reserve = 5.0
     ratio = (s - inc) / np.maximum(c - reserve, 1)
     share = float(np.clip(np.percentile(ratio[half == fit_half], 99.9), 0.1, 0.5))
     guard = dict(reserve=reserve, share=round(share, 3))
-    hard = np.maximum(0, c - guard["reserve"])
-    capped = np.minimum(np.minimum(t, hard * guard["share"] + inc), hard)
+    capped = np.minimum(t, bh.guard(c, inc, **guard))
     old = np.minimum(t, 0.1 * c)  # before: a draw capped at 10% of the clock left
     strata = {
         "all": np.ones(len(s), bool), **{FORMATS[f]: P["fmt"][played] == f for f in range(4)},
@@ -411,7 +414,7 @@ def fit(a):
         for name, m in strata.items()
     }  # fmt: skip
     report["think"]["guard"] = guard | dict(
-        human_moves_over=round(float((s > hard * guard["share"] + inc)[half == check_half].mean()), 4)
+        human_moves_over=round(float((s > bh.guard(c, inc, **guard))[half == check_half].mean()), 4)
     )
 
     # resignation: a discrete-time hazard on both players' opportunities
@@ -495,8 +498,8 @@ def fit(a):
     manifest = json.loads((ev.OUT / "manifest.json").read_text())
     model = json.loads((Path(a.model) / "config.json").read_text()) if a.model else {}
     params = dict(
-        resign=dict(coef=coef.round(5).tolist(), floor=floor, knots=list(KNOTS)),
-        draw=dict(coef=dcoef.round(5).tolist(), accept=accept, min_ply=min_ply),
+        resign=dict(coef=coef.round(5).tolist(), floor=floor, knots=list(KNOTS), min_ply=RESIGN_PLY),
+        draw=dict(coef=dcoef.round(5).tolist(), accept=accept, min_ply=min_ply, accept_min_ply=ACCEPT_PLY),
         guard=guard,
         provenance=dict(
             fit="analysis/lichess/human.py fit",

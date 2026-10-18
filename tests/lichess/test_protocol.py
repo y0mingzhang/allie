@@ -112,7 +112,7 @@ def test_clock_features(engine):
 def test_draw_offer_and_resign(engine, monkeypatch):
     from allie.lichess import behaviour
 
-    monkeypatch.setattr(behaviour, "accept_draw", lambda wdl: True)
+    monkeypatch.setattr(behaviour, "accept_draw", lambda wdl, ply: True)
     mock = MockLichess({"tok": "allie"})
     mock.house_offers = {6}
     mock, _ = start(engine, mock, draws=True)
@@ -301,36 +301,222 @@ def test_errors_on_the_opponents_turn_do_not_resign(engine, monkeypatch, caplog)
     assert not any("giving up" in r.message for r in caplog.records)
 
 
-@pytest.mark.parametrize(("search", "think"), [(0.6, 1.2), (0.9, 0.3)])
-def test_think_time_counts_from_the_state(engine, monkeypatch, search, think):
-    """The think-time wait starts when the state arrives: a search inside the sampled think
-    time does not add to it (a move takes max(think, search), the human's pace), and a search
-    longer than the think time adds no wait."""
+def thinking(monkeypatch, think, search=0.0):
+    """Every decision takes `search` seconds and draws `think` seconds; no resignation or draw offer."""
     from dataclasses import replace
 
-    from allie.lichess import bot as botmod
     from allie.lichess import engine as enginemod
 
-    decide, on_state, took = enginemod.Game.decide, botmod.Match.on_state, []
+    decide = enginemod.Game.decide
 
-    def searching(self, *args):
+    def slow(self, *args):
         d = decide(self, *args)
         time.sleep(search)
         return replace(d, think=think, resign=False, offer_draw=False)
 
-    def timed(self, s):
-        t0, moved = time.monotonic(), self.moved
-        on_state(self, s)
-        if self.moved != moved:
-            took.append(time.monotonic() - t0)
+    monkeypatch.setattr(enginemod.Game, "decide", slow)
 
-    monkeypatch.setattr(enginemod.Game, "decide", searching)
-    monkeypatch.setattr(botmod.Match, "on_state", timed)
+
+def game_of(mock, n=1):
+    wait(lambda: len(mock.games) >= n)
+    return list(mock.games.values())[n - 1]
+
+
+@pytest.mark.parametrize(("search", "think"), [(0.6, 1.2), (0.9, 0.3)])
+def test_think_time_counts_from_the_state(engine, monkeypatch, search, think):
+    """The think-time wait starts when the state arrives: a search inside the sampled think
+    time does not add to it (a move takes max(think, search), the human's pace), and a search
+    longer than the think time adds no wait. Timed at the server, from the opponent's move to the bot's."""
+    thinking(monkeypatch, think, search)
     mock, _ = start(engine, think_time=True)
     mock.challenge("random", "allie", 600, 0, color="black")  # the bot is white
-    wait(lambda: len(took) >= 3, timeout=60)
+    g = game_of(mock)
+    wait(lambda: len(g.times) >= 9)
+    took = [g.times[j] - g.times[j - 1] for j in (2, 4, 6, 8)]
     want = max(search, think)
     assert all(want <= t < want + 0.25 for t in took), took
+
+
+@pytest.mark.parametrize("accept", [True, False])
+def test_offer_during_the_think_is_answered_before_the_move(engine, monkeypatch, accept):
+    """An offer made while the bot thinks is answered at once, before its move: accepted, the game ends with
+    no move after it; declined, the bot moves without an offer of its own. (Live, the bot moved first and its
+    late yes became its own offer: 26 draws, some at move 4.)"""
+    from allie.lichess import behaviour
+
+    thinking(monkeypatch, 1.5)
+    monkeypatch.setattr(behaviour, "accept_draw", lambda wdl, ply: accept)
+    mock, _ = start(engine, draws=True, think_time=True)
+    mock.challenge("random", "allie", 600, 0, color="black")  # the bot is white
+    g = game_of(mock)
+    wait(lambda: len(g.board.move_stack) == 4)  # the bot's turn
+    mock.offer_draw(g, "black")
+    t = time.monotonic()
+    answer = f"/draw/{'yes' if accept else 'no'}"
+    wait(lambda: any(answer in c[2] for c in mock.calls), timeout=10)
+    assert time.monotonic() - t < 1.0 and not mock.rejected
+    if accept:
+        wait(lambda: g.status != "started")
+        assert g.status == "draw" and len(g.board.move_stack) == 4
+    else:
+        wait(lambda: len(g.board.move_stack) >= 6)
+        assert g.status == "started" and not any("/draw/yes" in c[2] or "offeringDraw" in c[2] for c in mock.calls)
+
+
+def test_game_that_ends_during_the_think(engine, monkeypatch):
+    """The opponent resigns while the bot thinks: no move is sent after it, the slot frees at once and a
+    rematch is accepted (live: 166 moves posted to ended games, 55 rematches declined "later")."""
+    thinking(monkeypatch, 5.0)
+    mock, bot = start(engine, think_time=True)
+    mock.challenge("random", "allie", 600, 0, color="black")  # the bot is white
+    g = game_of(mock)
+    wait(lambda: len(g.board.move_stack) == 2, timeout=15)
+    g.end("resign", "white")
+    t = time.monotonic()
+    wait(lambda: not bot.games, timeout=5)
+    assert time.monotonic() - t < 1.5
+    mock.challenge("random", "allie", 600, 0, color="black")
+    game_of(mock, 2)
+    assert not mock.declined and not mock.rejected
+    assert sum("/move/" in c[2] for c in mock.calls if g.id in c[2]) == 1
+
+
+@pytest.mark.parametrize("restart", [True, False])
+def test_lost_move_is_resent(engine, monkeypatch, caplog, restart):
+    """Lichess acknowledges the bot's move and loses it (live RtI5RtnK: in a restart; the bot waited 349 s
+    believing it had moved and lost on time). With the stream dropped, the reconnect's state shows the bot to
+    move; with the stream up, no state comes within LATE seconds and the bot resyncs. Either way it sends the
+    same move again, without deciding anew."""
+    from allie.lichess import bot as botmod
+
+    monkeypatch.setattr(botmod, "LATE", 0.5)
+    mock = MockLichess({"tok": "allie"})
+    mock.lose = [restart]
+    mock, _ = start(engine, mock)
+    mock.challenge("random", "allie", 60, 1, color="black")  # the bot is white: its first move is lost
+    wait(lambda: finished(mock))
+    g = game_of(mock)
+    moves = [c[2] for c in mock.calls if "/move/" in c[2]]
+    assert moves[0] == moves[1] and moves[0].endswith(g.board.move_stack[0].uci()) and not mock.lose
+    assert g.status != "outoftime" and len(g.board.move_stack) > 10 and not mock.rejected
+    assert any("resyncing" in r.getMessage() for r in caplog.records) != restart
+
+
+class Calls:
+    """A client that records each call and succeeds."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        return lambda *args: self.calls.append((name, *args)) or {}
+
+
+def match(engine, **play):
+    from types import SimpleNamespace
+
+    from allie.lichess.bot import Match
+
+    play = dict(think_time=False, resign=False) | play
+    bot = SimpleNamespace(config=Config(play=Play(**play)), client=Calls(), me="allie", engine=engine, search=None)
+    return Match(bot, "g1"), bot.client.calls
+
+
+def full(moves="", **kw):
+    side = lambda u: dict(id=u, name=u, rating=1500)
+    return dict(type="gameFull", id="g1", variant=dict(key="standard"), speed="blitz", rated=True,
+                white=side("allie"), black=side("opp"), clock=dict(initial=180000, increment=2000),
+                initialFen="startpos", state=state(moves, **kw))  # fmt: skip
+
+
+def state(moves, **kw):
+    return dict(type="gameState", moves=moves, wtime=170000, btime=170000, winc=2000, binc=2000, status="started") | kw
+
+
+def test_offers_are_answered_only_before_the_bots_move(engine, monkeypatch):
+    """A state with the opponent's offer that arrives after the bot's move at that position is stale (Lichess
+    declined the offer when the bot moved; a yes would offer a draw): it is not answered. A live offer is, and
+    an accepted one ends the bot's turn."""
+    from allie.lichess import behaviour
+
+    m, calls = match(engine)
+    m.on_event(full())
+    m.act()
+    (_, _, first, offer), = calls  # fmt: skip
+    assert offer is False
+    m.on_event(state("", bdraw=True))  # sent before the bot's move reached Lichess
+    m.act()
+    assert [c[0] for c in calls] == ["move"]
+    m.on_event(state(first))
+    m.act()
+    m.on_event(state(f"{first} e7e5", bdraw=True))  # a live offer, declined (too early)
+    m.act()
+    assert calls[1] == ("draw", "g1", False) and calls[2][0] == "move" and calls[2][3] is False
+    monkeypatch.setattr(behaviour, "accept_draw", lambda wdl, ply: True)
+    m.on_event(state(f"{first} e7e5 {calls[2][2]} b8c6", bdraw=True))
+    m.act()
+    m.act()
+    assert calls[3] == ("draw", "g1", True) and len(calls) == 4  # accepted: no move after it
+
+
+def test_resend_after_reconnect_and_resync(engine, monkeypatch):
+    """After the bot's move, a reconnect's state with the bot still to move (its move was lost) resends the
+    same move without deciding again; a stream that shows no new state LATE seconds after the move resyncs."""
+    from allie.lichess import bot as botmod
+    from allie.lichess import engine as enginemod
+
+    decide, n = enginemod.Game.decide, [0]
+
+    def counted(self, *args):
+        n[0] += 1
+        return decide(self, *args)
+
+    monkeypatch.setattr(enginemod.Game, "decide", counted)
+    monkeypatch.setattr(botmod, "LATE", 0.2)
+    m, calls = match(engine)
+    m.on_event(full())
+    m.act()
+    m.tick()
+    time.sleep(0.3)
+    with pytest.raises(ConnectionError, match="resyncing"):
+        m.tick()
+    m.on_event(full())  # the reconnect: still the bot's move
+    m.act()
+    assert [c[:3] for c in calls] == [calls[0][:3]] * 2 and n[0] == 1
+    m.on_event(full(calls[0][2]))  # it arrived: no resend
+    m.act()
+    assert len(calls) == 2
+
+
+def test_patience_and_chat(engine):
+    """No first move from the opponent: the wait scales with the base time (30 s up to 5 minutes, 90 s from
+    15), and starts again whenever they chat, up to 3 times as long."""
+    from allie.lichess.bot import patience
+
+    assert [patience(30, b) for b in (60, 180, 300, 600, 900, 3600)] == [30, 30, 30, 60, 90, 90]
+    assert patience(0, 600) == 0
+    m, calls = match(engine)
+    m.on_event(full("e2e4"))  # the bot is white and moved: the opponent owes a first move
+    m.patience, now = 1.0, time.monotonic()
+    m.waiting, m.chatted = now - 1.5, now - 0.5
+    m.tick()
+    assert not calls
+    m.chatted = now - 1.2
+    m.tick()
+    assert calls == [("abort", "g1")]
+    m.waiting, m.chatted = time.monotonic() - 3.5, time.monotonic()
+    m.tick()
+    assert calls[-1] == ("abort", "g1") and len(calls) == 2
+
+
+def test_rating_offset(engine):
+    """play.offset moves the bot's header Elo off its rating (mirrored or fixed), the opponent's stays."""
+    assert Play(rating="opponent", offset=-50).ratings(1500) == (1450, 1500)
+    assert Play(rating="opponent").ratings(None) == (1500, 1500)
+    assert Play(rating=1800, offset=-50).ratings(None) == (1750, 1800)
+    m, _ = match(engine, rating="opponent", offset=-50)
+    m.on_event(full())
+    assert m.game.elo == (1450, 1500)
 
 
 def test_refused_move_resyncs(engine, caplog):

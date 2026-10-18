@@ -40,7 +40,8 @@ class MockGame:
         self.status, self.winner = "started", None
         self.draw = {"white": False, "black": False}
         self.version = 0
-        self.history = []  # each move's mover's clock after it, ms
+        self.history, self.times = [], []  # each move's mover's clock after it (ms), and when it was played
+        self.on_end, self.restarts = None, 0  # called once the game ends; server restarts (streams dropped)
         self.changed = threading.Condition()
         self.chat = []  # chatLine events, as the game stream sends them
 
@@ -82,6 +83,11 @@ class MockGame:
             self.version += 1
             self.changed.notify_all()
 
+    def restart(self):
+        """Drop the game's streams, as a Lichess restart does."""
+        self.restarts += 1
+        self.publish()
+
     def say(self, user, text, room="player"):
         self.chat.append(dict(type="chatLine", room=room, username=user, text=text))
         self.publish()
@@ -89,6 +95,8 @@ class MockGame:
     def end(self, status, winner=None):
         self.status, self.winner = status, winner
         self.publish()
+        if self.on_end:
+            self.on_end()
 
     def move(self, user, uci, offer=False):
         """None if played, else the error. Moving declines the opponent's draw offer; offer:
@@ -115,6 +123,7 @@ class MockGame:
         self.turn_start = now
         self.board.push(move)
         self.history.append(int(self.clock[side]))
+        self.times.append(now)
         color = ("white", "black")[side]
         self.draw = {color: offer, ("black", "white")[side]: False}
         out = self.board.outcome(claim_draw=True)
@@ -149,6 +158,8 @@ class MockLichess:
             {},
         )  # fail: path prefix -> [HTTP codes to return first]
         self.drop_after = None  # close each user's next game stream after this many events
+        # the next moves Lichess acknowledges but loses (True: in a restart that drops the game's streams)
+        self.lose = []
         self.next_id, self.lock = 0, threading.Lock()
         self.closing = threading.Event()
         handler = type("Handler", (Handler,), dict(mock=self))
@@ -196,6 +207,9 @@ class MockLichess:
         limit, inc = tc["limit"], tc["increment"]
         g = MockGame(cid, white, black, limit, inc, c["rated"], r, self.max_plies)
         self.games[g.id] = g
+        ids = dict(gameId=g.id, id=g.id)
+        g.on_end = lambda: [self.events[u].put(dict(type="gameFinish", game=ids)) for u in (white, black)
+                            if u in self.events]  # fmt: skip
         for u in (white, black):
             if u in self.events:
                 self.events[u].put(dict(type="gameStart", game=dict(gameId=g.id, id=g.id)))
@@ -322,11 +336,11 @@ class Handler(BaseHTTPRequestHandler):
         self.mock.drop_after = None
         try:
             with g.changed:
-                seen, said, full = g.version, len(g.chat), g.full()
+                seen, said, full, epoch = g.version, len(g.chat), g.full(), g.restarts
             self.line(full)
             self.silent("game")
             last = full["state"]
-            while g.status == "started" and not self.mock.closing.is_set():
+            while g.status == "started" and not self.mock.closing.is_set() and g.restarts == epoch:
                 with g.changed:
                     if g.version == seen:
                         g.changed.wait(1)
@@ -343,7 +357,8 @@ class Handler(BaseHTTPRequestHandler):
                     last, sent = s, sent + 1
                     if drop is not None and sent >= drop:
                         return
-            self.line(g.state())
+            if g.restarts == epoch:
+                self.line(g.state())
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -352,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(404, {"error": "no such game"})
         color = g.color(user)
         match action:
+            case ["move", uci] if self.mock.lose:
+                if self.mock.lose.pop(0):
+                    g.restart()
             case ["move", uci]:
                 err = g.move(user, uci, "offeringDraw=true" in query)
                 if err:

@@ -10,8 +10,8 @@ its own mistake once punished, the opponent's good move, the endgame, the clocks
 finish, an event. Casual games: Allie's honest opinion from its own view. Rated games:
 nothing that helps the opponent mid-game. No engine but Allie.
 
-The chat reads its own copy of the game stream (split) and keeps its own model state (an
-engine Game) on its own thread: a move never waits for the chat, nor a reply for a move.
+The chat gets each event of the game stream at once (bot.Feed) and keeps its own model state
+(an engine Game) on its own thread: a move never waits for the chat, nor a reply for a move.
 """
 
 import gzip
@@ -24,6 +24,7 @@ import random
 import re
 import threading
 import time
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from functools import cache
@@ -50,7 +51,8 @@ KINDS = {  # the remarks, and what the model is asked for
     "compliment": "their good move: a brief, genuine compliment",
     "endgame": "the endgame starting: a short remark on it",
     "scramble": "your clock running low: a short remark on your time trouble",
-    "finish": "the end of the game: a short, gracious closing line, nothing about their mistakes",
+    "finish": "the end of the game: a short closing line on something specific to this game, not a generic"
+    " thanks or good luck, and nothing about their mistakes",
     "draw": "their draw offer, which you declined: a short, friendly word on it",
     "takeback": "their takeback request",
     "gone": "them leaving the game",
@@ -67,6 +69,8 @@ WEIGHTS = {
 MUTED = set()  # opponents who typed !quiet, for the life of the process
 RECENT = {}  # opponent -> (time, how the last game with them ended), for rematches
 HELLO = "Hi, I'm Allie, a bot that learned chess from human games. Good luck! (AI-written chat, !quiet to mute)"
+RESTING = "Hi, I'm Allie, a bot that learned chess from human games. Good luck!"  # the hello once chat is off
+REST = "My chat is off for the rest of the day, sorry. Enjoy the game!"  # once a game, to a message then
 QUIET = "Okay, I'll stay quiet. Good luck!"
 GG = "Good game, thanks!"  # the reply to their gg when nothing was said after the game
 STALE = 15.0  # seconds: a reply this long after the message it answers is not posted
@@ -97,7 +101,12 @@ the message. Moves in standard notation (Nf3, Qxd7#).
 
 Vary what you say and how you say it: never reuse a phrase, an opening word or the shape of \
 an earlier message, in this game or from your recent lines in the header. You greet once \
-(the fixed greeting); if they greet you, answer briefly without another hello.
+(the fixed greeting); if they greet you, answer briefly without another hello. Unless the header says \
+you played them recently, they are a new opponent: no "welcome back".
+
+Facts about you, never to contradict: you offer draws, accept or decline theirs, and resign as \
+human players of your rating do, through the game itself (so never promise or rule out a draw or \
+a resignation in chat); your chat replies take a few seconds.
 
 Each turn brings the game updates since your last turn:
 - Their moves, like "12. Nf3 them 14s, takes a bishop, check | you expected Nc3 41% Nf3* \
@@ -165,8 +174,8 @@ class Chat:
     model: str = "claude-sonnet-5-5"
     effort: str = "low"  # output_config.effort ("" = the model's default)
     thinking: str = "between_tools"  # Sonnet 5.5's lowest thinking ("" = the default)
-    max_tokens: int = 300
-    timeout: float = 6.0  # seconds per model call; a late reply is dropped
+    max_tokens: int = 500  # thinking included: at 300, 0.3% of live calls stopped short, billed and dropped
+    timeout: float = 8.0  # seconds per model call; a late reply is dropped
     key_file: str = "~/.config/allie/anthropic_key"  # if ANTHROPIC_API_KEY is unset
     day_cap: float = 1.0  # USD a UTC day, then silent until the next day
     month_cap: float = 15.0  # USD a UTC month
@@ -193,8 +202,9 @@ class Chat:
     recent_file: str = ""  # where ("" = recent-lines.json beside the ledger)
     replies: int = 30  # calls for chat messages per game
     gap: float = 4.0  # seconds from our last message to an unprompted one, at least
+    typing: float = 20.0  # a reply is posted at this many characters a second from the message, 1.5-6 s (0: at once)
     linger: float = 120.0  # seconds of answers after the game (+half after a message)
-    poll: float = 5.0  # seconds between chat fetches after the game, once it has no stream
+    poll: float = 5.0  # seconds to the first chat fetch after the game, once it has no stream; doubling while quiet
     hello: str = HELLO  # the first message of each game, fixed ("" = none)
 
 
@@ -205,49 +215,6 @@ class View(NamedTuple):
     probs: dict
     wdl: tuple
     think: float
-
-
-def split(events, chat, abandon=None):
-    """The game stream for the game thread, each event also handed to the chat at once by
-    a reader thread, so a think-time wait delays the moves but not the chat. The reader
-    outlives the game thread's loop while the chat lingers after the game, unless abandon
-    is set (the game thread resumed on a new stream: this one would feed the chat twice).
-    A chat that fails is left behind, logged once; the game never sees its errors."""
-    q, alive = queue.Queue(), [True]
-
-    def feed(e):
-        if alive[0]:
-            try:
-                chat.put(e)
-            except Exception:
-                alive[0] = False
-                log.exception("game %s chat: failed; the game goes on without it", chat.gid)
-
-    def read():
-        try:
-            for e in events:
-                if abandon is not None and abandon.is_set():
-                    break
-                if e:
-                    feed(e)
-                q.put(e)
-                if alive[0] and chat.done:
-                    break
-        except Exception as e:  # noqa: BLE001 - the game thread raises it
-            q.put(e)
-        finally:
-            q.put(END)
-            # an abandoned stream's end is not the game's
-            if abandon is None or not abandon.is_set():
-                feed(END)
-            if close := getattr(events, "close", None):
-                close()
-
-    threading.Thread(target=read, daemon=True, name=f"read-{chat.gid}").start()
-    while (e := q.get()) is not END:
-        if isinstance(e, Exception):
-            raise e
-        yield e
 
 
 class Chatter:
@@ -272,8 +239,8 @@ class Chatter:
         self.endgame = self.scrambled = self.closed = False  # seen; seen; said after the end
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
         self.last = 0  # the ply of the last call: no remark before ply `every`
-        self.posted, self.until = -math.inf, math.inf
-        self.heard, self.timings = Counter(), []
+        self.posted, self.until, self.interval = -math.inf, math.inf, self.cfg.poll
+        self.heard, self.timings, self.rested = Counter(), [], False
         self.seen, self.latest = [], []  # the moves analyzed, and the reader's latest
         name = f"chat-{self.gid}"
         threading.Thread(target=self.serve, daemon=True, name=name).start()
@@ -298,6 +265,10 @@ class Chatter:
     def muted(self):
         return self.opp in MUTED
 
+    def resting(self):
+        """Is the model off (the spend cap, no key)?"""
+        return bool(getattr(self.llm, "resting", lambda: False)())
+
     # the chat thread
 
     def serve(self):
@@ -308,7 +279,7 @@ class Chatter:
             log.exception("game %s chat: setup", self.gid)
         while not self.done:
             try:
-                batch = [self.q.get(timeout=self.cfg.poll if self.status else None)]
+                batch = [self.q.get(timeout=self.interval if self.status else None)]
             except queue.Empty:
                 batch = []
             while True:
@@ -371,9 +342,7 @@ class Chatter:
         us, them = ("white", "black") if self.white else ("black", "white")
         opp, play = e.get(them) or {}, self.match.bot.config.play
         self.opp = opponent(e, self.me)
-        rating = opp.get("rating")
-        ours = rating if play.rating == "opponent" else play.rating
-        rating, ours = rating or ours or 1500, ours or rating or 1500
+        ours, rating = play.ratings(opp.get("rating"))
         clock = e.get("clock")
         base = clock["initial"] // 1000 if clock else None
         inc = clock["increment"] // 1000 if clock else None
@@ -382,7 +351,7 @@ class Chatter:
         self.game = Game(engine, *elo, base, inc, speed)
         tc = f"{base / 60:g}+{inc}" if clock else "no clock"
         rated = e.get("rated")
-        mirror = " (you match your opponent's rating by default)"
+        mirror = " (set from your opponent's rating)"
         game = f"{speed.capitalize()} {tc}, {'RATED' if rated else 'CASUAL'}."
         header = [
             f"Game: {opp.get('name', 'anonymous')} ({rating}) has {them}, you have {us}. "
@@ -410,8 +379,9 @@ class Chatter:
             return
         self.greeted = True
         if self.cfg.hello and len(self.sans) < 2 and not self.muted():
-            self.post(self.cfg.hello, "player", False)
-            self.note(f'You posted (the fixed greeting): "{self.cfg.hello}"')
+            hello = RESTING if self.resting() else self.cfg.hello
+            self.post(hello, "player", False)
+            self.note(f'You posted (the fixed greeting): "{hello}"')
 
     def update(self, t, s):
         if self.game is None or self.status:
@@ -581,14 +551,15 @@ class Chatter:
 
     def line(self, t, room, who, text):
         text, user = text.strip(), who.lower()
-        if text and user != self.me:
-            log.info("game %s chat (%s) %s: %s", self.gid, room, who, text)
-        if not text or user in (self.me, "lichess") or room not in self.cfg.rooms:
+        if not text:
             return
-        if room == "player":
+        if room == "player":  # fetch() passes on only lines it has not heard as often
             self.heard[(user, text)] += 1
-            if user != self.opp:
-                return
+        if user == self.me:
+            return
+        log.info("game %s chat (%s) %s: %s", self.gid, room, who, text)
+        if user == "lichess" or room not in self.cfg.rooms or room == "player" and user != self.opp:
+            return
         if self.status:
             self.until = max(self.until, time.monotonic() + self.cfg.linger / 2)
         if user == self.opp and quiet({"type": "chatLine", "room": room, "text": text}):
@@ -636,7 +607,7 @@ class Chatter:
             return False
         if kind in WEIGHTS and kind not in self.allowed[engaged]:
             return False
-        if kind == "finish" and not self.finishing or kind in ("takeback", "gone") and not engaged:
+        if kind == "finish" and not (self.finishing and self.talked) or kind in ("takeback", "gone") and not engaged:
             return False
         if budget and self.said >= c.remarks:
             return False
@@ -689,6 +660,8 @@ class Chatter:
         start, then = time.monotonic(), list(self.seen)  # the moves in the prompt
         r = self.llm(self.system, messages)
         if r is None:  # an error, a refusal, the spend cap: the updates wait
+            if not unprompted and not self.rested and self.resting():
+                self.rested = self.post(REST, room, False) is not None
             return
         self.convo = [*messages, {"role": "assistant", "content": r.content}]
         self.pending = []
@@ -712,6 +685,8 @@ class Chatter:
         yet played; the seconds it took, or None. One try: a failed post is dropped."""
         if unprompted:
             time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
+        elif asked is not None and self.cfg.typing:  # a reply at a person's pace, well within STALE
+            time.sleep(max(asked + min(1.5 + len(text) / self.cfg.typing, 6.0) - time.monotonic(), 0))
         now, stopped = list(self.latest), getattr(self.match.bot, "stopped", None)
         why = (
             "quiet" if self.muted() and text != QUIET
@@ -720,8 +695,9 @@ class Chatter:
             and (len(now) - len(then) > 2 or now[: len(then)] != then)
             else "stale" if not unprompted and asked is not None
             and time.monotonic() - asked > STALE
-            else "an unplayed move, rated" if self.info.get("rated") and not self.status
+            else "an unplayed move" if (unprompted or self.info.get("rated") and not self.status)
             and text != QUIET and not played(text, now)
+            else "a repeat" if unprompted and repeats(text, recent(self.cfg).read(0))
             else None
         )  # fmt: skip
         if why:
@@ -753,6 +729,7 @@ class Chatter:
         """After the game, once its stream ended: new chat lines from the chat's page."""
         if not self.status or self.streaming or self.done:
             return
+        self.interval = min(2 * self.interval, 60.0)  # back off while nobody writes
         try:
             lines = self.match.bot.client.chat_lines(self.gid, retries=1)
         except (OSError, ValueError) as e:
@@ -763,6 +740,7 @@ class Chatter:
             key = ((x.get("user") or "").lower(), (x.get("text") or "").strip())
             seen[key] += 1
             if seen[key] > self.heard[key]:
+                self.interval = self.cfg.poll
                 self.line(time.monotonic(), "player", x.get("user", ""), x.get("text", ""))
 
 
@@ -1033,12 +1011,30 @@ def played(text, moves):
 
 
 def clean(text):
-    """The model's text as one line: no links, markup or wrapping quotes."""
-    text = " ".join(re.sub(r"</?[a-z_]+/?>", " ", text.replace("**", "")).split())
+    """The model's text as one line: no links, markup, emoji, invisible characters or wrapping quotes,
+    and none of the junk live replies sometimes trailed ("...ahead. text", "...squares.CHESS",
+    "...endgame.s well played.s", " %")."""
+    link = r"https?://|www\.|\b[a-z0-9-]+\.(?:org|com|net|io|gg|tv|me|co)\b"
+    if re.search(link, text, re.IGNORECASE):
+        return ""
+    text = "".join(c for c in text if unicodedata.category(c) not in ("So", "Cf", "Co", "Cs", "Cn"))
+    text = " ".join(re.sub(r"</?[a-z_]+/?>|`+", " ", text.replace("**", "")).split())
     text = re.sub(r"(?<=[a-z][.!?])(?=[A-Z][a-z])", " ", text)  # "game.Looks": two sentences
     text = text.strip("\"'\u201c\u201d{}")
-    link = r"https?://|www\.|\b[a-z0-9-]+\.(?:org|com|net|io|gg|tv|me|co)\b"
-    return "" if re.search(link, text, re.IGNORECASE) else text
+    text = re.sub(r"(?<=[^\W\d_]{2}[.!?])['\u2019]?[a-z].*", "", text)  # "endgame.s ...": a word glued on
+    if m := re.search(r"(?<!\d)[.!?\u2026](?=[^.!?\u2026]*$)", text):  # after the last sentence: a fragment, glued
+        tail = text[m.end() :]  # on or one word long, or no word at all
+        if tail and (tail[0] != " " or len(tail.split()) < 2 or not re.search(r"[^\W\d_]", tail)):
+            text = text[: m.end()]
+    return text
+
+
+def repeats(text, lines, k=3):
+    """Does text open or close with the same k words as one of lines? (Live, a fifth of the lines opened
+    "Thanks for the game, <name>." or closed "Good luck next!", the recent lines in the prompt notwithstanding.)"""
+    words = lambda t: re.findall(r"[^\W_]+", t.lower())
+    a = words(text)
+    return len(a) >= k and any(len(b := words(x)) >= k and (b[:k] == a[:k] or b[-k:] == a[-k:]) for x in lines)
 
 
 def recase(text, board):

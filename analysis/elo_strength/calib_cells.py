@@ -75,7 +75,7 @@ THINK = False  # --think: also each coverage beta as the bot plays it under the 
 TOPS = {}
 LADDERS = [("8", "32", "128", "256", "1024")]  # --ladder: coverage tags by cost (256v3: 256 simulations, 3 views)
 SIM = 0.015  # seconds a simulation (the 6-cpu bot; allie.lichess.calibration.COST is 16 cpus'; --sim)
-LAG, RESERVE, SHARE = 0.3, 2.5, 0.5  # allie.lichess: Play.lag, behaviour.json's guard
+LAG, RESERVE, SHARE = 0.3, 2.5, 0.5  # allie.lichess as studied: Play.lag, behaviour.json's guard before 2026-10-18
 MARGIN = 0.0  # seconds a search ends before the think time (allie.lichess.calibration.MARGIN)
 
 

@@ -12,8 +12,8 @@ import chess
 import pytest
 
 from allie.lichess import chat, llm
-from allie.lichess.bot import Bot
-from allie.lichess.chat import Chat, Chatter, clean, played, split
+from allie.lichess.bot import Bot, Feed
+from allie.lichess.chat import Chat, Chatter, clean, played
 from allie.lichess.client import Lichess
 from allie.lichess.config import Config
 from allie.lichess.engine import Engine, Play
@@ -63,7 +63,7 @@ class Game:
             chat=lambda gid, text, room, **kw: self.posts.append((room, text)),
             chat_lines=lambda gid, **kw: self.lines,
         )
-        cfg = Chat(enabled=True, gap=0, poll=0.05, **{"recent": 0} | cfg)
+        cfg = Chat(enabled=True, gap=0, poll=0.05, **{"recent": 0, "typing": 0} | cfg)
         config = SimpleNamespace(chat=cfg, play=Play())
         bot = SimpleNamespace(me="allie", config=config, client=client, engine=engine)
         self.match = SimpleNamespace(bot=bot, gid="g1", over=False)
@@ -102,6 +102,24 @@ def test_clean_and_played():
     assert clean("A calm game.<br>Looks solid.") == "A calm game. Looks solid."
     assert clean("A quiet game.Looks calm.") == "A quiet game. Looks calm."
     assert clean("see lichess.org/abc") == "" and clean("Nice game. Looks fun") != ""
+    for junk, want in (  # live replies with junk trailing
+        ("It left you well ahead. text", "It left you well ahead."),
+        ("The middle of the endgame.s well played.s", "The middle of the endgame."),
+        ("Play on the light squares.CHESS", "Play on the light squares."),
+        ("A long diagonal.ometric", "A long diagonal."),
+        ("Well played. %", "Well played."),
+        ("Good game ```", "Good game"),
+        ("Nice! \u25ca", "Nice!"),
+        ("Fair \u200bgame \U0001f642", "Fair game"),
+        ("I'm worse now.'s the pattern, but here", "I'm worse now."),
+    ):
+        assert clean(junk) == want, junk
+    for fine in ("e.g. a quiet move.", "Nice. 1.e4 e5 2.Nf3", "Wait... what a move!", "\u00a1Buena partida!",
+                 "Nice game. I liked Nf3", "Thanks, you too :)"):  # fmt: skip
+        assert clean(fine) == fine
+    assert chat.repeats("Thanks for the game, Bob. Nice fight!", ["Thanks for the game, Ann."])
+    assert chat.repeats("Sharp endgame. Good luck next!", ["Fun one. Good luck next!"])
+    assert not chat.repeats("A sharp fight today.", ["Thanks for the game."]) and not chat.repeats("gg", ["gg"])
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
     for t in (
         "why did you say gg?",
@@ -237,9 +255,9 @@ def test_reciprocity(engine, caplog):
         g.feed(state(" ".join(moves[:k])))
     assert c.kinds == ["opening", "compliment"]
     g.feed(state(" ".join(moves), status="resign", winner="black"))
-    assert c.kinds[-1] == "finish" and len(m.calls) == 3
+    assert c.kinds == ["opening", "compliment"] and len(m.calls) == 2  # no finish: they never wrote
     g.feed(g.say("gg wp"))
-    assert g.posts[-1] == ("player", "Nice.") and len(g.posts) == 3  # no second gg
+    assert g.posts[-1] == ("player", chat.GG) and len(g.posts) == 3
     assert "game g1 chat (player) Shy: gg wp" in caplog.text
     q = Game(engine, opp="shy2", hello="", quiet_p_moment=0, p_end=0, min_plies=0)
     q.chatter(Model("x"))
@@ -255,6 +273,51 @@ def test_reciprocity(engine, caplog):
     assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
     c.moment(time.monotonic(), "scramble")
     assert c.want is None
+
+
+def test_resting_lichess_lines_and_polling(engine, caplog):
+    """With the model off (the day's cap): the hello without the chat offer, and one line a game saying the
+    chat is off when they write. Lichess's own lines are logged once, not at every fetch, and fetches after
+    the game back off while nobody writes."""
+    caplog.set_level("INFO", logger="allie.lichess.chat")
+
+    class Off(Model):
+        def __call__(self, system, messages):
+            self.calls.append((system, messages))
+
+        def resting(self):
+            return True
+
+    g = Game(engine, opp="late", linger=5)
+    c = g.chatter(Off())
+    g.feed(g.full(), g.say("hi"), g.say("are you there?"))
+    assert g.posts == [("player", chat.RESTING), ("player", chat.REST)]
+    g.feed(g.say("Black offers draw", who="lichess"), state("e2e4", status="resign", winner="white"), chat.END)
+    g.lines = [{"user": "lichess", "text": "Black offers draw"}]
+    time.sleep(1.0)  # fetches 0.05, 0.1, 0.2, 0.4 s apart
+    assert caplog.text.count("Black offers draw") == 1 and c.interval >= 0.8
+
+
+def test_unprompted_lines_vary_and_name_played_moves(engine, tmp_path):
+    """An unprompted line (a remark, the finish) never names a move not played, casual games too, and never
+    opens or closes like a recent line; a reply after the game may name any move, at a person's pace."""
+    m = Model("Thanks for the game, Opp. Good luck next!")
+    g = Game(engine, opp="templ", hello="", p_end=1, min_plies=2, linger=5, recent=10,
+             recent_file=str(tmp_path / "recent.json"))  # fmt: skip
+    c = g.chatter(m)
+    c.talked = True
+    chat.recent(c.cfg).add("Thanks for the game, Ann. Good luck next!")
+    g.feed(g.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
+    assert len(m.calls) == 1 and g.posts == []  # a repeat
+    m.text = "I liked my plan with Nf3 there."
+    h = Game(engine, opp="casual", hello="", p_end=1, min_plies=2, linger=5, typing=20)
+    h.chatter(m).talked = True
+    h.feed(h.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
+    assert len(m.calls) == 2 and h.posts == []  # an unplayed move
+    m.text = "Maybe Nf3 was better."
+    start = time.monotonic()
+    h.feed(h.say("what should I have played?"))
+    assert h.posts == [("player", "Maybe Nf3 was better.")] and time.monotonic() - start >= 1.5
 
 
 def test_pick():
@@ -349,6 +412,7 @@ def test_one_goodbye(engine):
     g = Game(engine, opp="bye", hello="", quiet_p_moment=1, p_end=1, min_plies=2, linger=5)
     c = g.chatter(m)
     g.feed(g.full(), state("e2e4"), state("e2e4 e7e5"))
+    c.talked, c.unreplied = True, 2  # they wrote, then went quiet: a finish line, and gg gets the fixed reply
     m.gate.clear()
     c.put(state("e2e4 e7e5 g1f3", status="resign", winner="white"))
     c.put(g.say("gg"))
@@ -362,7 +426,7 @@ def test_long_goodbye_posts_whole(engine):
     """A closing line over one chat line is posted in both its parts."""
     text = "Thanks for the game, that was a hard fight all the way. " * 3 + "See you soon."
     g = Game(engine, opp="long", hello="", p_end=1, min_plies=2, linger=5)
-    g.chatter(Model(text))
+    g.chatter(Model(text)).talked = True  # a finish line only to someone who chatted
     g.feed(g.full(), state("e2e4"), state("e2e4 e7e5", status="resign", winner="black"))
     assert len(g.posts) == 2 and " ".join(x for _, x in g.posts) == text.strip()
 
@@ -562,9 +626,9 @@ def test_clocks_takeback_and_late(engine):
     assert g.posts == []
 
 
-def test_split():
+def test_feed():
     """The chat gets each event at once even while the game thread is busy; the game thread
-    gets them all in order, then the stream's error."""
+    gets them all in order (None for a keepalive or a timeout), then the stream's error and its end."""
     got = []
     sink = SimpleNamespace(gid="g", done=False, put=got.append)
 
@@ -574,16 +638,16 @@ def test_split():
         yield {"type": "b"}
         raise OSError("closed")
 
-    events = split(stream(), sink)
-    assert next(events) == {"type": "a"}
+    feed = Feed(stream(), sink)
     wait(lambda: len(got) == 3)  # a, b and the end, while the game thread waits
     assert got == [{"type": "a"}, {"type": "b"}, chat.END]
-    assert next(events) is None and next(events) == {"type": "b"}
+    assert feed.get() == {"type": "a"} and feed.get() is None and feed.get() == {"type": "b"}
     with pytest.raises(OSError):
-        next(events)
+        feed.get()
+    assert feed.get() is chat.END and feed.get(0.01) is None and feed.empty()
 
 
-def test_split_survives_a_failing_chat(caplog):
+def test_feed_survives_a_failing_chat(caplog):
     """A chat whose put raises is left behind, logged once; the game thread still gets
     every event and the stream's own end."""
 
@@ -592,7 +656,8 @@ def test_split_survives_a_failing_chat(caplog):
 
     sink = SimpleNamespace(gid="g", done=False, put=put)
     events = [{"type": "gameFull"}, None, {"type": "gameState"}, {"type": "chatLine"}]
-    assert list(split(iter(events), sink)) == events
+    feed = Feed(iter(events), sink)
+    assert [feed.get(5) for _ in events] == events and feed.get(5) is chat.END
     assert sum("chat: failed" in r.message for r in caplog.records) == 1
 
 
@@ -755,7 +820,7 @@ def test_claude(monkeypatch, tmp_path):
     start = time.monotonic()
     assert m(system, [{"role": "user", "content": "u"}]) is None  # stalled after starting
     assert time.monotonic() - start < 1.4  # the total deadline
-    partial = (300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + 300) * 10) / 1e6  # + all it could write
+    partial = (300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + cfg.max_tokens) * 10) / 1e6  # + all it could write
     m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] == pytest.approx(usd + partial)
     before = json.loads(ledger.read_text())[day]
@@ -764,11 +829,13 @@ def test_claude(monkeypatch, tmp_path):
     assert time.monotonic() - start < 1.4
     m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] > before  # still charged
+    assert not m.resting()
     assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
-    assert m(system, [{"role": "user", "content": "u"}]) is None
+    assert m(system, [{"role": "user", "content": "u"}]) is None and m.resting()
     assert len(api.requests) == 5
     key.unlink()
-    assert llm.make(cfg)(system, []) is None  # no key
+    silent = llm.make(cfg)
+    assert silent(system, []) is None and silent.resting()  # no key
 
 
 def test_config(tmp_path):

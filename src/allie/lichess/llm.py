@@ -35,7 +35,7 @@ MODELS, LOCK = {}, threading.Lock()
 
 def model(cfg):
     """The model of a [chat] config, shared by the games: a function (system, messages) ->
-    Reply, or None when it has none (an error, a refusal, the spend cap)."""
+    Reply, or None when it has none (an error, a refusal, the spend cap); resting(): is it off?"""
     with LOCK:
         if repr(cfg) not in MODELS:
             MODELS[repr(cfg)] = make(cfg)
@@ -47,7 +47,7 @@ def make(cfg):
         from .chat import Mock
 
         return Mock()
-    silent = lambda system, messages: None
+    silent = Silent()
     if cfg.model not in PRICES:
         log.error("chat: no price for %s, so no spend cap: fixed lines only", cfg.model)
         return silent
@@ -74,6 +74,16 @@ def key(path):
     if os.stat(path).st_mode & 0o077:
         log.warning("chat: %s is readable by others; chmod 600 it", path)
     return k or None
+
+
+class Silent:
+    """No model (no price, key or SDK): fixed lines only."""
+
+    def __call__(self, system, messages):
+        return None
+
+    def resting(self):
+        return True
 
 
 PRICES = {  # USD per million tokens: input, cache write 5 min and 1 h, cache read, output
@@ -279,6 +289,10 @@ class Claude:
         }
         if cfg.thinking:
             self.params["thinking"] = {"type": cfg.thinking}
+
+    def resting(self):
+        """Off: the spend cap reached, a bad key or model (a rate limit's minute too)."""
+        return time.monotonic() < self.until or not self.ledger.allows(wait=1.0)
 
     def __call__(self, system, messages):
         a, start = self.sdk, time.monotonic()

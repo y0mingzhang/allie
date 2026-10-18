@@ -63,27 +63,32 @@ trust_remote_code=True)`, see the model card).
 |---|---|
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
 | `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
-| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy in any time control and rating. One rule for every rating and time control (`calibration.py`): the move's think time is drawn first, a KL search (best-first on log-odds values, every node read as a game between two 3000-rated players) evaluates the largest of 8, 16, ..., 4096 leaves that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values, more sharply for stronger players and longer-thought positions. A search ends 0.3 s before the think time (or at a fifth of the clock) with the tree it has, so no search runs past the drawn think time. Searches run only on the Rust engine; a leaf is priced at `calibration.COST` (4 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 16 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra fast`. |
+| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy in any time control and rating. One rule for every rating and time control (`calibration.py`): the move's think time is drawn first, a KL search (best-first on log-odds values, every node read as a game between two 3000-rated players) evaluates the largest of 8, 16, ..., 4096 leaves that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values, more sharply for stronger players and longer-thought positions. A search ends 0.3 s before the think time (or at a fifth of the clock) with the tree it has, so no search runs past the drawn think time. Searches run only on the Rust engine; a leaf is priced at `calibration.COST` (4 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 16 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra fast`. Live, against rating-matched humans (2,223 games, 2026-10-06 to 10-17), it played 53 ± 8 Elo above its rating in games decided on the board (85 counting opponents who flagged or left; blitz -11, rapid +61, classical +124), so the live bot sets `play.offset = -50`: the rating it plays as, in the header and the tilt, 50 below its opponent's. |
 
 - **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
   63 bins, from 0 s to over an hour, given the position, both clocks and both ratings. It is a draw, not
   the average, so the bot plays obvious moves fast and sometimes thinks long, as people do. Human times
   are measured by the server, so the bot takes the lag off the draw (`play.lag`, 0.3 s: live, Lichess charged the bot 0.33 s per move beyond its own think time). Compute
   time counts toward the wait. Each side's first move takes 0.5-2 s.
-- **Clock safety.** The wait never exceeds half of the clock left above a 2.5 s reserve, plus the increment,
-  and never the clock above the reserve itself (the increment arrives only after the move). The reserve
-  covers the 99th percentile of live lag, 2.2 s. Fewer than 1%
-  of human moves would be cut by this guard.
+- **Clock safety.** The wait never exceeds half of the clock left above a 5 s reserve (a quarter under a
+  minute, between the two up to two minutes), plus the increment, and never the clock above the reserve
+  itself (the increment arrives only after the move). Live, with a 2.5 s reserve and half the clock, 5% of
+  the bot's bullet games flagged: one long think late in the game, then a reserve spent by the lag of the
+  moves at it (0.2-0.3 s a move, 1 s at the 90th percentile). The guard cuts 4% of human moves' times (9%
+  in bullet, mostly by under a second with a few seconds left), against 1.4% before.
 - **Resigning.** At each position, the bot resigns with the probability that a human of its rating resigns
   there: on its turn instead of moving, or right after its own move, when the new position shows it is
   lost. The probability is a hazard fitted on held-out human games, from the model's win / draw / loss
   estimate, the ply, the rating, the time control and the clock. It never resigns below the P(loss) under
-  which humans almost never resign (the 5th percentile of their resignations, 0.57). `play.resign = false`
-  turns it off.
+  which humans almost never resign (the 5th percentile of their resignations, 0.57), nor before ply 20: 6%
+  of human resignations come earlier, at a median P(loss) of 0.74 (live, the bot resigned at move 3).
+  `play.resign = false` turns it off.
 - **Draws.** It ends games by agreement about as often as humans do in the same situation, by offering a
-  draw with its move. It accepts an offer unless it is clearly better: above an expected score of 0.62,
-  where three quarters of human agreements happen at or below. The game data show agreements, not offers,
-  so these rules are heuristics. `play.draws = false` turns both off.
+  draw with its move (from ply 20). It accepts an offer from ply 30 (83% of human agreements come later)
+  unless it is clearly better: above an expected score of 0.62, where three quarters of human agreements
+  happen at or below. The game data show agreements, not offers, so these rules are heuristics. It answers
+  an offer only on its turn, before it moves: after its move Lichess has declined the offer, and a yes
+  would be an offer of its own. `play.draws = false` turns both off.
 - **Calibration.** `analysis/lichess/human.py` scores the main evaluation's games, fits `behaviour.json` on
   half of them and checks it on the other half. It then plays the bot against itself in those games'
   ratings and time controls, and compares its games with the humans'. See "Human-likeness" below.
@@ -92,7 +97,13 @@ trust_remote_code=True)`, see the model card).
 - **Challenges.** `[challenge]` sets the accepted speeds, base times, increments, rated or casual games, humans
   or bots, and games per opponent. Only standard chess from the starting position is accepted. Beyond
   `max_games`, challenges are declined with "later". A game whose opponent has not made a first move within
-  `abort` seconds (30) is aborted: Lichess can leave one open for an hour, holding a slot and a drain.
+  `abort` seconds (30; up to 3 times that from a 15-minute base, and again while they chat, up to 3 times)
+  is aborted: Lichess can leave one open for an hour, holding a slot and a drain.
+- **Never blocked.** A game's thread waits out the think time on its stream, so offers, resignations,
+  aborts and rematch challenges are handled during the wait, and no move goes to a game that ended. If
+  Lichess's state does not show the bot's move within 3 s, or a reconnect shows the bot still to move (a
+  move lost in a Lichess restart), it sends the same move again; a move's POST gives up after 3 tries of
+  5 s and reconnects.
 
 ## Human-likeness
 
@@ -179,9 +190,12 @@ involved.
   compliment and a plan most often): 1, 2 or 3 of them with chances `mix` while the opponent is quiet,
   one more once they chat (`p_moment` per chance then, `quiet_p_moment` before). A finish line comes
   with chance `p_end`; `p_draw` at a declined draw offer; at most `remarks` remarks a game. Quiet means
-  until they write, or once `unanswered` of the bot's lines in a row get no reply. A "gg" after the
-  game gets a fixed reply (no call) if the bot said nothing after the game. The bot's last `recent`
-  remarks reach the model as lines from recent games, not to be reused or referred to.
+  until they write, or once `unanswered` of the bot's lines in a row get no reply. The finish line is only
+  for an opponent who wrote during the game. A "gg" after the game gets a fixed reply (no call) if the bot
+  said nothing after the game. The bot's last `recent` remarks reach the model as lines from recent games,
+  not to be reused or referred to; an unprompted line that opens or closes with the same three words as
+  one of them is not posted (live, a fifth of the lines were one "Thanks for the game ... Good luck next!"
+  template), nor one naming a move not played.
 - **Voice.** A friendly, curious club player, in plain sentence case: short, warm, no jokes or slang.
   Never a dig at the opponent's mistakes.
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
@@ -190,15 +204,21 @@ involved.
   After the game it reviews from Allie's view when asked.
 - **`!quiet`.** It mutes the bot for that game and their rematches, including a message already being
   written.
-- **Never in the way.** The chat reads its own copy of the game stream on a reader thread and keeps its
-  own model state, so it does not wait behind a move's think time.
-  - Replies are posted at once; unprompted messages wait `gap` seconds after the last one.
+- **Facts.** The persona knows the bot offers, accepts and declines draws and resigns as humans of its
+  rating do, through the game: it never promises or rules them out in chat. The model's text loses markup,
+  emoji, invisible characters and junk trailing its last sentence.
+- **Never in the way.** The chat gets each event of the game stream from its reader thread at once and
+  keeps its own model state, so it does not wait behind a move's think time.
+  - Replies are posted at a person's pace (`typing` characters a second from their message, 1.5-6 s);
+    unprompted messages wait `gap` seconds after the last one.
   - A call over `timeout` is dropped, and an error only skips a message.
   - A bad key or model turns the model off; a rate limit pauses it a minute.
-  - After the game, once the stream closes, it reads new chat lines from the game's chat page.
+  - After the game, once the stream closes, it reads new chat lines from the game's chat page, every
+    `poll` seconds at first and twice as long after each fetch with nothing new.
 - **Spend cap.** Each response's tokens are priced into a ledger file (`ledger`) by UTC day and month
   (Sonnet 5.5, $ per million tokens: 2 input, 2.50 / 4 cache write for 5 min / 1 h, 0.20 cache read,
-  10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over. The totals
+  10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over: the hello
+  then leaves out the chat offer, and a message gets one fixed line a game saying the chat is off. The totals
   live in memory, seeded from the file at start; a background thread writes the charges to it (and
   picks up other processes'), retrying a failed write, so no call waits on the filesystem. The same
   goes for the recent lines. A spend limit on the key in the Anthropic Console is the backstop.

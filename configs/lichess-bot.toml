@@ -10,7 +10,7 @@ active_experts = 0            # routed experts per token, 0 = all 16; 8 is faste
 url = "https://lichess.org"
 max_games = 4                 # concurrent games; the rest are declined with "later"
 greeting = ""                 # sent to the opponent's chat at the start of each game
-abort = 30                    # seconds without the opponent's first move before the bot aborts the game
+abort = 30                    # seconds without the opponent's first move before the bot aborts (3x from 15 min)
 
 [challenge]
 rated = true
@@ -28,6 +28,7 @@ per_user = 1                  # concurrent games with one opponent
 mode = "human"                # human: sample the policy; strongest: argmax (or search); calibrated: play at
                               # the strength of humans of the rating (calibration.py); see engine.MODES
 rating = "opponent"           # the bot's Elo in the game header: a number, or "opponent" to mirror it
+offset = 0                    # Elo added to it; live calibrated play was 53 Elo too strong at 0 (README): -50
 temperature = 1.0             # human mode; 1 is the model's own distribution
 search = 0                    # strongest mode: 0 or 5 / 8 / 25 / 128 coverage-search simulations
 think_time = true             # wait a think time drawn from the model's think-time head, as a human would
@@ -39,8 +40,8 @@ enabled = false               # needs `uv sync --extra chat` and an Anthropic AP
 rooms = ["player"]            # rooms to answer and remark in; add "spectator" for spectators
 model = "claude-sonnet-5-5"
 effort = "low"                # output_config.effort; thinking "between_tools" = off, for latency
-max_tokens = 300
-timeout = 6.0                 # seconds; a late message is dropped, a move never waits
+max_tokens = 500              # thinking included
+timeout = 8.0                 # seconds; a late message is dropped, a move never waits
 key_file = "~/.config/allie/anthropic_key"  # chmod 600; ANTHROPIC_API_KEY wins if set
 day_cap = 1.0                 # USD per UTC day, counted from each response's usage; then silent
 month_cap = 15.0              # USD per UTC month
@@ -50,7 +51,7 @@ p_moment = 0.7                # while they chat: chance of a remark when one of 
 quiet_p_moment = 0.6          # ... until they write, or ignore `unanswered` of our lines in a row
 unanswered = 2
 p_draw = 0.4                  # at their declined draw offer
-p_end = 0.35                  # a game's chance of a closing line (min_plies or more, not aborted)
+p_end = 0.35                  # a game's chance of a closing line (they chatted, min_plies or more, not aborted)
 min_plies = 10
 remarks = 4                   # remarks a game, at most
 every = 6                     # plies from any call to an unprompted one, at least
@@ -58,4 +59,6 @@ scramble = 20.0               # seconds: the clock remark once a clock is under 
 recent = 50                   # unprompted lines kept across games and not reused (beside the ledger)
 replies = 30                  # calls for chat messages per game
 gap = 4.0                     # seconds from our last message to an unprompted one, at least
+typing = 20.0                 # replies at this many characters a second from the message, 1.5-6 s (0: at once)
 linger = 120.0                # seconds of answers after the game (longer after each message)
+poll = 5.0                    # seconds to the first chat fetch after the game, doubling while nobody writes

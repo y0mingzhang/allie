@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 
 log = logging.getLogger(__name__)
+CONTACT = "https://github.com/y0mingzhang/allie"  # Lichess asks bots for contact details in the User-Agent
 
 
 class Lichess:
@@ -16,7 +17,7 @@ class Lichess:
         self.url, self.timeout, self.retries = url.rstrip("/"), timeout, retries
         self.wait = wait  # after HTTP 429, as Lichess asks
         self.silence = silence  # seconds without a byte (keepalives included) before a stream is dropped
-        self.headers = {"Authorization": f"Bearer {token}", "User-Agent": "allie-bot"}
+        self.headers = {"Authorization": f"Bearer {token}", "User-Agent": f"allie-bot (+{CONTACT})"}
 
     def _open(self, method, path, data=None, timeout=None):
         body = urllib.parse.urlencode(data or {}).encode() if method == "POST" else None
@@ -64,8 +65,10 @@ class Lichess:
         return self.call("POST", f"/api/challenge/{challenge}/decline", {"reason": reason})
 
     def move(self, game, move, draw=False):
+        """Fewer, shorter tries than other calls: past them, the game reconnects and resends the move (a
+        network blip cost live games 15-40 s of clock at 5 tries of 20 s)."""
         q = "?offeringDraw=true" if draw else ""
-        return self.call("POST", f"/api/bot/game/{game}/move/{move}{q}")
+        return self.call("POST", f"/api/bot/game/{game}/move/{move}{q}", retries=3, timeout=5)
 
     def abort(self, game):
         return self.call("POST", f"/api/bot/game/{game}/abort")

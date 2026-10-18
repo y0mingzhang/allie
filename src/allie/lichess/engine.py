@@ -23,12 +23,19 @@ class Play:
     mode: str = "human"  # a key of MODES: human samples the policy; strongest: argmax (or search);
     # calibrated: plays at the strength of humans of its rating (calibration.py)
     rating: int | str = 1500  # the bot's header Elo, or "opponent" to mirror it
+    offset: int = 0  # Elo added to the bot's rating (live calibrated play measured stronger than its rating)
     temperature: float = 1.0  # human mode
     search: int = 0  # strongest mode: coverage-search simulations (0 = policy argmax)
     think_time: bool = True  # wait a think time drawn from the model's think-time head
     resign: bool = True  # resign as often and as late as humans of the bot's rating do
     draws: bool = True  # offer and accept draws as humans do (otherwise: never)
     lag: float = 0.3  # seconds Lichess charges beyond the bot's own think time (measured live)
+
+    def ratings(self, them):
+        """(the bot's, the opponent's) header Elo, given the opponent's rating (None: unknown)."""
+        ours = them if self.rating == "opponent" else self.rating
+        them = them or ours or 1500
+        return (ours or them) + self.offset, them
 
 
 class Engine:
@@ -285,7 +292,7 @@ class Game:
             return True
         if (len(self.moves) % 2 == 0) != white:  # the head speaks for the side to move
             w, loss = loss, w
-        return behaviour.accept_draw((w, d, loss))
+        return behaviour.accept_draw((w, d, loss), len(self.moves))
 
     def cell(self, elo):
         """allie.search's cell: format x mover Elo band."""
