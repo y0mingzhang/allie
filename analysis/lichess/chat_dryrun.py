@@ -196,7 +196,7 @@ def main():
         end, script = None, SCRIPTS.get(script)
         if a.log:
             h = read(path, 0)[0]
-            kind, plies = h["Event"].split()[0], 10_000
+            kind, plies = h["Event"].split()[0].lower(), 10_000
             script, end = from_log(a.log, h)
         posts, turns = [], []
         ref = {}

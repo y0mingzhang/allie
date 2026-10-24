@@ -178,16 +178,14 @@ involved.
   on a moment, at most one remark of each kind a game, by chance, decided in code before any call,
   at least `every` plies after the last call. The kinds:
   - the opening (once a name is known);
-  - its plan after one of its middlegame moves;
   - its own mistake, once the opponent has punished it;
   - the opponent's good move;
-  - the endgame starting;
   - its own clock under `scramble` seconds;
   - the finish (in games of `min_plies` or more, not aborted);
   - a declined draw offer, a takeback request, the opponent leaving.
 
-  Variety: each game draws which of the first six kinds it may use, by weight (the opening, a
-  compliment and a plan most often): 1, 2 or 3 of them with chances `mix` while the opponent is quiet,
+  Variety: each game draws which of the first four kinds it may use, by weight (a compliment most
+  often): 1, 2 or 3 of them with chances `mix` while the opponent is quiet,
   one more once they chat (`p_moment` per chance then, `quiet_p_moment` before). A finish line comes
   with chance `p_end`; `p_draw` at a declined draw offer; at most `remarks` remarks a game. Quiet means
   until they write, or once `unanswered` of the bot's lines in a row get no reply. The finish line is only
@@ -196,8 +194,11 @@ involved.
   not to be reused or referred to; an unprompted line that opens or closes with the same three words as
   one of them is not posted (live, a fifth of the lines were one "Thanks for the game ... Good luck next!"
   template), nor one naming a move not played.
-- **Voice.** A friendly, curious club player, in plain sentence case: short, warm, no jokes or slang.
-  Never a dig at the opponent's mistakes.
+- **Voice.** A friendly club player typing in a chat box: short, casual (lowercase, chat shorthand,
+  light humor, a joke when asked), mirroring the opponent's language and register, often silent; no
+  service-desk politeness and no narration of its own moves. A bot with no gender or age when asked.
+  Never a dig at the opponent's mistakes, and no coaching mid-game in any game. The last of the
+  `replies` a game signs off, and no remarks follow it.
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
   In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
   message naming a move not yet played (a bare square only if it is a legal pawn push) is dropped.
@@ -227,7 +228,8 @@ involved.
   (`chmod 600`) or `ANTHROPIC_API_KEY`. Each call is logged with its tokens (new, cached, written,
   output), cost, time to the first token and latency; the key is never logged.
 - **Dry run.** `analysis/lichess/chat_dryrun.py` replays recorded games through a real chat, with scripted
-  messages, a draw offer and a resignation (`--llm mock` needs no key).
+  messages, a draw offer and a resignation, or (`--log`) live games with their opponents' real lines from
+  the bot's log (`--llm mock` needs no key).
 
 ## Cost and accuracy
 

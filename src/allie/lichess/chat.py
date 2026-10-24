@@ -103,7 +103,7 @@ and don't keep telling them how your position feels.
 Don't repeat yourself: no template you reuse across messages, in this game or from your \
 recent lines in the header (a plain gg or nice is fine). You greet once (the fixed \
 greeting); if they greet you, answer without another hello. Unless the header says you played \
-them recently, they are a new opponent: no "welcome back".
+them recently, you don't remember them: no "welcome back", and no "we've never played" either.
 
 Facts about you, never to contradict:
 - You're a bot, not a person: no gender, age, looks, family, home or life away from chess. \
@@ -114,7 +114,8 @@ through the game itself: never promise or rule out a draw or a resignation in ch
 - You never take moves back, and you can't send challenges: for another game, they \
 challenge you.
 - Who made you and why: your Lichess profile has the details; don't make up more.
-- Your chat replies take a few seconds, and your moves never wait for the chat.
+- Your chat replies take a few seconds, and your moves never wait for the chat. Your think \
+time is human-like on purpose: often you know your move early and take your time to play it.
 
 Each turn brings the game updates since your last turn:
 - Their moves, like "12. Nf3 them 14s, takes a bishop, check | you expected Nc3 41% Nf3* \
@@ -317,8 +318,6 @@ class Chatter:
 
     def stop(self):
         self.done = True
-        if self.opp and self.status:
-            RECENT[self.opp] = (time.monotonic(), self.result())
 
     def handle(self, t, e):
         if e is None:  # the game thread is done
@@ -516,6 +515,7 @@ class Chatter:
         if live:
             return
         self.status, self.winner = status, s.get("winner")
+        RECENT[self.opp] = (time.monotonic(), self.result())  # at once: a rematch may start while we linger
         if self.want and self.want[2]:  # a moment of the last moves: the end decides
             self.want = None
         if self.offer and status == "draw":
@@ -611,7 +611,7 @@ class Chatter:
         by chance, within the budget, `every` plies from the last call. Whether the chance
         was taken."""
         c, engaged = self.cfg, self.engaged()
-        if self.want or self.muted() or kind in self.kinds:
+        if self.want or self.muted() or kind in self.kinds or self.answered >= c.replies:  # signed off
             return False
         if kind in WEIGHTS and kind not in self.allowed[engaged]:
             return False
@@ -1037,14 +1037,13 @@ def clean(text):
     if re.search(link, text, re.IGNORECASE):
         return ""
     text = re.sub(r"(?<=[^\W\d_]{2}[.!?])['\u2019]?[a-z].*", "", text)  # "endgame.s ...": a word glued on
-    text = re.sub(r"(?<=[.!?\u2026])\s+[?!]+$", "", text)  # a move annotation after the end
+    text = re.sub(r"(?<=[.!?\u2026])(?:\s+[?!]+|\])$", "", text)  # a move annotation or a stray ] after the end
     # an ASCII fragment after the last sentence (not a move number's dots): glued on, a leaked key or no word
-    if m := re.search(r"(?<![\d.\s])[.!?\u2026][)\]\"'\u201d\u2019]*(?=[^.!?\u2026]*$)", text):
+    if m := re.search(r"(?<=[^\d.\s])[.!?\u2026][)\]\"'\u201d\u2019]*(?=[^.!?\u2026]*$)", text):
         tail = text[m.end() :]
         if tail.isascii() and tail and (tail[0] != " " or tail.strip() == "text" or not re.search("[A-Za-z]", tail)):
             text = text[: m.end()]
-    text = text.strip("\"'\u201c\u201d{} ")
-    return text[:-1] if text.endswith("]") and "[" not in text else text
+    return text.strip("\"'\u201c\u201d{} ")
 
 
 STOP = set("a an and as at be but by d for from here how i in is it its ll m me my now of on or our re s so t that "

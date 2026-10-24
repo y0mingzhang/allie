@@ -124,7 +124,7 @@ def test_clean_and_played():
         assert clean(junk) == want, junk
     for fine in ("e.g. a quiet move.", "Nice. 1.e4 e5 2.Nf3", "Wait... what a move!", "\u00a1Buena partida!",
                  "Nice game. I liked Nf3", "Thanks, you too :)", "Your 15...Qh4 was strong", "(Nice move.)",
-                 "oof. gg", "nice one. ty", "what?! no way", "[sic] fine]", "type !quiet to mute me",
+                 "oof. gg", "nice one. ty", "what?! no way", "gg :]", "type !quiet to mute me", "!quiet mutes me",
                  "\u4f60\u597d!\u6211\u662fAllie", "Caf\u00e9 time, \u00a1ol\u00e9!"):  # fmt: skip
         assert clean(fine) == fine
     assert chat.repeats("Thanks for the game, Bob. Nice fight!", ["Thanks for the game, Ann."])
@@ -193,13 +193,16 @@ def test_conversation(engine):
 
 
 def test_rematch_hello(engine):
-    """An opponent of the last 15 minutes gets the short hello, and the header says so."""
-    chat.RECENT["again"] = (time.monotonic() - 300, "you won by checkmate after 30 plies")
+    """An opponent of a game that just ended (the chat still lingering) gets the short hello, and the header
+    says so."""
+    g = Game(engine, opp="again", linger=60)
+    g.chatter(Model(""))
+    g.feed(g.full(), state("e2e4 e7e5", status="resign", winner="black"))
     m = Model("")
-    g = Game(engine, opp="again")
-    g.chatter(m)
-    g.feed(g.full(), g.say("hi"))
-    assert g.posts == [("player", chat.AGAIN)] and "5 min ago" in m.calls[0][0][1]["text"]
+    g2 = Game(engine, opp="again")
+    g2.chatter(m)
+    g2.feed(g2.full(), g2.say("hi"))
+    assert g2.posts == [("player", chat.AGAIN)] and "0 min ago: you won by resignation" in m.calls[0][0][1]["text"]
 
 
 def test_moments_draw_resign(engine):
