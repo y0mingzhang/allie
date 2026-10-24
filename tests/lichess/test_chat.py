@@ -115,16 +115,23 @@ def test_clean_and_played():
         ("Nice game.Me too!", "Nice game. Me too!"),
         ("Strong try. \u00f0\u0178\u2122\u201a", "Strong try."),
         ("Nice rook lift.','speak':true", "Nice rook lift."),
+        (
+            "I went for the Englund Gambit, so we'll see how it goes. ?!",
+            "I went for the Englund Gambit, so we'll see how it goes.",
+        ),
+        ("your sacrifices kept me on my toes.]", "your sacrifices kept me on my toes."),
     ):
         assert clean(junk) == want, junk
     for fine in ("e.g. a quiet move.", "Nice. 1.e4 e5 2.Nf3", "Wait... what a move!", "\u00a1Buena partida!",
                  "Nice game. I liked Nf3", "Thanks, you too :)", "Your 15...Qh4 was strong", "(Nice move.)",
+                 "oof. gg", "nice one. ty", "what?! no way", "[sic] fine]", "type !quiet to mute me",
                  "\u4f60\u597d!\u6211\u662fAllie", "Caf\u00e9 time, \u00a1ol\u00e9!"):  # fmt: skip
         assert clean(fine) == fine
     assert chat.repeats("Thanks for the game, Bob. Nice fight!", ["Thanks for the game, Ann."])
     assert chat.repeats("Sharp endgame. Good luck next!", ["Fun one. Good luck next!"])
     assert not chat.repeats("A sharp fight today.", ["Thanks for the game."]) and not chat.repeats("gg", ["gg"])
     assert not chat.repeats("This is the Sicilian.", ["This is the London."])  # stopwords only
+    assert not chat.repeats("gg, that was a wild one", ["gg, that was close"])  # chat fillers too
     assert chat.gg("GG wp") and chat.gg("ggs") and not chat.gg("eggs")
     for t in (
         "why did you say gg?",
@@ -185,6 +192,16 @@ def test_conversation(engine):
     assert len(c.timings) == 2 and c.timings[0]["text"] == "hi! enjoy the game."
 
 
+def test_rematch_hello(engine):
+    """An opponent of the last 15 minutes gets the short hello, and the header says so."""
+    chat.RECENT["again"] = (time.monotonic() - 300, "you won by checkmate after 30 plies")
+    m = Model("")
+    g = Game(engine, opp="again")
+    g.chatter(m)
+    g.feed(g.full(), g.say("hi"))
+    assert g.posts == [("player", chat.AGAIN)] and "5 min ago" in m.calls[0][0][1]["text"]
+
+
 def test_moments_draw_resign(engine):
     """Unprompted calls at moments by probability; a declined draw offer; the end, with
     Allie's review; then answers after the game, by fetching the chat once its stream ends."""
@@ -241,7 +258,7 @@ def test_reciprocity(engine, caplog):
     g = Game(engine, opp="shy", hello="", quiet_p_moment=1, every=0, p_end=1, linger=5,
              min_plies=4)  # fmt: skip
     c = g.chatter(m)
-    c.allowed = (["opening", "compliment"], ["opening", "compliment", "plan"])
+    c.allowed = (["opening", "compliment"], ["opening", "compliment", "mistake"])
     script(c, lambda n: 0.5 if n < 9 else 0.3)  # their 5th move (ply 9) is strong
     moves = [
         "e2e4",
@@ -270,10 +287,10 @@ def test_reciprocity(engine, caplog):
     assert q.posts == [("player", chat.GG)]  # nothing said after the game: the fixed reply
     d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=1, every=0)
     c = d.chatter(Model("hey"))
-    c.allowed = ([], ["endgame"])
+    c.allowed = ([], ["opening"])
     d.feed(d.full(), d.say("hi"))
     assert c.engaged()
-    c.moment(time.monotonic(), "endgame")  # the kind they get once they chat
+    c.moment(time.monotonic(), "opening")  # the kind they get once they chat
     c.respond()
     assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
     c.moment(time.monotonic(), "scramble")
@@ -296,7 +313,7 @@ def test_resting_lichess_lines_and_polling(engine, caplog):
     g = Game(engine, opp="late", linger=5)
     c = g.chatter(Off())
     g.feed(g.full(), g.say("hi"), g.say("are you there?"))
-    assert g.posts == [("player", chat.RESTING), ("player", chat.REST)]
+    assert g.posts == [("player", chat.HELLO.removesuffix(chat.TAG)), ("player", chat.REST)]
     g.feed(g.say("Black offers draw", who="lichess"), state("e2e4", status="resign", winner="white"), chat.END)
     g.lines = [{"user": "lichess", "text": "Black offers draw"}]
     time.sleep(1.0)  # fetches 0.05, 0.1, 0.2, 0.4 s apart
@@ -350,8 +367,8 @@ def test_pick():
 
 def test_facts_and_kinds(engine):
     """Each move's line says what it did (captures, checks, material, a piece left hanging);
-    the mistake remark comes once our bad move is punished, the endgame and clock remarks
-    once each; no remark for a mere surprise."""
+    the mistake remark comes once our bad move is punished, the clock remark once; no remark
+    for a mere surprise."""
     m = Model("")
     g = Game(engine, opp="tac", white=True, hello="", p_moment=1, every=0, scramble=150)
     c = g.chatter(m)
@@ -617,7 +634,7 @@ def test_clocks_takeback_and_late(engine):
     assert c.game.clocks == ref.clocks == [170, 171]
     g.feed(state("e2e4 e7e5 g1f3"), state("e2e4"))  # a takeback of two plies
     assert c.game.moves == ["e2e4"] and c.sans == ["e4"] and max(c.views) == 1
-    c.want = ("plan", "player", True, time.monotonic())
+    c.want = ("opening", "player", True, time.monotonic())
     c.put({"type": "opponentGone", "gone": False})
     wait(lambda: m.calls)
     for k in range(2, 6):

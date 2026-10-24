@@ -2,17 +2,21 @@
 
 Each game's moves and clocks go to a real Chatter (the bot's model, the chat's model) as the
 game stream would send them, with a script of opponent messages, a draw offer and a
-resignation. Prints each transcript (with the model's silences), every reply's latency
-and cost, and the spend.
+resignation, or (--log, a live game's PGN) the opponent's real lines from the bot's log at
+the plies they came. Prints each transcript (with the model's silences), every reply's
+latency and cost, and the spend.
 
 usage: python analysis/lichess/chat_dryrun.py --config bot.toml [--llm claude|mock]
-           [--ledger PATH] [--seed N] [--prompts]
-           GAME.pgn:casual|rated:PLIES[:chatty|identity|quiet|silent]...
+           [--ledger PATH] [--seed N] [--prompts] [--log BOT.log]
+           GAME.pgn:casual|rated:PLIES[:chatty|identity|quiet|silent]... | --log BOT.log GAME.pgn...
 """
 
 import argparse
+import bisect
 import logging
+import re
 import tempfile
+from datetime import datetime
 from types import SimpleNamespace
 
 import chess.pgn
@@ -51,7 +55,52 @@ def read(path, plies):
     return h, moves, clocks, base, inc
 
 
-def replay(c, posts, path, rated, plies, script):
+def from_log(log, h):
+    """Game h's opponent lines from a bot log, as a script: each burst (lines 6 s apart at
+    most) at the ply it came, by the bot's decision times (a move of theirs came as the bot
+    began its next decision; a move of ours, its think time after it began); their draw
+    offers (not one they had accepted); the lines after the game; and how it ended."""
+    gid, white = h["GameId"], h["White"] == BOT
+    opp, them = h["Black" if white else "White"].lower(), "Black" if white else "White"
+    begun, made, lines, end = {}, {}, [], None
+    with open(log) as f:
+        for x in f:
+            if f" game {gid} " not in x:
+                continue
+            t = datetime.strptime(x[:23], "%Y-%m-%d %H:%M:%S,%f").timestamp()
+            if m := re.search(r" ply (\d+): \S+ .*? (\d+) ms(?: think ([\d.]+) s)?", x):
+                k, ms, think = int(m[1]), int(m[2]) / 1000, float(m[3] or 0)
+                begun.setdefault(k, t - ms)
+                made.setdefault(k, t - ms + max(think, ms))
+            elif m := re.search(r" chat \(player\) ([^:]+): (.*)", x):
+                lines.append((t, m[1].lower(), m[2].strip()))
+            elif m := re.search(r" over: (\w+), winner (\w+)", x):
+                end = (t, m[1], None if m[2] == "None" else m[2])
+    n = max([*begun, -1]) + 2
+    # times[k]: when the k-th move was made (ours: sent; theirs: our next decision began)
+    times = [made.get(k - 1) if (k - 1) % 2 != white else begun.get(k) for k in range(1, n)]
+    for k in range(1, len(times)):
+        times[k] = times[k] or times[k - 1]
+    times = [x or 0.0 for x in times]
+    during, after, last = [], [], -1.0
+    for i, (t, who, text) in enumerate(lines):
+        if who == "lichess" and text == f"{them} offers draw":
+            nxt = next((y for _, w, y in lines[i + 1 :] if w == "lichess"), "")
+            if nxt != "Draw offer accepted":
+                during.append((bisect.bisect_right(times, t), "draw"))
+        elif who == opp and end and t > end[0]:
+            after.append(text)
+        elif who == opp:
+            k = bisect.bisect_right(times, t)
+            if during and t - last <= 6 and isinstance(during[-1][1], list) and during[-1][0] == k:
+                during[-1][1].append(text)
+            else:
+                during.append((k, [text]))
+            last = t
+    return (during, after), end and end[1:]
+
+
+def replay(c, posts, path, rated, plies, script, end=None):
     h, moves, clocks, base, inc = read(path, plies)
     white = h["White"] == BOT
     opp = h["Black" if white else "White"]
@@ -66,12 +115,13 @@ def replay(c, posts, path, rated, plies, script):
             "white": player(h["White"], h["WhiteElo"]),
             "black": player(h["Black"], h["BlackElo"]), "initialFen": "startpos",
             "state": state(0)}  # fmt: skip
-    during, after = SCRIPTS[script]
-    script = {round(f * len(moves)): text for f, text in during}
+    during, after = script
+    script = {}  # ply -> its events: a message, a burst of them, or "draw"
+    for f, x in during:
+        script.setdefault(f if isinstance(f, int) else round(f * len(moves)), []).append(x)
     feed = lambda *es: [c.put(e) for e in es] and c.q.join()
-    say = lambda k, text: (posts.append((k, opp, text)),
-                           feed({"type": "chatLine", "room": "player", "username": opp,
-                                 "text": text}))  # fmt: skip
+    line = lambda text: {"type": "chatLine", "room": "player", "username": opp, "text": text}
+    say = lambda k, *texts: ([posts.append((k, opp, x)) for x in texts], feed(*map(line, texts)))
     feed(full)
     for k in range(len(moves) + 1):
         if k:
@@ -79,14 +129,17 @@ def replay(c, posts, path, rated, plies, script):
                 times[(k - 1) % 2] = int(clocks[k - 1] * 1000)
             feed(state(k))
         them = (k % 2 == 0) != white  # their move next
-        match script.get(k):
-            case "draw" if them:
-                posts.append((k, opp, "(offers a draw)"))
-                feed(state(k, **{"wdraw" if not white else "bdraw": True}), state(k))
-            case "draw":
-                script[k + 1] = "draw"
-            case str() as text:
-                say(k, text)
+        for x in script.get(k, []):
+            match x:
+                case "draw" if them:
+                    posts.append((k, opp, "(offers a draw)"))
+                    feed(state(k, **{"wdraw" if not white else "bdraw": True}), state(k))
+                case "draw":
+                    script.setdefault(k + 1, []).append("draw")
+                case list():
+                    say(k, *x)
+                case _:
+                    say(k, x)
     # the game's real end when the replay reaches it, else the side worse off resigns
     board = chess.Board()
     for u in moves:
@@ -98,6 +151,8 @@ def replay(c, posts, path, rated, plies, script):
         winner = ("white" if white else "black") if e >= 0.5 else ("black" if white else "white")
     status = "mate" if board.is_checkmate() else "outoftime" if "Time" in h.get(
         "Termination", "") else "draw" if winner is None else "resign"  # fmt: skip
+    if end:
+        status, winner = end
     who = "Allie" if winner and (winner == "white") != white else opp  # the side that ended it
     posts.append((len(moves), who if winner else "--", f"({status})"))
     feed(state(len(moves), status=status, winner=winner), chat.END)
@@ -115,7 +170,8 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--recent", help="the recent-lines file (default: a new temporary one)")
     p.add_argument("--prompts", action="store_true", help="print each call's new turn")
-    p.add_argument("games", nargs="+", help="PGN:casual|rated:plies")
+    p.add_argument("--log", help="a bot log: replay each live game (PGN) with its opponent's real lines")
+    p.add_argument("games", nargs="+", help="PGN:casual|rated:plies[:script], or PGN with --log")
     a = p.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     logging.getLogger("allie.lichess.chat").addFilter(
@@ -135,7 +191,13 @@ def main():
     engine = Engine(model(config))
     llm = chat.model(config.chat)
     for i, spec in enumerate(a.games):
-        path, kind, plies, script = (spec.split(":") + ["chatty"])[:4]
+        path, *rest = spec.split(":")
+        kind, plies, script = (rest + ["casual", 10_000, "chatty"][len(rest) :])[:3]
+        end, script = None, SCRIPTS.get(script)
+        if a.log:
+            h = read(path, 0)[0]
+            kind, plies = h["Event"].split()[0], 10_000
+            script, end = from_log(a.log, h)
         posts, turns = [], []
         ref = {}
         at = lambda ref=ref: len(ref["c"].sans) + bool(ref["c"].status)
@@ -152,7 +214,7 @@ def main():
             return r
 
         c = ref["c"] = Chatter(match, logged, a.seed + i)
-        h, moves, _ = replay(c, posts, path, kind == "rated", int(plies), script)
+        h, moves, _ = replay(c, posts, path, kind == "rated", int(plies), script, end)
         b = chess.Board()
         sans = []
         for u in moves:
