@@ -6,7 +6,7 @@ left unexpanded at the root's own value, and cov_q{b}k in W - L units) for calib
 {b}kx). Run each of calib_kl_subsets.py's subsets at its own budget.
 
 python calib_kl.py OUT --pos positions-human.npz --subset subset-1024.npy --budget 1024 --checkpoint CKPT
-    [--source SRC] [--batch 64 --chunk 256] [--shard i --shards n]
+    [--source SRC] [--batch 64 --chunk 256] [--slots 131072] [--shard i --shards n]
 """
 
 import argparse
@@ -21,8 +21,6 @@ from allie.lichess.tokens import header
 from allie.search import kl
 from allie.search.moe_oracle import MoEOracle
 from allie.search.native import from_prefix
-
-SLOTS = 1 << 17  # the oracle's key/value slots and node rows
 
 
 def under(spec, tokens, feats):
@@ -72,6 +70,7 @@ def main():
     p.add_argument("--source", help="a pre-package checkpoint's frozen source")
     p.add_argument("--batch", type=int, help="positions a forest (default: as many as the oracle's slots hold)")
     p.add_argument("--chunk", type=int, help="positions an output file (default 4 batches)")
+    p.add_argument("--slots", type=int, default=1 << 17, help="the oracle's key/value slots and node rows")
     p.add_argument("--shard", type=int, default=0)
     p.add_argument("--shards", type=int, default=1)
     a = p.parse_args()
@@ -81,18 +80,18 @@ def main():
     off, tokens, feats = z["offsets"], z["tokens"], z["feats"]
     subset = np.load(a.subset) if a.subset else np.arange(len(off) - 1)
     longest, nv = int(np.diff(off)[subset].max()), len(C.VIEWS)
-    a.batch = a.batch or min(96, SLOTS // (nv * (longest + a.budget) + longest))  # views' prefills and nodes, prior's
+    a.batch = a.batch or min(96, a.slots // (nv * (longest + a.budget) + longest))  # views' prefills and nodes, prior's
     a.chunk = a.chunk or 4 * a.batch
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    run = {k: v for k, v in vars(a).items() if k not in ("out", "shard", "shards")}
+    run = {k: v for k, v in vars(a).items() if k not in ("out", "shard", "shards", "slots")}
     run |= dict(grow=C.GROW, read=C.READ, views=list(C.VIEWS))
     if (f := out / "args.json").exists():
         assert json.loads(f.read_text()) == run, f"{f}: chunks of another run"
     else:
         (tmp := out / f"args.{a.shard}.tmp").write_text(json.dumps(run, indent=1))
         tmp.replace(f)
-    oracle = MoEOracle(a.checkpoint, a.source, slots=SLOTS, rows=SLOTS)
+    oracle = MoEOracle(a.checkpoint, a.source, slots=a.slots, rows=a.slots)
     for lo in range(0, len(subset), a.chunk)[a.shard :: a.shards]:
         dst = out / f"{lo:06d}.npz"
         if dst.exists():
