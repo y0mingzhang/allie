@@ -13,6 +13,9 @@ calib_plotdata.py's per-cell metrics and slopes for the README figure).
 A ladder tag names its values: N (search-human-ann2c's cov_qN) or an --extra run's tag (e.g. 1024, 256c,
 512kx: piKL's log-odds values); a trailing "a" tilts arctanh(0.99 Q) instead of the values as given. Positions without a rung's values
 fall to the next lower rung the position has (so scores there understate that rung).
+--policy extra: the policy (rung 0, the cross-entropy bar's raw) and the think-time head (the draw and beta's t)
+are the --extra chunks' own (calib_kl.py's root prior and heads: another model's export), not CALIB_DIR's
+search-human-ann2c (Allie 2.0's); positions the extras lack are dropped.
 """
 
 import argparse
@@ -37,15 +40,28 @@ def tilt_metrics(lp, v, mm, h):
     return np.c_[p @ mm.T, p[:, h]]
 
 
-def load(d, ladder, extras, sim):
+def own(extras):
+    """The extras' model: position -> (legal tokens, prior, root heads) from their chunks."""
+    out = {}
+    for e in extras:
+        for z in cf.chunks(e):
+            for n, i in enumerate(z["index"]):
+                a, b = z["offsets"][n], z["offsets"][n + 1]
+                out.setdefault(int(i), (z["legal"][a:b], z["prior"][a:b].astype(float), z["heads"][n].astype(float)))
+    return out
+
+
+def load(d, ladder, extras, sim, policy="base"):
     """Per position: its index (pos), cell, rating, half, game, human metrics, the policy's metrics, ce0 = -log P(human
-    move) under the policy, the rungs' metrics on G [K, G, 3] and their think-time weights [K + 1]."""
+    move) under the policy, the rungs' metrics on G [K, G, 3] and their think-time weights [K + 1]. policy "extra":
+    the policy and heads from the extras' chunks (own()), else the base directory's."""
     meta = np.load(d / "positions-human.npz")["meta"]
     z = np.load(d / "positions-human.npz")
     tokens, starts = z["tokens"], z["offsets"]
     mpv = cf.load_mpv(d / "mpv-human")
     dists = cf.load_dists([d / "search-human-ann2c"])
     ex = [cc.extra(Path(e)) for e in extras]
+    mine = own([Path(e) for e in extras]) if policy == "extra" else None
     K = len(ladder)
     names = [(t[:-1], True) if t.endswith("a") else (t, False) for t in ladder]  # (values tag, log-odds tilt)
     cost = np.array([cc.leaves(t) for t, _ in names]) * sim
@@ -75,7 +91,12 @@ def load(d, ladder, extras, sim):
             continue
         mm = cf.move_metrics([cps[t] for t in dd["legal"]])[cc.K]
         h = list(dd["legal"]).index(int(m[8]))
-        raw = dd["prior"].astype(float)
+        raw, heads = dd["prior"].astype(float), dd["heads"]
+        if mine is not None:
+            if i not in mine:
+                continue
+            legal, prior, heads = mine[i]
+            raw = prior[[{t: j for j, t in enumerate(legal.tolist())}[t] for t in dd["legal"].tolist()]]
         lp = np.log(np.maximum(raw, 1e-300))
         R, have = np.zeros((K, len(G), 3)), np.zeros(K, bool)
         for k, (base, atanh) in enumerate(names):
@@ -104,7 +125,7 @@ def load(d, ladder, extras, sim):
         out["clock"].append(np.nan if clock is None else clock)
         out["est"].append(np.nan if base is None or inc is None else base + 40 * inc)
         w = cc.weights(
-            dd["heads"][:63].astype(float),
+            heads[:63].astype(float),
             clock,
             tok - 10 if 10 <= tok <= 190 else 0,
             cost,
@@ -122,7 +143,7 @@ def load(d, ladder, extras, sim):
         out["H"].append(mm[:, h])
         out["base"].append(np.r_[mm @ raw, raw[h]])
         out["ce0"].append(-np.log(max(raw[h], 1e-12)))
-        out["think"].append(cf.think_seconds(dd["heads"]))
+        out["think"].append(cf.think_seconds(heads))
         out["R"].append(R)
         out["W"].append(w)
         out["have"].append(have)
@@ -252,6 +273,12 @@ def main():
     p.add_argument("dir")
     p.add_argument("--ladder", required=True)
     p.add_argument("--extra", nargs="*", default=[])
+    p.add_argument(
+        "--policy",
+        choices=["base", "extra"],
+        default="base",
+        help="the raw policy and think-time head: the base directory's (Allie 2.0) or the extras' own",
+    )
     p.add_argument("--sim", type=float, default=0.004, help="seconds a leaf (allie.lichess.calibration.COST)")
     p.add_argument(
         "--margin", type=float, default=0.3, help="seconds a search ends before the think time (calibration.MARGIN)"
@@ -283,7 +310,7 @@ def main():
     cc.MARGIN, CE, CE_Z, LOSS, BULLET = a.margin, a.ce, a.ce_z, a.loss, a.bullet_from
     d = Path(a.dir)
     ladder = a.ladder.split(",")
-    A = load(d, ladder, a.extra, a.sim)
+    A = load(d, ladder, a.extra, a.sim, a.policy)
     human = cf.summarize(
         cf.table(
             np.load(d / "positions-human.npz")["meta"],
