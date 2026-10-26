@@ -58,8 +58,9 @@ def release(name):
     ORDER[ORDER.index(REFS[1])] = REFS[1] = ref
 
 
-def us():
-    return LABEL["bigrun"].strip("*")
+def us(start=False):
+    s = LABEL["bigrun"].strip("*")
+    return s[0].upper() + s[1:] if start else s
 
 
 def scores(path, keep):
@@ -142,7 +143,7 @@ def overall(s, masks, sc, rng, out, lines):
                 )
             lines.append("")
         lines += [
-            f"**{us()} minus each model, same positions, pooled over the four bands "
+            f"**{us(True)} minus each model, same positions, pooled over the four bands "
             f"(negative CE / positive accuracy favours {us()})**",
             "",
             "| vs | delta CE (nats) | delta accuracy (pp) |",
