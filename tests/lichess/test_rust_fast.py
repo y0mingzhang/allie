@@ -114,8 +114,8 @@ def test_rust_isas(tiny_path, isa, int8, monkeypatch):
 
 @pytest.mark.parametrize("int8", [False, True])
 @pytest.mark.parametrize("isa", ["native", "avx2", "scalar"])
-def test_rust_allie22(c4x_path, isa, int8, monkeypatch):
-    """Allie 2.2's switches (XSA, log gates, three dense blocks, centring on the first MoE layers): each kernel
+def test_rust_allie21(c4x_path, isa, int8, monkeypatch):
+    """Allie 2.1's switches (XSA, log gates, three dense blocks, centring on the first MoE layers): each kernel
     variant is the reference up to BF16 rounding, which without XSA is far off."""
     out = replay(rust(c4x_path, isa, monkeypatch, int8=int8, threads=3))
     ref = Model(c4x_path, dtype=torch.bfloat16, int8=int8, backend="torch")

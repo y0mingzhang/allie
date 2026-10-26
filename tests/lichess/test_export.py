@@ -12,7 +12,7 @@ ALLIE20 = dict(adam_every=True, board="conv", fp32_small_masters=True, key_offse
                moe_gamma=0.01, moe_gate_floor=1e-12, moe_init=0.006, moe_kernel="scatter-dualgather", moe_round=16,
                moe_router_center=0.9, moe_router_lr_mul=0.05, moe_seq=0.001, moe_shared_frac=0.25,
                moe_update="quantile")  # fmt: skip
-ALLIE22 = dict(board="conv", mlp="swiglu", key_offset=False, moe=[256, 16], moe_seq=0.001, moe_init=0.006,
+ALLIE21 = dict(board="conv", mlp="swiglu", key_offset=False, moe=[256, 16], moe_seq=0.001, moe_init=0.006,
                moe_router_lr_mul=0.05, moe_gamma=0.01, moe_update="quantile", moe_kernel="scatter-dualgather",
                moe_shared_frac=0.25, moe_round=16, fp32_small_masters=True, moe_log_gates=True, moe_dense_first=3,
                moe_router_center=0.9, moe_router_center_first=4, xsa=True, moe_shard=True)  # fmt: skip
@@ -63,11 +63,11 @@ def checkpoint(path, arch):
     ), (w, c)
 
 
-@pytest.mark.parametrize("arch", ["allie20", "allie22"])
+@pytest.mark.parametrize("arch", ["allie20", "allie21"])
 def test_convert(tmp_path, arch):
-    """A checkpoint of Allie 2.0's or 2.2's switches (XSA, log gates, dense_first 3, centring on the first MoE
+    """A checkpoint of Allie 2.0's or 2.1's switches (XSA, log gates, dense_first 3, centring on the first MoE
     layers) converts to the export it came from; 2.0's has no new keys."""
-    arch, kw = dict(allie20=(ALLIE20, {}), allie22=(ALLIE22, C4X | dict(centre_first=4)))[arch]
+    arch, kw = dict(allie20=(ALLIE20, {}), allie21=(ALLIE21, C4X | dict(centre_first=4)))[arch]
     state, (w, c) = checkpoint(tiny_export(tmp_path, **kw), arch)
     got, config = convert(state)
     n = c["layers"]
@@ -79,11 +79,11 @@ def test_convert(tmp_path, arch):
                                                                  "x0_lambdas", "xsa") else torch.bfloat16)  # fmt: skip
     del c["name"]
     assert config == c | dict(gate_floor=arch.get("moe_gate_floor", 0.0))
-    assert ("log_gates" in config) == ("xsa" in got) == (arch is ALLIE22)
+    assert ("log_gates" in config) == ("xsa" in got) == (arch is ALLIE21)
 
 
 def test_convert_refuses(tmp_path):
-    state, _ = checkpoint(tiny_export(tmp_path, **C4X), ALLIE22)
+    state, _ = checkpoint(tiny_export(tmp_path, **C4X), ALLIE21)
     for bad in (
         dict(moe_keep=8),
         dict(xsa=False),

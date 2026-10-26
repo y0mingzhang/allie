@@ -77,7 +77,7 @@ def tiny(tiny_path):
     return Model(tiny_path, dtype=torch.float32)
 
 
-# Allie 2.2's switches
+# Allie 2.1's switches
 C4X = dict(layers=8, dense_first=3, centre_first=2, xsa=True, log_gates=True)
 
 
@@ -88,5 +88,5 @@ def c4x_path(tmp_path_factory):
 
 @pytest.fixture(params=["tiny_path", "c4x_path"])
 def export(request):
-    """Each tiny export: Allie 2.0's switches and 2.2's."""
+    """Each tiny export: Allie 2.0's switches and 2.1's."""
     return request.getfixturevalue(request.param)

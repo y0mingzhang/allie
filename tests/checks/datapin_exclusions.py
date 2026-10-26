@@ -15,7 +15,7 @@ never accepting a game whose token_hash is in strat-eval-v1. Checks:
   mask     every non-blitz July shard holding golden games, read by the sampler: exactly
            its golden games and validation leaks weigh 0
   resume   a checkpoint loads only into a sampler of its own exclusions (none included)
-  old pin  Allie 2.1's table, history and pin: index, batches and state as REF_MIX's
+  old pin  the paused v3 run's and Allie 2.1's table, history and pin: index, batches and state as REF_MIX's
 
     PYTHONPATH=src .venv/bin/python tests/checks/datapin_exclusions.py NEW_PIN OLD_PIN [REF_MIX]
 
@@ -40,7 +40,7 @@ from allie.data.store import hash64
 from allie.data.vocab import BOS, TERM_NORMAL, TERM_OTHER
 
 GOLDEN = paths.DATA / "strat-eval-v1"
-TABLE = "table:c8s200f0v4d112-b8276fd781ac"  # Allie 2.1's
+TABLE = "table:c8s200f0v4d112-b8276fd781ac"  # the paused v3 run's and Allie 2.1's
 BLITZ = 2
 PF, CHUNK = 0.0005, 16384
 

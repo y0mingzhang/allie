@@ -120,7 +120,7 @@ def test_release_name(tiny_path, tmp_path):
 
     name = lambda out: json.loads((out / "config.json").read_text())["name"]
     assert name(build(tiny_path, tmp_path / "a")) == "tiny"  # the export's
-    assert name(build(tiny_path, tmp_path / "b", "allie-2.2")) == "allie-2.2"
+    assert name(build(tiny_path, tmp_path / "b", "allie-2.1")) == "allie-2.1"
 
 
 @pytest.mark.skipif(not os.environ.get("ALLIE_EXPORT"), reason="set ALLIE_EXPORT to a local export to compare")

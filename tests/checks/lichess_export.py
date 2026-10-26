@@ -1,4 +1,4 @@
-"""export.convert of a small random model with Allie 2.2's arch (log gates, three dense blocks, router centres on the
+"""export.convert of a small random model with Allie 2.1's arch (log gates, three dense blocks, router centres on the
 first four MoE layers, XSA): the exported reference (allie.lichess.model, BF16 on the GPU, and its CUDA graphs) and
 the GPU search oracle (allie.search.moe_oracle.forward) against the compiled training forward, game by game, within
 BF16 rounding (3x the reference's gap to itself in FP32, in mean logit and CE differences); the reference without XSA
