@@ -51,10 +51,10 @@ def own(extras):
     return out
 
 
-def load(d, ladder, extras, sim, policy="base"):
+def load(d, ladder, extras, sim, policy="base", keep=None):
     """Per position: its index (pos), cell, rating, half, game, human metrics, the policy's metrics, ce0 = -log P(human
     move) under the policy, the rungs' metrics on G [K, G, 3] and their think-time weights [K + 1]. policy "extra":
-    the policy and heads from the extras' chunks (own()), else the base directory's."""
+    the policy and heads from the extras' chunks (own()), else the base directory's. keep: only these positions."""
     meta = np.load(d / "positions-human.npz")["meta"]
     z = np.load(d / "positions-human.npz")
     tokens, starts = z["tokens"], z["offsets"]
@@ -86,6 +86,8 @@ def load(d, ladder, extras, sim, policy="base"):
         )
     }
     for i, dd in dists.items():
+        if keep is not None and i not in keep:
+            continue
         cps, m = mpv.get(i), meta[i]
         if cps is None or "cov_p256" not in dd or set(dd["legal"].tolist()) != set(cps):
             continue
@@ -279,6 +281,7 @@ def main():
         default="base",
         help="the raw policy and think-time head: the base directory's (Allie 2.0) or the extras' own",
     )
+    p.add_argument("--positions", help="an index file (.npy): only these positions")
     p.add_argument("--sim", type=float, default=0.004, help="seconds a leaf (allie.lichess.calibration.COST)")
     p.add_argument(
         "--margin", type=float, default=0.3, help="seconds a search ends before the think time (calibration.MARGIN)"
@@ -310,7 +313,8 @@ def main():
     cc.MARGIN, CE, CE_Z, LOSS, BULLET = a.margin, a.ce, a.ce_z, a.loss, a.bullet_from
     d = Path(a.dir)
     ladder = a.ladder.split(",")
-    A = load(d, ladder, a.extra, a.sim, a.policy)
+    keep = set(np.load(a.positions).tolist()) if a.positions else None
+    A = load(d, ladder, a.extra, a.sim, a.policy, keep)
     human = cf.summarize(
         cf.table(
             np.load(d / "positions-human.npz")["meta"],
