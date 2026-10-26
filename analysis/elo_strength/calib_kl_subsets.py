@@ -1,4 +1,4 @@
-"""Pruned budgets for the KL view-tree export: per position the largest of --budgets the bot could search at --sim
+"""Pruned budgets for the KL export (calib_kl.py): per position the largest of --budgets the bot could search at --sim
 seconds a leaf (P(think >= b sim + MARGIN, within the clock's tenth) >= --p; calib_cells.reach on search-human-ann2c's
 think-time heads), the smallest budget otherwise. Writes disjoint index files OUT/subset-{b}.npy: grow each position's
 forest to its budget once; every smaller budget is read from it.

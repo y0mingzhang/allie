@@ -13,8 +13,9 @@ The scripts behind the results the docs cite, kept as they ran (they read and wr
 - `elo_strength/`: the calibrated bot's rule (`allie.lichess.calibration`). Positions from held-out games
   (`calib_positions.py`), Stockfish on every legal move (`calib_mpv.py`, with `play.py`'s engine wrapper), the
   coverage ladders and the output calibration of `calibration-allie-2.0.json` (`calib_search.py`,
-  `calib_outcal.py`), the KL export's pruned budgets (`calib_kl_subsets.py`), and the joint fit with the README
-  figure's data (`calib_unified.py` on `calib_cells.py`, `calib_fit.py`, `calib_rule.py`, `calib_plotdata.py`).
+  `calib_outcal.py`), the KL search's GPU export at each position's affordable budget (`calib_kl.py` on
+  `calib_kl_subsets.py`), and the joint fit with the README figure's data (`calib_unified.py` on `calib_cells.py`,
+  `calib_fit.py`, `calib_rule.py`, `calib_plotdata.py`).
 - `lichess/`: the bot's checks and measurements: its model against the training forward (`parity.py`), speed
   (`speed.py`), search cost under load (`search_load.py`, `search_profile.py`), tree reuse between moves
   (`reuse_fraction.py`), human think times and resignations behind `behaviour.json` (`human.py`) and chat dry
