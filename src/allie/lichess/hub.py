@@ -1,7 +1,7 @@
 """The Hugging Face release: weights, config, the inference code and a model card in one folder.
 
-    python -m allie.lichess.hub build EXPORT_DIR OUT_DIR [--name NAME]  # weights hard-linked, not copied
-    python -m allie.lichess.hub upload OUT_DIR [--repo REPO]  # private unless --public
+    python -m allie.lichess.hub build EXPORT_DIR OUT_DIR [--name NAME] [--card README]  # weights hard-linked
+    python -m allie.lichess.hub upload OUT_DIR [--repo REPO]  # private unless --public; REPO named as the release
 
 The folder runs with transformers alone (AutoModel, trust_remote_code): it ships this package's
 api.py, fast.py, fastrs.py, model.py and tokens.py unchanged, plus hf/'s configuration, modeling wrapper and card.
@@ -21,7 +21,7 @@ CODE = ("api.py", "fast.py", "fastrs.py", "model.py", "tokens.py")
 WRAPPER = ("configuration_allie.py", "modeling_allie.py", "README.md")
 
 
-def build(export, out, name=None):
+def build(export, out, name=None, card=None):
     export, out = Path(export), Path(out)
     out.mkdir(parents=True, exist_ok=True)
     weights = out / "model.safetensors"
@@ -45,17 +45,19 @@ def build(export, out, name=None):
     for name in CODE:
         shutil.copy(HERE / name, out / name)
     for name in WRAPPER:
-        text = (HERE / "hf" / name).read_text().replace("GITHUB_URL", GITHUB)
-        (out / name).write_text(text)
+        src = Path(card) if card and name == "README.md" else HERE / "hf" / name
+        (out / name).write_text(src.read_text().replace("GITHUB_URL", GITHUB))
     return out
 
 
 def upload(out, repo=REPO, private=True):
+    name = json.loads((Path(out) / "config.json").read_text())["name"]  # allie-2.0: "Allie 2.0"
+    if repo.rsplit("/", 1)[-1] != name:  # never one release's weights over another's
+        raise SystemExit(f"{out} holds {name}: upload it to a repo named {name}, not {repo}")
     from huggingface_hub import HfApi
 
     api = HfApi()
     api.create_repo(repo, private=private, exist_ok=True)
-    name = json.loads((Path(out) / "config.json").read_text())["name"]  # allie-2.0: "Allie 2.0"
     api.upload_folder(folder_path=str(out), repo_id=repo, commit_message=name.replace("allie-", "Allie ", 1))
     return f"https://huggingface.co/{repo}"
 
@@ -67,13 +69,14 @@ def main():
     b.add_argument("export")
     b.add_argument("out")
     b.add_argument("--name", help="the release's name in config.json (default: the export's)")
+    b.add_argument("--card", help="the model card (default: hf/README.md)")
     u = sub.add_parser("upload")
     u.add_argument("out")
     u.add_argument("--repo", default=REPO)
     u.add_argument("--public", action="store_true")
     a = p.parse_args()
     if a.command == "build":
-        print(build(a.export, a.out, a.name))
+        print(build(a.export, a.out, a.name, a.card))
     else:
         print(upload(a.out, a.repo, not a.public))
 

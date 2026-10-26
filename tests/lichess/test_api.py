@@ -116,11 +116,17 @@ def test_transformers_remote_code(release, export):
 
 
 def test_release_name(tiny_path, tmp_path):
-    from allie.lichess.hub import build
+    from allie.lichess.hub import build, upload
 
     name = lambda out: json.loads((out / "config.json").read_text())["name"]
     assert name(build(tiny_path, tmp_path / "a")) == "tiny"  # the export's
     assert name(build(tiny_path, tmp_path / "b", "allie-2.1")) == "allie-2.1"
+    (tmp_path / "card.md").write_text("# Allie 2.1, GITHUB_URL\n")
+    assert (build(tiny_path, tmp_path / "c", "allie-2.1", tmp_path / "card.md") / "README.md").read_text() == (
+        "# Allie 2.1, https://github.com/y0mingzhang/allie\n"
+    )
+    with pytest.raises(SystemExit, match="allie-2.1"):  # never over another release's repo
+        upload(tmp_path / "c", "yimingzhang/allie-2.0")
 
 
 @pytest.mark.skipif(not os.environ.get("ALLIE_EXPORT"), reason="set ALLIE_EXPORT to a local export to compare")

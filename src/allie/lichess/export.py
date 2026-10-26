@@ -122,5 +122,7 @@ def main(checkpoint, out, name):
         checkpoint=str(path.resolve()),
         checkpoint_sha256=sha256(path),
     )
+    if "readout" in state:  # a release blend (experiments.tail_ema blend): its final weights and tail EMA
+        config["readout"] = state["readout"]
     (out / "config.json").write_text(json.dumps(config, indent=1) + "\n")
     return config

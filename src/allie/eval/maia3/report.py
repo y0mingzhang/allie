@@ -5,7 +5,9 @@ cell). Slices: Elo band, 200-Elo bin of the mover, blitz time control, game form
 
 usage: eval.maia3.report STEP          (bigrun-v2/step-STEP/scores.npz, formats/scores/bigrun-STEP.npz)
        eval.maia3.report NAME SCORES   (SCORES: NAME's benchmark scores.npz, beside its .json; formats/scores/NAME.npz)
-Writes tables-bigrun.md and aggregate-bigrun.json, or tables-NAME.md and aggregate-NAME.json.
+Writes tables-bigrun.md and aggregate-bigrun.json, or tables-NAME.md and aggregate-NAME.json. A NAME in RELEASES
+gets its row's label, size and cost, and its earlier release in place of the sweep MoE (scores/REF.npz and
+formats/scores/REF.npz).
 """
 
 import json
@@ -45,7 +47,19 @@ CLOCK = [(0, 10), (10, 30), (30, 60), (60, 120), (120, 10**6)]
 PLY = [(0, 10), (10, 20), (20, 40), (40, 60), (60, 80), (80, 10**6)]
 TC = ["180+0", "180+2", "300+0", "300+3"]
 FORMATS = ["bullet", "blitz", "rapid", "classical"]
-REFS = ("maia3-79m", "sw-moe-s42")
+REFS = ["maia3-79m", "sw-moe-s42"]
+LABEL["allie-2.0"], PARAMS["allie-2.0"], GFLOPS["allie-2.0"] = "Allie 2.0", PARAMS["bigrun"], GFLOPS["bigrun"]
+# NAME: its row's label, size and GFLOPs per move (modded_train.useful_flops' forward), and the model it replaces
+RELEASES = {"allie-2.1": ("**Allie 2.1**", "MoE 1.23B active / 9.19B total", 2.451, "allie-2.0")}
+
+
+def release(name):
+    LABEL["bigrun"], PARAMS["bigrun"], GFLOPS["bigrun"], ref = RELEASES[name]
+    ORDER[ORDER.index(REFS[1])] = REFS[1] = ref
+
+
+def us():
+    return LABEL["bigrun"].strip("*")
 
 
 def scores(path, keep):
@@ -128,8 +142,8 @@ def overall(s, masks, sc, rng, out, lines):
                 )
             lines.append("")
         lines += [
-            "**Big run minus each model, same positions, pooled over the four bands "
-            "(negative CE / positive accuracy favours the big run)**",
+            f"**{us()} minus each model, same positions, pooled over the four bands "
+            f"(negative CE / positive accuracy favours {us()})**",
             "",
             "| vs | delta CE (nats) | delta accuracy (pp) |",
             "|---|---:|---:|",
@@ -157,13 +171,13 @@ def sliced(
     lines += [
         f"### {title}",
         "",
-        f"Accuracy % / CE (nats). {note} Deltas: big run minus the model, 95% game-bootstrap interval.",
+        f"Accuracy % / CE (nats). {note} Deltas: {us()} minus the model, 95% game-bootstrap interval.",
         "",
         "| "
         + name
         + " | n | "
         + " | ".join(LABEL[m].strip("*") for m in ORDER)
-        + " | dCE vs 79M | dAcc vs 79M (pp) | dCE vs sweep MoE |",
+        + f" | dCE vs 79M | dAcc vs 79M (pp) | dCE vs {LABEL[REFS[1]]} |",
         "|---|---:|" + "---:|" * (len(ORDER) + 3),
     ]
     for g, k, games in groups:
@@ -179,7 +193,7 @@ def sliced(
         lines.append(
             f"| {g} | {d['n']:,} | "
             + " | ".join(f"{v['acc'] * 100:.1f} / {v['ce']:.4f}" for v in d["models"].values())
-            + f" | {ci(d['d_ce_maia3-79m'])} | {ci(d['d_acc_maia3-79m'], 100, '{:+.2f}')} | {ci(d['d_ce_sw-moe-s42'])} |"
+            + f" | {ci(d['d_ce_maia3-79m'])} | {ci(d['d_acc_maia3-79m'], 100, '{:+.2f}')} | {ci(d[f'd_ce_{REFS[1]}'])} |"
         )
     lines.append("")
 
@@ -187,6 +201,8 @@ def sliced(
 def main():
     if len(sys.argv) > 2:
         name, bench, out_name = sys.argv[1], Path(sys.argv[2]), sys.argv[1]
+        if name in RELEASES:
+            release(name)
     else:
         step = int(sys.argv[1])
         name, out_name = f"bigrun-{step}", "bigrun"
@@ -273,11 +289,11 @@ def main():
             "### By game format (macro over the four Elo bands)",
             "",
             "Bullet / rapid / classical: build_formats.py's 5,000 positions per cell; blitz: the 80,000 above. "
-            "Accuracy % / CE (nats); deltas: big run minus the model, 95% game-bootstrap interval of the macro.",
+            f"Accuracy % / CE (nats); deltas: {us()} minus the model, 95% game-bootstrap interval of the macro.",
             "",
             "| format | n | "
             + " | ".join(LABEL[m].strip("*") for m in ORDER)
-            + " | dCE vs 79M | dAcc vs 79M (pp) | dCE vs sweep MoE |",
+            + f" | dCE vs 79M | dAcc vs 79M (pp) | dCE vs {LABEL[REFS[1]]} |",
             "|---|---:|" + "---:|" * (len(ORDER) + 3),
         ]
         for i, name in enumerate(FORMATS):
@@ -287,7 +303,7 @@ def main():
                 n=int(k.sum()),
                 models={m: dict(acc=mac(cat[m]["top1"]), ce=mac(cat[m]["ce"])) for m in ORDER},
             )
-            for ref, key in (("maia3-79m", "ce"), ("sw-moe-s42", "ce"), ("maia3-79m", "top1")):
+            for ref, key in (("maia3-79m", "ce"), (REFS[1], "ce"), ("maia3-79m", "top1")):
                 x = cat["bigrun"][key] - cat[ref][key]
                 lo, hi = np.percentile(macro_boot(games[k], cell[k], x[k], rng), [2.5, 97.5])
                 d[f"d_{key}_{ref}"] = dict(mean=mac(x), lo=float(lo), hi=float(hi))
@@ -295,7 +311,7 @@ def main():
                 f"| {name} | {d['n']:,} | "
                 + " | ".join(f"{v['acc'] * 100:.1f} / {v['ce']:.4f}" for v in d["models"].values())
                 + f" | {ci(d['d_ce_maia3-79m'])} | {ci(d['d_top1_maia3-79m'], 100, '{:+.2f}')} |"
-                f" {ci(d['d_ce_sw-moe-s42'])} |"
+                f" {ci(d[f'd_ce_{REFS[1]}'])} |"
             )
         lines += [
             "",

@@ -93,3 +93,35 @@ def test_convert_refuses(tmp_path):
         s = state | dict(config=state["config"] | dict(arch=state["config"]["arch"] | bad))
         with pytest.raises(AssertionError):
             convert(s)
+
+
+def test_release_blend(tmp_path):
+    """experiments.tail_ema blend: (1 - g) final + g EMA on the EMA's tensors, the rest final, as a run directory the
+    export reads, its readout record carried into config.json; an EMA of another step or a restarted one is refused."""
+    from allie.experiments.tail_ema import blend
+    from allie.lichess.export import main as export
+
+    state, _ = checkpoint(tiny_export(tmp_path / "tiny", **C4X), ALLIE21)
+    state["step"] = 10
+    run = tmp_path / "run"
+    (run / "checkpoints/step-10").mkdir(parents=True)
+    torch.save(state, run / "checkpoints/step-10/model.pt")
+    torch.save(dict(format="allie-modded-medium-1", directory="checkpoints/step-10", step=10), run / "last.pt")
+    keys = ("embed.weight", "scalars", "blocks.3.mlp.up")
+    ema = {k: state["model"][k].float() + 1 for k in keys}
+    tail = dict(step=10, horizon=0.5, every=1, ema_from=6, window_from=6, ema=ema)
+    torch.save(tail, tmp_path / "tail-ema-0.5.pt")
+    readout = blend(run / "last.pt", tmp_path / "tail-ema-0.5.pt", 0.25, tmp_path / "out")
+    assert readout["gamma"] == 0.25 and readout["final_step"] == 10 and readout["tail"] == "tail-ema-0.5.pt"
+    pointer = torch.load(tmp_path / "out/last.pt", weights_only=False)
+    got = torch.load(tmp_path / "out" / pointer["directory"] / "model.pt", weights_only=False)
+    assert pointer["step"] == 10 and got["readout"] == readout
+    for k, w in state["model"].items():
+        want = torch.lerp(w.float(), ema[k], 0.25).to(w.dtype) if k in ema else w
+        assert got["model"][k].dtype == w.dtype and torch.equal(got["model"][k], want), k
+    config = export(tmp_path / "out/last.pt", tmp_path / "export", "allie-2.1")
+    assert config["readout"] == readout and config["name"] == "allie-2.1" and config["step"] == 10
+    for bad in (dict(step=9), dict(ema_from=7)):
+        torch.save(tail | bad, tmp_path / "bad.pt")
+        with pytest.raises(AssertionError):
+            blend(run / "last.pt", tmp_path / "bad.pt", 0.5, tmp_path / f"bad-{len(bad)}-{next(iter(bad))}")
