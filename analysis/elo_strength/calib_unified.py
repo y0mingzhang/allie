@@ -41,7 +41,9 @@ def tilt_metrics(lp, v, mm, h):
 
 
 def own(extras):
-    """The extras' model: position -> (legal tokens, prior, root heads) from their chunks."""
+    """The extras' model: position -> (legal tokens, prior, root heads) from their chunks (one checkpoint's)."""
+    ckpts = {json.loads(f.read_text())["checkpoint"] for e in extras if (f := Path(e) / "args.json").exists()}
+    assert len(ckpts) <= 1, f"--policy extra: extras of several models {ckpts}"
     out = {}
     for e in extras:
         for z in cf.chunks(e):
@@ -61,9 +63,11 @@ def load(d, ladder, extras, sim, policy="base", keep=None):
     mpv = cf.load_mpv(d / "mpv-human")
     dists = cf.load_dists([d / "search-human-ann2c"])
     ex = [cc.extra(Path(e)) for e in extras]
-    mine = own([Path(e) for e in extras]) if policy == "extra" else None
     K = len(ladder)
     names = [(t[:-1], True) if t.endswith("a") else (t, False) for t in ladder]  # (values tag, log-odds tilt)
+    if policy == "extra":
+        assert extras and not any(t.isdigit() for t, _ in names), "--policy extra: the extras' own tags only"
+    mine = own([Path(e) for e in extras]) if policy == "extra" else None
     cost = np.array([cc.leaves(t) for t, _ in names]) * sim
     out = {
         k: []
@@ -83,6 +87,7 @@ def load(d, ladder, extras, sim, policy="base", keep=None):
             "clock",
             "est",
             "pos",
+            "folded",
         )
     }
     for i, dd in dists.items():
@@ -98,6 +103,7 @@ def load(d, ladder, extras, sim, policy="base", keep=None):
             if i not in mine:
                 continue
             legal, prior, heads = mine[i]
+            assert len(legal) == len(dd["legal"]), i
             raw = prior[[{t: j for j, t in enumerate(legal.tolist())}[t] for t in dd["legal"].tolist()]]
         lp = np.log(np.maximum(raw, 1e-300))
         R, have = np.zeros((K, len(G), 3)), np.zeros(K, bool)
@@ -132,6 +138,7 @@ def load(d, ladder, extras, sim, policy="base", keep=None):
             tok - 10 if 10 <= tok <= 190 else 0,
             cost,
         )
+        out["folded"].append(w[1:][~have].sum())
         for k in range(K - 1, -1, -1):  # a rung without values: its draws fall to the next lower one
             if not have[k]:
                 w[k] += w[k + 1]
@@ -313,8 +320,9 @@ def main():
     cc.MARGIN, CE, CE_Z, LOSS, BULLET = a.margin, a.ce, a.ce_z, a.loss, a.bullet_from
     d = Path(a.dir)
     ladder = a.ladder.split(",")
-    keep = set(np.load(a.positions).tolist()) if a.positions else None
-    A = load(d, ladder, a.extra, a.sim, a.policy, keep)
+    keep = np.load(a.positions) if a.positions else None
+    assert keep is None or keep.dtype.kind in "iu", "--positions: position indices"
+    A = load(d, ladder, a.extra, a.sim, a.policy, None if keep is None else set(keep.tolist()))
     human = cf.summarize(
         cf.table(
             np.load(d / "positions-human.npz")["meta"],
@@ -327,7 +335,9 @@ def main():
     sel = np.ones(len(A["f"]), bool)
     if a.cells == "subset":
         sel = A["have"][:, :-1].all(1)  # the 1,024 rung exists only in some cells
-    print(f"{sel.sum()} positions; ladder {ladder}")
+    print(
+        f"{sel.sum()} positions; ladder {ladder}; think draws above a position's top rung {A['folded'][sel].mean():.2%}"
+    )
     if a.params:
         X = mixed(A, betas(A, a.params, (a.forms or "think").split(",")[0]))
         st = cell_stats(A, X, sel, human)
