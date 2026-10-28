@@ -204,7 +204,7 @@ We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embe
 
 At the big run's compute, the law's MoE optimum is 1.8B active parameters on 28B tokens. That is 51 times the sweep's largest budget and 3.9 times the largest size it was fit on, so treat it as a direction, not a validated choice. Beyond the swept sizes, training FLOPs per parameter and token are held at the largest size's value.
 
-The optimum is flat: half that size costs 0.0013. The largest shape that trained on the 8-GPU L40S node was 24 blocks of width 1536.
+The optimum is flat: half that size costs 0.0013. The largest shape that trained on the 8-GPU L40S node at the time was 24 blocks of width 1536; Allie 2.1's 24 × 2048 fits with its experts sharded across the GPUs.
 
 **Recipe re-run.** We re-ran the big run's recipe at the sweep's sizes and compared it with the sweep's recipe. Positive means the big run's recipe is worse:
 
@@ -328,7 +328,8 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 
 - 112B tokens in 213,623 steps of 524,288 tokens: 8.27×10²⁰ training FLOPs, 2.6 times the big run's.
 - The same data and sampling rules as the big run, with a sampling table sized for 112B tokens.
-- The peak learning rate is 0.35 times the big run's, with the same 2,013 warmup steps and a linear decay to the end.
+- The learning rates are 0.35 times the big run's base rates, with the same 2,013 warmup steps and a linear decay to 0.1% of the peak.
+- Adam steps on every other step, instead of on every step at half the rate.
 - One node with 8 L40S GPUs, as for the big run: 359 hours of training in 2-day jobs, a median of 89K tokens per second.
 - No second anneal. The released weights are half the final weights and half an exponential moving average of the weights with a horizon of 17,090 steps (8% of the run), updated every 64 steps from step 162,354.
 
@@ -370,7 +371,7 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 | | Allie 2.1 CE / top-1 | minus Maia-3 79M | minus Allie 2.0 |
 |---|---:|---:|---:|
 | Bullet | 1.2944 / 57.4% | −0.1657 [−0.1762, −0.1549] | −0.0209 [−0.0250, −0.0170] |
-| Blitz | 1.1779 / 60.1% | −0.0489 [−0.0520, −0.0458] | −0.0251 [−0.0273, −0.0230] |
+| Blitz | 1.1779 / 60.1% | −0.0489 [−0.0522, −0.0458] | −0.0251 [−0.0272, −0.0230] |
 | Rapid | 1.1888 / 59.8% | −0.0503 [−0.0564, −0.0444] | −0.0312 [−0.0353, −0.0269] |
 | Classical | 1.2180 / 58.8% | −0.0545 [−0.0610, −0.0482] | −0.0319 [−0.0367, −0.0271] |
 

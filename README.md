@@ -62,7 +62,7 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of w
 
 - **Lower loss in every cell.** All 16 time-control and rating cells of the main test set improve, by 0.013 to 0.050. The gain grows with rating: 0.016 for players under 1400, 0.021 at 1400-2000, 0.030 at 2000-2400 and 0.040 at 2400 and above. By time control, it grows from 0.020 in bullet to 0.034 in classical.
 - **Against Maia-3 79M.** On the blitz benchmark, Allie 2.1's loss is 0.0489 [0.0458, 0.0522] lower and its top choice is right 1.32 points [1.11, 1.53] more often. On Maia-3's own protocol, the gaps are 0.0419 [0.0388, 0.0451] and 1.23 points [0.97, 1.48]. Allie 2.0's are 0.0238 and 0.48 points, and 0.0132 and 0.31 points.
-- **What changed.** Width 2048 instead of 1536. Blocks 1-3 are dense instead of block 1 only. The router computes its gates in log space, with no division. Only the first four expert blocks centre the router's input, not all of them. Attention is exclusive self-attention (XSA). The peak learning rate is 0.35 times Allie 2.0's.
+- **What changed.** Width 2048 instead of 1536. Blocks 1-3 are dense instead of block 1 only. The router computes its gates in log space, with no division. Only the first four expert blocks centre the router's input, not all of them. Attention is exclusive self-attention (XSA). The learning rates are 0.35 times Allie 2.0's base rates, and Adam steps on every other step instead of every step at half the rate.
 - **The released weights** are half the final weights and half an exponential moving average of the weights over the end of training. That scores 1.2240, against 1.2248 for the final weights alone. There is no second anneal.
 - **The forecast.** A scaling law refit on a new sweep with Allie 2.1's recipe forecast 1.2325 to 1.2396 on the September games. Allie 2.1 scored 1.2265, below the forecast like Allie 2.0, but by less.
 - **Speed.** Each move reads 1.7 times as many bytes as with Allie 2.0 and takes 1.4 times as long on the same CPU.
@@ -95,7 +95,7 @@ The law forecast 1.2856 for the big run. The big run scored 1.2533, below the la
 
 The big run's recipe isn't the reason: at small scale it is slightly worse than the sweep's. More likely, the law underestimates how far loss keeps falling with compute. [Allie 2.1](#allie-21) landed below its forecast too.
 
-The law would have picked a bigger model trained on fewer tokens: 1.8B active parameters on 28B tokens. Instead we trained the largest model that fit on one 8-GPU machine, with 0.69B active parameters on 75B tokens.
+The law would have picked a bigger model trained on fewer tokens: 1.8B active parameters on 28B tokens. Instead we trained the largest model that fit on one 8-GPU machine at the time, with 0.69B active parameters on 75B tokens.
 
 ### What else shaped it
 
@@ -135,7 +135,7 @@ We compare Allie 2.0 and 2.1 with the original Allie and [Maia-3](https://arxiv.
 
 Maia-3 trains only on Lichess blitz, so we compare on blitz. We use 80,000 blitz positions from July 2026, 20,000 from each of four rating bands.
 
-![Loss against compute per move for Maia-3, the original Allie, and Allie 2.0 with and without search](docs/figures/pareto.png)
+![Loss against compute per move for Maia-3, the original Allie, Allie 2.0 with and without search, and Allie 2.1](docs/figures/pareto.png)
 
 *Orange: Allie 2.0 alone and with 5 search simulations per move, and Allie 2.1 alone. More search is in [DETAILS](docs/DETAILS.md#search).*
 

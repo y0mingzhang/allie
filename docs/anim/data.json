@@ -136,7 +136,7 @@
   },
 
   "scaling": {
-    "_src": "the 45-run isoFLOP sweep (24 MoE, 21 dense; main-evaluation CE) refit three ways (Chinchilla approaches 1-3); Allie 2.0 / 2.1 from the big runs; miss: the why-the-law-missed-Allie-2.0 study (backtests, law forms, decay-to-zero forks of Allie 2.0, eval and parameter-count checks); actual: Allie 2.1's final checkpoint on the main evaluation (bigrun-trajectory-v4) and the later forecast (scale22's four law forms, Oct 17) against its released weights, both on September 2026 games",
+    "_src": "the 45-run isoFLOP sweep (24 MoE, 21 dense; main-evaluation CE) refit three ways (Chinchilla approaches 1-3); Allie 2.0 / 2.1 from the big runs; miss: the why-the-law-missed-Allie-2.0 study (backtests, law forms, decay-to-zero forks of Allie 2.0, eval and parameter-count checks); actual: Allie 2.1's final checkpoint on the main evaluation (bigrun-trajectory-v4); later: the Oct 17 refit's four law forms on September 2026 games, against Allie 2.1's released weights on them",
     "meta": {
       "C20": 3.1421e+20,
       "Y20": 1.2533,

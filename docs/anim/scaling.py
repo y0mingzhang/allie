@@ -1739,7 +1739,7 @@ class S10(Scene):
         VGroup(head, items).arrange(DOWN, buff=0.5, aligned_edge=LEFT).move_to([0, 0.3, 0])
         self.play(
             Write(head),
-            *cap("Both big runs landed below their forecasts: the sweep pins shape, not level."),
+            *cap("Both big runs beat their forecasts, even the ones anchored on real runs."),
         )
         self.play(
             LaggedStart(*[FadeIn(r, shift=0.1 * UP) for r in items], lag_ratio=0.5),
