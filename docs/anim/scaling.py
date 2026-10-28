@@ -66,7 +66,7 @@ VIDEO = dict(
     name="scaling-law",
     scenes=[*[f"S{i}" for i in range(9)], "M1", "M2", "M3", "S9", "S10"],
     gif=(["S7", 8.6], 13.5),
-    poster=["S10", 27.0],
+    poster=["S10", 39.0],
 )
 
 
@@ -1562,7 +1562,7 @@ class S9(Scene):
             FadeIn(nf),
             FadeIn(st),
             FadeIn(stl),
-            *cap(f"Allie 2.1 trains with {c21 / c20:.1f} times Allie 2.0's compute."),
+            *cap(f"Allie 2.1 trained with {c21 / c20:.1f} times Allie 2.0's compute."),
         )
         v21 = P.vline(c21, RULE, 2.5)
         l21 = lab(f"Allie 2.1\n{sci(c21)} FLOPs", 22, INK, "SEMIBOLD").next_to(P.p(c21, 1.39), DOWN + RIGHT, buff=0.1)
@@ -1624,12 +1624,13 @@ class S10(Scene):
         cap = Cap(self)
         k = kicker("Forecasting Allie 2.1")
         F = D["forecast"]
-        O, y20 = F["old"], M["Y20"]
-        P = Plot((-0.7, 8.5), (1.226, 1.259), 11.8, 4.3, (0.25, 0.35), logx=False,
+        O, y20, A = F["old"], M["Y20"], F["actual"]
+        y0 = 1.222
+        P = Plot((-0.7, 8.5), (y0, 1.259), 11.8, 4.3, (0.25, 0.35), logx=False,
                  yt=[(y, f"{y:.2f}") for y in (1.23, 1.24, 1.25)], yl="loss (nats)")  # fmt: skip
 
         def under(x, s, color=INK2):
-            return lab(s, 20, color).next_to(P.p(x, 1.226), DOWN, buff=0.14)
+            return lab(s, 20, color).next_to(P.p(x, y0), DOWN, buff=0.14)
 
         lvl = Line(P.p(-0.32, y20), P.p(0.32, y20), color=INK, stroke_width=6)
         l0 = lab(f"{y20:.4f}", 22, INK, "SEMIBOLD").next_to(lvl, UP, buff=0.1)
@@ -1710,6 +1711,19 @@ class S10(Scene):
         )
         cap.hold()
 
+        ast = star(P.p(xf, A["final"]), 0.17)
+        al = lab(f"{A['final']:.3f}  actual", 26, ORANGE, "SEMIBOLD").next_to(ast, RIGHT, buff=0.2)
+        self.play(GrowFromCenter(ast), FadeIn(al),
+                  *cap(f"Allie 2.1 finished on {A['date']} at {A['final']:.3f}, {F['central'] - A['final']:.3f} below the forecast."))  # fmt: skip
+        cap.hold()
+        self.play(Indicate(ci, color=ORANGE), *cap("That is below even the forecast's 90% band."))
+        cap.hold()
+        self.play(*cap("But after this forecast, its run also changed its learning rate, attention and router."))
+        cap.hold()
+        lo, hi = (f - A["later_score"] for f in A["later"])
+        self.play(*cap(f"A later forecast that included those changes was still {lo:.3f}–{hi:.3f} too high."))
+        cap.hold()
+
         self.play(*[FadeOut(m) for m in self.mobjects if m is not cap.cur and m is not k])
         N = F["next"]
         head = text("How we forecast now", 44, INK, weight="SEMIBOLD")
@@ -1725,12 +1739,8 @@ class S10(Scene):
         VGroup(head, items).arrange(DOWN, buff=0.5, aligned_edge=LEFT).move_to([0, 0.3, 0])
         self.play(
             Write(head),
-            *cap(
-                f"First real check: 2.1's loss at the same point in its run as 2.0's, from about {N['check_from']:.0%} on."
-            ),
+            *cap("Both big runs landed below their forecasts: the sweep pins shape, not level."),
         )
-        cap.hold()
-        self.play(*cap(f"Earlier checkpoints say little: they carry at least ±{N['ckpt_noise']:.3f} of noise."))
         self.play(
             LaggedStart(*[FadeIn(r, shift=0.1 * UP) for r in items], lag_ratio=0.5),
             run_time=2.4,

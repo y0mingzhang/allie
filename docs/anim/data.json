@@ -1,6 +1,6 @@
 {
   "arch": {
-    "_src": "README.md and docs/DETAILS.md; src/allie/model (moe.py, network.py, board.py); src/allie/data/vocab.py; Allie 2.1: its training run's configuration; demo: allie.lichess.api.Allie.analyze on the released checkpoint (int8, CPU)",
+    "_src": "README.md and docs/DETAILS.md; src/allie/model (moe.py, network.py, board.py); src/allie/data/vocab.py; Allie 2.1: its training run's configuration, its released weights' main evaluation (results/lm-eval/allie-2.1) and modded_train.useful_flops' GFLOPs per move; demo: allie.lichess.api.Allie.analyze on the released checkpoint (int8, CPU)",
     "game": {
       "tc": "3+2",
       "base": 180,
@@ -57,10 +57,11 @@
       "mlp": 5456,
       "active": 1.2,
       "total": 9.2,
-      "gflops": 2.5,
+      "gflops": 2.45,
       "tokens": 112,
       "steps": 213623,
-      "status": "training since Oct 4, 2026"
+      "loss": 1.224,
+      "status": "finished training on Oct 28, 2026"
     },
     "original": {
       "loss": 1.3526,
@@ -135,7 +136,7 @@
   },
 
   "scaling": {
-    "_src": "the 45-run isoFLOP sweep (24 MoE, 21 dense; main-evaluation CE) refit three ways (Chinchilla approaches 1-3); Allie 2.0 / 2.1 from the big runs; miss: the why-the-law-missed-Allie-2.0 study (backtests, law forms, decay-to-zero forks of Allie 2.0, eval and parameter-count checks)",
+    "_src": "the 45-run isoFLOP sweep (24 MoE, 21 dense; main-evaluation CE) refit three ways (Chinchilla approaches 1-3); Allie 2.0 / 2.1 from the big runs; miss: the why-the-law-missed-Allie-2.0 study (backtests, law forms, decay-to-zero forks of Allie 2.0, eval and parameter-count checks); actual: Allie 2.1's final checkpoint on the main evaluation (bigrun-trajectory-v4) and the later forecast (scale22's four law forms, Oct 17) against its released weights, both on September 2026 games",
     "meta": {
       "C20": 3.1421e+20,
       "Y20": 1.2533,
@@ -908,9 +909,13 @@
       "next": {
         "count": "2–3",
         "n": [200000000.0, 700000000.0],
-        "tpp": [30, 100],
-        "check_from": 0.3,
-        "ckpt_noise": 0.01
+        "tpp": [30, 100]
+      },
+      "actual": {
+        "date": "Oct 28",
+        "final": 1.2248,
+        "later": [1.2325, 1.2396],
+        "later_score": 1.2265
       }
     },
     "miss": {

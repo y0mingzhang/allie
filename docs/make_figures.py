@@ -31,6 +31,8 @@ OUT = ROOT / "docs" / "figures"
 FONTS = ROOT / "docs" / "fonts"
 FINAL = R / "pretrain/bigfix-24x1536d75m4shipv2-s16-24x1536-c8s200f0v4-s42"  # the big run
 ANN = "ann-all-p05-t1907"  # Allie 2.0: the big run's second anneal
+V21 = "allie-2.1"  # Allie 2.1: the v4 run's final weights blended with their tail EMA
+V21_BENCH = DATA / "release-2.1/maia3/blitz.npz"  # its benchmark scores
 SEARCH = DATA / "maia3-bench/search"
 SWEEP = X / "sweep-readout-c8s200f0v4-w4.json"
 C_ALLIE = 3.142088554411623e20  # the big run's useful training FLOPs (bigrun-trajectory-v2)
@@ -244,6 +246,44 @@ def training():
         f"  N {act / 1e6:.1f}M, D {D / 1e9:.1f}B: forecast {forecast:.4f}; big run {curve[-1]['v']:.4f} from {curve[0]['t']:.0f}B;"
         f" Allie 2.0 {v_ann:.4f} at {t_ann:.1f}B"
     )
+
+
+def training21():
+    """Allie 2.1's main-eval CE over training against Allie 2.0's big run, by training tokens, with each release."""
+
+    def curve(tag):
+        rows = sorted(jsonl(X / f"maia3-bench/bigrun-trajectory-{tag}.jsonl"), key=lambda r: r["step"])
+        return [dict(t=r["tokens"] / 1e9, v=r["golden_macro"]) for r in rows if r.get("golden_macro")]
+
+    c20, c21 = curve("v2"), curve("v4")
+    t20 = c20[-1]["t"] + jload(R / f"pretrain/{ANN}/done.json")["tokens_processed"] / 1e9
+    v20, v21 = (jload(R / f"lm-eval/{n}/strat-v1.json")["macro"] for n in (ANN, V21))
+    x = alt.X("t:Q", scale=alt.Scale(domain=[0, 120], nice=False), title="Training tokens (billions)",
+              axis=alt.Axis(values=[0, 20, 40, 60, 80, 100, 120], grid=False))  # fmt: skip
+    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.20, 1.42], nice=False, zero=False), title="Main-evaluation loss (nats)",
+              axis=alt.Axis(values=[1.20, 1.25, 1.30, 1.35, 1.40], grid=True, format=".2f"))  # fmt: skip
+    rel20 = [dict(t=t20, v=v20, t_=f"Allie 2.0  {v20:.4f}")]
+    rel21 = [dict(t=c21[-1]["t"], v=v21, t_=f"Allie 2.1  {v21:.4f}")]
+    chart = alt.layer(
+        values(c20).mark_line(color=NEUTRAL_DARK, strokeWidth=2.5).encode(x=x, y=y),
+        values([c20[-1]] + rel20).mark_line(color=NEUTRAL_DARK, strokeWidth=2, strokeDash=[3, 2]).encode(x=x, y=y),
+        values(rel20).mark_circle(color=NEUTRAL_DARK, size=110, opacity=1).encode(x=x, y=y),
+        values(rel20).mark_text(align="right", dx=-10, dy=18, color=INK2, fontWeight=600).encode(x=x, y=y, text="t_:N"),
+        values(c21).mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y),
+        values(rel21).mark_circle(color=ALLIE, size=120, opacity=1).encode(x=x, y=y),
+        values(rel21).mark_text(align="right", dx=-4, dy=20, color=INK, fontWeight=600).encode(x=x, y=y, text="t_:N"),
+        values([dict(c20[0], t_="Allie 2.0's big run")]).mark_text(align="left", dx=8, dy=-4, color=INK2)
+        .encode(x=x, y=y, text="t_:N"),
+        values([dict(c21[0], t_="Allie 2.1")]).mark_text(align="left", dx=8, dy=-10, color=ALLIE, fontWeight=600)
+        .encode(x=x, y=y, text="t_:N"),
+    ).properties(width=WIDTH, height=300, title=title(
+        f"Allie 2.1 finished {v20 - v21:.3f} below Allie 2.0",
+        "Main-evaluation loss of each run's checkpoints by training tokens, and the released models: Allie 2.0",
+        "after its second anneal, Allie 2.1 averaged with its weights' moving average. Each run's learning rate",
+        "decays to near zero at its own end. Lower is better."))  # fmt: skip
+    save(chart, "training-2.1")
+    print(f"  Allie 2.0: big run {c20[-1]['v']:.4f} at {c20[-1]['t']:.1f}B, released {v20:.4f} at {t20:.1f}B")
+    print(f"  Allie 2.1: final {c21[-1]['v']:.4f} at {c21[-1]['t']:.1f}B, released {v21:.4f}")
 
 
 def isoflop():
@@ -547,6 +587,12 @@ def pareto():
     pts = [dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name) for m, name in MAIA.items()]
     for k, t in (("frozen/legal", "Allie 2.0 (raw)"), ("devcal/5", "5 simulations")):
         pts.append(dict(fam="allie", g=p[k]["gflops"], v=p[k]["ce"], t=t))
+    sys.path[:0] = [str(ROOT / "src")]
+    from allie.eval.maia3.report import RELEASES
+
+    with np.load(V21_BENCH) as z:
+        pts.append(dict(fam="allie21", g=RELEASES[V21][2], v=float(z["ce_legal"][search_index(rep["n"])].mean()),
+                        t="Allie 2.1 (raw)"))  # fmt: skip
     ce = previous("allie1-medium", "bench")
     if ce is not None:
         pts.append(
@@ -559,10 +605,10 @@ def pareto():
         )
     x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.2, 25], nice=False), title="Compute per move (GFLOPs, log scale)",
               axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20], grid=False, format="~g"))  # fmt: skip
-    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.20, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
-              axis=alt.Axis(values=[1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
+    y = alt.Y("v:Q", scale=alt.Scale(domain=[1.18, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
+              axis=alt.Axis(values=[1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
     b = values(pts)
-    maia, allie, orig = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "orig"))
+    maia, allie, allie21, orig = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "allie21", "orig"))
     raw = alt.datum.t == "Allie 2.0 (raw)"
     chart = alt.layer(
         maia.mark_line(color=NEUTRAL_DARK, strokeWidth=2).encode(x=x, y=y),
@@ -574,8 +620,10 @@ def pareto():
         allie.mark_circle(color=ALLIE, opacity=1).encode(x=x, y=y, size=alt.condition(raw, alt.value(170), alt.value(90))),
         allie.transform_filter(raw).mark_text(dy=20, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
         allie.transform_filter(~raw).mark_text(dy=18).encode(x=x, y=y, text="t:N"),
-    ).properties(width=2 * 300 + 34, height=330, title=title(
-        "Allie 2.0 needs 1.4 GFLOPs per move",
+        allie21.mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
+        allie21.mark_text(dy=20, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+    ).properties(width=2 * 300 + 34, height=360, title=title(
+        "Allie 2.0 and 2.1 need 1.4 and 2.5 GFLOPs per move",
         "Loss against compute per move on 20,000 blitz positions, every position scored. Compute counts",
         "matrix multiplies. Grey line: a guide between three separately trained Maia-3 models."))  # fmt: skip
     save(chart, "pareto")
@@ -596,6 +644,7 @@ def protocol_scores():
     paths = {name: DATA / f"maia3-bench/scores/{m}.npz" for m, name in MAIA.items()}
     paths["Original Allie"] = ORIGINAL / "bench/allie1-medium.npz"
     paths["Allie 2.0"] = DATA / f"distill-v2/scores/{ANN}.npz"
+    paths["Allie 2.1"] = V21_BENCH
     return {k: read(p) for k, p in paths.items() if Path(p).exists()}
 
 
@@ -606,11 +655,11 @@ def protocol():
     from allie.eval.maia3 import aggregate
 
     res = aggregate.compare(protocol_scores())["maia_protocol"]
-    order = [m for m in ("Allie 2.0", "Maia-3 23M", "Original Allie", "Maia-3 5M") if m in res]
+    order = [m for m in ("Allie 2.1", "Allie 2.0", "Maia-3 23M", "Original Allie", "Maia-3 5M") if m in res]
     panels = []
     for i, (key, name, dom, nd, ticks, lnd) in enumerate((
-        ("d_ce", "Loss difference (nats, lower is better)", [-0.04, 0.10], 2, [-0.04, 0, 0.04, 0.08], 3),
-        ("d_top1", "Top-choice accuracy (percentage points)", [-3.0, 1.3], 0, [-3, -2, -1, 0, 1], 2),
+        ("d_ce", "Loss difference (nats, lower is better)", [-0.09, 0.10], 2, [-0.04, 0, 0.04, 0.08], 3),
+        ("d_top1", "Top-choice accuracy (percentage points)", [-3.0, 2.1], 0, [-3, -2, -1, 0, 1, 2], 2),
     )):  # fmt: skip
         rows = [dict(name=m, d=res[m][key]["mean"], lo=res[m][key]["lo"], hi=res[m][key]["hi"], label=signed(res[m][key]["mean"], lnd))
                 for m in order]  # fmt: skip
@@ -622,13 +671,13 @@ def protocol():
                 nd,
                 ticks,
                 name,
-                alt.datum.name == "Allie 2.0",
+                (alt.datum.name == "Allie 2.0") | (alt.datum.name == "Allie 2.1"),
                 label_axis=i == 0,
                 width=280,
             )
         )
     chart = alt.hconcat(*panels, spacing=34).properties(title=title(
-        "Under the Maia-3 protocol, Allie 2.0 performs similarly to Maia-3 79M",
+        "Under the Maia-3 protocol, Allie 2.1 is ahead of Maia-3 79M",
         f"Difference from Maia-3 79M on {res['positions']:,} blitz positions, scored by the Maia-3 paper's rule.",
         "Whiskers: 95% intervals."))  # fmt: skip
     save(chart, "protocol")
@@ -825,6 +874,7 @@ FIGS = {
     "frontier": frontier,
     "optimal": optimal,
     "training": training,
+    "training-2.1": training21,
     "pareto": pareto,
     "protocol": protocol,
     "versatility": versatility,
