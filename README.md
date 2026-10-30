@@ -20,9 +20,9 @@ Our main test set covers every time control and rating level. Its games come fro
 - In blitz, its top choice is the move played **59.3%** of the time. For players rated 2400 and above, it is **63.1%**.
 - It runs on an ordinary CPU: about 4-7 ms per move on a recent server ([fast inference](#fast-inference)).
 
-**Allie 2.1**, a larger model trained on 112B tokens, finished training on October 28, 2026. Its loss on the main test set is **1.2240**. Its weights and a Lichess bot that plays it are coming; until then, Allie 2.0 is the model to play and download. Its results are in [Allie 2.1](#allie-21).
+**Allie 2.1**, a larger model trained on 112B tokens, finished training on October 28, 2026. Its loss on the main test set is **1.2240**. The Lichess bot has played it since October 30, 2026. Its weights are coming; until then, Allie 2.0 is the model to download. Its results are in [Allie 2.1](#allie-21).
 
-You can [play Allie 2.0 on Lichess](#play-against-allie-on-lichess) or [download it](#download-and-run-the-model).
+You can [play Allie 2.1 on Lichess](#play-against-allie-on-lichess) or [download Allie 2.0](#download-and-run-the-model).
 
 ![Diagram of one Allie 2.0 block: attention, then a router that sends each token to 16 of 256 experts plus a shared expert](docs/figures/model.png)
 
@@ -42,7 +42,7 @@ Three silent, captioned animations, about five to seven minutes each. Each tease
 
 ## Allie 2.1
 
-Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of which 1.2B are used for each move, trained on 112B tokens of the same data. It took 14.9 days on the same kind of 8-GPU machine and finished on October 28, 2026. Its weights, and a Lichess bot that plays it, are coming.
+Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of which 1.2B are used for each move, trained on 112B tokens of the same data. It took 14.9 days on the same kind of 8-GPU machine and finished on October 28, 2026. The Lichess bot has played it since October 30; its weights are coming.
 
 ![Main-test loss during training for Allie 2.1 and Allie 2.0's big run, and both released models](docs/figures/training-2.1.png)
 
@@ -58,6 +58,8 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of w
 | Parameters used per move / total | 0.69B / 5.6B | 1.23B / 9.19B |
 | Compute per move | 1.39 GFLOPs | 2.45 GFLOPs |
 | Time per move, int8 on an AMD EPYC 7763, 12 threads | 10.4 ms | 14.3 ms |
+| Calibrated play: search time per move, median / 90th percentile (four games at a human pace, same CPU) | 3.1 / 12.3 s | 1.8 / 4.9 s |
+| Calibrated play: largest search | 4,096 leaves | 1,024 leaves |
 | Memory, int8 | 6.4 GB | 9.8 GB |
 
 - **Lower loss in every cell.** All 16 time-control and rating cells of the main test set improve, by 0.013 to 0.050. The gain grows with rating: 0.016 for players under 1400, 0.021 at 1400-2000, 0.030 at 2000-2400 and 0.040 at 2400 and above. By time control, it grows from 0.020 in bullet to 0.034 in classical.
@@ -65,7 +67,8 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of w
 - **What changed.** Width 2048 instead of 1536. Blocks 1-3 are dense instead of block 1 only. The router computes its gates in log space, with no division. Only the first four expert blocks centre the router's input, not all of them. Attention is exclusive self-attention (XSA). The learning rates are 0.35 times Allie 2.0's base rates, and Adam steps on every other step instead of every step at half the rate.
 - **The released weights** are half the final weights and half an exponential moving average of the weights over the end of training. That scores 1.2240, against 1.2248 for the final weights alone. There is no second anneal.
 - **The forecast.** A scaling law refit on a new sweep with Allie 2.1's recipe forecast 1.2325 to 1.2396 on the September games. Allie 2.1 scored 1.2265, below the forecast like Allie 2.0, but by less.
-- **Speed.** Each move reads 1.7 times as many bytes as with Allie 2.0 and takes 1.4 times as long on the same CPU.
+- **Speed.** Each move reads 1.7 times as many bytes as with Allie 2.0 and takes 1.4 times as long on the same CPU. In calibrated play each searches at its own budget: an Allie 2.1 leaf (a position the search evaluates) costs 1.6-1.8 times an Allie 2.0 leaf, and its search stops at 1,024 leaves instead of 4,096. Within its human-like think time, Allie 2.1 searches 1.8 s a move against 3.1 s (median, four games at a human pace), 4.8 s against 11.8 s in classical.
+- **Calibrated play.** The bot's calibration is refitted for Allie 2.1, one rule per time control. Of 80 strength tests (accuracy and blunder rate by time control and rating), 5 fall outside the noise on held-out July games and 11 on September games, against Allie 2.0's 2 and 8; about 4 would by chance. In every time control, calibrated play predicts human moves at least as well as Allie 2.1 alone.
 
 More numbers are in [DETAILS](docs/DETAILS.md#allie-21).
 
@@ -201,14 +204,14 @@ Commands run inside the environment: prefix them with `uv run`, or activate `.ve
 
 ## Play against Allie on Lichess
 
-Allie 2.0 plays on Lichess as [**AllieTheChessBot**](https://lichess.org/@/AllieTheChessBot). Challenge it from its profile page. A switch to Allie 2.1 is coming.
+Allie 2.1 plays on Lichess as [**AllieTheChessBot**](https://lichess.org/@/AllieTheChessBot) (Allie 2.0 did until October 30, 2026). Challenge it from its profile page.
 
 - **Time controls.** Bullet to classical: 1 to 60 minutes, with up to 180 seconds of increment.
 - **Games.** Rated or casual, standard chess from the starting position.
 - **It plays at your level.** The bot takes on your rating. Then it plays a move a player of that rating would likely make.
 - **It plays like a human opponent at your level.**
 - **It thinks like a human.** Before each move, it waits about as long as a person would.
-- **Availability.** It plays humans only, two games at a time and one game per opponent.
+- **Availability.** It plays humans only, up to ten games at a time and one game per opponent.
 
 You can run your own bot from a clone of [this repository](https://github.com/y0mingzhang/allie). It needs only a CPU: under 10 ms per move on 8 server cores, and 6.4 GB of memory.
 
@@ -222,11 +225,11 @@ The [bot's guide](src/allie/lichess/README.md) covers bot accounts, settings and
 
 ### Calibrated play
 
-In its `calibrated` mode the bot plays close to the strength of humans of its rating (by default, yours) at the game's time control. Sampling straight from the model plays weaker than such humans, most at high ratings and in classical, so the bot first searches and then samples, at temperature 1, from the model's distribution leaned toward the moves the search rates highly. One rule covers every rating and time control: the search is never larger than the human-like think time the bot draws for the move (and its clock) allows, and the lean grows with the rating and with how long humans think in the position. In no rating or time control does calibrated play predict human moves measurably worse than the model alone. The [bot's guide](src/allie/lichess/README.md) covers the setting (search runs on the Rust CPU engine and needs the `fast` extra) and [calibration.py](src/allie/lichess/calibration.py) has the rule and its fit.
+In its `calibrated` mode the bot plays close to the strength of humans of its rating (by default, yours) at the game's time control. Sampling straight from the model plays weaker than such humans, most at high ratings and in classical, so the bot first searches and then samples, at temperature 1, from the model's distribution leaned toward the moves the search rates highly. One rule per time control, with no rating thresholds, covers every rating: the search is never larger than the human-like think time the bot draws for the move (and its clock) allows, and the lean grows with the rating and with how long humans think in the position, never below a floor, since Allie 2.1 alone also plays below humans rated 800-1400, where the rating term vanishes. On September games, in no rating or time control does calibrated play predict human moves measurably worse than the model alone. The [bot's guide](src/allie/lichess/README.md) covers the setting (search runs on the Rust CPU engine and needs the `fast` extra) and [calibration.py](src/allie/lichess/calibration.py) has the rule and its fit. The rule and the bot's timing, resign and draw rules (`behaviour.json`) are fitted for Allie 2.1. To run the bot with Allie 2.0, use `calibration.py` and `behaviour.json` from [the October 29 version](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess).
 
 ![Move accuracy and blunder rate against rating, by time control: humans' own moves, the bot sampling straight from the model, calibrated play, Maia-3 and the original Allie](docs/figures/calibrated.png)
 
-*Move accuracy and blunder rate (log scale), scored by Stockfish on every legal move, against rating, on 197,191 positions from September 2026 games (the rule is fitted on July games). The line is the humans' own moves; the points are the expected values of each model's move distribution at that rating: Allie 2.0 sampled straight from the model or calibrated as the bot plays it, Maia-3 (79M) playing its most likely move or sampled, and the original Allie (blitz only). Maia-3 is trained on blitz only and isn't meant for other time controls; neither Maia-3 nor the original Allie sees the clock. Bands and whiskers: 95% intervals.*
+*Move accuracy and blunder rate (log scale), scored by Stockfish on every legal move, against rating, on 197,191 positions from September 2026 games (the rule is fitted on July games). The line is the humans' own moves; the points are the expected values of each model's move distribution at that rating: Allie 2.0 sampled straight from the model or calibrated with its own rule (the bot's until October 30, 2026), Maia-3 (79M) playing its most likely move or sampled, and the original Allie (blitz only). Maia-3 is trained on blitz only and isn't meant for other time controls; neither Maia-3 nor the original Allie sees the clock. Bands and whiskers: 95% intervals.*
 
 ## Download and run the model
 

@@ -313,7 +313,7 @@ One cached step: the time a move takes once the opponent's move arrives, median 
 
 ## Allie 2.1
 
-Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training on October 28, 2026. Its weights are not released yet, and the Lichess bot still plays Allie 2.0. The rest of this page describes Allie 2.0.
+Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training on October 28, 2026. Its weights are not released yet; the Lichess bot has played it since October 30, 2026. The rest of this page describes Allie 2.0.
 
 **Model.** What differs from Allie 2.0:
 
@@ -387,9 +387,30 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 | BF16, 1 game: ms per move | 18.4 | 25.4 |
 | BF16, 16 games: ms per step | 70.7 | 105.1 |
 | BF16, memory | 11.5 GB | 18.3 GB |
+| KL search, one game alone: ms per leaf at 128 / 1,024 leaves | 3.78 / 2.94 | 6.42 / 4.83 |
+| KL search, three games at once at 128 leaves: ms per leaf each | 8.8 | 15.1 |
+| Calibrated bot: leaf price it plans at (`calibration.COST`) / largest search | 4 ms / 4,096 leaves | 6 ms / 1,024 leaves |
+| Calibrated bot, four games at a human pace: search time per move, median / p90 | 3.1 / 12.3 s | 1.8 / 4.9 s |
+| Same, by time control, median: bullet / blitz / classical | 1.0 / 2.9 / 11.8 s | 0.4 / 1.5 / 4.8 s |
+| Calibrated bot, ten games at 0.3x think time (a dense load test): search time per move, median / p90 | 4.7 / 13.2 s | 4.4 / 9.6 s |
+| Calibrated bot, peak memory under load | 7.7-9.5 GB | 10.4-11.5 GB |
 
 - One game reads 1.29 GB of int8 weights per move, against 0.74 GB.
 - On 5,000 benchmark positions, against the training forward, the int8 default changes the loss by −0.0010 [−0.0021, +0.0002] nats, BF16 on CPU by −0.0015 [−0.0023, −0.0006] and CUDA graphs on GPU by −0.0013 [−0.0022, −0.0005]. int8 and BF16 pick the same top move 99.4% of the time.
+- Each model is calibrated at its own leaf price: its lone 128-leaf search on this CPU (Allie 2.0 4 ms, 2.1 6 ms). The live bot has a median of 3 games open, where Allie 2.0's leaves cost a median 3.1 ms (88,632 decisions, 2026-10-18 to 10-29), below its 4 ms; Allie 2.1's cost 5.2 ms in the four-game test, below its 6 ms: both play at the price they were fitted at.
+- The search sizes Allie 2.1 picks from stop at 1,024 leaves: fitting larger ones cost too much GPU time. Capping Allie 2.0's rule there costs it at most 18 Elo, in the 2200+ classical cells.
+- No search ran past its think time; counting the move's own work, the latest move came 0.14 s (Allie 2.1) and 0.27 s (Allie 2.0) after it, both in the ten-game test.
+- Small samples (92-148 decisions a four-game test, with no rapid games, and about 320 a ten-game one): the medians hold to about 10%, the 90th percentiles roughly.
+
+**Calibrated play.** Refitted on Allie 2.1's own search at every search size up to 1,024 leaves, on the same July 2026 games as Allie 2.0's rule. One rule for every time control misses 10-21 of the 80 strength tests held out: Allie 2.1's raw strength rises with rating more steeply than Allie 2.0's, and one exponential in rating fits only one end. The bot uses one rule per time control with a floor on the tilt ([calibration.py](../src/allie/lichess/calibration.py)).
+
+| | Allie 2.0 | Allie 2.1 |
+|---|---:|---:|
+| Strength tests outside the noise, of 80: July held out / September | 2 / 8 | 5 / 11 |
+| Calibrated minus raw CE on September games: bullet / blitz / rapid / classical | −0.0006 / −0.0047 / −0.0102 / −0.0114 | −0.0002 / −0.0018 / −0.0074 / −0.0080 |
+
+- About 4 of 80 tests would miss by chance. Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is out of the tilt's reach: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans.
+- No bin's calibrated CE is above the raw model's at 95% on September games; on July, only bullet 2000 with the game halves pooled, where Allie 2.1 alone already plays 0.2 points strong.
 
 ## Reproducing
 
