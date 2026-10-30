@@ -1,7 +1,8 @@
 """One calibrated rule for every cell, no rating or time-control thresholds: a single searcher's ladder,
 the largest rung the move's drawn think time and the clock allow (calib_cells.py --think's mixture), and
 a tilt pi ~ prior exp(beta v) on its values v (log-odds arctanh(0.99 Q), or v as given for "x" tags)
-with beta = beta0 exp(gamma x), max(beta0 + gamma x, 0) or, the bot's, beta0 exp(gamma x) (t / 10 s)^delta,
+with beta = beta0 exp(gamma x), max(beta0 + gamma x, 0), beta0 exp(gamma x) (t / 10 s)^delta or, the bot's,
+thinkx: beta0 exp(gamma x) (t / 10 s)^(delta + eta x) + floor, one rule per format (--by-format),
 x = (R - 1700) / 1000 and t the position's expected human think time. The parameters are fitted jointly
 over the cells (debiased squared Elo error of accuracy and blunder rate, bullet excluded from the loss:
 its human curve is too flat for Elo) with the human-move cross-entropy at or below the policy's on
@@ -9,7 +10,8 @@ average over cells; fitted on each game half and scored on the other.
 
 python calib_unified.py CALIB_DIR --ladder 8a,32a,128a,256a,1024a [--extra DIR ...] [--cells subset|all]
 --params B0,G,D [--plot plot.json]: score the think form at fixed parameters instead of fitting (and write
-calib_plotdata.py's per-cell metrics and slopes for the README figure).
+calib_plotdata.py's per-cell metrics and slopes for the README figure); four tuples: one rule per format.
+--by-format fits one rule per format on its own cells (with --ce cells the bar is per cell, so the formats separate).
 A ladder tag names its values: N (search-human-ann2c's cov_qN) or an --extra run's tag (e.g. 1024, 256c,
 512kx: piKL's log-odds values); a trailing "a" tilts arctanh(0.99 Q) instead of the values as given. Positions without a rung's values
 fall to the next lower rung the position has (so scores there understate that rung).
@@ -27,6 +29,7 @@ import numpy as np
 import calib_cells as cc
 import calib_fit as cf
 import calib_plotdata as cp
+from allie.lichess import calibration
 from allie.lichess.tokens import SECONDS
 
 G = np.exp(np.linspace(np.log(0.02), np.log(64), 33))  # beta grid the fit interpolates in log beta
@@ -176,13 +179,17 @@ def betas(A, par, form):
     with t the position's expected human think time (its think-time head), x = (R - 1700) / 1000; clock
     and est: think times (c / 600 s)^kappa, c the mover's clock left or the game's estimated duration
     base + 40 increment (1 when unknown); thinkx: think with exponent delta + eta x (the rating slope grows
-    with the think time)."""
+    with the think time), plus a floor c when given (b0, g, d, eta, c): the tilt low ratings get regardless.
+    A list of four parameter tuples: one rule per format (bullet, blitz, rapid, classical)."""
+    if isinstance(par, list):
+        return np.choose(A["f"], [betas(A, q, form) for q in par])
     x = (A["elo"] - 1700) / 1000
     if form == "thinkx":
-        b0, g, dl, eta = par
-        return b0 * np.exp(g * x) * (A["think"] / 10) ** (dl + eta * x)
+        b0, g, dl, eta, *c = par
+        return b0 * np.exp(g * x) * (A["think"] / 10) ** (dl + eta * x) + (c[0] if c else 0.0)
     if form in ("think", "clock", "est"):
         b0, g, dl, *k = par
+        assert len(k) == (form != "think"), f"{form}: {par}"
         c = 1.0 if form == "think" else np.nan_to_num(A[form] / 600, nan=1.0) ** k[0]
         return b0 * np.exp(g * x) * (A["think"] / 10) ** dl * c
     b0, g = par
@@ -219,13 +226,22 @@ def objective(st):
     return loss, float(max(v[4] - CE_Z * v[5] for v in st.values()) if CE == "cells" else np.mean(ce))
 
 
-def fit(A, sel, human, form, grid):
-    best = (np.inf, None)
+def fit(A, sel, human, form, grid, by_format=False):
+    """The grid point of least loss that holds the bar, or by_format a list of each format's on its own cells."""
+    groups = [[f] for f in range(4)] if by_format else [range(4)]
+    best = [(np.inf, None)] * len(groups)
     for par in grid:
-        loss, ce = objective(cell_stats(A, mixed(A, betas(A, par, form)), sel, human))
-        if ce <= 0 and loss < best[0]:
-            best = (loss, par)
-    return best[1]
+        st = cell_stats(A, mixed(A, betas(A, par, form)), sel, human)
+        for i, g in enumerate(groups):
+            loss, ce = objective({c: v for c, v in st.items() if c[0] in g})
+            if ce <= 0 and loss < best[i][0]:
+                best[i] = (loss, par)
+    pars = [p for _, p in best]
+    return None if None in pars else pars if by_format else pars[0]
+
+
+def flat(par):
+    return [flat(q) for q in par] if isinstance(par, list) else [round(float(x), 4) for x in par]
 
 
 def plot(A, X, sel):
@@ -289,9 +305,9 @@ def main():
         help="the raw policy and think-time head: the base directory's (Allie 2.0) or the extras' own",
     )
     p.add_argument("--positions", help="an index file (.npy): only these positions")
-    p.add_argument("--sim", type=float, default=0.004, help="seconds a leaf (allie.lichess.calibration.COST)")
+    p.add_argument("--sim", type=float, default=calibration.COST, help="seconds a leaf (calibration.COST)")
     p.add_argument(
-        "--margin", type=float, default=0.3, help="seconds a search ends before the think time (calibration.MARGIN)"
+        "--margin", type=float, default=calibration.MARGIN, help="seconds a search ends before the think time"
     )
     p.add_argument(
         "--ce",
@@ -311,11 +327,16 @@ def main():
     p.add_argument("--deltas", type=floats, help="think form: the deltas to try")
     p.add_argument("--kappas", type=floats, help="clock and est forms: the kappas to try; thinkx: the etas")
     p.add_argument("--gammas", type=floats, help="thinkx: the gammas to try")
-    p.add_argument("--params", type=floats, help="score these parameters (--forms' first form, default think), no fit")
+    p.add_argument("--b0s", type=int, default=11, help="thinkx: beta0 grid points, log-spaced 0.1-0.6")
+    p.add_argument("--floors", type=floats, help="thinkx: the tilt floors to try (a fifth parameter)")
+    p.add_argument("--params", type=floats, nargs="+", help="score these parameters (--forms' first form, default think), "
+                   "no fit; four tuples: one per format")  # fmt: skip
+    p.add_argument("--by-format", action="store_true", help="fit one rule per format, each on its own cells")
     p.add_argument("--plot", help="with --params: write per-cell metrics and slopes here (calib_plotdata.py's format)")
     p.add_argument("--loss", choices=["elo", "z"], default="elo", help="squared gaps in Elo or in standard errors")
     p.add_argument("--bullet-from", type=int, default=9999, help="bullet bins from this rating join the loss")
     a = p.parse_args()
+    assert not a.by_format or a.bullet_from <= 2600, "--by-format: bullet needs bins in the loss (--bullet-from)"
     global CE, CE_Z, LOSS, BULLET
     cc.MARGIN, CE, CE_Z, LOSS, BULLET = a.margin, a.ce, a.ce_z, a.loss, a.bullet_from
     d = Path(a.dir)
@@ -339,10 +360,12 @@ def main():
         f"{sel.sum()} positions; ladder {ladder}; think draws above a position's top rung {A['folded'][sel].mean():.2%}"
     )
     if a.params:
-        X = mixed(A, betas(A, a.params, (a.forms or "think").split(",")[0]))
+        assert len(a.params) in (1, 4), "--params: one tuple or one per format"
+        par = a.params[0] if len(a.params) == 1 else a.params
+        X = mixed(A, betas(A, par, (a.forms or "think").split(",")[0]))
         st = cell_stats(A, X, sel, human)
         cells = {f"{cf.FORMATS[f]}/{b}": [float(x) for x in v] for (f, b), v in st.items()}
-        out = dict(params=list(a.params), in_sample=report(st, "  in-sample"), cells=cells, outside=outside(cells))
+        out = dict(params=flat(par), in_sample=report(st, "  in-sample"), cells=cells, outside=outside(cells))
         print("  outside the noise:", json.dumps(out["outside"]))
         (d / a.out).write_text(json.dumps(dict(think=out), indent=1) + "\n")
         if a.plot:
@@ -355,35 +378,36 @@ def main():
     for f in ("clock", "est"):
         grids[f] = [(b, g, dl, k) for b in np.exp(np.linspace(np.log(0.05), np.log(16), 17)) for g in (2, 2.5, 3, 3.5, 4)
                     for dl in (a.deltas or (0.25, 0.5, 0.625, 0.75, 1.0)) for k in (a.kappas or (-0.25, 0, 0.25, 0.5, 0.75, 1))]  # fmt: skip
-    grids["thinkx"] = [(b, g, dl, k) for b in np.exp(np.linspace(np.log(0.1), np.log(0.6), 11)) for g in (a.gammas or (2.5, 3, 3.5))
+    grids["thinkx"] = [(b, g, dl, k) for b in np.exp(np.linspace(np.log(0.1), np.log(0.6), a.b0s)) for g in (a.gammas or (2.5, 3, 3.5))
                        for dl in (a.deltas or (0.5, 0.75, 1.0)) for k in (a.kappas or (-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1.0))]  # fmt: skip
+    if a.floors:
+        grids["thinkx"] = [q + (c,) for q in grids["thinkx"] for c in a.floors]
     if a.forms:
         grids = {k: v for k, v in grids.items() if k in a.forms.split(",")}
     out = {}
     for form, grid in grids.items():
-        par = fit(A, sel, human, form, grid)
+        par = fit(A, sel, human, form, grid, a.by_format)
         if par is None:
             print(f"{form}: no parameters on the grid hold the cross-entropy bar")
             continue
         full = cell_stats(A, mixed(A, betas(A, par, form)), sel, human)
-        held = {}
+        held, picks = {}, []
         for h in (0, 1):
-            ph = fit(A, sel & (A["half"] == h), human, form, grid)
+            ph = fit(A, sel & (A["half"] == h), human, form, grid, a.by_format)
             if ph is None:
                 print(f"{form}: half {h}: no parameters on the grid hold the cross-entropy bar")
                 break
+            picks.append(ph)
             st = cell_stats(A, mixed(A, betas(A, ph, form)), sel & (A["half"] != h), human)
             for c, v in st.items():
-                held.setdefault(c, []).append((ph, v))
+                held.setdefault(c, []).append(v)
         else:
-            heldst = {c: np.array([v for _, v in vs]) for c, vs in held.items()}  # [half, stat]
-            print(
-                f"{form}: params {tuple(round(float(x), 3) for x in par)}; halves {[tuple(round(float(x), 3) for x in held[next(iter(held))][h][0]) for h in (0, 1)]}"
-            )
-            out[form] = dict(params=[float(x) for x in par], in_sample=report(full, "  in-sample"), held_out=report(heldst, "  held-out "),
+            heldst = {c: np.array(vs) for c, vs in held.items()}  # [half, stat]
+            halves = [flat(q) for q in picks]
+            print(f"{form}: params {flat(par)}; halves {halves}")
+            out[form] = dict(params=flat(par), in_sample=report(full, "  in-sample"), held_out=report(heldst, "  held-out "),
                              cells={f"{cf.FORMATS[f]}/{b}": [float(x) for x in v] for (f, b), v in full.items()},
-                             cells_held={f"{cf.FORMATS[f]}/{b}": v.tolist() for (f, b), v in heldst.items()},
-                             halves=[[float(x) for x in held[next(iter(held))][h][0]] for h in (0, 1)],
+                             cells_held={f"{cf.FORMATS[f]}/{b}": v.tolist() for (f, b), v in heldst.items()}, halves=halves,
                              outside_held=outside({f"{cf.FORMATS[f]}/{b}": v for (f, b), v in heldst.items()}))  # fmt: skip
             print("  outside the noise, held out:", json.dumps(out[form]["outside_held"]))
     (d / a.out).write_text(json.dumps(out, indent=1) + "\n")

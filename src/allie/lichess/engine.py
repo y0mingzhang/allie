@@ -352,7 +352,7 @@ def calibrated(game, play, search, clock):
             if sims >= calibration.MEASURED and not stopped:
                 e.sim_cost += 0.3 * (searched / sims - e.sim_cost)
             if found is not None:
-                beta = calibration.beta(game.elo[len(game.moves) % 2], time)
+                beta = calibration.beta(game.elo[len(game.moves) % 2], time, FORMATS.get(game.speed, 1))
                 s = np.zeros(len(legal))
                 s[[legal.index(m) for m in found[0]]] = calibration.tilt(*found[-2:], beta)
     i = int(game.rng.choice(len(legal), p=s / s.sum()))

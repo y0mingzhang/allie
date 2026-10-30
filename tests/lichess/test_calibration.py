@@ -14,12 +14,10 @@ from .test_tokens import random_game
 def test_beta_grows_with_rating_and_think_time():
     quick, slow = np.zeros(63), np.zeros(63)
     quick[2], slow[30] = 1, 1  # 2.5 s; about 2 min
-    b = calibration.beta
-    assert b(1700, quick) < b(1700, slow) and b(1200, slow) < b(1700, slow) < b(2400, slow)
-    t = float(calibration.SECONDS[30])
-    assert b(2700, slow) == pytest.approx(
-        calibration.BETA0 * np.exp(calibration.GAMMA) * (t / 10) ** (calibration.DELTA + calibration.ETA)
-    )
+    t, b = float(calibration.SECONDS[30]), calibration.beta
+    for f, (b0, g, d, e, c) in enumerate(calibration.RULES):
+        assert b(1700, quick, f) < b(1700, slow, f) and b(1200, slow, f) < b(1700, slow, f) < b(2400, slow, f)
+        assert b(2700, slow, f) == pytest.approx(b0 * np.exp(g) * (t / 10) ** (d + e) + c)
 
 
 def test_the_clock_caps_the_budget():
@@ -86,13 +84,13 @@ def test_calibrated_mode(tiny_path, tiny, monkeypatch):
     assert len(game.moves) == 20  # white to move
     assert game.decide(play, None, 590).move in legal_of(game)  # no searcher: the policy
     betas, beta = [], calibration.beta
-    monkeypatch.setattr(calibration, "beta", lambda r, t: betas.append(r) or 40.0)
+    monkeypatch.setattr(calibration, "beta", lambda r, t, f: betas.append((r, f)) or 40.0)
     assert (
         game.decide(play, search, 590).move == legal_of(game)[-1]
     )  # the values' tilt, not the calibrated distribution
     assert search.budgets == [calibration.LADDER[-1]] and betas == [
-        2000
-    ]  # the clock allows the top rung; white's rating
+        (2000, behaviour.FORMATS["rapid"])
+    ]  # the clock allows the top rung; white's rating and the game's format
     reserve, rungs = behaviour.PARAMETERS["guard"]["reserve"], calibration.LADDER
     clock = 10 * rungs[-2] * calibration.COST + (reserve + 1) / 2  # a tenth above the reserve just misses rungs[-2]
     assert game.decide(play, search, clock).move == legal_of(game)[-1]
