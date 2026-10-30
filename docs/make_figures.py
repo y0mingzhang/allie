@@ -581,54 +581,58 @@ def search_index(n):
 
 
 def pareto():
-    """Legal-move CE against GFLOPs per move, on the 20,000 benchmark positions that search ran on."""
+    """Legal-move CE against GFLOPs per move, on the 20,000 benchmark positions that search ran on: Maia-3's sizes
+    as a smooth guide, the Allie releases as straight segments, and Allie 2.0's 5-simulation search as a dashed
+    branch."""
     rep = jload(SEARCH / "report-ann2.json")
-    p = rep["points"]
+    p, idx = rep["points"], search_index(rep["n"])
     pts = [dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name) for m, name in MAIA.items()]
-    for k, t in (("frozen/legal", "Allie 2.0 (raw)"), ("devcal/5", "5 simulations")):
-        pts.append(dict(fam="allie", g=p[k]["gflops"], v=p[k]["ce"], t=t))
+    ce = previous("allie1-medium", "bench")
+    if ce is not None:
+        pts.append(dict(fam="allie", g=gflops("allie1-medium"), v=float(ce[idx].mean()), t="Original Allie"))
     sys.path[:0] = [str(ROOT / "src")]
     from allie.eval.maia3.report import RELEASES
 
     with np.load(V21_BENCH) as z:
-        pts.append(dict(fam="allie21", g=RELEASES[V21][2], v=float(z["ce_legal"][search_index(rep["n"])].mean()),
-                        t="Allie 2.1 (raw)"))  # fmt: skip
-    ce = previous("allie1-medium", "bench")
-    if ce is not None:
-        pts.append(
-            dict(
-                fam="orig",
-                g=gflops("allie1-medium"),
-                v=float(ce[search_index(rep["n"])].mean()),
-                t="Original Allie",
-            )
-        )
-    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.2, 25], nice=False), title="Compute per move (GFLOPs, log scale)",
+        v21 = float(z["ce_legal"][idx].mean())
+    raw, srch = p["frozen/legal"], p["devcal/5"]
+    pts += [
+        dict(fam="allie", g=raw["gflops"], v=raw["ce"], t="Allie 2.0"),
+        dict(fam="allie", g=RELEASES[V21][2], v=v21, t="Allie 2.1"),
+        dict(fam="search", g=srch["gflops"], v=srch["ce"], t="Allie 2.0 + 5 search simulations"),
+    ]
+    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.25, 20], nice=False), title="Compute per move (GFLOPs, log scale)",
               axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20], grid=False, format="~g"))  # fmt: skip
     y = alt.Y("v:Q", scale=alt.Scale(domain=[1.18, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
               axis=alt.Axis(values=[1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
     b = values(pts)
-    maia, allie, allie21, orig = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "allie21", "orig"))
-    raw = alt.datum.t == "Allie 2.0 (raw)"
+    maia, allie, search = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "search"))
+    branch = values([dict(g=raw["gflops"], v=raw["ce"], g2=srch["gflops"], v2=srch["ce"])])
+    dot = dict(size=140, opacity=1, stroke=PAPER, strokeWidth=2)
+
+    def tag(t, align, dx, dy, strong=False):
+        return b.transform_filter(alt.datum.t == t).mark_text(align=align, dx=dx, dy=dy, color=INK if strong else INK2,
+                                                             fontWeight=600 if strong else 400).encode(x=x, y=y, text="t:N")  # fmt: skip
+
     chart = alt.layer(
-        maia.mark_line(color=NEUTRAL_DARK, strokeWidth=2).encode(x=x, y=y),
-        maia.mark_circle(size=110, color=NEUTRAL_DARK, opacity=1).encode(x=x, y=y),
+        maia.mark_line(color=NEUTRAL_DARK, strokeWidth=2.5, interpolate="monotone").encode(x=x, y=y),
+        allie.mark_line(color=ALLIE, strokeWidth=2.5).encode(x=x, y=y),
+        branch.mark_rule(color=ALLIE, strokeWidth=2.5, strokeDash=[6, 4]).encode(x=x, y=y, x2="g2:Q", y2="v2:Q"),
+        maia.mark_circle(color=NEUTRAL_DARK, **dot).encode(x=x, y=y),
+        allie.mark_circle(color=ALLIE, **dot).encode(x=x, y=y),
+        search.mark_circle(size=75, fill=PAPER, stroke=ALLIE, strokeWidth=2, opacity=1).encode(x=x, y=y),
         maia.mark_text(align="left", dx=10, dy=-10).encode(x=x, y=y, text="t:N"),
-        orig.mark_point(size=110, color=NEUTRAL_DARK, strokeWidth=2, filled=False).encode(x=x, y=y),
-        orig.mark_text(align="right", dx=-11).encode(x=x, y=y, text="t:N"),
-        allie.mark_line(color=ALLIE, strokeWidth=2.4).encode(x=x, y=y),
-        allie.mark_circle(color=ALLIE, opacity=1).encode(x=x, y=y, size=alt.condition(raw, alt.value(170), alt.value(90))),
-        allie.transform_filter(raw).mark_text(dy=20, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
-        allie.transform_filter(~raw).mark_text(dy=18).encode(x=x, y=y, text="t:N"),
-        allie21.mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
-        allie21.mark_text(dy=20, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
-    ).properties(width=2 * 300 + 34, height=360, title=title(
+        tag("Original Allie", "right", -12, 0),
+        tag("Allie 2.0", "right", -12, 0, True),
+        tag("Allie 2.1", "left", 12, 0, True),
+        tag("Allie 2.0 + 5 search simulations", "center", 0, 20),
+    ).properties(width=WIDTH, height=360, title=title(
         "Allie 2.0 and 2.1 need 1.4 and 2.5 GFLOPs per move",
-        "Loss against compute per move on 20,000 blitz positions, every position scored. Compute counts",
-        "matrix multiplies. Grey line: a guide between three separately trained Maia-3 models."))  # fmt: skip
+        "Loss on 20,000 blitz positions, every position scored, against compute per move (matrix-multiply FLOPs).",
+        "Grey: Maia-3 at three sizes. Orange: successive Allie releases, not a size sweep. Dashed: 2.0 with search."))  # fmt: skip
     save(chart, "pareto")
     for r in pts:
-        print(f"  {r['t']:16s} {r['g']:7.2f} GF  CE {r['v']:.4f}")
+        print(f"  {r['t']:33s} {r['g']:7.2f} GF  CE {r['v']:.4f}")
 
 
 def protocol_scores():

@@ -135,9 +135,9 @@ We compare Allie 2.0 and 2.1 with the original Allie and [Maia-3](https://arxiv.
 
 Maia-3 trains only on Lichess blitz, so we compare on blitz. We use 80,000 blitz positions from July 2026, 20,000 from each of four rating bands.
 
-![Loss against compute per move for Maia-3, the original Allie, Allie 2.0 with and without search, and Allie 2.1](docs/figures/pareto.png)
+![Loss against compute per move. Allie 2.0 (1.4 GFLOPs) and Allie 2.1 (2.5) have lower loss than all three Maia-3 sizes, including Maia-3 79M at 9.2 GFLOPs. The original Allie sits near Maia-3 5M. Five search simulations take Allie 2.0 to 8.3 GFLOPs for 0.0025 lower loss.](docs/figures/pareto.png)
 
-*Orange: Allie 2.0 alone and with 5 search simulations per move, and Allie 2.1 alone. More search is in [DETAILS](docs/DETAILS.md#search).*
+*Scores are on the 20,000 positions search ran on, 5,000 per rating band, so they differ slightly from the 80,000-position numbers below. More search is in [DETAILS](docs/DETAILS.md#search).*
 
 On all 80,000 positions, Allie 2.0's loss is 1.2030 against 1.2269 for Maia-3 79M. It uses 1.39 GFLOPs per move against 9.23. Allie 2.1's loss is 1.1779, at 2.45 GFLOPs.
 

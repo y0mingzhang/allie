@@ -111,7 +111,7 @@ Each search budget's output is calibrated on separate July 2026 games, which do 
 | Before the second anneal, 5 simulations | 8.30 | 1.2189 | +0.0026 [+0.0014, +0.0039] | +0.15 [−0.08, +0.37] |
 | Before the second anneal, 128 simulations | 176 | 1.2161 | +0.0055 [+0.0038, +0.0070] | +0.18 [−0.04, +0.40] |
 
-On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395. The original Allie scores 1.3006. 128 simulations ran only before the second anneal, so the README's plot leaves them out.
+On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395. The original Allie scores 1.3006, and Allie 2.1, not run with search, 1.1931. 128 simulations ran only before the second anneal, so the README's plot leaves them out.
 
 The gain comes from strong players. Before the anneal, with 128 simulations, it is −0.0001 below 1400 and +0.0014 at 1400-2000. It is +0.0062 at 2000-2400 and +0.0143 at 2400+.
 
