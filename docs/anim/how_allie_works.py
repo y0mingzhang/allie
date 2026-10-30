@@ -1673,7 +1673,7 @@ class Next(Scene):
             run_time=0.8,
         )
         cap.hold()
-        self.play(*cap("Its weights are coming; the Lichess bot still plays Allie 2.0."), run_time=0.6)
+        self.play(*cap("Its weights are coming; the Lichess bot has played it since October 30."), run_time=0.6)
         cap.hold()
         fade_all(self, cap)
 
