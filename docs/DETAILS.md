@@ -101,21 +101,23 @@ We score the original Allie's raw policy on the same positions, in its own input
 
 The search runs over the model's own predictions of the move, the outcome and the thinking time. We ran it on 20,000 benchmark positions, 5,000 per rating band. The README's compute plot uses these positions, so its values differ slightly from the 80,000-position table.
 
-Each search budget's output is calibrated on separate July 2026 games, which do not overlap the benchmark.
+Each search budget's output is calibrated for each model on separate July 2026 games, which do not overlap the benchmark (`analysis/search-bench/fit.py`); with the search's default calibration, search raises the loss at every budget. Compute counts every model evaluation the search makes, including attention over the cached game. The raw rows are scored by the search's model server, within 0.0006 of the benchmark scorer.
 
-| Model | GFLOPs per move | CE | CE gain | top-1 gain (points) |
-|---|---:|---:|---:|---:|
-| Allie 2.0, raw policy | 1.40 | 1.2194 | | |
-| Allie 2.0, 5 simulations | 8.30 | 1.2169 | +0.0025 [+0.0013, +0.0037] | +0.10 [−0.10, +0.31] |
-| Before the second anneal, raw policy | 1.40 | 1.2216 | | |
-| Before the second anneal, 5 simulations | 8.30 | 1.2189 | +0.0026 [+0.0014, +0.0039] | +0.15 [−0.08, +0.37] |
-| Before the second anneal, 128 simulations | 176 | 1.2161 | +0.0055 [+0.0038, +0.0070] | +0.18 [−0.04, +0.40] |
+| Simulations | Allie 2.0 GFLOPs | CE | CE gain | Allie 2.1 GFLOPs | CE | CE gain |
+|---:|---:|---:|---:|---:|---:|---:|
+| none (raw policy) | 1.40 | 1.2194 | | 2.46 | 1.1937 | |
+| 2 | 4.16 | 1.2192 | +0.0002 [−0.0010, +0.0012] | 7.34 | 1.1932 | +0.0005 [−0.0004, +0.0014] |
+| 5 | 8.30 | 1.2169 | +0.0025 [+0.0013, +0.0037] | 14.6 | 1.1925 | +0.0012 [+0.0001, +0.0023] |
+| 10 | 15.2 | 1.2160 | +0.0034 [+0.0021, +0.0047] | 26.8 | 1.1916 | +0.0021 [+0.0009, +0.0033] |
+| 25 | 35.8 | 1.2152 | +0.0041 [+0.0027, +0.0055] | 63.1 | 1.1914 | +0.0023 [+0.0010, +0.0036] |
+| 50 | 70.0 | 1.2147 | +0.0047 [+0.0031, +0.0063] | 123 | 1.1913 | +0.0024 [+0.0012, +0.0037] |
+| 100 | 138 | 1.2142 | +0.0052 [+0.0036, +0.0066] | 244 | 1.1909 | +0.0028 [+0.0016, +0.0040] |
 
-On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395. The original Allie scores 1.3006, and Allie 2.1, not run with search, 1.1931. 128 simulations ran only before the second anneal, so the README's plot leaves them out.
+From 10 to 100 simulations the loss falls only 0.0018 more (Allie 2.0) and 0.0007 (Allie 2.1). Top-1 accuracy moves by at most 0.2 points, within the noise. On the same positions, Maia-3 5M, 23M and 79M score 1.3086, 1.2597 and 1.2395, and the original Allie 1.3006.
 
-The gain comes from strong players. Before the anneal, with 128 simulations, it is −0.0001 below 1400 and +0.0014 at 1400-2000. It is +0.0062 at 2000-2400 and +0.0143 at 2400+.
+The gain comes from strong players. With 100 simulations it is −0.0004 below 1400, +0.0008 at 1400-2000, +0.0055 at 2000-2400 and +0.0148 at 2400+ for Allie 2.0, and +0.0003, +0.0010, +0.0024 and +0.0078 for Allie 2.1.
 
-Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 nats on the scaling sweep's best MoE models, and 0.0055 on the big run's final checkpoint.
+Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 nats on the scaling sweep's best MoE models, and 0.0055 on the big run's final checkpoint. 100 simulations gain 0.0052 on Allie 2.0, the same size, and 0.0028 on the larger Allie 2.1.
 
 ## Evaluation
 

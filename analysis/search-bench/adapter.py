@@ -1,5 +1,5 @@
-"""Maia-3 benchmark and dev positions as search queries, and Bench: Search at any fixed budget, where 5/8/25
-use the 128-simulation output policy and 460 the 512 one unless the calibration has its own.
+"""Maia-3 benchmark and dev positions as search queries, and Bench: Search at any fixed budget, where budgets up to
+128 use the 128-simulation output policy and 460 the 512 one unless the calibration has its own.
 """
 
 import numpy as np
@@ -10,7 +10,7 @@ from allie.search.native import from_prefix
 
 G = paths.DATA / "strat-eval-v1"
 DATA = paths.DATA / "maia3-bench"
-POLICY = {5: "128", 8: "128", 25: "128", 128: "128", 460: "512"}
+POLICY = {b: "128" for b in (2, 5, 8, 10, 25, 50, 100, 128)} | {460: "512"}
 
 
 def positions():

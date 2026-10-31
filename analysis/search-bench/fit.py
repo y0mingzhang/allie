@@ -9,8 +9,8 @@ are fit on the dev positions routed to them. "temperature" refits only per-band 
 policy (beta = 0), the no-search control for what recalibration alone buys.
 
 Writes <tag>/devcal-<point>.npz (per-position CE, top-1 on the bench) and calibration-<tag>.json
-next to this file: allie.search's calibration.json with budget_policies replaced by the refits (5/8/25/460
-are extra keys, reachable only through adapter.Bench); router, backup and old_parameters frozen.
+next to this file: allie.search's calibration.json with budget_policies replaced by the refits (fixed budgets
+but 128 are extra keys, reachable only through adapter.Bench); router, backup and old_parameters frozen.
 
 usage: fit.py <tag> [budgets,...]   (needs <tag>/<budget> for the bench and <tag>-dev/<budget> for dev)
 """
@@ -30,7 +30,7 @@ D = adapter.DATA / "search"
 HERE = Path(__file__).resolve().parent
 F = torch.tensor([0.25, 0.5, 1.0, 2.0, 4.0])
 TC = np.r_[np.arange(16), 16 * np.exp(np.arange(47) / 7.06)]
-FIXED = ["5", "8", "25", "128", "460"]
+FIXED = ["2", "5", "8", "10", "25", "50", "100", "128", "460"]
 
 
 def load(folder, P):

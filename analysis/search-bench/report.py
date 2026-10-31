@@ -23,7 +23,7 @@ from allie.eval.maia3.aggregate import boot
 DATA = paths.DATA / "maia3-bench"
 HERE = Path(__file__).resolve().parent
 FLOPS = json.loads((paths.ROOT / "results/recipe10x/maia3-bench/aggregate-sweep1e18.json").read_text())["flops"]
-BUDGETS = ["5", "8", "25", "128", "460", "adaptive"]
+BUDGETS = ["2", "5", "8", "10", "25", "50", "100", "128", "460", "adaptive"]
 BANDS = {4: "<1400", 5: "1400-2000", 6: "2000-2400", 7: ">=2400"}
 MAIA = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
 MODEL = {
@@ -32,13 +32,19 @@ MODEL = {
     "bigrun132k": ("big run step 132K", 24, 1536),
     "bigrun": ("big run", 24, 1536),
     "ann2": ("annealed big run", 24, 1536),
+    "allie-2.0": ("Allie 2.0", 24, 1536),
+    "allie-2.1": ("Allie 2.1", 24, 2048),
 }
-# Allie 2.0: 2 x active matmul parameters per move; its raw reference is eval.maia3.score_moe on the same checkpoint
-FLOPS |= {t: dict(flops_per_move=1389084288) for t in ("bigrun132k", "bigrun", "ann2")}
+# 2 x active matmul parameters per move (allie.train.trainer.useful_flops' forward); the raw reference is the same checkpoint's
+# benchmark scores
+FLOPS |= {t: dict(flops_per_move=1389084288) for t in ("bigrun132k", "bigrun", "ann2", "allie-2.0")}
+FLOPS["allie-2.1"] = dict(flops_per_move=2451464320)
 RAW = {
     "bigrun132k": DATA / "bigrun-v2/step-00132096/scores.npz",
     "bigrun": DATA / "bigrun-v2/step-00143051/scores.npz",
     "ann2": paths.DATA / "distill-v2/scores/ann-all-p05-t1907.npz",
+    "allie-2.0": paths.DATA / "distill-v2/scores/ann-all-p05-t1907.npz",
+    "allie-2.1": paths.DATA / "release-2.1/maia3/blitz.npz",
 }
 KEYS = ("index", "ce", "top1", "nodes")
 
@@ -221,6 +227,8 @@ def plot(results):
         "bigrun132k": "#4a3aa7",
         "bigrun": "#4a3aa7",
         "ann2": "#4a3aa7",
+        "allie-2.0": "#4a3aa7",
+        "allie-2.1": "#e4572e",
     }
     big = MODEL[results[0][0]][1] == 24
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.2), facecolor=surface)

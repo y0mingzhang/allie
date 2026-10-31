@@ -576,63 +576,72 @@ def gflops(name):
 
 def search_index(n):
     """Benchmark positions the search ran on (legal.npz order), as run.py drew them."""
-    files = sorted((SEARCH / "ann2/legal").glob("[0-9]*.npz"))
+    files = sorted((SEARCH / "allie-2.0/legal").glob("[0-9]*.npz"))
     return np.concatenate([np.load(f)["index"] for f in files])[:n]
 
 
 def pareto():
     """Legal-move CE against GFLOPs per move, on the 20,000 benchmark positions that search ran on: Maia-3's sizes
-    as a smooth guide, the Allie releases as straight segments, and Allie 2.0's 5-simulation search as a dashed
-    branch."""
-    rep = jload(SEARCH / "report-ann2.json")
-    p, idx = rep["points"], search_index(rep["n"])
+    as a smooth guide, the Allie releases as straight segments, and each release's search from 2 to 100 simulations
+    (output calibrated per budget on dev games) as a dashed curve from its raw point."""
+    budgets = [2, 5, 10, 25, 50, 100]
+    reps = {m: jload(SEARCH / f"report-{t}.json") for m, t in (("Allie 2.0", "allie-2.0"), ("Allie 2.1", "allie-2.1"))}
+    p, n = reps["Allie 2.0"]["points"], reps["Allie 2.0"]["n"]
+    assert reps["Allie 2.1"]["n"] == n
+    idx = search_index(n)
     pts = [dict(fam="maia", g=p[f"maia/{m}"]["gflops"], v=p[f"maia/{m}"]["ce"], t=name) for m, name in MAIA.items()]
     ce = previous("allie1-medium", "bench")
     if ce is not None:
         pts.append(dict(fam="allie", g=gflops("allie1-medium"), v=float(ce[idx].mean()), t="Original Allie"))
-    sys.path[:0] = [str(ROOT / "src")]
-    from allie.eval.maia3.report import RELEASES
-
-    with np.load(V21_BENCH) as z:
-        v21 = float(z["ce_legal"][idx].mean())
-    raw, srch = p["frozen/legal"], p["devcal/5"]
-    pts += [
-        dict(fam="allie", g=raw["gflops"], v=raw["ce"], t="Allie 2.0"),
-        dict(fam="allie", g=RELEASES[V21][2], v=v21, t="Allie 2.1"),
-        dict(fam="search", g=srch["gflops"], v=srch["ce"], t="Allie 2.0 + 5 search simulations"),
-    ]
-    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.25, 20], nice=False), title="Compute per move (GFLOPs, log scale)",
-              axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20], grid=False, format="~g"))  # fmt: skip
+    curve = []
+    for m, rep in reps.items():
+        q = rep["points"]
+        pts.append(dict(fam="allie", g=q["frozen/legal"]["gflops"], v=q["frozen/legal"]["ce"], t=m))
+        for s, k in [(0, "frozen/legal")] + [(b, f"devcal/{b}") for b in budgets]:
+            curve.append(dict(m=m, s=s, g=q[k]["gflops"], v=q[k]["ce"]))
+    x = alt.X("g:Q", scale=alt.Scale(type="log", domain=[0.15, 300], nice=False), title="Compute per move (GFLOPs, log scale)",
+              axis=alt.Axis(values=[0.5, 1, 2, 5, 10, 20, 50, 100, 200], grid=False, format="~g"))  # fmt: skip
     y = alt.Y("v:Q", scale=alt.Scale(domain=[1.18, 1.32], nice=False, zero=False), title="Loss (nats, lower is better)",
               axis=alt.Axis(values=[1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32], grid=True, format=".2f"))  # fmt: skip
-    b = values(pts)
-    maia, allie, search = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie", "search"))
-    branch = values([dict(g=raw["gflops"], v=raw["ce"], g2=srch["gflops"], v2=srch["ce"])])
+    b, c = values(pts), values(curve)
+    maia, allie = (b.transform_filter(alt.datum.fam == f) for f in ("maia", "allie"))
+    search = c.transform_filter(alt.datum.s > 0)
     dot = dict(size=140, opacity=1, stroke=PAPER, strokeWidth=2)
 
     def tag(t, align, dx, dy, strong=False):
         return b.transform_filter(alt.datum.t == t).mark_text(align=align, dx=dx, dy=dy, color=INK if strong else INK2,
                                                              fontWeight=600 if strong else 400).encode(x=x, y=y, text="t:N")  # fmt: skip
 
+    def end(m, dy):
+        return (
+            c.transform_filter((alt.datum.m == m) & (alt.datum.s == budgets[-1]))
+            .mark_text(align="right", dx=6, dy=dy, color=INK2, text=f"+{budgets[-1]} simulations")
+            .encode(x=x, y=y)
+        )
+
     chart = alt.layer(
         maia.mark_line(color=NEUTRAL_DARK, strokeWidth=2.5, interpolate="monotone").encode(x=x, y=y),
         allie.mark_line(color=ALLIE, strokeWidth=2.5).encode(x=x, y=y),
-        branch.mark_rule(color=ALLIE, strokeWidth=2.5, strokeDash=[6, 4]).encode(x=x, y=y, x2="g2:Q", y2="v2:Q"),
+        c.mark_line(color=ALLIE, strokeWidth=2.5, strokeDash=[6, 4]).encode(x=x, y=y, detail="m:N", order="s:Q"),
         maia.mark_circle(color=NEUTRAL_DARK, **dot).encode(x=x, y=y),
         allie.mark_circle(color=ALLIE, **dot).encode(x=x, y=y),
-        search.mark_circle(size=75, fill=PAPER, stroke=ALLIE, strokeWidth=2, opacity=1).encode(x=x, y=y),
+        search.mark_circle(size=40, fill=PAPER, stroke=ALLIE, strokeWidth=1.8, opacity=1).encode(x=x, y=y),
         maia.mark_text(align="left", dx=10, dy=-10).encode(x=x, y=y, text="t:N"),
         tag("Original Allie", "right", -12, 0),
         tag("Allie 2.0", "right", -12, 0, True),
-        tag("Allie 2.1", "left", 12, 0, True),
-        tag("Allie 2.0 + 5 search simulations", "center", 0, 20),
+        tag("Allie 2.1", "center", 0, 22, True),
+        end("Allie 2.0", 18),
+        end("Allie 2.1", 18),
     ).properties(width=WIDTH, height=360, title=title(
         "Allie 2.0 and 2.1 need 1.4 and 2.5 GFLOPs per move",
         "Loss on 20,000 blitz positions, every position scored, against compute per move (matrix-multiply FLOPs).",
-        "Grey: Maia-3 at three sizes. Orange: successive Allie releases, not a size sweep. Dashed: 2.0 with search."))  # fmt: skip
+        "Grey: Maia-3 at three sizes. Orange: successive Allie releases, not a size sweep.",
+        f"Dashed: each release with {', '.join(map(str, budgets[:-1]))} and {budgets[-1]} search simulations, output recalibrated per budget."))  # fmt: skip
     save(chart, "pareto")
     for r in pts:
         print(f"  {r['t']:33s} {r['g']:7.2f} GF  CE {r['v']:.4f}")
+    for r in curve:
+        print(f"  {r['m']} + {r['s']:3d} simulations      {r['g']:7.2f} GF  CE {r['v']:.4f}")
 
 
 def protocol_scores():
