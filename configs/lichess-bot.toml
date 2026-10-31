@@ -1,12 +1,12 @@
-# allie-bot: Allie 2.0 on Lichess. The API token comes from LICHESS_TOKEN, never this file.
+# allie-bot: Allie 2.1 on Lichess. The API token comes from LICHESS_TOKEN, never this file.
 # Override any key on the command line: allie-bot play --config this.toml --set play.rating=1800
 
-model = "yimingzhang/allie-2.0"  # Hugging Face repo (downloaded once, 11 GB), or an export directory
+model = "yimingzhang/allie-2.1"  # Hugging Face repo (downloaded once, 18 GB), or an export directory
 device = "cpu"                # or "cuda"
 dtype = "bfloat16"            # or "float32" (twice the memory; on CPU the PyTorch reference, about 3x slower)
 threads = 8                   # CPU threads (0 = one per core of one socket; more are faster up to memory bandwidth)
 active_experts = 0            # routed experts per token, 0 = all 16; 8 is faster, slightly less accurate
-# int8 = false               # int8 weights are the CPU default (6.4 GB, about 1.6 times as fast); false: BF16
+# int8 = false               # int8 weights are the CPU default (9.8 GB, about 1.8 times as fast); false: BF16
 url = "https://lichess.org"
 max_games = 4                 # concurrent games; the rest are declined with "later"
 greeting = ""                 # sent to the opponent's chat at the start of each game
@@ -28,7 +28,7 @@ per_user = 1                  # concurrent games with one opponent
 mode = "human"                # human: sample the policy; strongest: argmax (or search); calibrated: play at
                               # the strength of humans of the rating (calibration.py); see engine.MODES
 rating = "opponent"           # the bot's Elo in the game header: a number, or "opponent" to mirror it
-offset = 0                    # Elo added to it; live calibrated play was 53 Elo too strong at 0 (README): -50
+offset = 0                    # Elo added to it; live calibrated play (Allie 2.0) was 53 Elo too strong at 0 (README): -50
 temperature = 1.0             # human mode; 1 is the model's own distribution
 search = 0                    # strongest mode: 0 or 5 / 8 / 25 / 128 coverage-search simulations
 think_time = true             # wait a think time drawn from the model's think-time head, as a human would

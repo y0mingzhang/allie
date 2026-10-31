@@ -1,7 +1,7 @@
-"""Allie 2.0 for transformers (trust_remote_code), on CPU or GPU.
+"""Allie for transformers (trust_remote_code), on CPU or GPU.
 
     from transformers import AutoModel
-    model = AutoModel.from_pretrained("yimingzhang/allie-2.0", trust_remote_code=True)
+    model = AutoModel.from_pretrained("yimingzhang/allie-2.1", trust_remote_code=True)
     model.predict(["e2e4", "e7e5", "g1f3"], white_elo=1800, black_elo=1750, time_control="180+2")
 
 The network, its key-value cache, its fast paths and the chess inputs are api.py, model.py, fast.py,

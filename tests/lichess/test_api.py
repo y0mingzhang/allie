@@ -131,7 +131,7 @@ def test_release_name(tiny_path, tmp_path):
 
 @pytest.mark.skipif(not os.environ.get("ALLIE_EXPORT"), reason="set ALLIE_EXPORT to a local export to compare")
 def test_hub_weights_match_local_export():
-    """Downloads the 11 GB release and compares every tensor with a local export."""
+    """Downloads the release (18 GB) and compares every tensor with a local export."""
     from huggingface_hub import hf_hub_download
 
     from allie.lichess.model import read

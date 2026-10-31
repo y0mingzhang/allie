@@ -1,4 +1,4 @@
-"""Allie 2.0's CPU fast path for model.py's step(): the Rust engine (rust/allie-fast, module allie_fast, from
+"""Allie's CPU fast path for model.py's step(): the Rust engine (rust/allie-fast, module allie_fast, from
 `uv sync --extra fast`). One call runs the whole step (input embedding, board CNN, every block, the head) on a
 pool of threads pinned within one NUMA node, the weights' pages moved there (ALLIE_NUMA=0 leaves them), with
 barriers between a block's phases and its matrices shared out in chunks. Matrices are read in place from

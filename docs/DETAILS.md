@@ -10,7 +10,7 @@ The loss is cross-entropy (CE) in nats: the negative log-probability of the move
 
 The benchmark is 80,000 blitz positions from July 2026, 20,000 per band of the mover's rating: under 1400, 1400-2000, 2000-2400 and 2400+. Probabilities are renormalized over the legal moves.
 
-Allie 2.0 is the released model: the big run's final checkpoint after its second anneal (see [Training](#training)). The tables also list that checkpoint before the anneal.
+Allie 2.0, as released, is the big run's final checkpoint after its second anneal (see [Training](#training)). The tables also list that checkpoint before the anneal.
 
 | Allie 2.0 minus | CE | top-1 (points) |
 |---|---:|---:|
@@ -315,7 +315,7 @@ One cached step: the time a move takes once the opponent's move arrives, median 
 
 ## Allie 2.1
 
-Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training on October 28, 2026. Its weights are not released yet; the Lichess bot has played it since October 30, 2026. The rest of this page describes Allie 2.0.
+Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training on October 28, 2026. Its weights are on Hugging Face as [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1); the Lichess bot has played it since October 30, 2026. The rest of this page describes Allie 2.0.
 
 **Model.** What differs from Allie 2.0:
 

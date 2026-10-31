@@ -1,7 +1,7 @@
-"""Allie 2.0 move prediction: load once, then ask for move probabilities at any rating and clock.
+"""Allie move prediction: load once, then ask for move probabilities at any rating and clock.
 
     from allie.lichess.api import Allie
-    allie = Allie.from_pretrained()  # yimingzhang/allie-2.0 from the Hub, or an export directory
+    allie = Allie.from_pretrained()  # yimingzhang/allie-2.1 from the Hub, or an export directory
     allie.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="180+2")
 
 Self-contained (torch, numpy, python-chess and this directory's model.py, its fast paths and tokens.py),
@@ -20,7 +20,7 @@ import torch
 from .model import Cache, Model, step
 from .tokens import HEADER, MOVE_ID, START, advance, features, fill, header
 
-REPO = "yimingzhang/allie-2.0"
+REPO = "yimingzhang/allie-2.1"
 TIME, WDL = slice(2350, 2413), slice(2413, 2416)
 # seconds at the centre of each think-time bin: 0..15 exact, then log-spaced
 CENTRES = np.r_[np.arange(16), 16 * np.exp(np.arange(47) / 7.06)]
@@ -76,7 +76,7 @@ def resolve(name, **hub):
 
 
 class Allie:
-    """Allie 2.0 on CPU or GPU. predict() and play() reuse the key-value cache of a recent call
+    """Allie on CPU or GPU. predict() and play() reuse the key-value cache of a recent call
     whose game they extend, so asking move after move in one game costs one or two new tokens."""
 
     def __init__(self, model, sessions=4):

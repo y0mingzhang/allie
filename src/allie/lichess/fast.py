@@ -1,4 +1,4 @@
-"""Allie 2.0's GPU fast path for model.py's step(): Graphs replays model.py's forward, captured once per batch
+"""Allie's GPU fast path for model.py's step(): Graphs replays model.py's forward, captured once per batch
 and attention span, for steps that add one token to each game; a game's cache is a slot of one preallocated
 pool. The CPU's is the Rust engine (fastrs.py)."""
 

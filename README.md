@@ -20,9 +20,9 @@ Our main test set covers every time control and rating level. Its games come fro
 - In blitz, its top choice is the move played **59.3%** of the time. For players rated 2400 and above, it is **63.1%**.
 - It runs on an ordinary CPU: about 4-7 ms per move on a recent server ([fast inference](#fast-inference)).
 
-**Allie 2.1**, a larger model trained on 112B tokens, finished training on October 28, 2026. Its loss on the main test set is **1.2240**. The Lichess bot has played it since October 30, 2026. Its weights are coming; until then, Allie 2.0 is the model to download. Its results are in [Allie 2.1](#allie-21).
+**Allie 2.1**, a larger model trained on 112B tokens, finished training on October 28, 2026. Its loss on the main test set is **1.2240**. The Lichess bot has played it since October 30, 2026, and its weights are on Hugging Face as [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1). Its results are in [Allie 2.1](#allie-21).
 
-You can [play Allie 2.1 on Lichess](#play-against-allie-on-lichess) or [download Allie 2.0](#download-and-run-the-model).
+You can [play Allie 2.1 on Lichess](#play-against-allie-on-lichess) or [download it](#download-and-run-the-model).
 
 ![Diagram of one Allie 2.0 block: attention, then a router that sends each token to 16 of 256 experts plus a shared expert](docs/figures/model.png)
 
@@ -42,7 +42,7 @@ Three silent, captioned animations, about five to seven minutes each. Each tease
 
 ## Allie 2.1
 
-Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of which 1.2B are used for each move, trained on 112B tokens of the same data. It took 14.9 days on the same kind of 8-GPU machine and finished on October 28, 2026. The Lichess bot has played it since October 30; its weights are coming.
+Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of which 1.2B are used for each move, trained on 112B tokens of the same data. It took 14.9 days on the same kind of 8-GPU machine and finished on October 28, 2026. The Lichess bot has played it since October 30; its weights are on [Hugging Face](https://huggingface.co/yimingzhang/allie-2.1).
 
 ![Main-test loss during training for Allie 2.1 and Allie 2.0's big run, and both released models](docs/figures/training-2.1.png)
 
@@ -213,19 +213,19 @@ Allie 2.1 plays on Lichess as [**AllieTheChessBot**](https://lichess.org/@/Allie
 - **It thinks like a human.** Before each move, it waits about as long as a person would.
 - **Availability.** It plays humans only, up to ten games at a time and one game per opponent.
 
-You can run your own bot from a clone of [this repository](https://github.com/y0mingzhang/allie). It needs only a CPU: under 10 ms per move on 8 server cores, and 6.4 GB of memory.
+You can run your own bot from a clone of [this repository](https://github.com/y0mingzhang/allie). It needs only a CPU: about 14 ms per move with Allie 2.1 on 12 server cores, and 9.8 GB of memory.
 
 ```sh
-uv sync
+uv sync --extra bot --extra fast
 export LICHESS_TOKEN=lip_...        # a bot account's token with the bot:play scope
-allie-bot play --config configs/lichess-bot.toml --set model=PATH_TO_ALLIE_2.0
+allie-bot play --config configs/lichess-bot.toml
 ```
 
 The [bot's guide](src/allie/lichess/README.md) covers bot accounts, settings and speed. A `strongest` mode plays the most likely move of a strong player.
 
 ### Calibrated play
 
-In its `calibrated` mode the bot plays close to the strength of humans of its rating (by default, yours) at the game's time control. Sampling straight from the model plays weaker than such humans, most at high ratings and in classical, so the bot first searches and then samples, at temperature 1, from the model's distribution leaned toward the moves the search rates highly. One rule per time control, with no rating thresholds, covers every rating: the search is never larger than the human-like think time the bot draws for the move (and its clock) allows, and the lean grows with the rating and with how long humans think in the position, never below a floor, since Allie 2.1 alone also plays below humans rated 800-1400, where the rating term vanishes. On September games, in no rating or time control does calibrated play predict human moves measurably worse than the model alone. The [bot's guide](src/allie/lichess/README.md) covers the setting (search runs on the Rust CPU engine and needs the `fast` extra) and [calibration.py](src/allie/lichess/calibration.py) has the rule and its fit. The rule and the bot's timing, resign and draw rules (`behaviour.json`) are fitted for Allie 2.1. To run the bot with Allie 2.0, use `calibration.py` and `behaviour.json` from [the October 29 version](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess).
+In its `calibrated` mode the bot plays close to the strength of humans of its rating (by default, yours) at the game's time control. Sampling straight from the model plays weaker than such humans, most at high ratings and in classical, so the bot first searches and then samples, at temperature 1, from the model's distribution leaned toward the moves the search rates highly. One rule per time control, with no rating thresholds, covers every rating: the search is never larger than the human-like think time the bot draws for the move (and its clock) allows, and the lean grows with the rating and with how long humans think in the position, never below a floor, since Allie 2.1 alone also plays below humans rated 800-1400, where the rating term vanishes. On September games, in no rating or time control does calibrated play predict human moves measurably worse than the model alone. The [bot's guide](src/allie/lichess/README.md) covers the setting (search runs on the Rust CPU engine and needs the `fast` extra) and [calibration.py](src/allie/lichess/calibration.py) has the rule and its fit. The rule and the bot's timing, resign and draw rules (`behaviour.json`) are fitted for Allie 2.1. To run the bot with Allie 2.0, use `calibration.py` and `behaviour.json` from [commit cad41559](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess).
 
 ![Move accuracy and blunder rate against rating, by time control: humans' own moves, the bot sampling straight from the model, calibrated play, Maia-3 and the original Allie](docs/figures/calibrated.png)
 
@@ -233,7 +233,7 @@ In its `calibrated` mode the bot plays close to the strength of humans of its ra
 
 ## Download and run the model
 
-The weights are on Hugging Face as [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0), an 11 GB download (Allie 2.1's are coming). It runs with `transformers` alone, on a CPU or a GPU:
+The weights are on Hugging Face as [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1), an 18 GB download. The previous release, Allie 2.0, is [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0) (11 GB); its bot calibration is in [commit cad41559](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess). The model runs with `transformers` alone, on a CPU or a GPU:
 
 ```sh
 pip install transformers torch python-chess
@@ -242,7 +242,7 @@ pip install transformers torch python-chess
 ```python
 from transformers import AutoModel
 
-model = AutoModel.from_pretrained("yimingzhang/allie-2.0", trust_remote_code=True)
+model = AutoModel.from_pretrained("yimingzhang/allie-2.1", trust_remote_code=True)
 model.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="180+2")
 model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player would play it
 ```
@@ -251,7 +251,7 @@ model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player woul
 
 ### Fast inference
 
-Allie 2.0 has 5.6B parameters, yet it plays a move in about 4-7 ms on a recent server CPU with 8 to 32 threads, in 6.4 GB of memory. Batching 64 games, it plays about 1,500 moves a second.
+Allie 2.0 has 5.6B parameters, yet it plays a move in about 4-7 ms on a recent server CPU with 8 to 32 threads, in 6.4 GB of memory. Batching 64 games, it plays about 1,500 moves a second. Allie 2.1 takes 1.4 times as long, in 9.8 GB ([Allie 2.1](#allie-21)).
 
 - **It reads little.** Each move reads only the 0.7B parameters it routes through.
 - **It reads fast.** Rust kernels (Linux on x86-64; elsewhere the PyTorch reference, about three times slower) stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach.

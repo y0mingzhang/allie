@@ -1,4 +1,4 @@
-"""Allie 2.0's configuration for transformers (trust_remote_code)."""
+"""Allie's configuration for transformers (trust_remote_code)."""
 
 from transformers import PretrainedConfig
 

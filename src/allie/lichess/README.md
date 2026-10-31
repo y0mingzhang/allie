@@ -1,6 +1,6 @@
 # Allie on Lichess
 
-`allie.lichess` runs Allie 2.0 as a [Lichess bot](https://lichess.org/api#tag/Bot), and predicts moves from
+`allie.lichess` runs Allie 2.1 as a [Lichess bot](https://lichess.org/api#tag/Bot), and predicts moves from
 Python or the command line. It needs no GPU: one CPU process holds the model once and plays several games at
 a time.
 
@@ -18,8 +18,9 @@ a time.
    without the engine). `fast` builds the Rust engine: Linux on x86-64 (AVX-512, AVX2 or neither), with
    [Rust](https://rustup.rs) 1.89 or later. Without it (or elsewhere) the model runs the PyTorch reference,
    about three times slower, and `calibrated` mode does not search.
-2. **Weights.** By default the bot downloads [`yimingzhang/allie-2.0`](https://huggingface.co/yimingzhang/allie-2.0)
-   from Hugging Face on first start (11 GB). To serve a training checkpoint instead, export it once and set
+2. **Weights.** By default the bot downloads [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1)
+   from Hugging Face on first start (18 GB). The previous release, `yimingzhang/allie-2.0` (11 GB), needs
+   `calibration.py` and `behaviour.json` from [commit cad41559](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess). To serve a training checkpoint instead, export it once and set
    `model` to the directory:
    ```sh
    allie-bot export results/pretrain/allie-2.0/last.pt exports/allie-2.0 --name allie-2.0
@@ -46,7 +47,7 @@ a time.
 ```python
 from allie.lichess.api import Allie
 
-allie = Allie.from_pretrained()  # yimingzhang/allie-2.0; int8 on CPU, BF16 on GPU
+allie = Allie.from_pretrained()  # yimingzhang/allie-2.1; int8 on CPU, BF16 on GPU
 allie.predict("1. e4 e5 2. Nf3", white_elo=1800, black_elo=1750, time_control="180+2")
 allie.analyze(["e2e4", "e7e5"], 1500, 1500, "60+0", clocks=[60, 59])  # also win/draw/loss and think time
 allie.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 player would play it
@@ -54,7 +55,7 @@ allie.play("1. e4 e5 2. Nf3", elo=1200)  # a move sampled as a 1200 player would
 
 On the command line: `allie-predict "1. e4 e5 2. Nf3" --elo 1800 --tc 180+2` prints the most likely moves,
 the win / draw / loss probabilities and the expected think time. The same code ships in the Hugging Face
-repository, so `transformers` alone runs it (`AutoModel.from_pretrained("yimingzhang/allie-2.0",
+repository, so `transformers` alone runs it (`AutoModel.from_pretrained("yimingzhang/allie-2.1",
 trust_remote_code=True)`, see the model card).
 
 ## Playing styles
@@ -63,7 +64,7 @@ trust_remote_code=True)`, see the model card).
 |---|---|
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
 | `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
-| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy in any time control and rating. One rule per time control, none per rating (`calibration.py`): the move's think time is drawn first, a KL search (best-first on log-odds values, every node read as a game between two 3000-rated players) evaluates the largest of 8, 16, ..., 1024 leaves that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values, more sharply for stronger players and longer-thought positions, never less than its time control's floor. A search ends 0.3 s before the think time (or at a fifth of the clock) with the tree it has, so no search runs past the drawn think time. Searches run only on the Rust engine; a leaf is priced at `calibration.COST` (6 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 24 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra fast`. Live with Allie 2.0, against rating-matched humans (2,223 games, 2026-10-06 to 10-17), it played 53 ± 8 Elo above its rating in games decided on the board (85 counting opponents who flagged or left; blitz -11, rapid +61, classical +124), so the live bot sets `play.offset = -50`: the rating it plays as, in the header and the tilt, 50 below its opponent's (kept for Allie 2.1 until its own live games measure it). The rule and `behaviour.json` are fitted for Allie 2.1; for Allie 2.0, use both from [the October 29 version](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess). |
+| `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy in any time control and rating. One rule per time control, none per rating (`calibration.py`): the move's think time is drawn first, a KL search (best-first on log-odds values, every node read as a game between two 3000-rated players) evaluates the largest of 8, 16, ..., 1024 leaves that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values, more sharply for stronger players and longer-thought positions, never less than its time control's floor. A search ends 0.3 s before the think time (or at a fifth of the clock) with the tree it has, so no search runs past the drawn think time. Searches run only on the Rust engine; a leaf is priced at `calibration.COST` (6 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 24 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra fast`. Live with Allie 2.0, against rating-matched humans (2,223 games, 2026-10-06 to 10-17), it played 53 ± 8 Elo above its rating in games decided on the board (85 counting opponents who flagged or left; blitz -11, rapid +61, classical +124), so the live bot sets `play.offset = -50`: the rating it plays as, in the header and the tilt, 50 below its opponent's (kept for Allie 2.1 until its own live games measure it). The rule and `behaviour.json` are fitted for Allie 2.1; for Allie 2.0, use both from [commit cad41559](https://github.com/y0mingzhang/allie/tree/cad41559/src/allie/lichess). |
 
 - **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
   63 bins, from 0 s to over an hour, given the position, both clocks and both ratings. It is a draw, not
@@ -238,7 +239,9 @@ steps of a game, `analysis/lichess/speed.py`). The bot appends its own move whil
 each decision reads one new token; a step of 16 games reads one token for each. CPU: int8 weights, the
 Rust engine (the default) unless noted. The EPYC 7763 row is the Rust engine's; the others were measured on
 the C++ kernels it replaced, whose logits it reproduces bit for bit; on the 7763 it was as fast within run-to-run
-noise, or faster (C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's resident size.
+noise, or faster (C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's resident size. The table is Allie
+2.0's; Allie 2.1 takes 14.3 ms per move on the EPYC 7763 with 12 threads, in 9.8 GB (Allie 2.0: 10.4 ms, measured
+alongside it on the same node).
 
 | Device | Threads | 1 game: ms per move | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|

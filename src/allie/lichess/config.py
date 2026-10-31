@@ -23,7 +23,7 @@ class Challenge:
 
 @dataclass
 class Config:
-    model: str = "yimingzhang/allie-2.0"  # Hugging Face repo or directory (config.json, weights)
+    model: str = "yimingzhang/allie-2.1"  # Hugging Face repo or directory (config.json, weights)
     device: str = "cpu"
     dtype: str = "bfloat16"
     threads: int = 0  # CPU threads: the Rust engine's, else torch's (0: torch's default within one socket)
