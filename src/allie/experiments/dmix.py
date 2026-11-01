@@ -8,15 +8,14 @@ curve being the law shifted through the control runs.
 """
 
 import json
-import os
-from pathlib import Path
 
 import numpy as np
 from scipy.optimize import brentq
 
+from allie import paths
 from allie.experiments.isoflop import additive
 
-ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie")) / "results/recipe10x"
+ROOT = paths.ROOT / "results/recipe10x"
 EVAL = ROOT.parent / "lm-eval"
 
 

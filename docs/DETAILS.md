@@ -432,7 +432,7 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 | `tests/` | `test_checks.py` runs each check in `tests/checks/` as its own program; `test_equivalent.py` guards how the big run's final checkpoint loads |
 | `analysis/` | The analysis scripts behind the search and comparison results, as run |
 
-**Paths.** `ALLIE_DATA` holds the game stores and evaluation sets. `ALLIE_PROJECT_ROOT` is where `results/` receives runs and scores; it defaults to the checkout.
+**Paths.** `ALLIE_DATA` holds the game stores and evaluation sets. `ALLIE_PROJECT_ROOT` is where `results/` receives runs and scores; it defaults to the checkout. `ALLIE_SCRATCH` holds what a job can rebuild, best on node-local disk: the trainer's board encoder and the store builder, compiled, compiler caches, a study's staged runtime and local runs; it defaults to `~/.cache/allie`.
 
 **Tests.** `uv run pytest` skips checks whose GPU or data is missing.
 

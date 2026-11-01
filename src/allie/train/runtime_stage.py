@@ -4,7 +4,6 @@ import argparse
 import errno
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import posixpath
 import shutil
@@ -13,7 +12,9 @@ import sys
 import tarfile
 import tempfile
 
-BASE = Path(os.environ.get("ALLIE_DATA", "/data/group_data/dei-group/yimingz3/allie")) / "envs"
+from allie import paths
+
+BASE = paths.DATA / "envs"
 SOURCE = BASE / "modded-torch210"
 MANIFEST = BASE / "modded-torch210-runtime.json"
 
@@ -67,7 +68,7 @@ def build():
 
 def ensure():
     info = json.loads(MANIFEST.read_text())
-    parent = Path("/scratch/yimingz3/allie/runtimes")
+    parent = paths.SCRATCH / "runtimes"
     parent.mkdir(parents=True, exist_ok=True)
     target = parent / f"torch210-{info['sha256'][:16]}"
     marker = target / "allie-runtime.json"

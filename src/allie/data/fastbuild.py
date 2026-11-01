@@ -29,6 +29,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from allie import paths
 from allie.data import store as cd
 from allie.data.vocab import MOVES
 
@@ -87,8 +88,7 @@ class Game(ctypes.Structure):
 def lib():
     """fastbuild.c compiled once per source version and node, like model.board's."""
     sha = hashlib.sha256(SRC.read_bytes()).hexdigest()[:16]
-    default = f"/scratch/{os.environ['USER']}/allie/fastbuild"
-    cache = Path(os.environ.get("ALLIE_FASTBUILD_CACHE", default)) / sha
+    cache = Path(os.environ.get("ALLIE_FASTBUILD_CACHE", paths.SCRATCH / "fastbuild")) / sha
     so = cache / "fastbuild.so"
     if not so.exists():
         cache.mkdir(parents=True, exist_ok=True)

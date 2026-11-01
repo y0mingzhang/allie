@@ -16,6 +16,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from allie import paths
+
 SOURCE = Path(__file__).resolve().parent
 CPP_SHA = "2c5b1a2432f93ecd057000d1aaf5acd789ff848519657c026c3243d22c7b5589"
 TABLE_SHA = "d51d604209cc7afb0437906a3bb046aa50bb855608a414abbadbbd545f12e1c5"
@@ -29,7 +31,7 @@ def _load():
         assert hashlib.sha256(src.read_bytes()).hexdigest() == CPP_SHA
         table_file = SOURCE / "move-table.json"
         assert hashlib.sha256(table_file.read_bytes()).hexdigest() == TABLE_SHA
-        cache = Path(os.environ.get("ALLIE_BOARD_CACHE", "/scratch/yimingz3/allie/board-encoder"))
+        cache = Path(os.environ.get("ALLIE_BOARD_CACHE", paths.SCRATCH / "board-encoder"))
         cache = cache / CPP_SHA
         cache.mkdir(parents=True, exist_ok=True)
         lib = cache / "encoder.so"

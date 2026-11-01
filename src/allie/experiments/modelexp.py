@@ -46,7 +46,7 @@ from allie.data.pin import digest, sha
 from allie.model.arch import extra_flops
 from allie.train.provenance import source_hashes
 
-ROOT = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
+ROOT = paths.ROOT
 G = paths.DATA
 STUDIES = ROOT / "results/recipe10x"
 RECIPES = STUDIES / "recipes"  # data.mix.RECIPES
@@ -378,6 +378,7 @@ def plan(key, commit=None):
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output={study}/logs/%x-%A_%a.out
+export ALLIE_PROJECT_ROOT={ROOT} ALLIE_DATA={G} ALLIE_SCRATCH={paths.SCRATCH}
 {f"export MODELEXP_LOCAL={LOCAL}" if w["local"] else ""}
 PYTHONPATH={study}/source exec {ROOT}/.venv/bin/python -m allie.experiments.modelexp task {study}/round.py {key}
 """
@@ -795,9 +796,9 @@ def pretrained(r):
     return ROOT / "results/pretrain" / r["name"]
 
 
-# node-local project root of local waves: they train there and copy back all but the rank files (model.pt, pointers,
-# logs), so ROOT's storage holds no optimizer state; a requeue on another node starts the run over
-LOCAL = Path("/scratch/yimingz3/allie/modelexp-root")
+# project root of local waves, node-local if ALLIE_SCRATCH is: they train there and copy back all but the rank files
+# (model.pt, pointers, logs), so ROOT's storage holds no optimizer state; a requeue on another node starts the run over
+LOCAL = paths.SCRATCH / "modelexp-root"
 
 
 def finished(out):
@@ -841,8 +842,8 @@ def run_one(study, r, gpu):
         NCCL_CUMEM_HOST_ENABLE="0",
         NCCL_IB_DISABLE="1",
         NCCL_P2P_DISABLE="1",
-        TORCHINDUCTOR_CACHE_DIR=f"/scratch/yimingz3/allie/model-inductor-{gpu}",
-        TRITON_CACHE_DIR=f"/scratch/yimingz3/allie/model-triton-{gpu}",
+        TORCHINDUCTOR_CACHE_DIR=str(paths.SCRATCH / f"model-inductor-{gpu}"),
+        TRITON_CACHE_DIR=str(paths.SCRATCH / f"model-triton-{gpu}"),
         PYTHONPATH=f"{study / 'source'}:{G / 'envs/chessmix-overlay'}",
     )
     out, log = pretrained(r), study / "logs" / n

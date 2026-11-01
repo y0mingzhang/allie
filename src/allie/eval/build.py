@@ -11,7 +11,6 @@ of token j of row i (-1 = unscored), so target j of the evaluator uses labels[:,
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +22,7 @@ from allie.data.vocab import BOS
 
 MONTH = cm.STORE / "2026-07"
 OUT = paths.DATA / "strat-eval-v1"
-SPLITS = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie")) / "data"
+SPLITS = paths.ROOT / "data"
 FORMATS = ["bullet", "blitz", "rapid", "classical"]  # data-v1 format ids 1..4
 BANDS = ["<1400", "1400-2000", "2000-2400", ">=2400"]
 UPPER = [1400, 2000, 2400, 10**4]

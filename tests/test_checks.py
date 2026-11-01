@@ -22,8 +22,7 @@ from allie import paths
 ROOT = Path(__file__).resolve().parents[1]
 CHECKS = ROOT / "tests/checks"
 # allie.experiments.modelexp reads its baseline study on import
-BASELINE = Path(os.environ.get("ALLIE_PROJECT_ROOT", "/home/yimingz3/src/allie"))
-BASELINE /= "results/recipe10x/data-v1-B3.json"
+BASELINE = paths.ROOT / "results/recipe10x/data-v1-B3.json"
 HISTORY = ["git", "-C", str(CHECKS), "cat-file", "-e", "90fd74c^{commit}"]
 
 skip = pytest.mark.skipif
