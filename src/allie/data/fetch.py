@@ -1,9 +1,10 @@
 """Download one month of Lichess/standard-chess-games (Hugging Face) parquet files, verified.
 
-Usage: data.fetch YYYY-MM OUT_DIR. Files are fetched in parallel with curl and each is checked
-against the size and sha256 that the Hub records; exits nonzero unless every file verifies.
+Files are fetched in parallel with curl and each is checked against the size and sha256 that the
+Hub records; exits nonzero unless every file verifies.
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -17,7 +18,7 @@ REPO = "datasets/Lichess/standard-chess-games"
 API = f"https://huggingface.co/api/{REPO}/tree/main/data/year={{}}/month={{}}"
 URL = f"https://huggingface.co/{REPO}/resolve/main/{{}}"
 TOKEN = Path.home() / ".cache/huggingface/token"  # authenticated requests get a higher rate limit
-AUTH = ["-H", f"Authorization: Bearer {TOKEN.read_text().strip()}"] if TOKEN.exists() else []
+BEARER = f"Bearer {TOKEN.read_text().strip()}" if TOKEN.exists() else None
 
 
 def fetch(entry, out):
@@ -30,16 +31,19 @@ def fetch(entry, out):
         subprocess.run(
             [
                 "curl",
+                "-K",
+                "-",
                 "-sSL",
                 "--retry",
                 "5",
                 "--max-time",
                 "3600",
-                *AUTH,
                 "-o",
                 str(tmp),
                 URL.format(entry["path"]),
-            ]
+            ],
+            input=f'header = "Authorization: {BEARER}"\n' if BEARER else "",  # not in argv: ps shows it
+            text=True,
         )
         if tmp.exists():
             tmp.rename(dst)
@@ -52,7 +56,7 @@ def main(month, out):
         f
         for f in json.load(
             urllib.request.urlopen(
-                urllib.request.Request(API.format(year, mo), headers=dict([AUTH[1].split(": ", 1)]) if AUTH else {})
+                urllib.request.Request(API.format(year, mo), headers=dict(Authorization=BEARER) if BEARER else {})
             )
         )
         if f["path"].endswith(".parquet")
@@ -66,4 +70,7 @@ def main(month, out):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("month", help="YYYY-MM")
+    p.add_argument("out", help="output directory")
+    main(**vars(p.parse_args()))
