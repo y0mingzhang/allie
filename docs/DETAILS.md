@@ -408,11 +408,14 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 
 | | Allie 2.0 | Allie 2.1 |
 |---|---:|---:|
+| Rules (parameters) | 1 (4) | 4 (20) |
 | Strength tests outside the noise, of 80: July held out / September | 2 / 8 | 5 / 11 |
+| The same with one rule of Allie 2.0's form, July held out: Elo loss / z loss | 2 / 3 | 16 / 14 |
 | Calibrated minus raw CE on September games: bullet / blitz / rapid / classical | −0.0006 / −0.0047 / −0.0102 / −0.0114 | −0.0002 / −0.0018 / −0.0074 / −0.0080 |
 
-- About 4 of 80 tests would miss by chance. Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is out of the tilt's reach: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans.
-- No bin's calibrated CE is above the raw model's at 95% on September games; on July, only bullet 2000 with the game halves pooled, where Allie 2.1 alone already plays 0.2 points strong.
+- The 2 / 8 and 5 / 11 aren't like for like. Allie 2.1's 5 has five times the parameters and is the lowest of 8 variants scored on these same July games (Elo or z loss, floor or none, one rule or four; earlier tries scored 11-21), so it is optimistic. In the one-rule row, the Elo fit is Allie 2.0's, same grid and loss (21 on the variants' grid); the z fits differ, Allie 2.1's on the variants' grid with bullet from 800, Allie 2.0's from 1800.
+- About 4 of 80 tests would miss by chance, so September's 8 and 11 are both above it. September isn't untouched for either rule: Allie 2.0's followed its predecessors' September scores (11 each), Allie 2.1's those of three candidates (14-17). Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is out of the tilt's reach: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans.
+- No bin's calibrated CE is above the raw model's at 95% on September games. On July, bullet 2000 passes only in sample (z 1.96) and held out against the game halves' mean standard error (z 1.84); pooled it is above (z 2.42, one half 2.60), where Allie 2.1 alone already plays 0.2 points strong.
 
 ## Reproducing
 

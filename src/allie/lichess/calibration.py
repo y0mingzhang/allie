@@ -1,6 +1,7 @@
 """Calibrated strength (`play.mode = "calibrated"`): Allie asked to play at rating R makes moves of
 the quality an R-rated human makes at the same time control, predicting human moves no worse than
-its policy does in any time control and rating. One rule per time control, no rating thresholds: the
+its policy does at 95% in any time control and rating on September games (on July, bullet 2000 is
+worse with the game halves pooled). One rule per time control, no rating thresholds: the
 move's think time is drawn first (behaviour.think); a KL search (treers.KL, GROW and READ) evaluates
 the largest rung of LADDER that fits both that time less MARGIN and a tenth of the clock above the
 reserve, a leaf priced at COST or at the bot's recent measured cost when higher (up to 4 COST), and
@@ -35,9 +36,10 @@ fit): 5 of 80 tests outside the noise at 95%, about 4 expected by chance (bullet
 on accuracy / blunder rate, bullet 2000 +180 on accuracy, rapid 1400 +121 on blunder rate, classical
 1800 +62 on accuracy); RMS Elo error bullet 292, blitz 41, rapid 92, classical 0 (debiased; bullet's
 flat human curve inflates its Elo); cross-entropy against the policy's 0.0000, -0.0014, -0.0058 and
--0.0026 nats, no bin above it by each half's errors (bullet 2000 is above it with the halves pooled,
-in every rule tried: the policy already plays 0.2 points strong there). A bullet-only refit on a
-wider grid (BETA0 from 0.02, GAMMA to 4, FLOOR 0-0.1) picks the same tilt, a near constant 0.1;
+-0.0026 nats, no bin above it against the halves' mean standard error (bullet 2000 is above it with the
+halves pooled, z 2.42, one half 2.60, in every rule tried: the policy already plays 0.2 points strong
+there). A bullet-only refit on a wider grid (BETA0 from 0.02, GAMMA to 4, FLOOR 0-0.1) picks the same
+tilt, a near constant 0.1;
 bullet without a tilt passes bullet 2000 on September but misses 4 more tests on July (800-1200,
 2200, 2600). On September 2026 games (197,191 positions, none in the fit): 11 of 80 tests outside
 the noise, in 8 bins: bullet 800 -497 / -633, bullet 2000 +245 on blunder rate, blitz 800 -417 /
