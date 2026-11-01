@@ -1,10 +1,12 @@
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 
-from allie.lichess import behaviour, calibration
+from allie.lichess import behaviour, calibration, cli
+from allie.lichess.config import Config
 from allie.lichess.engine import Engine, Game, Play
 from allie.lichess.model import Model
 
@@ -67,6 +69,12 @@ class Search:
             np.full(len(moves), 1 / len(moves)),
             np.where(np.arange(len(moves)) == 0, 1.0, -1.0),
         )
+
+
+@pytest.mark.parametrize("name, warned", [("allie-2.1", False), ("allie-2.0", True)])
+def test_calibrated_warns_on_another_release(name, warned, caplog):
+    cli.searcher(Config(play=Play(mode="calibrated")), SimpleNamespace(config=dict(name=name), fast=None))
+    assert ("cad41559" in caplog.text) == warned
 
 
 def test_calibrated_mode(tiny_path, tiny, monkeypatch):

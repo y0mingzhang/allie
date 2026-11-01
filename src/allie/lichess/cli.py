@@ -35,6 +35,12 @@ def searcher(c, m):
     (play.search), both native on the Rust engine (treers). Off the engine only strongest searches
     (tree.Coverage on allie.search's C++ tree, --extra search); calibrated plays the policy there."""
     strongest = c.play.mode == "strongest" and c.play.search
+    if c.play.mode == "calibrated" and (name := m.config.get("name")) != "allie-2.1":
+        logging.getLogger("allie").warning(
+            "%s is playing the calibration fitted for Allie 2.1 (calibration.py, behaviour.json), and may not play at "
+            "its rating; for Allie 2.0, check out commit cad41559",
+            name,
+        )
     if m.fast is not None and c.play.mode == "calibrated":
         from . import calibration
         from .treers import KL
@@ -69,7 +75,7 @@ def main():
     e = sub.add_parser("export", help="training checkpoint -> safetensors export")
     e.add_argument("checkpoint")
     e.add_argument("out")
-    e.add_argument("--name", required=True, help="its name in config.json (the release: allie-2.0)")
+    e.add_argument("--name", required=True, help="its name in config.json (the release: allie-2.1)")
     run = sub.add_parser("play", help="play on Lichess (token: LICHESS_TOKEN)")
     run.add_argument("--drain-file", help="once this file exists, finish the games and exit")
     run.add_argument("--log", help="append the log here (reopened after a failed write; while "
