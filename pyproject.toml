@@ -13,7 +13,7 @@ dependencies = [
     "pyarrow>=15",
     "chess>=1.10",
     "zstandard>=0.22",
-    "matplotlib>=3.9",
+    "matplotlib>=3.11",
     "requests>=2.31",
 ]
 
@@ -25,8 +25,6 @@ bot = ["huggingface_hub>=0.20", "safetensors>=0.4"]
 # allie.lichess.chat: game chat written by Claude (off unless [chat] enabled)
 chat = ["anthropic>=1.0"]
 test = ["pytest>=8"]
-# docs/make_figures.py: Vega-Lite charts rendered to PNG
-figures = ["altair>=5.5", "vl-convert-python>=1.7"]
 # allie.lichess: the Rust engine (rust/allie-fast: int8 forward, KV caches, tree searches); needs cargo
 fast = ["allie-fast"]
 

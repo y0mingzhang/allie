@@ -1,0 +1,15 @@
+{
+ "_src": "Noise bootstrap of the first sweep's law, 1,200 refits: 90% intervals of its forecast for Allie 2.0's big run (f20) and of its best size and tokens at that compute. Copied from docs/anim/data.json scaling.law.ci at commit 3c844055.",
+ "f20": [
+  1.2804,
+  1.2906
+ ],
+ "Nopt_c20": [
+  1404200000.0,
+  2465900000.0
+ ],
+ "Dopt_c20": [
+  20867000000.0,
+  36646000000.0
+ ]
+}

@@ -16,7 +16,7 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 - Blocks 1-3 have dense MLPs. Blocks 4-24 route each token to 16 of 256 experts.
 - The chosen gates are computed in log space, as 4 · softmax(log s), with no division to overflow.
 - Only the first four routed blocks centre the router's input.
-- Exclusive self-attention (XSA): each head's output loses a learned share of its projection on the token's own value.
+- Exclusive self-attention (XSA): each head rescales its projection on the token's own value by a learned amount, usually removing it.
 - 1.23B active and 9.19B total parameters, 2.45 GFLOPs per move with the game cached.
 
 **Training.**
@@ -106,8 +106,13 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 | The same with one rule of Allie 2.0's form, July held out: Elo loss / z loss | 2 / 3 | 16 / 14 |
 | Calibrated minus raw CE on September games: bullet / blitz / rapid / classical | −0.0006 / −0.0047 / −0.0102 / −0.0114 | −0.0002 / −0.0018 / −0.0074 / −0.0080 |
 
+![Eight panels, by time control and metric, of each model's gap from humans by rating, with 95% intervals. Calibrated Allie 2.1 stays near zero. The raw model falls below it at high ratings. Maia-3 79M's top move sits far above it at low and middle ratings. Sampled Maia-3 is above it in bullet and below it at high ratings elsewhere.](explainers/figures/calibrated-gaps.png)
+
+*Accuracy and blunder rate in points; above zero plays stronger than the humans. Intervals are paired with the humans' moves and clustered by game.*
+
 - The 2 / 8 and 5 / 11 aren't like for like. Allie 2.1's 5 has five times the parameters and is the lowest of 8 variants scored on these same July games (Elo or z loss, floor or none, one rule or four; earlier tries scored 11-21), so it is optimistic. In the one-rule row, the Elo fit is Allie 2.0's, same grid and loss (21 on the variants' grid); the z fits differ, Allie 2.1's on the variants' grid with bullet from 800, Allie 2.0's from 1800.
-- About 4 of 80 tests would miss by chance, so September's 8 and 11 are both above it. September isn't untouched for either rule: Allie 2.0's followed its predecessors' September scores (11 each), Allie 2.1's those of three candidates (14-17). Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is out of the tilt's reach: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans.
+- RMS Elo miss on September games, bullet / blitz / rapid / classical: Allie 2.0 10 / 58 / 0 / 21; Allie 2.1 157 / 95 / 49 / 19. Bullet's flat human curve inflates Elo, but on that same curve Allie 2.0 scores 10.
+- About 4 of 80 tests would miss by chance, so September's 8 and 11 are both above it. September isn't untouched for either rule: Allie 2.0's followed its predecessors' September scores (11 each), Allie 2.1's those of three candidates (14-17). Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is left short by the rule: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans, and the one bullet formula leaves the tilt at 0.11 there, too low to close it (at 0.44 it would, on September games: accuracy 84.75 against the humans' 84.69, blunders 10.71 against 10.48).
 - No bin's calibrated CE is above the raw model's at 95% on September games. On July, bullet 2000 passes only in sample (z 1.96) and held out against the game halves' mean standard error (z 1.84); pooled it is above (z 2.42, one half 2.60), where Allie 2.1 alone already plays 0.2 points strong.
 
 ## Blitz benchmark
@@ -177,9 +182,9 @@ That keeps 56,599 of the 80,000 positions, in 6,089 games. An earlier version of
 
 ### By rating
 
-![Loss relative to Maia-3 79M by game rating, for Maia-3 5M and 23M, the original Allie, Allie 2.0 and Allie 2.1](figures/rating.png)
+![Loss relative to Maia-3 79M by game rating, for Maia-3 5M and 23M, the original Allie, Allie 2.0 and Allie 2.1](explainers/figures/rating.png)
 
-*Every position scored, as in the README's compute plot.*
+*Every position scored, as in the README's compute plot. Bands are 95% intervals; the original Allie's aren't stored.*
 
 The rating plot uses every scored blitz move of the main evaluation: 402,108 positions in 6,247 games. They are reweighted to the natural mix of players and grouped by game rating in 100-point bins.
 
@@ -257,9 +262,9 @@ Allie 2.0's model; what Allie 2.1 changes is under [Allie 2.1](#allie-21).
 
 This section is Allie 2.0's; what Allie 2.1 changed is in [Allie 2.1](#allie-21).
 
-![The big run's loss on the main test set during training, the scaling law's forecast, and Allie 2.0 after the second anneal](figures/training.png)
+![Main-test loss against training tokens. Allie 2.1's curve runs from 2B to 112B tokens and ends at 1.2240. Allie 2.0's big run, scored from 22B tokens, falls faster, crosses it near 70B tokens and ends at 1.2505 after a second anneal.](explainers/figures/training.png)
 
-*Earlier checkpoints were not scored on the main test set.*
+*The big run scored 1.2533 at 75B tokens, against a forecast of 1.2856; the second anneal took it to 1.2505. Earlier checkpoints were not scored on the main test set.*
 
 Allie 2.0 trained in two runs. The big run took 75B tokens in 143,051 steps, 3.14×10²⁰ training FLOPs. The second anneal added 1B tokens in 1,907 steps, 4.2×10¹⁸ FLOPs. Data, optimization and systems below describe the big run.
 
@@ -296,9 +301,9 @@ Allie 2.0 trained in two runs. The big run took 75B tokens in 143,051 steps, 3.1
 
 ## Scaling laws
 
-The sweep has 45 runs, dense and MoE, at 6.3×10¹⁷, 1.9×10¹⁸ and 6.2×10¹⁸ training FLOPs. Each budget has five to seven sizes, from 8 to 24 blocks and widths 384 to 1280. Eleven repeats with a second seed put the seed-to-seed standard deviation at 0.0029.
+The sweep has 45 runs, dense and MoE, at 6.3×10¹⁷, 1.8×10¹⁸ and 6.2×10¹⁸ training FLOPs. Each budget has five to seven sizes, from 8 to 24 blocks and widths 384 to 1280. Eleven repeats with a second seed put the seed-to-seed standard deviation at 0.0029.
 
-At each budget, a quadratic in log size is fit through the four sizes around the minimum. The isoflop plot shows those sizes' seed means, and its rings mark the fitted minima.
+At each budget, a quadratic in log size is fit through the four sizes around the minimum. The README's sweep plot shows those sizes' seed means, and its rings mark the fitted minima.
 
 We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embedding parameters and D is training tokens. Intervals here are 90%:
 
@@ -312,23 +317,24 @@ We fit L(N, D) = E + A (N/10⁷)^−α + B (D/10⁸)^−β. N is active non-embe
 - The big run has N = 0.69B and D = 75B, 109 tokens per parameter. It was forecast at 1.2856 and scored 1.2533. After the second anneal, Allie 2.0 scores 1.2505.
 - The compute-optimal size grows as C^0.66.
 
-![Compute-optimal active parameters against training compute, with the big run's size against the law's extrapolated optimum](figures/optimal.png)
+![Active parameters against training tokens. The law's best size climbs with compute, dashed past the sweep, to 1.8B parameters on 28B tokens at the big run's compute. Allie 2.0's big run sits on the same line of equal compute, at 0.69B on 75B tokens. Allie 2.1, at 2.6 times the compute, is 1.2B on 112B.](explainers/figures/optimal.png)
 
-*Points: the sweep's best sizes, with 90% intervals. Lines: each family's scaling law.*
+*Points: the sweep's best sizes and the law's choice at the big run's compute. Their 90% intervals run along lines of equal compute. By the law, the big run's size and tokens cost only 0.003 against its own choice.*
 
-At the big run's compute, the law's MoE optimum is 1.8B active parameters on 28B tokens. That is 51 times the sweep's largest budget and 3.9 times the largest size it was fit on, so treat it as a direction, not a validated choice. Beyond the swept sizes, training FLOPs per parameter and token are held at the largest size's value.
+At the big run's compute, the law's MoE optimum is 1.8B active parameters on 28B tokens. That is 51 times the sweep's largest budget and 5.1 times the largest size it was fit on, so treat it as a direction, not a validated choice. Beyond the swept sizes, training FLOPs per parameter and token are held at the largest size's value.
 
 The optimum is flat: half that size costs 0.0013. The largest shape that trained on the 8-GPU L40S node at the time was 24 blocks of width 1536; Allie 2.1's 24 × 2048 fits with its experts sharded across the GPUs.
 
 **Recipe re-run.** We re-ran the big run's recipe at the sweep's sizes and compared it with the sweep's recipe. Positive means the big run's recipe is worse:
 
-| Budget | Shape | Main evaluation | 2400+ cells |
-|---|---|---:|---:|
-| 6.3×10¹⁷ FLOPs | 12 blocks × 512 | +0.0082 | +0.0104 |
-| 6.2×10¹⁸ FLOPs | 18 blocks × 896 | +0.0058 | +0.0086 |
-| 6.2×10¹⁸ FLOPs | 20 blocks × 1024 | +0.0042 | +0.0074 |
+| Budget | Shape | Main evaluation |
+|---|---|---:|
+| 6.3×10¹⁷ FLOPs | 12 blocks × 512 (two seeds) | +0.0087 |
+| 6.2×10¹⁸ FLOPs | 14 blocks × 640 | +0.0122 |
+| 6.2×10¹⁸ FLOPs | 18 blocks × 896 | +0.0058 |
+| 6.2×10¹⁸ FLOPs | 20 blocks × 1024 | +0.0042 |
 
-The gap shrinks by about 0.003 per tenfold of compute. It extrapolates to about −0.002 at the big run's 3.1×10²⁰ FLOPs. So the 0.032 below the forecast comes from the law's form, not from the recipe.
+That doesn't settle the 0.032 below the forecast, since an effect can grow with scale and the big run was 51 times past the largest budget. Part of the recipe may matter there: the big run's loss falls about 0.013 per 5 points of learning rate near the end, and stopping at 5% of peak, where the sweep's schedule stops, reads about 0.012 higher off its curve. At small scale the same change gained only 0.0019. One way to split the miss: 0.012 from that decay, 0.006 (tentative) from token-starved runs setting the law's limit too high, and 0.015 that nothing we measured explains.
 
 ## Design findings
 
