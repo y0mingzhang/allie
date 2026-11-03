@@ -369,9 +369,8 @@ def test_pick():
 
 
 def test_facts_and_kinds(engine):
-    """Each move's line says what it did (captures, checks, material, a piece left hanging);
-    the mistake remark comes once our bad move is punished, the clock remark once; no remark
-    for a mere surprise."""
+    """Each move's line says what it did (captures, checks, material); the mistake remark comes
+    once our bad move is punished, the clock remark once; no remark for a mere surprise."""
     m = Model("")
     g = Game(engine, opp="tac", white=True, hello="", p_moment=1, every=0, scramble=150)
     c = g.chatter(m)
@@ -384,8 +383,7 @@ def test_facts_and_kinds(engine):
     g.feed(state(" ".join(moves), wtime=140000))
     turns = "\n".join(m.turn(i) for i in range(len(m.calls)))
     assert "2. exd5 you" in turns and "takes a pawn | feel" in turns
-    assert "material: you +1" in turns and "left hanging: d5" not in turns  # a trade
-    assert "3. Qh5 you" in turns and "left hanging: Qh5" in turns
+    assert "material: you +1" in turns and "3. Qh5 you" in turns
     assert "3... Qxh5 them" in turns and "takes a queen" in turns
     assert "material: you -9" in turns
     assert c.kinds == ["mistake"]  # the clock remark waits: one call at a time
@@ -511,15 +509,35 @@ def test_recent_keeps_lines_when_a_read_fails(tmp_path, monkeypatch):
     assert r.writer.flush(5) and json.loads(path.read_text()) == ["one", "two"]
 
 
-def test_traded_and_hanging():
-    b = chess.Board("4k3/8/8/3p4/4K3/8/8/8 w - - 0 1")
-    b.push_uci("e4d5")  # the king takes: never a trade square, never hanging
-    assert chat.traded(b) is None and chat.hanging(b, chess.WHITE) == []
-    b = chess.Board()
-    for u in ["e2e4", "d7d5", "e4d5"]:
-        b.push_uci(u)
-    assert chat.traded(b) == chess.D5 and chat.hanging(b, chess.WHITE, chess.D5) == []
-    assert chat.hanging(b, chess.WHITE) == ["d5"]
+def test_laughs_and_board_talk(engine, tmp_path):
+    """One laugh a game, in a reply; during the game no line on a loose piece; the recent lines come without either."""
+    assert chat.unlaugh("lol, queen out early LOL, ok haha") == "queen out early, ok" and chat.unlaugh("lol?") == ""
+    assert chat.unlaugh("nice move. hahah didn't see it") == "nice move. didn't see it"
+    assert chat.unlaugh("nice one (lolol)") == "nice one" and chat.unlaugh("-1 but fine") == "-1 but fine"
+    assert chat.unlaugh("lol gg lol", True) == "lol gg"
+    for talk in ("f4's hanging", "c4 hangs", "hanging on e4", "you hung it", "free rook", "the free ones", "d3 was free",
+                 "d3 is free", "the pawn's free", "en prise", "bit loose"):  # fmt: skip
+        assert chat.BOARD_TALK.search(talk), talk
+    for fine in ("french exchange", "any change?", "hanging in there", "hang on", "hang tight", "hanging by a thread",
+                 "feel free to", "lichess is free", "hungarian"):  # fmt: skip
+        assert not chat.BOARD_TALK.search(fine), fine
+    path = tmp_path / "recent.json"
+    path.write_text(json.dumps(["caro exchange, quick start lol", "c5 hangs for a sec"]))
+    g = Game(engine, hello="", recent=50, recent_file=str(path), p_draw=1)
+    m = Model("no thanks lol")
+    g.chatter(m)
+    g.feed(g.full(), state("e2e4", wdraw=True))
+    g.feed(state("e2e4"))  # a remark: no laugh, and the one laugh left for a reply
+    assert "- caro exchange, quick start\n" in m.calls[0][0][1]["text"] + "\n"
+    assert "hangs" not in m.calls[0][0][1]["text"]
+    m.text = "lol ok"
+    g.feed(g.say("hi"))
+    g.feed(g.say("you?"))
+    m.text = "your knight's hanging"
+    g.feed(g.say("hm?"))  # not posted
+    m.text = "haha gg, c4 was loose"
+    g.feed(state("e2e4 e7e5", status="resign", winner="white"), g.say("wow"))  # over: not board talk any more
+    assert [t for _, t in g.posts] == ["no thanks", "lol ok", "ok", "gg, c4 was loose"]
 
 
 def test_recent_lines(engine, tmp_path):
@@ -762,7 +780,18 @@ class FakeAPI:
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 api.requests.append(({k.lower(): v for k, v in self.headers.items()}, body))
                 step = api.script.pop(0)
-                stall = 0
+                stall, stop, thought = 0, "end_turn", ()
+                if step == "refuse":
+                    stop, step = "refusal", {"speak": False, "text": ""}
+                elif step == "think":
+                    step = {"speak": True, "text": "hm"}
+                    thought = (
+                        {"type": "content_block_start", "index": 0,
+                         "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
+                        {"type": "content_block_delta", "index": 0,
+                         "delta": {"type": "signature_delta", "signature": "sig"}},
+                        {"type": "content_block_stop", "index": 0},
+                    )  # fmt: skip
                 if isinstance(step, tuple) and step[0] == "sleep":
                     time.sleep(step[1])
                     step = {"speak": False, "text": ""}
@@ -791,12 +820,13 @@ class FakeAPI:
                 text = json.dumps(step)
                 for e in (
                     {"type": "message_start", "message": message},
-                    {"type": "content_block_start", "index": 0,
+                    *thought,
+                    {"type": "content_block_start", "index": len(thought) // 3,
                      "content_block": {"type": "text", "text": ""}},
-                    {"type": "content_block_delta", "index": 0,
+                    {"type": "content_block_delta", "index": len(thought) // 3,
                      "delta": {"type": "text_delta", "text": text}},
-                    {"type": "content_block_stop", "index": 0},
-                    {"type": "message_delta", "delta": {"stop_reason": "end_turn",
+                    {"type": "content_block_stop", "index": len(thought) // 3},
+                    {"type": "message_delta", "delta": {"stop_reason": stop,
                      "stop_sequence": None}, "usage": {"output_tokens": 12}},
                     {"type": "message_stop"},
                 ):  # fmt: skip
@@ -832,14 +862,12 @@ def test_claude(monkeypatch, tmp_path):
     r = m(system, [{"role": "user", "content": "update"}])
     assert r.speak and r.text == "Nice move!" and r.first <= r.seconds
     headers, body = api.requests[0]
-    assert headers["x-api-key"] == "sk-test-123" and body["stream"] is True
-    assert "server-side-fallback-2026-07-01" in headers["anthropic-beta"]
-    assert body["model"] == "claude-sonnet-5-5" and body["fallbacks"] == "default"
-    assert body["thinking"] == {"type": "between_tools"}
-    assert body["output_config"]["effort"] == "low"
+    assert headers["x-api-key"] == "sk-test-123" and body["stream"] is True and "anthropic-beta" not in headers
+    assert body["model"] == "claude-haiku-5-5" and "fallbacks" not in body and "thinking" not in body
+    assert body["output_config"]["effort"] == "high"
     assert body["output_config"]["format"]["schema"] == llm.DECISION
     assert body["cache_control"] == {"type": "ephemeral"} and body["system"] == system
-    usd = (300 * 2 + 100 * 2.5 + 700 * 0.2 + 12 * 10) / 1e6
+    usd = (300 * 0.1 + 100 * 0.125 + 700 * 0.01 + 12 * 0.5) / 1e6
     assert r.usd == pytest.approx(usd)
     day = llm.datetime.now(llm.UTC).strftime("%Y-%m-%d")
     assert m.ledger.writer.flush()
@@ -850,7 +878,7 @@ def test_claude(monkeypatch, tmp_path):
     start = time.monotonic()
     assert m(system, [{"role": "user", "content": "u"}]) is None  # stalled after starting
     assert time.monotonic() - start < 1.4  # the total deadline
-    partial = (300 * 2 + 100 * 2.5 + 700 * 0.2 + (1 + cfg.max_tokens) * 10) / 1e6  # + all it could write
+    partial = (300 * 0.1 + 100 * 0.125 + 700 * 0.01 + (1 + cfg.max_tokens) * 0.5) / 1e6  # + all it could write
     m.ledger.writer.flush()
     assert json.loads(ledger.read_text())[day] == pytest.approx(usd + partial)
     before = json.loads(ledger.read_text())[day]
@@ -863,9 +891,35 @@ def test_claude(monkeypatch, tmp_path):
     assert m(system, [{"role": "user", "content": "u"}]) is None  # 401: off
     assert m(system, [{"role": "user", "content": "u"}]) is None and m.resting()
     assert len(api.requests) == 5
+    sonnet = llm.make(Chat(model="claude-sonnet-5-5", thinking="between_tools", key_file=str(key), ledger=str(ledger)))
+    assert sonnet.params["fallbacks"] == "default" and sonnet.params["thinking"] == {"type": "between_tools"}
+    assert "server-side-fallback-2026-07-01" in sonnet.params["betas"]
     key.unlink()
     silent = llm.make(cfg)
     assert silent(system, []) is None and silent.resting()  # no key
+
+
+def test_claude_thinking_and_refusal(monkeypatch, tmp_path, engine):
+    """Thinking blocks come back unchanged on the next call; a refusal is billed and its turn dropped."""
+    pytest.importorskip("anthropic")
+    api = FakeAPI(["think", {"speak": True, "text": "ok"}, "refuse"])
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", api.url)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    m = llm.make(Chat(enabled=True, ledger=str(tmp_path / "spend.json")))
+    first = {"role": "user", "content": "update"}
+    r = m([], [first])
+    assert r.text == "hm" and r.content[0].type == "thinking"
+    m([], [first, {"role": "assistant", "content": r.content}, {"role": "user", "content": "more"}])
+    thinking = api.requests[1][1]["messages"][1]["content"][0]
+    assert thinking == {"type": "thinking", "thinking": "", "signature": "sig"}
+    r = m([], [first])
+    assert r.content == [] and not r.speak and r.usd > 0
+    turns = []
+    g = Game(engine, hello="")
+    c = g.chatter(lambda system, messages: turns.append(messages[-1]["content"]) or r)
+    g.feed(g.full(), g.say("a bad line"))
+    g.feed(g.say("hi"))
+    assert "a bad line" in turns[0] and "a bad line" not in turns[1] and c.convo == []
 
 
 def test_config(tmp_path):

@@ -157,7 +157,7 @@ compute) plus 0.1 s of lag. Endings, bot (human):
 ## Chat
 
 With `[chat] enabled = true` (default off), the bot talks in the game chat in natural language, written
-by Claude (`claude-sonnet-5-5`, effort low, thinking off) from Allie's own view of the game. No engine is
+by Claude (`claude-haiku-5-5`, effort high, adaptive thinking) from Allie's own view of the game. No engine is
 involved.
 
 - **One conversation per game.** The persona and policy (cached for an hour) and the game's header come
@@ -165,10 +165,9 @@ involved.
   not reuse. Each model call appends a user turn with everything since the last call, then the model's
   decision as JSON `{"speak": bool, "text": str}`. Earlier turns are never edited, so each call reads
   the conversation from the prompt cache.
-  - **Moves:** what each one did (castles, takes, promotes, checks), the material when it changed, and
-    for the bot's own moves a piece left en prise. For the opponent's moves, Allie's prediction for
-    them at their rating (top moves with probabilities, the move played marked) and the usual think
-    time; for every move, the bot's win/draw/loss after it.
+  - **Moves:** what each one did (castles, takes, promotes, checks) and the material when it changed. For
+    the opponent's moves, Allie's prediction for them at their rating (top moves with probabilities, the
+    move played marked) and the usual think time; for every move, the bot's win/draw/loss after it.
   - **Events:** draw offers and the bot's answer, takebacks, resignation, flag, abort, the opponent
     leaving.
   - **Chat lines:** verbatim.
@@ -199,7 +198,10 @@ involved.
   light humor, a joke when asked), mirroring the opponent's language and register, often silent; no
   service-desk politeness and no narration of its own moves. A bot with no gender or age when asked.
   Never a dig at the opponent's mistakes, and no coaching mid-game in any game. The last of the
-  `replies` a game signs off, and no remarks follow it.
+  `replies` a game signs off, and no remarks follow it. lol and haha come at most once a game, in a reply
+  (code strips the rest; live, 96% of opening remarks ended in lol). During the game a line calling a piece
+  hanging, loose or free is not posted (live, of 25 such lines, 9 were false and 13 gave one away or dug at
+  the opponent's).
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
   In rated games it gives nothing that helps the opponent mid-game: it deflects like a human, and a
   message naming a move not yet played (a bare square only if it is a legal pawn push) is dropped.
@@ -218,9 +220,9 @@ involved.
   - After the game, once the stream closes, it reads new chat lines from the game's chat page, every
     `poll` seconds at first and twice as long after each fetch with nothing new.
 - **Spend cap.** Each response's tokens are priced into a ledger file (`ledger`) by UTC day and month
-  (Sonnet 5.5, $ per million tokens: 2 input, 2.50 / 4 cache write for 5 min / 1 h, 0.20 cache read,
-  10 output). At `day_cap` or `month_cap` the chat goes silent until the window turns over: the hello
-  then leaves out the chat offer, and a message gets one fixed line a game saying the chat is off. The totals
+  (Haiku 5.5, $ per million tokens: 0.10 input, 0.125 / 0.20 cache write for 5 min / 1 h, 0.01 cache read,
+  0.50 output; about $0.0005 a game). At `day_cap` or `month_cap` the chat goes silent until the window turns
+  over: the hello then leaves out the chat offer, and a message gets one fixed line a game saying the chat is off. The totals
   live in memory, seeded from the file at start; a background thread writes the charges to it (and
   picks up other processes'), retrying a failed write, so no call waits on the filesystem. The same
   goes for the recent lines. A spend limit on the key in the Anthropic Console is the backstop.

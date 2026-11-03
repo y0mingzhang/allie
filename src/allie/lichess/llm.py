@@ -35,7 +35,7 @@ MODELS, LOCK = {}, threading.Lock()
 
 def model(cfg):
     """The model of a [chat] config, shared by the games: a function (system, messages) ->
-    Reply, or None when it has none (an error, a refusal, the spend cap); resting(): is it off?"""
+    Reply, or None when it has none (an error, the spend cap); resting(): is it off?"""
     with LOCK:
         if repr(cfg) not in MODELS:
             MODELS[repr(cfg)] = make(cfg)
@@ -89,6 +89,7 @@ class Silent:
 PRICES = {  # USD per million tokens: input, cache write 5 min and 1 h, cache read, output
     "claude-sonnet-5-5": (2.0, 2.5, 4.0, 0.2, 10.0),
     "claude-sonnet-5": (2.0, 2.5, 4.0, 0.2, 10.0),  # Sonnet 5.5's refusal fallback
+    "claude-haiku-5-5": (0.1, 0.125, 0.2, 0.01, 0.5),  # prompts to 100K tokens; a game's chat stays far below
     "claude-haiku-4-5": (1.0, 1.25, 2.0, 0.1, 5.0),
 }
 
@@ -284,9 +285,9 @@ class Claude:
             "max_tokens": cfg.max_tokens,
             "output_config": output,
             "cache_control": {"type": "ephemeral"},  # the conversation so far
-            "betas": ["server-side-fallback-2026-07-01"],
-            "fallbacks": "default",
         }
+        if not cfg.model.startswith("claude-haiku"):  # Haiku has no server-side fallback
+            self.params |= {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
         if cfg.thinking:
             self.params["thinking"] = {"type": cfg.thinking}
 
@@ -338,6 +339,8 @@ class Claude:
         log.info("chat model %s: %d new + %d cached + %d written, %d out, $%.4f (day $%.2f,"
                  " month $%.2f), first token %.2f s, %.2f s, %s", r.model, *n[1:], day,
                  month, first or t, t, r.stop_reason)  # fmt: skip
+        if r.stop_reason == "refusal":
+            return Reply([], False, "", first or t, t, usd)
         if r.stop_reason != "end_turn" or t > self.cfg.timeout:
             return None
         try:

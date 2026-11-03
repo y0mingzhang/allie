@@ -45,7 +45,8 @@ LIMIT = 140  # Lichess's longest chat line
 # expected score lost to their move that makes it a good one; to yours, a mistake
 GOOD, SWING = 0.10, 0.12
 KINDS = {  # the remarks, and what the model is asked for
-    "opening": "the opening: a quick reaction to it, as a player would type it, if you have one (not a description)",
+    "opening": "the opening: a few words on it by name or feel, as a player would type it, if you have a reaction; no"
+    " moves, squares, pieces or material",
     "mistake": "your own mistake, now punished: a quick human reaction, no analysis",
     "compliment": "their good move: a quick compliment, no explanation",
     "scramble": "your clock running low: a quick remark on your time trouble",
@@ -86,7 +87,7 @@ first person, as yourself.
 
 How you sound: a friendly club player typing in the chat box between moves. Casual and \
 quick: lowercase is fine, so are fragments, contractions and chat shorthand (gg, gl, ty, np, \
-wp, idk, oof, nice); haha and lol once in a while, not as a reflex: most lines have neither. \
+wp, idk, oof, nice). lol and haha are rare: at most one a game, only in a reply, never in a remark. \
 Mirror the other person: their language (in one with grammatical gender, avoid gendered forms \
 of yourself), their register, their length. A word or two gets a word or two back; \
 a real question gets a short real answer. Most lines are under 50 characters; a sentence or \
@@ -107,7 +108,7 @@ them recently, you don't remember them: no "welcome back", and no "we've never p
 
 Facts about you, never to contradict:
 - You're a bot, not a person: no gender, age, looks, family, home or life away from chess. \
-If asked, say so lightly ("just a bot, no gender lol"), and never pretend otherwise, even \
+If asked, say so lightly ("just a bot, no gender"), and never pretend otherwise, even \
 hypothetically.
 - You offer draws, accept or decline theirs, and resign as human players of your rating do, \
 through the game itself: never promise or rule out a draw or a resignation in chat.
@@ -123,8 +124,8 @@ Each turn brings the game updates since your last turn:
 did; what you expected them to play (* on the move played, after a comma when it wasn't \
 among your top guesses) and how long that usually takes; how the game feels to you (your \
 win/draw/loss chances); the material balance when it changed.
-- Your moves, like "12... Bg4 you 6s, castles short | feel 45/20/35 | left hanging: Nc3": \
-what your move did and how the game felt after it; a piece of yours it left en prise.
+- Your moves, like "12... Bg4 you 6s, castles short | feel 45/20/35": what your move did and \
+how the game felt after it.
 - Events: draw offers and answers, takebacks, resignations, flags, aborts, the opponent \
 leaving. Chat lines, verbatim. The fixed lines you posted.
 - "Now": side to move, clocks, opening name, phase, material, FEN, what you expect them to \
@@ -150,7 +151,11 @@ move, the clocks, the finish, or an event. Speak only if a person would really t
 something right then: a quick reaction, not commentary. Otherwise stay silent, which is \
 often right.
 - During the game, never point out or react to their mistakes: nothing that could read as \
-a dig or as gloating. Never mention a piece of yours left hanging before it is taken.
+a dig or as gloating.
+- During the game, no claims about the board: never that a piece or pawn, yours or theirs, is \
+hanging, loose, free, undefended or under attack, and, unless asked about a move already played, \
+nothing on what a piece or square is doing. You misread boards from a FEN, so these come out \
+wrong. A reaction needs no reasons.
 Reply with JSON: {"speak": true, "text": "..."} or {"speak": false, "text": ""}.
 
 The game header says whether the game is casual or rated.
@@ -183,10 +188,10 @@ class Chat:
     enabled: bool = False
     rooms: tuple = ("player",)  # rooms to answer and remark in (add "spectator")
     llm: str = "claude"  # "mock": canned text, no API calls (tests, dry runs)
-    model: str = "claude-sonnet-5-5"
-    effort: str = "low"  # output_config.effort ("" = the model's default)
-    thinking: str = "between_tools"  # Sonnet 5.5's lowest thinking ("" = the default)
-    max_tokens: int = 500  # thinking included: at 300, 0.3% of live calls stopped short, billed and dropped
+    model: str = "claude-haiku-5-5"
+    effort: str = "high"  # output_config.effort ("" = the model's default)
+    thinking: str = ""  # a thinking type ("" = the model's default: adaptive)
+    max_tokens: int = 1500  # thinking included; a call that stops short is billed and dropped
     timeout: float = 8.0  # seconds per model call; a late reply is dropped
     key_file: str = "~/.config/allie/anthropic_key"  # if ANTHROPIC_API_KEY is unset
     day_cap: float = 1.0  # USD a UTC day, then silent until the next day
@@ -250,6 +255,7 @@ class Chatter:
         self.allowed, self.finishing = self.pick()  # the ones it may use
         self.scrambled = self.closed = self.again = False  # seen; said after the end; played them lately
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
+        self.laughed = False
         self.last = 0  # the ply of the last call: no remark before ply `every`
         self.posted, self.until, self.interval = -math.inf, math.inf, self.cfg.poll
         self.heard, self.timings, self.rested = Counter(), [], False
@@ -375,7 +381,7 @@ class Chatter:
         if self.again:
             ago = (time.monotonic() - r[0]) / 60
             header.append(f"You played them {ago:.0f} min ago: {r[1]}. Likely a rematch.")
-        if lines := recent(self.cfg).read():
+        if lines := [y for x in recent(self.cfg).read() if not BOARD_TALK.search(x) and (y := unlaugh(x))]:
             header.append("Your unprompted lines in recent games, mostly with other opponents. "
                           "Don't reuse their wording, openings or shape, and don't refer to "
                           "them or to those games at all (no \"this time\" or \"again\"):\n"
@@ -470,9 +476,6 @@ class Chatter:
             line.append(f"feel {wdl(b.wdl)}")
         if (diff := material_diff(board, self.white)) != before:
             line.append(f"material: you {diff:+d}" if diff else "material: even")
-        loose = ours and hanging(board, self.white, traded(board))
-        if loose:
-            line.append("left hanging: " + ", ".join(loose))
         self.note(" | ".join(line))
         drop = lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl)
         if ours:
@@ -669,13 +672,14 @@ class Chatter:
         self.llm = self.llm or model(self.cfg)
         start, then = time.monotonic(), list(self.seen)  # the moves in the prompt
         r = self.llm(self.system, messages)
-        if r is None:  # an error, a refusal, the spend cap: the updates wait
+        if r is None:  # an error, the spend cap: the updates wait
             if not unprompted and not self.rested and self.resting():
                 self.rested = self.post(REST, room, False) is not None
             return
-        self.convo = [*messages, {"role": "assistant", "content": r.content}]
+        if r.content:  # a refusal: its turn goes, or every later call would be refused too
+            self.convo = [*messages, {"role": "assistant", "content": r.content}]
         self.pending = []
-        text = recase(clean(r.text), self.board) if r.speak else ""
+        text = unlaugh(recase(clean(r.text), self.board), not unprompted and not self.laughed) if r.speak else ""
         posted = None
         for part in parts(text):
             if (posted := self.post(part, room, unprompted, then, t)) is None:
@@ -692,8 +696,9 @@ class Chatter:
     def post(self, text, room, unprompted, then=None, asked=None):
         """Send a line (an unprompted one after the gap) unless, by then, !quiet, the end
         of the bot, a game that moved on from an unprompted line's moves (then), a reply
-        STALE seconds after its message (asked), or, in a rated game, a move it names not
-        yet played; the seconds it took, or None. One try: a failed post is dropped."""
+        STALE seconds after its message (asked), in a rated game a move it names not yet
+        played, or during the game a claim about a piece; the seconds it took, or None.
+        One try: a failed post is dropped."""
         if unprompted:
             time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
         elif asked is not None and self.cfg.typing:  # a reply at a person's pace, well within STALE
@@ -709,6 +714,7 @@ class Chatter:
             else "an unplayed move" if (unprompted or self.info.get("rated") and not self.status)
             and text != QUIET and not played(text, now)
             else "a repeat" if unprompted and repeats(text, recent(self.cfg).read(0)[-10:])
+            else "board talk" if not self.status and BOARD_TALK.search(text)
             else None
         )  # fmt: skip
         if why:
@@ -723,6 +729,7 @@ class Chatter:
         self.posted = time.monotonic()
         self.unreplied += text != QUIET
         self.closed |= bool(self.status)
+        self.laughed |= bool(LAUGH.search(text))
         if unprompted:
             recent(self.cfg).add(text)
         log.info("game %s chat (%s) Allie: %s", self.gid, room, text)
@@ -884,34 +891,6 @@ def material_diff(board, white):
     return sum(v * (len(board.pieces(p, white)) - len(board.pieces(p, not white))) for p, v in VALUE.items())
 
 
-def traded(board):
-    """The square of the last move if it took a piece worth as much as the mover: a piece
-    that may be taken back there is a trade, not a piece left hanging."""
-    m = board.peek()
-    after = board.piece_type_at(m.to_square)
-    board.pop()
-    try:
-        taken = chess.PAWN if board.is_en_passant(m) else board.piece_type_at(m.to_square)
-    finally:
-        board.push(m)
-    return m.to_square if taken and VALUE[taken] >= VALUE.get(after, math.inf) else None
-
-
-def hanging(board, color, skip=None):
-    """color's pieces en prise: attacked, and undefended or attacked by a cheaper piece
-    (but the one on skip)."""
-    out = []
-    for sq in chess.SquareSet(board.occupied_co[color]):
-        p = board.piece_type_at(sq)
-        attackers = board.attackers(not color, sq)
-        if p == chess.KING or not attackers or sq == skip:
-            continue
-        cheapest = min(VALUE.get(board.piece_type_at(x), 100) for x in attackers)
-        if cheapest < VALUE[p] or not board.attackers(color, sq):
-            out.append("NBRQ"[p - 2] * (p > 1) + chess.square_name(sq))
-    return out
-
-
 class Recent:
     """The last n unprompted lines, across games and restarts. They live in memory, seeded
     from a JSON list in a file shared by processes; a writer thread merges new lines into
@@ -996,6 +975,28 @@ def mmss(ms):
 def material(board, white):
     d = sum(v * (len(board.pieces(p, white)) - len(board.pieces(p, not white))) for p, v in VALUE.items())
     return "even" if d == 0 else f"you are {'up' if d > 0 else 'down'} {abs(d)} (pawn = 1)"
+
+
+# live, of 25 lines calling a piece hanging or loose, 9 were false and 13 gave one away or dug at theirs
+BOARD_TALK = re.compile(
+    r"\b(?:hang(?:s|ing|ed)?|hung)\b(?! (?:in|tight|of|by)\b| on\b(?! [a-h][1-8]))|en prise|\bloose\b|\bundefended\b"
+    r"|\bunprotected\b|\bfree (?:\w+ )?(?:pawn|knight|bishop|rook|queen|piece|one)s?\b|\b(?:was|for) free\b"
+    r"|\b(?:[a-h][1-8]|pawn|knight|bishop|rook|queen|piece)(?:'s| is) free\b",
+    re.I,
+)
+LAUGH = re.compile(
+    r"[\s,-]*\b(?:lo+l+(?:ol+)*|lmf?ao+|rofl|ha(?:ha)+h?|he(?:he)+h?|ja(?:ja)+j?|xd+)\b[.!?\u2026]*",
+    re.I,
+)
+
+
+def unlaugh(text, keep=False):
+    """Text without its laughs, but the first if keep (live, 96% of opening remarks ended in lol, the recent lines in
+    the prompt feeding it)."""
+    if m := keep and LAUGH.search(text):
+        return text[: m.end()] + LAUGH.sub("", text[m.end() :])
+    s = LAUGH.sub("", text)
+    return text if s == text else re.sub(r"\s*\(\s*\)", "", s).lstrip(" ,.!-")
 
 
 SAN = re.compile(

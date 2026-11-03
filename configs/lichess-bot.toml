@@ -38,9 +38,9 @@ draws = true                  # offer and accept draws as humans do; false: neve
 [chat]                        # natural-language chat written by Claude from Allie's numbers (README)
 enabled = false               # needs `uv sync --extra chat` and an Anthropic API key
 rooms = ["player"]            # rooms to answer and remark in; add "spectator" for spectators
-model = "claude-sonnet-5-5"
-effort = "low"                # output_config.effort; thinking "between_tools" = off, for latency
-max_tokens = 500              # thinking included
+model = "claude-haiku-5-5"
+effort = "high"               # output_config.effort; thinking is the model's default, adaptive
+max_tokens = 1500             # thinking included
 timeout = 8.0                 # seconds; a late message is dropped, a move never waits
 key_file = "~/.config/allie/anthropic_key"  # chmod 600; ANTHROPIC_API_KEY wins if set
 day_cap = 1.0                 # USD per UTC day, counted from each response's usage; then silent
