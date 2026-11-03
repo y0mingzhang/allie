@@ -370,8 +370,9 @@ def lesion(args):
         return t, f, b
 
     def header_and(m):
-        return lambda t, n, dev: (torch.arange(n, device=dev)[None] < HEADER) | (
-            torch.arange(n, device=dev)[None] >= torch.arange(t, device=dev)[:, None] - m + 1
+        return lambda t, n, dev: (
+            (torch.arange(n, device=dev)[None] < HEADER)
+            | (torch.arange(n, device=dev)[None] >= torch.arange(t, device=dev)[:, None] - m + 1)
         )
 
     self_only = lambda t, n, dev: torch.arange(n, device=dev)[None] == torch.arange(t, device=dev)[:, None]

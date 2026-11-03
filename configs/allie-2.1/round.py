@@ -21,7 +21,16 @@ S16 = MOE(256, 16, moe_shared_frac=0.25, moe_round=16, moe_update="quantile", fp
 D3 = dict(moe_router_lr_mul=0.05, moe_log_gates=True, moe_dense_first=3, moe_router_center=0.9)
 C4X = dict(moe_router_center_first=4, xsa=True)
 ARCH = S16["arch"] | D3 | C4X | dict(moe_shard=True)
-SHIP = ["--smoe-tuned", "--shard-early", "--shard-prefetch", 2, "--ckpt-frac", 0.95, "--shard-hold", "--optimizers-reversed"]
+SHIP = [
+    "--smoe-tuned",
+    "--shard-early",
+    "--shard-prefetch",
+    2,
+    "--ckpt-frac",
+    0.95,
+    "--shard-hold",
+    "--optimizers-reversed",
+]
 EXTRA = ["--row-tokens", 16384, "--ckpt", "eager", "--checkpoint-every", 1024, "--moe-remat", "--moe-chunks", 4]
 EXTRA += ["--keep-checkpoints", 1, *SHIP, "--keep-model-every", round(STEPS / 10)]
 TEMA = ["--tail-ema", 0.08, "--tail-ema-every", 64]

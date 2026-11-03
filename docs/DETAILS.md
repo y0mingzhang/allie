@@ -16,7 +16,7 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 - Blocks 1-3 have dense MLPs. Blocks 4-24 route each token to 16 of 256 experts.
 - The chosen gates are computed in log space, as 4 · softmax(log s), with no division to overflow.
 - Only the first four routed blocks centre the router's input.
-- Exclusive self-attention (XSA): each head rescales its projection on the token's own value by a learned amount, usually removing it.
+- Exclusive self-attention (XSA): each head rescales its projection on the token's own value by a learned amount, usually reducing it; 23% of heads add to it.
 - 1.23B active and 9.19B total parameters, 2.45 GFLOPs per move with the game cached.
 
 **Training.**

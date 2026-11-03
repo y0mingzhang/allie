@@ -496,7 +496,7 @@ def main():
     assert a.micro_batch * a.row_tokens % 1024 == 0
     assert min(a.eval_every, a.checkpoint_every, a.val_rows, a.micro_batch) > 0
     assert a.keep_checkpoints >= 0
-    assert a.name and all(c.isalnum() or c in "-_" for c in a.name)
+    assert a.name[:1].isalnum() and all(c.isalnum() or c in "-_." for c in a.name)
     out = ROOT / "results/pretrain" / a.name
     if rank == 0:
         out.mkdir(exist_ok=True, parents=True)
