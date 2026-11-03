@@ -6,11 +6,115 @@ The numbers behind the [README](../README.md).
 
 The loss is cross-entropy (CE) in nats: the negative log-probability of the move played. Intervals are 95%, from 2,000 bootstrap draws over whole games. Differences between models are paired on the same positions.
 
+## Allie 2.1
+
+Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training on October 28, 2026. Its weights are on Hugging Face as [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1); the Lichess bot has played it since October 30, 2026. Sections that describe Allie 2.0's model or run say so.
+
+**Model.** What differs from Allie 2.0:
+
+- Width 2048, with 32 heads of 64. Routed experts have hidden width 256 and the shared expert 1360, so the active width, 16 × 256 + 1360 = 5456, matches the dense blocks.
+- Blocks 1-3 have dense MLPs. Blocks 4-24 route each token to 16 of 256 experts.
+- The chosen gates are computed in log space, as 4 · softmax(log s), with no division to overflow.
+- Only the first four routed blocks centre the router's input.
+- Exclusive self-attention (XSA): each head's output loses a learned share of its projection on the token's own value.
+- 1.23B active and 9.19B total parameters, 2.45 GFLOPs per move with the game cached.
+
+**Training.**
+
+- 112B tokens in 213,623 steps of 524,288 tokens: 8.27×10²⁰ training FLOPs, 2.6 times the big run's.
+- The same data and sampling rules as the big run, with a sampling table sized for 112B tokens.
+- The learning rates are 0.35 times the big run's base rates, with the same 2,013 warmup steps and a linear decay to 0.1% of the peak.
+- Adam steps on every other step, instead of on every step at half the rate.
+- One node with 8 L40S GPUs, as for the big run: 359 hours of training in 2-day jobs, a median of 89K tokens per second.
+- No second anneal. The released weights are half the final weights and half an exponential moving average of the weights with a horizon of 17,090 steps (8% of the run), updated every 64 steps from step 162,354.
+
+**Main evaluation.** Each row is the mean of its cells' CE.
+
+| | Allie 2.0 | Allie 2.1 | Difference |
+|---|---:|---:|---:|
+| All 16 cells | 1.2505 | 1.2240 | −0.0265 |
+| Bullet | 1.3117 | 1.2920 | −0.0197 |
+| Blitz | 1.2135 | 1.1884 | −0.0252 |
+| Rapid | 1.2189 | 1.1921 | −0.0268 |
+| Classical | 1.2579 | 1.2234 | −0.0344 |
+| Under 1400 | 1.4473 | 1.4312 | −0.0161 |
+| 1400-2000 | 1.2888 | 1.2681 | −0.0207 |
+| 2000-2400 | 1.1659 | 1.1362 | −0.0296 |
+| 2400+ | 1.1001 | 1.0603 | −0.0398 |
+| September 2026 games, all 16 cells | 1.2535 | 1.2265 | −0.0270 |
+| September 2026 games, 2400+ | 1.1101 | 1.0678 | −0.0423 |
+
+- Every cell improves, from 0.013 (blitz, under 1400) to 0.050 (classical, 2400+).
+- The September cells are built as the main evaluation's are, from September 2026 games: after every model's training data.
+- The final weights alone score 1.2248 on the main evaluation and 1.2272 on September games.
+
+**Blitz benchmark.** On the 80,000 positions: CE 1.1779, top-1 60.12%.
+
+| Allie 2.1 minus | CE | top-1 (points) |
+|---|---:|---:|
+| Maia-3 5M | −0.1175 [−0.1212, −0.1136] | +3.17 [+2.92, +3.41] |
+| Maia-3 23M | −0.0695 [−0.0730, −0.0659] | +1.78 [+1.56, +2.01] |
+| Maia-3 79M | −0.0489 [−0.0522, −0.0458] | +1.32 [+1.11, +1.53] |
+| Allie 2.0 | −0.0251 [−0.0272, −0.0230] | +0.83 [+0.65, +1.02] |
+
+- On Maia's protocol it is ahead of Allie 2.0 by 0.0287 [0.0261, 0.0312] in CE and 0.92 points [0.70, 1.14] in top-1.
+- By the mover's rating, its lead over Allie 2.0 grows from 0.006-0.007 below 1000, within the noise, to 0.040 at 2400 and above.
+- In the first 10 plies it is no better than Allie 2.0: +0.0008 [−0.0019, +0.0038].
+
+**By time control.** Bullet, rapid and classical use the 20,000-position samples of [Beyond blitz](../README.md#beyond-blitz); blitz is the benchmark. CE is the mean over the four rating bands.
+
+| | Allie 2.1 CE / top-1 | minus Maia-3 79M | minus Allie 2.0 |
+|---|---:|---:|---:|
+| Bullet | 1.2944 / 57.4% | −0.1657 [−0.1762, −0.1549] | −0.0209 [−0.0250, −0.0170] |
+| Blitz | 1.1779 / 60.1% | −0.0489 [−0.0522, −0.0458] | −0.0251 [−0.0272, −0.0230] |
+| Rapid | 1.1888 / 59.8% | −0.0503 [−0.0564, −0.0444] | −0.0312 [−0.0353, −0.0269] |
+| Classical | 1.2180 / 58.8% | −0.0545 [−0.0610, −0.0482] | −0.0319 [−0.0367, −0.0271] |
+
+**Forecasts.** On October 5, for the same shape before its recipe changed, the forecast built up from Allie 2.0's big run was 1.241 [1.231, 1.251] (90%) on the main evaluation. The final weights scored 1.2248. On October 17, the scaling law refit on a new sweep with Allie 2.1's recipe forecast 1.2325-1.2396 on September games for the released weights. They scored 1.2265.
+
+**Inference.** On an AMD EPYC 7763 with 12 threads, both models on the same node:
+
+| | Allie 2.0 | Allie 2.1 |
+|---|---:|---:|
+| int8, 1 game: ms per move | 10.4 | 14.3 |
+| int8, 16 games: ms per step | 51.8 | 80.2 |
+| int8, memory | 6.4 GB | 9.8 GB |
+| BF16, 1 game: ms per move | 18.4 | 25.4 |
+| BF16, 16 games: ms per step | 70.7 | 105.1 |
+| BF16, memory | 11.5 GB | 18.3 GB |
+| KL search, one game alone: ms per leaf at 128 / 1,024 leaves | 3.78 / 2.94 | 6.42 / 4.83 |
+| KL search, three games at once at 128 leaves: ms per leaf each | 8.8 | 15.1 |
+| Calibrated bot: leaf price it plans at (`calibration.COST`) / largest search | 4 ms / 4,096 leaves | 6 ms / 1,024 leaves |
+| Calibrated bot, four games at a human pace: search time per move, median / p90 | 3.1 / 12.3 s | 1.8 / 4.9 s |
+| Same, by time control, median: bullet / blitz / classical | 1.0 / 2.9 / 11.8 s | 0.4 / 1.5 / 4.8 s |
+| Calibrated bot, ten games at 0.3x think time (a dense load test): search time per move, median / p90 | 4.7 / 13.2 s | 4.4 / 9.6 s |
+| Calibrated bot, peak memory under load | 7.7-9.5 GB | 10.4-11.5 GB |
+
+- One game reads 1.29 GB of int8 weights per move, against 0.74 GB.
+- On 5,000 benchmark positions, against the training forward, the int8 default changes the loss by −0.0010 [−0.0021, +0.0002] nats, BF16 on CPU by −0.0015 [−0.0023, −0.0006] and CUDA graphs on GPU by −0.0013 [−0.0022, −0.0005]. int8 and BF16 pick the same top move 99.4% of the time.
+- Each model is calibrated at its own leaf price: its lone 128-leaf search on this CPU (Allie 2.0 4 ms, 2.1 6 ms). The live bot has a median of 3 games open, where Allie 2.0's leaves cost a median 3.1 ms (88,632 decisions, 2026-10-18 to 10-29), below its 4 ms; Allie 2.1's cost 5.2 ms in the four-game test, below its 6 ms: both play at the price they were fitted at.
+- The search sizes Allie 2.1 picks from stop at 1,024 leaves: fitting larger ones cost too much GPU time. Capping Allie 2.0's rule there costs it at most 18 Elo, in the 2200+ classical cells.
+- No search ran past its think time; counting the move's own work, the latest move came 0.14 s (Allie 2.1) and 0.27 s (Allie 2.0) after it, both in the ten-game test.
+- Small samples (92-148 decisions a four-game test, with no rapid games, and about 320 a ten-game one): the medians hold to about 10%, the 90th percentiles roughly.
+
+**Calibrated play.** Refitted on Allie 2.1's own search at every search size up to 1,024 leaves, on the same July 2026 games as Allie 2.0's rule. One rule for every time control misses 10-21 of the 80 strength tests held out: Allie 2.1's raw strength rises with rating more steeply than Allie 2.0's, and one exponential in rating fits only one end. The bot uses one rule per time control with a floor on the tilt ([calibration.py](../src/allie/lichess/calibration.py)).
+
+| | Allie 2.0 | Allie 2.1 |
+|---|---:|---:|
+| Rules (parameters) | 1 (4) | 4 (20) |
+| Strength tests outside the noise, of 80: July held out / September | 2 / 8 | 5 / 11 |
+| The same with one rule of Allie 2.0's form, July held out: Elo loss / z loss | 2 / 3 | 16 / 14 |
+| Calibrated minus raw CE on September games: bullet / blitz / rapid / classical | −0.0006 / −0.0047 / −0.0102 / −0.0114 | −0.0002 / −0.0018 / −0.0074 / −0.0080 |
+
+- The 2 / 8 and 5 / 11 aren't like for like. Allie 2.1's 5 has five times the parameters and is the lowest of 8 variants scored on these same July games (Elo or z loss, floor or none, one rule or four; earlier tries scored 11-21), so it is optimistic. In the one-rule row, the Elo fit is Allie 2.0's, same grid and loss (21 on the variants' grid); the z fits differ, Allie 2.1's on the variants' grid with bullet from 800, Allie 2.0's from 1800.
+- About 4 of 80 tests would miss by chance, so September's 8 and 11 are both above it. September isn't untouched for either rule: Allie 2.0's followed its predecessors' September scores (11 each), Allie 2.1's those of three candidates (14-17). Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is out of the tilt's reach: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans.
+- No bin's calibrated CE is above the raw model's at 95% on September games. On July, bullet 2000 passes only in sample (z 1.96) and held out against the game halves' mean standard error (z 1.84); pooled it is above (z 2.42, one half 2.60), where Allie 2.1 alone already plays 0.2 points strong.
+
 ## Blitz benchmark
 
 The benchmark is 80,000 blitz positions from July 2026, 20,000 per band of the mover's rating: under 1400, 1400-2000, 2000-2400 and 2400+. Probabilities are renormalized over the legal moves.
 
-Allie 2.0, as released, is the big run's final checkpoint after its second anneal (see [Training](#training)). The tables also list that checkpoint before the anneal.
+Allie 2.0, the previous release, is the big run's final checkpoint after its second anneal (see [Training](#training)). The tables also list that checkpoint before the anneal.
 
 | Allie 2.0 minus | CE | top-1 (points) |
 |---|---:|---:|
@@ -19,7 +123,7 @@ Allie 2.0, as released, is the big run's final checkpoint after its second annea
 | Maia-3 79M | −0.0238 [−0.0272, −0.0208] | +0.48 [+0.27, +0.70] |
 | Before the second anneal | −0.0026 [−0.0033, −0.0019] | +0.03 [−0.07, +0.13] |
 
-Compute per move counts forward-pass FLOPs with the game so far cached, not measured time. Allie 2.0's top-1 accuracy is 63.1% on the 2400+ band.
+Compute per move counts forward-pass FLOPs with the game so far cached, not measured time. Top-1 accuracy on the 2400+ band is 64.5% for Allie 2.1 and 63.1% for Allie 2.0. Allie 2.1's own table is under [Allie 2.1](#allie-21).
 
 ### Tables
 
@@ -31,9 +135,9 @@ Maia's protocol (56,599 positions):
 | Maia-3 23M | 1.2405 | 58.56 | +0.0225 [+0.0203, +0.0248] | −0.50 [−0.72, −0.29] |
 | Maia-3 79M | 1.2180 | 59.06 | | |
 | Original Allie | 1.2883 | 57.09 | +0.0703 [+0.0659, +0.0746] | −1.97 [−2.23, −1.69] |
+| Allie 2.0 before its second anneal | 1.2075 | 59.32 | −0.0105 [−0.0139, −0.0072] | +0.26 [+0.02, +0.52] |
 | Allie 2.0 | 1.2048 | 59.37 | −0.0132 [−0.0166, −0.0100] | +0.31 [+0.06, +0.56] |
-| Allie 2.1 | 1.1762 | 60.29 | −0.0419 [−0.0451, −0.0388] | +1.23 [+0.97, +1.48] |
-| Before the second anneal | 1.2075 | 59.32 | −0.0105 [−0.0139, −0.0072] | +0.26 [+0.02, +0.52] |
+| **Allie 2.1** | **1.1762** | **60.29** | −0.0419 [−0.0451, −0.0388] | +1.23 [+0.97, +1.48] |
 
 *Brackets are 95% intervals over games, with each model paired with Maia-3 79M on the same positions.*
 
@@ -45,9 +149,9 @@ All 80,000 positions:
 | Maia-3 23M | 22.9M | 2.40 | 1.2475 | 58.34 |
 | Maia-3 79M | 78.9M | 9.23 | 1.2269 | 58.80 |
 | Original Allie | 305M | 0.61 | 1.2848 | 57.06 |
+| Allie 2.0 before its second anneal | 0.69B active, 5.6B total | 1.39 | 1.2056 | 59.26 |
 | Allie 2.0 | 0.69B active, 5.6B total | 1.39 | 1.2030 | 59.29 |
-| Before the second anneal | 0.69B active, 5.6B total | 1.39 | 1.2056 | 59.26 |
-| Allie 2.1 | 1.23B active, 9.19B total | 2.45 | 1.1779 | 60.12 |
+| **Allie 2.1** | 1.23B active, 9.19B total | 2.45 | **1.1779** | **60.12** |
 
 ### Where the differences come from
 
@@ -92,7 +196,7 @@ We score the original Allie's raw policy on the same positions, in its own input
 - **Benchmark.** CE 1.2848 [1.2748, 1.2941] and top-1 57.06% [56.70, 57.42].
 - **By rating band.** CE 1.4256, 1.2947, 1.2320 and 1.1870 from the lowest band to the highest. Top-1 is 59.20% on the 2400+ band.
 - **Maia-3's protocol.** CE 1.2883 and top-1 57.09%.
-- **Main evaluation.** 1.3526, against Allie 2.0's 1.2505. Only blitz is in its training data, so bullet, rapid and classical games get its unknown time-control token.
+- **Main evaluation.** 1.3526, against Allie 2.1's 1.2240. Only blitz is in its training data, so bullet, rapid and classical games get its unknown time-control token.
 - **Compute.** 0.61 GFLOPs per move with a cache, counted as for the other models. Its released decoder has no cache: it re-reads the game for each move, about 28 GFLOPs at the benchmark's mean ply.
 - **Search.** Its time-adaptive search averages 50 such passes per move. We do not score it.
 - **Input mapping.** 3 of 6,191 benchmark games, 35 positions, use a time control outside its 24 blitz tokens and get the unknown token. The model clamps ratings to 500-3000.
@@ -136,6 +240,8 @@ Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 na
 - CE is over all 1,968 move tokens, without legal-move masking. The headline number is the plain mean of the 16 cells.
 
 ## The model
+
+Allie 2.0's model; what Allie 2.1 changes is under [Allie 2.1](#allie-21).
 
 - **Tokens.** An 11-token header: start, base time, increment, and each rating as four digits. Then one token per move, from-square and to-square plus promotion. Games are packed into 16K-token rows, and attention stays within each game.
 - **Clock inputs.** At every position the model gets the mover's and the opponent's time left, and the mover's previous thinking time, as Fourier features of log seconds. 10% of training games leave them out.
@@ -319,110 +425,6 @@ One cached step: the time a move takes once the opponent's move arrives, median 
 - **Batching.** Games in one step share each expert's weights: 16 games cost 3.6 to 5 times one game on CPU, and 64 games 9 to 16 times.
 - **Accuracy.** On 5,000 benchmark positions, against the training forward, BF16 weights on CPU change the loss by +0.0003 [−0.0007, +0.0012] nats, the int8 default by +0.0010 [−0.0011, +0.0032], and CUDA graphs on GPU by +0.0005 [−0.0005, +0.0014]. int8 minus BF16 is +0.0008 [−0.0013, +0.0030], and the two pick the same top move 97.7% of the time. The [bot's guide](../src/allie/lichess/README.md#cost-and-accuracy) has the full comparison.
 
-## Allie 2.1
-
-Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training on October 28, 2026. Its weights are on Hugging Face as [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1); the Lichess bot has played it since October 30, 2026. The rest of this page describes Allie 2.0.
-
-**Model.** What differs from Allie 2.0:
-
-- Width 2048, with 32 heads of 64. Routed experts have hidden width 256 and the shared expert 1360, so the active width, 16 × 256 + 1360 = 5456, matches the dense blocks.
-- Blocks 1-3 have dense MLPs. Blocks 4-24 route each token to 16 of 256 experts.
-- The chosen gates are computed in log space, as 4 · softmax(log s), with no division to overflow.
-- Only the first four routed blocks centre the router's input.
-- Exclusive self-attention (XSA): each head's output loses a learned share of its projection on the token's own value.
-- 1.23B active and 9.19B total parameters, 2.45 GFLOPs per move with the game cached.
-
-**Training.**
-
-- 112B tokens in 213,623 steps of 524,288 tokens: 8.27×10²⁰ training FLOPs, 2.6 times the big run's.
-- The same data and sampling rules as the big run, with a sampling table sized for 112B tokens.
-- The learning rates are 0.35 times the big run's base rates, with the same 2,013 warmup steps and a linear decay to 0.1% of the peak.
-- Adam steps on every other step, instead of on every step at half the rate.
-- One node with 8 L40S GPUs, as for the big run: 359 hours of training in 2-day jobs, a median of 89K tokens per second.
-- No second anneal. The released weights are half the final weights and half an exponential moving average of the weights with a horizon of 17,090 steps (8% of the run), updated every 64 steps from step 162,354.
-
-**Main evaluation.** Each row is the mean of its cells' CE.
-
-| | Allie 2.0 | Allie 2.1 | Difference |
-|---|---:|---:|---:|
-| All 16 cells | 1.2505 | 1.2240 | −0.0265 |
-| Bullet | 1.3117 | 1.2920 | −0.0197 |
-| Blitz | 1.2135 | 1.1884 | −0.0252 |
-| Rapid | 1.2189 | 1.1921 | −0.0268 |
-| Classical | 1.2579 | 1.2234 | −0.0344 |
-| Under 1400 | 1.4473 | 1.4312 | −0.0161 |
-| 1400-2000 | 1.2888 | 1.2681 | −0.0207 |
-| 2000-2400 | 1.1659 | 1.1362 | −0.0296 |
-| 2400+ | 1.1001 | 1.0603 | −0.0398 |
-| September 2026 games, all 16 cells | 1.2535 | 1.2265 | −0.0270 |
-| September 2026 games, 2400+ | 1.1101 | 1.0678 | −0.0423 |
-
-- Every cell improves, from 0.013 (blitz, under 1400) to 0.050 (classical, 2400+).
-- The September cells are built as the main evaluation's are, from September 2026 games: after every model's training data.
-- The final weights alone score 1.2248 on the main evaluation and 1.2272 on September games.
-
-**Blitz benchmark.** On the 80,000 positions: CE 1.1779, top-1 60.12%.
-
-| Allie 2.1 minus | CE | top-1 (points) |
-|---|---:|---:|
-| Maia-3 5M | −0.1175 [−0.1212, −0.1136] | +3.17 [+2.92, +3.41] |
-| Maia-3 23M | −0.0695 [−0.0730, −0.0659] | +1.78 [+1.56, +2.01] |
-| Maia-3 79M | −0.0489 [−0.0522, −0.0458] | +1.32 [+1.11, +1.53] |
-| Allie 2.0 | −0.0251 [−0.0272, −0.0230] | +0.83 [+0.65, +1.02] |
-
-- On Maia's protocol it is ahead of Allie 2.0 by 0.0287 [0.0261, 0.0312] in CE and 0.92 points [0.70, 1.14] in top-1.
-- By the mover's rating, its lead over Allie 2.0 grows from 0.006-0.007 below 1000, within the noise, to 0.040 at 2400 and above.
-- In the first 10 plies it is no better than Allie 2.0: +0.0008 [−0.0019, +0.0038].
-
-**By time control.** Bullet, rapid and classical use the 20,000-position samples of [Beyond blitz](../README.md#beyond-blitz); blitz is the benchmark. CE is the mean over the four rating bands.
-
-| | Allie 2.1 CE / top-1 | minus Maia-3 79M | minus Allie 2.0 |
-|---|---:|---:|---:|
-| Bullet | 1.2944 / 57.4% | −0.1657 [−0.1762, −0.1549] | −0.0209 [−0.0250, −0.0170] |
-| Blitz | 1.1779 / 60.1% | −0.0489 [−0.0522, −0.0458] | −0.0251 [−0.0272, −0.0230] |
-| Rapid | 1.1888 / 59.8% | −0.0503 [−0.0564, −0.0444] | −0.0312 [−0.0353, −0.0269] |
-| Classical | 1.2180 / 58.8% | −0.0545 [−0.0610, −0.0482] | −0.0319 [−0.0367, −0.0271] |
-
-**Forecasts.** On October 5, for the same shape before its recipe changed, the forecast built up from Allie 2.0's big run was 1.241 [1.231, 1.251] (90%) on the main evaluation. The final weights scored 1.2248. On October 17, the scaling law refit on a new sweep with Allie 2.1's recipe forecast 1.2325-1.2396 on September games for the released weights. They scored 1.2265.
-
-**Inference.** On an AMD EPYC 7763 with 12 threads, both models on the same node:
-
-| | Allie 2.0 | Allie 2.1 |
-|---|---:|---:|
-| int8, 1 game: ms per move | 10.4 | 14.3 |
-| int8, 16 games: ms per step | 51.8 | 80.2 |
-| int8, memory | 6.4 GB | 9.8 GB |
-| BF16, 1 game: ms per move | 18.4 | 25.4 |
-| BF16, 16 games: ms per step | 70.7 | 105.1 |
-| BF16, memory | 11.5 GB | 18.3 GB |
-| KL search, one game alone: ms per leaf at 128 / 1,024 leaves | 3.78 / 2.94 | 6.42 / 4.83 |
-| KL search, three games at once at 128 leaves: ms per leaf each | 8.8 | 15.1 |
-| Calibrated bot: leaf price it plans at (`calibration.COST`) / largest search | 4 ms / 4,096 leaves | 6 ms / 1,024 leaves |
-| Calibrated bot, four games at a human pace: search time per move, median / p90 | 3.1 / 12.3 s | 1.8 / 4.9 s |
-| Same, by time control, median: bullet / blitz / classical | 1.0 / 2.9 / 11.8 s | 0.4 / 1.5 / 4.8 s |
-| Calibrated bot, ten games at 0.3x think time (a dense load test): search time per move, median / p90 | 4.7 / 13.2 s | 4.4 / 9.6 s |
-| Calibrated bot, peak memory under load | 7.7-9.5 GB | 10.4-11.5 GB |
-
-- One game reads 1.29 GB of int8 weights per move, against 0.74 GB.
-- On 5,000 benchmark positions, against the training forward, the int8 default changes the loss by −0.0010 [−0.0021, +0.0002] nats, BF16 on CPU by −0.0015 [−0.0023, −0.0006] and CUDA graphs on GPU by −0.0013 [−0.0022, −0.0005]. int8 and BF16 pick the same top move 99.4% of the time.
-- Each model is calibrated at its own leaf price: its lone 128-leaf search on this CPU (Allie 2.0 4 ms, 2.1 6 ms). The live bot has a median of 3 games open, where Allie 2.0's leaves cost a median 3.1 ms (88,632 decisions, 2026-10-18 to 10-29), below its 4 ms; Allie 2.1's cost 5.2 ms in the four-game test, below its 6 ms: both play at the price they were fitted at.
-- The search sizes Allie 2.1 picks from stop at 1,024 leaves: fitting larger ones cost too much GPU time. Capping Allie 2.0's rule there costs it at most 18 Elo, in the 2200+ classical cells.
-- No search ran past its think time; counting the move's own work, the latest move came 0.14 s (Allie 2.1) and 0.27 s (Allie 2.0) after it, both in the ten-game test.
-- Small samples (92-148 decisions a four-game test, with no rapid games, and about 320 a ten-game one): the medians hold to about 10%, the 90th percentiles roughly.
-
-**Calibrated play.** Refitted on Allie 2.1's own search at every search size up to 1,024 leaves, on the same July 2026 games as Allie 2.0's rule. One rule for every time control misses 10-21 of the 80 strength tests held out: Allie 2.1's raw strength rises with rating more steeply than Allie 2.0's, and one exponential in rating fits only one end. The bot uses one rule per time control with a floor on the tilt ([calibration.py](../src/allie/lichess/calibration.py)).
-
-| | Allie 2.0 | Allie 2.1 |
-|---|---:|---:|
-| Rules (parameters) | 1 (4) | 4 (20) |
-| Strength tests outside the noise, of 80: July held out / September | 2 / 8 | 5 / 11 |
-| The same with one rule of Allie 2.0's form, July held out: Elo loss / z loss | 2 / 3 | 16 / 14 |
-| Calibrated minus raw CE on September games: bullet / blitz / rapid / classical | −0.0006 / −0.0047 / −0.0102 / −0.0114 | −0.0002 / −0.0018 / −0.0074 / −0.0080 |
-
-- The 2 / 8 and 5 / 11 aren't like for like. Allie 2.1's 5 has five times the parameters and is the lowest of 8 variants scored on these same July games (Elo or z loss, floor or none, one rule or four; earlier tries scored 11-21), so it is optimistic. In the one-rule row, the Elo fit is Allie 2.0's, same grid and loss (21 on the variants' grid); the z fits differ, Allie 2.1's on the variants' grid with bullet from 800, Allie 2.0's from 1800.
-- About 4 of 80 tests would miss by chance, so September's 8 and 11 are both above it. September isn't untouched for either rule: Allie 2.0's followed its predecessors' September scores (11 each), Allie 2.1's those of three candidates (14-17). Allie 2.1's September misses: bullet 800 and 2000, blitz 800 and 2200, rapid 2400 and 2600, classical 1200 and 1800. Bullet 800 is out of the tilt's reach: on July games, Allie 2.1 alone plays 0.9 accuracy points below those humans.
-- No bin's calibrated CE is above the raw model's at 95% on September games. On July, bullet 2000 passes only in sample (z 1.96) and held out against the game halves' mean standard error (z 1.84); pooled it is above (z 2.42, one half 2.60), where Allie 2.1 alone already plays 0.2 points strong.
-
 ## Reproducing
 
 | Module | What it is |
@@ -437,7 +439,7 @@ Allie 2.1 is Allie 2.0's design, wider and trained longer. It finished training 
 | `allie.lichess` | The Lichess bot and its CPU inference engine |
 | `allie.experiments.modelexp`, `isoflop`, `dmix`, `readout`, `tail_ema` | Frozen studies on Slurm, scaling-law fits, the sweep readout, scores of final-to-EMA blends |
 | `allie.cli` | `allie-train` (a config file to a torchrun of the trainer) and `allie-eval` |
-| `configs/` | `allie-2.0.json`, the trainer's arguments; `recipes/`, its sampling table; `allie-2.0/`, the run's record |
+| `configs/` | `allie-2.1.json` and `allie-2.0.json`, the trainer's arguments; `recipes/`, their sampling tables; `allie-2.1/` and `allie-2.0/`, the runs' records |
 | `tests/` | `test_checks.py` runs each check in `tests/checks/` as its own program; `test_equivalent.py` guards how the big run's final checkpoint loads |
 | `analysis/` | The analysis scripts behind the search and comparison results, as run |
 

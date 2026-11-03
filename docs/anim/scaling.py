@@ -66,7 +66,7 @@ VIDEO = dict(
     name="scaling-law",
     scenes=[*[f"S{i}" for i in range(9)], "M1", "M2", "M3", "S9", "S10"],
     gif=(["S7", 8.6], 13.5),
-    poster=["S10", 39.0],
+    poster=["S10", 41.0],
 )
 
 
@@ -1712,9 +1712,11 @@ class S10(Scene):
         cap.hold()
 
         ast = star(P.p(xf, A["final"]), 0.17)
-        al = lab(f"{A['final']:.3f}  actual", 26, ORANGE, "SEMIBOLD").next_to(ast, RIGHT, buff=0.2)
+        al = lab(f"{A['final']:.3f}  final weights", 26, ORANGE, "SEMIBOLD").next_to(ast, RIGHT, buff=0.2)
         self.play(GrowFromCenter(ast), FadeIn(al),
-                  *cap(f"Allie 2.1 finished on {A['date']} at {A['final']:.3f}, {F['central'] - A['final']:.3f} below the forecast."))  # fmt: skip
+                  *cap(f"Allie 2.1's final weights scored {A['final']:.4f} on {A['date']}, {F['central'] - A['final']:.3f} below the forecast."))  # fmt: skip
+        cap.hold()
+        self.play(*cap(f"The released weights, half final and half a moving average, score {A['released']:.4f}."))
         cap.hold()
         self.play(Indicate(ci, color=ORANGE), *cap("That is below even the forecast's 90% band."))
         cap.hold()

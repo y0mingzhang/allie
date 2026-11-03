@@ -51,7 +51,7 @@ def build(export, out, name=None, card=None):
 
 
 def upload(out, repo=REPO, private=True):
-    name = json.loads((Path(out) / "config.json").read_text())["name"]  # allie-2.0: "Allie 2.0"
+    name = json.loads((Path(out) / "config.json").read_text())["name"]  # allie-2.1: "Allie 2.1"
     if repo.rsplit("/", 1)[-1] != name:  # never one release's weights over another's
         raise SystemExit(f"{out} holds {name}: upload it to a repo named {name}, not {repo}")
     from huggingface_hub import HfApi

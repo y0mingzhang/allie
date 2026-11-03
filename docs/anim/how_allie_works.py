@@ -1,7 +1,7 @@
-"""How Allie Works: a Lichess game becomes tokens, the board and clocks join each move, 24 blocks
-route each move through 16 of 256 experts, and three heads predict a human's move, think time and
-result; then what "human-like" means, why the experts are small, the router's fixes, active
-against total parameters, and Allie 2.1. Every number is data.json's "arch" key."""
+"""How Allie Works, on Allie 2.1: a Lichess game becomes tokens, the board and clocks join each move,
+24 blocks route each move through 16 of 256 experts, and three heads predict a human's move, think
+time and result; then what "human-like" means, why the experts are small, the router's fixes, active
+against total parameters, and what changed from Allie 2.0. Every number is data.json's "arch" key."""
 
 import numpy as np
 from manim import (
@@ -334,7 +334,8 @@ class Title(Scene):
         cap = Captions(self, wps=WPS)
         t = text("How Allie Works", 92, INK, weight="SEMIBOLD")
         sub = sans("a chess model that plays like a human", 38)
-        head = VGroup(t, sub).arrange(DOWN, aligned_edge=LEFT, buff=0.35)
+        tag = sans("Allie 2.1", 28, MUTED)
+        head = VGroup(t, sub, tag).arrange(DOWN, aligned_edge=LEFT, buff=0.35)
         head.move_to([-2.6, 0.45, 0])
         g = grid(0.17, 0.042).move_to([4.4, -0.05, 0])
         sh = shared_bar(g, 0.42, 0.16)
@@ -667,7 +668,7 @@ class Trunk(Scene):
         k = kicker("3 · the trunk")
         n = D["blocks"]
         xs = np.linspace(-6.0, 6.0, n)
-        dense = set(V0["dense"])
+        dense = set(V1["dense"])
         yb, h_att, h_mlp = -0.85, 0.55, 1.45
         ys = yb + h_mlp / 2
         blocks = VGroup()
@@ -696,7 +697,10 @@ class Trunk(Scene):
             FadeIn(k),
             Create(stream),
             LaggedStart(*[FadeIn(b, shift=0.15 * UP) for b in blocks], lag_ratio=0.05),
-            *cap(f"The vectors then pass through {n} transformer blocks, each attention followed by an MLP."),
+            *cap(
+                f"The vectors, {V1['width']:,} wide, pass through {n} transformer blocks: "
+                f"attention with {V1['heads']} heads, then an MLP."
+            ),
             run_time=1.6,
         )
         dot = Dot([-6.9, ys, 0], 0.1, color=ORANGE).set_z_index(2)
@@ -760,13 +764,13 @@ class Trunk(Scene):
             .arrange(RIGHT, buff=0.5)
             .move_to([0, -2.35, 0])
         )
-        d = V0["dense"][-1]
+        d = V1["dense"][-1]
         self.play(
             FadeOut(toks),
             FadeOut(arcs),
             *[b[1].animate.set_fill(GREY if i in dense else ORANGE) for i, b in enumerate(blocks, 1)],
             FadeIn(legend),
-            *cap(f"In Allie 2.0, block {d} has an ordinary MLP; blocks {d + 1} to {n} use a mixture of experts."),
+            *cap(f"Blocks 1 to {d} have an ordinary MLP; blocks {d + 1} to {n} use a mixture of experts."),
             run_time=0.9,
         )
         cap.hold(-0.3)
@@ -1221,7 +1225,7 @@ class Small(Scene):
         paper(self)
         cap = Captions(self, wps=WPS)
         k = kicker("7 · why many small experts")
-        mlp, ex, shw = V0["mlp"], V0["expert"], V0["shared"]
+        mlp, ex, shw = V1["mlp"], V1["expert"], V1["shared"]
         W, x0, y = 11.0, -5.5, 2.0
         dense = Rectangle(width=W, height=0.6, fill_color=GREY, fill_opacity=1, stroke_width=0).move_to([0, y, 0])
         dlab = sans(f"one dense MLP: {mlp:,} hidden units", 28, INK).next_to(dense, UP, buff=0.2).align_to(dense, LEFT)
@@ -1253,7 +1257,7 @@ class Small(Scene):
             ReplacementTransform(dense, pieces),
             FadeIn(lab1),
             FadeIn(lab2),
-            *cap(f"A move uses {K} experts of {ex} plus a shared one of {shw:,}: the same {mlp:,}."),
+            *cap(f"A move uses {K} experts, {ex} units each, plus a shared one of {shw:,}: the same {mlp:,}."),
             run_time=1.0,
         )
         cap.hold()
@@ -1292,12 +1296,19 @@ class Small(Scene):
         self.play(FadeOut(VGroup(pieces, lab1, lab2, dlab, store, picked, slab)), run_time=0.5)
         wy = D["why"]
         rows = [
-            (f"Allie: {E} small experts", 1.0, 1.0, ORANGE),
+            (f"{E} small experts", 1.0, 1.0, ORANGE),
             (f"{wy['fine_vs']} experts, twice the size", *wy["fine"], PALE),
             ("dense transformer", *wy["dense"], GREY),
         ]
         bx, scale = -0.9, 2.5
-        title = bold("training compute needed for the same loss", 30).move_to([0, 2.5, 0])
+        title = (
+            VGroup(
+                bold("training compute needed for the same loss", 30),
+                sans("the scaling sweep's smaller models, not Allie 2.1 itself", 24, MUTED),
+            )
+            .arrange(DOWN, buff=0.12)
+            .move_to([0, 2.4, 0])
+        )
         axis = Line(
             [bx, -1.55, 0],
             [bx + scale * 2.8, -1.55, 0],
@@ -1337,7 +1348,7 @@ class Small(Scene):
             Create(axis),
             FadeIn(tks),
             FadeIn(bars[0]),
-            *cap("How much training compute does each design need to match Allie?"),
+            *cap("Our scaling sweep trained smaller models: how much compute does each design need to match?"),
             run_time=1.0,
         )
         cap.hold(-0.4)
@@ -1388,11 +1399,12 @@ class Router(Scene):
         self.play(steps[0].animate.set_color(ORANGE), run_time=0.3)
         n = ValueTracker(0)
         cnt = always_redraw(lambda: bold(f"{int(round(n.get_value()))}", 96, ORANGE).move_to([3.4, 0.55, 0]))
-        clab = sans(f"of {E} experts starved", 30).move_to([3.4, -0.45, 0])
+        clab = VGroup(sans(f"of {E} experts starved", 30), sans("Allie 2.0's runs", 24, MUTED)).arrange(DOWN, buff=0.12)
+        clab.move_to([3.4, -0.6, 0])
         self.add(cnt)
         self.play(
             FadeIn(clab),
-            *cap("In the first attempt, the first router's input became nearly constant."),
+            *cap("In Allie 2.0's first attempt, the first router's input became nearly constant."),
             run_time=0.7,
         )
         cap.hold(-0.6)
@@ -1414,7 +1426,7 @@ class Router(Scene):
                 *[g[i].animate.set_fill(busy[i]).set_stroke(OFF_EDGE, 1) for i in dead],
                 lag_ratio=0.01,
             ),
-            *cap("Fix: centre the router's input with a running mean, and step its optimizer every step."),
+            *cap("Allie 2.0's fix: centre the router's input with a running mean, and step its optimizer every step."),
             run_time=1.6,
         )
         after = bold(f"{lo}–{hi}", 96, BLUE).move_to([3.4, 0.55, 0])
@@ -1440,7 +1452,7 @@ class Router(Scene):
         cap.hold(-0.4)
         self.play(
             FadeIn(tiny, shift=0.2 * DOWN),
-            *cap(f"At step {R['overflow_step']:,}, one move's sum was {sci(R['overflow_sum'])}."),
+            *cap(f"At step {R['overflow_step']:,} of Allie 2.0's run, one move's sum was {sci(R['overflow_sum'])}."),
             run_time=0.8,
         )
         self.play(FadeIn(boom), Indicate(tiny, color=ORANGE), run_time=0.6)
@@ -1497,6 +1509,11 @@ class Router(Scene):
             run_time=1.0,
         )
         cap.hold()
+        self.play(
+            *cap("It centres only the first four expert blocks' routers, and steps Adam every other step."),
+            run_time=0.6,
+        )
+        cap.hold()
         fade_all(self, cap)
 
 
@@ -1505,24 +1522,24 @@ class Params(Scene):
         paper(self)
         cap = Captions(self, wps=WPS)
         k = kicker("9 · capacity is total, cost is active")
-        s = 1.95
+        s = 1.55
         big = Square(
-            s * V0["total"] ** 0.5,
+            s * V1["total"] ** 0.5,
             fill_color=OFF,
             fill_opacity=1,
             stroke_color=RULE,
             stroke_width=2,
         ).move_to([-3.6, 0.0, 0])
-        act = Square(s * V0["active"] ** 0.5, fill_color=ORANGE, fill_opacity=1, stroke_width=0).align_to(
+        act = Square(s * V1["active"] ** 0.5, fill_color=ORANGE, fill_opacity=1, stroke_width=0).align_to(
             big, DOWN + LEFT
         )
         tl = (
-            VGroup(bold(f"{V0['total']}B", 48, INK), sans("parameters stored", 26))
+            VGroup(bold(f"{V1['total']}B", 48, INK), sans("parameters stored", 26))
             .arrange(DOWN, buff=0.08)
             .move_to(big.get_center() + 0.6 * UP + 0.5 * RIGHT)
         )
         al = (
-            VGroup(bold(f"{V0['active']}B", 34, BG), sans("used per move", 20, BG))
+            VGroup(bold(f"{V1['active']}B", 34, BG), sans("used per move", 20, BG))
             .arrange(DOWN, buff=0.05)
             .move_to(act)
         )
@@ -1530,21 +1547,21 @@ class Params(Scene):
             FadeIn(k),
             FadeIn(big),
             FadeIn(tl),
-            *cap(f"Allie 2.0 stores {V0['total']} billion parameters."),
+            *cap(f"Allie 2.1 stores {V1['total']} billion parameters."),
             run_time=0.8,
         )
         cap.hold(-0.3)
         self.play(
             GrowFromEdge(act, DOWN + LEFT),
             FadeIn(al),
-            *cap(f"Each move uses only {V0['active']} billion, since it runs just {K} experts per block."),
+            *cap(f"Each move uses only {V1['active']} billion, since it runs just {K} experts per block."),
             run_time=0.9,
         )
         cap.hold()
 
         rows = [
             ("Original Allie", D["original"]["gflops"], GREY),
-            ("Allie 2.0", V0["gflops"], ORANGE),
+            ("Allie 2.1", V1["gflops"], ORANGE),
             (D["maia3"]["name"], D["maia3"]["gflops"], BLUE_PALE),
         ]
         bx, sc = 0.9, 5.2 / D["maia3"]["gflops"]
@@ -1571,13 +1588,12 @@ class Params(Scene):
             *[FadeIn(b[0]) for b in bars],
             *[GrowFromEdge(b[1], LEFT) for b in bars],
             *[FadeIn(b[2]) for b in bars],
-            *cap(f"So a move costs {V0['gflops']} GFLOPs, against {D['maia3']['gflops']} for {D['maia3']['name']}."),
+            *cap(f"So a move costs {V1['gflops']} GFLOPs, against {D['maia3']['gflops']} for {D['maia3']['name']}."),
             run_time=1.1,
         )
         cap.hold()
-        ms = D["cpu_ms"]
         self.play(
-            *cap(f"A move reads only {D['int8_gb']} GB of int8 weights: {ms[0]}–{ms[1]} ms on a server CPU."),
+            *cap(f"A move reads only {D['int8_gb']} GB of int8 weights: {D['cpu_ms']} ms on {D['cpu']}."),
             run_time=0.6,
         )
         cap.hold()
@@ -1588,7 +1604,7 @@ class Next(Scene):
     def construct(self):
         paper(self)
         cap = Captions(self, wps=WPS)
-        k = kicker("10 · Allie 2.1")
+        k = kicker("10 · from Allie 2.0 to Allie 2.1")
         s, base = 1.15, -1.9
         sq, x = [], -6.5
         for v in (V0, V1):
@@ -1642,7 +1658,7 @@ class Next(Scene):
             FadeIn(k),
             FadeIn(sq[0]),
             FadeIn(heads[0]),
-            *cap("Allie 2.0 is released. Allie 2.1 widens the same design."),
+            *cap("Allie 2.1 widens the design of Allie 2.0, the previous release."),
             run_time=0.8,
         )
         cap.hold(-0.6)
@@ -1673,14 +1689,16 @@ class Next(Scene):
             run_time=0.8,
         )
         cap.hold()
-        self.play(*cap("Its weights are coming; the Lichess bot has played it since October 30."), run_time=0.6)
+        self.play(
+            *cap("Its weights are on Hugging Face; the Lichess bot has played it since October 30."), run_time=0.6
+        )
         cap.hold()
         fade_all(self, cap)
 
         name = text("Allie", 92, INK, weight="SEMIBOLD")
         links = VGroup(
             mono("github.com/y0mingzhang/allie", 32, INK2),
-            mono("huggingface.co/yimingzhang/allie-2.0", 32, INK2),
+            mono("huggingface.co/yimingzhang/allie-2.1", 32, INK2),
             mono("lichess.org/@/AllieTheChessBot", 32, ORANGE),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.24)
         VGroup(name, links).arrange(DOWN, aligned_edge=LEFT, buff=0.5).move_to([0, 0.3, 0])

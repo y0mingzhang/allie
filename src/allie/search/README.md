@@ -26,7 +26,7 @@ build at another directory holding `chess.hpp`. Builds are cached by content und
 
 ## Run
 
-`MoEOracle` serves a mixture-of-experts training checkpoint such as Allie 2.0's on one CUDA GPU, built by the
+`MoEOracle` serves a mixture-of-experts training checkpoint such as Allie 2.1's on one CUDA GPU, built by the
 checkpoint's own training code (a checkpoint from before the package layout takes `source=`, its run's frozen
 source). The released Hugging Face weights run search through the Lichess bot instead (`play.search`, see
 [allie.lichess](../lichess/README.md)).
@@ -93,8 +93,8 @@ rating router (`adaptive`), the output policy per budget (`budget_policies`: per
 position features, a temperature) and the policies of fixed 64 and 1000 simulations and of the projection
 (`old_parameters`). They were fitted on a dense model. `Search(oracle, calibration=...)` takes another fit of the
 same form: Allie 2.0's, refit on held-out games, is
-[`allie/lichess/calibration-allie-2.0.json`](../lichess/calibration-allie-2.0.json). The default file makes Allie 2.0
-worse at every budget. `analysis/search-bench/fit.py` refits it for a model.
+[`allie/lichess/calibration-allie-2.0.json`](../lichess/calibration-allie-2.0.json). Allie 2.1's `strongest` mode uses that file unchanged; its own fit, behind the numbers in
+[DETAILS](../../../docs/DETAILS.md#search), isn't shipped. The default file makes both models worse at every budget. `analysis/search-bench/fit.py` refits it for a model.
 
 ## Capacity
 

@@ -55,7 +55,7 @@ def torchrun(nproc, target, args, env):
 
 def train():
     p = argparse.ArgumentParser(description="Train from a config file; resumes the run's last checkpoint.")
-    p.add_argument("config", help="e.g. configs/allie-2.0.json")
+    p.add_argument("config", help="e.g. configs/allie-2.1.json")
     p.add_argument("--name", help="run name (default: the config's)")
     p.add_argument("--nproc", type=int, default=8, help="GPUs on this node")
     a, extra = p.parse_known_args()

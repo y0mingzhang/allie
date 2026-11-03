@@ -1,6 +1,6 @@
 {
   "arch": {
-    "_src": "README.md and docs/DETAILS.md; src/allie/model (moe.py, network.py, board.py); src/allie/data/vocab.py; Allie 2.1: its training run's configuration, its released weights' main evaluation (results/lm-eval/allie-2.1) and modded_train.useful_flops' GFLOPs per move; demo: allie.lichess.api.Allie.analyze on the released checkpoint (int8, CPU)",
+    "_src": "README.md and docs/DETAILS.md (section Allie 2.1: width, heads, experts, parameters, GFLOPs, one game's 1.29 GB of int8 weights, 14.3 ms a move); src/allie/model (moe.py, network.py, board.py); src/allie/data/vocab.py; its training run's configuration; demo: allie.lichess.api.Allie.analyze on the released Allie 2.1 (int8, CPU); Allie 2.0 (v20) only as the comparison's predecessor",
     "game": {
       "tc": "3+2",
       "base": 180,
@@ -55,13 +55,13 @@
       "expert": 256,
       "shared": 1360,
       "mlp": 5456,
-      "active": 1.2,
-      "total": 9.2,
+      "active": 1.23,
+      "total": 9.19,
       "gflops": 2.45,
       "tokens": 112,
       "steps": 213623,
       "loss": 1.224,
-      "status": "finished training on Oct 28, 2026"
+      "status": "finished training on October 28, 2026"
     },
     "original": {
       "loss": 1.3526,
@@ -71,21 +71,22 @@
       "name": "Maia-3 79M",
       "gflops": 9.23
     },
-    "gflops_fixed": 0.74,
-    "gflops_expert": 0.041,
-    "int8_gb": 0.74,
-    "cpu_ms": [4.6, 6.3],
+    "int8_gb": 1.29,
+    "cpu_ms": 14.3,
+    "cpu": "an AMD EPYC 7763, 12 threads",
     "heads": {
       "time_bins": 63,
       "aux_weight": 0.2
     },
     "why": {
+      "_src": "the isoFLOP sweep's small models (256 experts with 12 active against 128 with 6; dense against MoE), not Allie 2.1 or 2.0",
       "fine_vs": 128,
       "fine": [1.04, 1.34],
       "shared": [1.13, 1.15],
       "dense": [2.17, 2.5]
     },
     "router": {
+      "_src": "Allie 2.0's first attempt (starved) and big run (starved_after, overflow, floor); not Allie 2.1's: its run's worst layer logged a median of 0-4 starved experts, 20 at most, and its log-space gates need no floor",
       "center_decay": 0.9,
       "starved": 116,
       "starved_after": [0, 2],
@@ -100,19 +101,19 @@
       "rating_hidden_2400": 0.111
     },
     "demo": {
-      "_src": "allie.lichess.api.Allie.analyze, released Allie 2.0 (int8 CPU), time control 180+2; outputs: 1800 vs 1750, clocks 180, 180, 179 s; human: both players at each rating, no clocks",
+      "_src": "allie.lichess.api.Allie.analyze, released Allie 2.1 (int8 CPU, the default Rust engine), time control 180+2; outputs: 1800 vs 1750, clocks 180, 180, 179 s; human: both players at each rating, no clocks",
       "clock": {"mine": 180, "theirs": 179, "think": null},
       "outputs": {
         "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
         "moves": [
-          ["Nc6", "b8c6", 0.7078],
-          ["Nf6", "g8f6", 0.1184],
-          ["d6", "d7d6", 0.1116],
-          ["d5", "d7d5", 0.0241]
+          ["Nc6", "b8c6", 0.6861],
+          ["Nf6", "g8f6", 0.1336],
+          ["d6", "d7d6", 0.1201],
+          ["d5", "d7d5", 0.0188]
         ],
-        "wdl": [0.4077, 0.0406, 0.5517],
+        "wdl": [0.4149, 0.0426, 0.5425],
         "think": 1.51,
-        "time": [0.11645, 0.62173, 0.17043, 0.04023, 0.01595, 0.00926, 0.00548, 0.00404, 0.00279, 0.00232, 0.00183, 0.00146, 0.00107, 0.00086, 0.00068, 0.00062, 0.00096, 0.00065, 0.00075, 0.00067, 0.00044, 0.00029, 0.0003, 0.00019, 0.00014, 0.00011, 8e-05, 7e-05, 4e-05, 3e-05, 2e-05, 1e-05, 1e-05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        "time": [0.10987, 0.62003, 0.17295, 0.0468, 0.01669, 0.00948, 0.00562, 0.00402, 0.00268, 0.00204, 0.00153, 0.00127, 0.00091, 0.00079, 0.00063, 0.00056, 0.00085, 0.00061, 0.00063, 0.00056, 0.00035, 0.00024, 0.00025, 0.00016, 0.00013, 0.0001, 7e-05, 6e-05, 4e-05, 3e-05, 2e-05, 1e-05, 1e-05, 1e-05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
       },
       "centres": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.435, 21.24, 24.472, 28.195, 32.486, 37.429, 43.124, 49.686, 57.247, 65.958, 75.995, 87.558, 100.882, 116.232, 133.919, 154.297, 177.775, 204.827, 235.994, 271.904, 313.279, 360.949, 415.873, 479.154, 552.065, 636.07, 732.858, 844.373, 972.857, 1120.892, 1291.453, 1487.968, 1714.385, 1975.255, 2275.82, 2622.121, 3021.117, 3480.826, 4010.487, 4620.744, 5323.861, 6133.969, 7067.346, 8142.751, 9381.795, 10809.379],
       "human": {
@@ -125,18 +126,18 @@
         "show": ["g6", "Qf6", "Qe7", "Nf6"],
         "ratings": [800, 1200, 1600, 2000, 2400],
         "p": [
-          {"g6": 0.7127, "Qf6": 0.0308, "Qe7": 0.0459, "Nf6": 0.0898},
-          {"g6": 0.7229, "Qf6": 0.112, "Qe7": 0.0581, "Nf6": 0.0485},
-          {"g6": 0.6032, "Qf6": 0.2306, "Qe7": 0.1137, "Nf6": 0.0245},
-          {"g6": 0.7388, "Qf6": 0.1385, "Qe7": 0.104, "Nf6": 0.0091},
-          {"g6": 0.9263, "Qf6": 0.0283, "Qe7": 0.0387, "Nf6": 0.0053}
+          {"g6": 0.6535, "Qf6": 0.0419, "Qe7": 0.0733, "Nf6": 0.0927},
+          {"g6": 0.6937, "Qf6": 0.0964, "Qe7": 0.082, "Nf6": 0.052},
+          {"g6": 0.5859, "Qf6": 0.2175, "Qe7": 0.1452, "Nf6": 0.0212},
+          {"g6": 0.662, "Qf6": 0.1676, "Qe7": 0.1464, "Nf6": 0.0103},
+          {"g6": 0.8437, "Qf6": 0.0606, "Qe7": 0.0889, "Nf6": 0.0042}
         ]
       }
     }
   },
 
   "scaling": {
-    "_src": "the 45-run isoFLOP sweep (24 MoE, 21 dense; main-evaluation CE) refit three ways (Chinchilla approaches 1-3); Allie 2.0 / 2.1 from the big runs; miss: the why-the-law-missed-Allie-2.0 study (backtests, law forms, decay-to-zero forks of Allie 2.0, eval and parameter-count checks); actual: Allie 2.1's final checkpoint on the main evaluation (bigrun-trajectory-v4); later: the Oct 17 refit's four law forms on September 2026 games, against Allie 2.1's released weights on them",
+    "_src": "the 45-run isoFLOP sweep (24 MoE, 21 dense; main-evaluation CE) refit three ways (Chinchilla approaches 1-3); Allie 2.0 / 2.1 from the big runs; miss: the why-the-law-missed-Allie-2.0 study (backtests, law forms, decay-to-zero forks of Allie 2.0, eval and parameter-count checks); actual: Allie 2.1's final checkpoint on the main evaluation (bigrun-trajectory-v4) and its released weights (README, 1.2240); later: the Oct 17 refit's four law forms on September 2026 games, against Allie 2.1's released weights on them",
     "meta": {
       "C20": 3.1421e+20,
       "Y20": 1.2533,
@@ -914,6 +915,7 @@
       "actual": {
         "date": "Oct 28",
         "final": 1.2248,
+        "released": 1.224,
         "later": [1.2325, 1.2396],
         "later_score": 1.2265
       }
@@ -997,105 +999,105 @@
   },
 
   "search": {
-    "_src": "src/allie/lichess/calibration.py (the shipped per-cell search budgets) and the analyses in analysis/elo_strength/ behind it; elo = mean of the accuracy and blunder-rate Elo gaps vs humans; ce = human-move CE minus the raw policy's, nats",
-    "model": "Allie 2.0 (annealed)",
-    "positions": 220000,
-    "month": "July 2026",
+    "_src": "Allie 2.1's shipped rule, src/allie/lichess/calibration.py (RULES, LADDER, COST, MARGIN), scored as the bot plays it (analysis/elo_strength/calib_unified.py; release-2.1/calib-fit win21-sept and its plot json, the README figure's); cells: September 2026 games, none in the fit; raw_elo and elo: mean of the accuracy and blunder-rate Elo gaps against the humans; ce: human-move CE minus the raw policy's, nats; miss: outside the noise at 95% on accuracy or blunder rate; leaves: the median of the rungs the bot's think-time draws give, at COST; raw and shipped: per time control, the mean gap and the debiased RMS Elo of calib_unified.report; tests: DETAILS' Calibrated play. sweep: research on annealed Allie 2.0 only, the search sweep of Oct 3-5, 2026 (coverage_elo: its per-cell table before the sweep, classical 2400 and 2600 at 256 simulations; rows: leaves to reach human accuracy with CE below raw on 1,000 dev positions per cell; holdout: classical 2600 on 4,000 positions outside dev). live: the bot's live config and DETAILS' four-game test",
+    "model": "Allie 2.1",
+    "positions": 197191,
+    "month": "September 2026",
+    "fit_positions": 198794,
+    "fit_month": "July 2026",
     "formats": ["bullet", "blitz", "rapid", "classical"],
     "bins": [800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600],
     "blunder_drop": 15,
-    "cells": {
-      "bullet/800": {"human_acc": 84.95, "human_blunder": 10.22, "raw_acc": 84.71, "raw_blunder": 10.46, "raw_elo": -328, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -328, "ce": 0.0},
-      "bullet/1000": {"human_acc": 84.95, "human_blunder": 10.58, "raw_acc": 84.61, "raw_blunder": 10.86, "raw_elo": -376, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -376, "ce": 0.0},
-      "bullet/1200": {"human_acc": 85.93, "human_blunder": 9.1, "raw_acc": 85.38, "raw_blunder": 9.73, "raw_elo": -437, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -437, "ce": 0.0},
-      "bullet/1400": {"human_acc": 85.9, "human_blunder": 8.76, "raw_acc": 85.91, "raw_blunder": 8.8, "raw_elo": -3, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -3, "ce": 0.0},
-      "bullet/1600": {"human_acc": 85.84, "human_blunder": 9.2, "raw_acc": 85.41, "raw_blunder": 9.52, "raw_elo": -166, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -166, "ce": 0.0},
-      "bullet/1800": {"human_acc": 85.91, "human_blunder": 8.88, "raw_acc": 85.68, "raw_blunder": 9.11, "raw_elo": -83, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -83, "ce": 0.0},
-      "bullet/2000": {"human_acc": 86.52, "human_blunder": 8.08, "raw_acc": 86.41, "raw_blunder": 8.41, "raw_elo": -71, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -71, "ce": 0.0},
-      "bullet/2200": {"human_acc": 88.06, "human_blunder": 6.8, "raw_acc": 87.09, "raw_blunder": 7.83, "raw_elo": -299, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -299, "ce": 0.0},
-      "bullet/2400": {"human_acc": 88.4, "human_blunder": 6.52, "raw_acc": 87.78, "raw_blunder": 7.19, "raw_elo": -178, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -178, "ce": 0.0},
-      "bullet/2600": {"human_acc": 89.31, "human_blunder": 5.74, "raw_acc": 88.3, "raw_blunder": 6.65, "raw_elo": -248, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -248, "ce": 0.0},
-      "blitz/800": {"human_acc": 84.07, "human_blunder": 12.14, "raw_acc": 84.09, "raw_blunder": 12.05, "raw_elo": 12, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": 12, "ce": 0.0},
-      "blitz/1000": {"human_acc": 84.88, "human_blunder": 10.06, "raw_acc": 84.61, "raw_blunder": 10.54, "raw_elo": -88, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -88, "ce": 0.0},
-      "blitz/1200": {"human_acc": 86.02, "human_blunder": 9.08, "raw_acc": 85.61, "raw_blunder": 9.45, "raw_elo": -94, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -94, "ce": 0.0},
-      "blitz/1400": {"human_acc": 86.31, "human_blunder": 8.28, "raw_acc": 85.82, "raw_blunder": 8.72, "raw_elo": -109, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -109, "ce": 0.0},
-      "blitz/1600": {"human_acc": 86.79, "human_blunder": 7.84, "raw_acc": 86.21, "raw_blunder": 8.34, "raw_elo": -122, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -122, "ce": 0.0},
-      "blitz/1800": {"human_acc": 88.07, "human_blunder": 6.5, "raw_acc": 87.28, "raw_blunder": 7.46, "raw_elo": -195, "choice": "coverage 128 b0.5", "sims": 128, "beta": 0.5, "ms": 2832, "elo": -77, "ce": -0.0019},
-      "blitz/2000": {"human_acc": 88.22, "human_blunder": 6.12, "raw_acc": 87.11, "raw_blunder": 7.46, "raw_elo": -262, "choice": "coverage 128", "sims": 128, "beta": null, "ms": 2832, "elo": -48, "ce": -0.0073},
-      "blitz/2200": {"human_acc": 89.78, "human_blunder": 5.2, "raw_acc": 88.05, "raw_blunder": 6.93, "raw_elo": -373, "choice": "coverage 128 b2", "sims": 128, "beta": 2.0, "ms": 2832, "elo": -23, "ce": -0.0074},
-      "blitz/2400": {"human_acc": 90.44, "human_blunder": 4.24, "raw_acc": 88.38, "raw_blunder": 6.53, "raw_elo": -476, "choice": "coverage 128 b3", "sims": 128, "beta": 3.0, "ms": 2832, "elo": -7, "ce": -0.0103},
-      "blitz/2600": {"human_acc": 91.43, "human_blunder": 3.52, "raw_acc": 89.05, "raw_blunder": 6.16, "raw_elo": -556, "choice": "coverage 256 b3", "sims": 256, "beta": 3.0, "ms": 5388, "elo": -38, "ce": -0.0155},
-      "rapid/800": {"human_acc": 85.52, "human_blunder": 10.38, "raw_acc": 85.14, "raw_blunder": 11.14, "raw_elo": -331, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -331, "ce": 0.0},
-      "rapid/1000": {"human_acc": 85.39, "human_blunder": 10.5, "raw_acc": 85.29, "raw_blunder": 10.35, "raw_elo": 0, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": 0, "ce": 0.0},
-      "rapid/1200": {"human_acc": 85.58, "human_blunder": 9.72, "raw_acc": 85.71, "raw_blunder": 9.54, "raw_elo": 48, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": 48, "ce": 0.0},
-      "rapid/1400": {"human_acc": 86.8, "human_blunder": 8.74, "raw_acc": 86.53, "raw_blunder": 8.63, "raw_elo": -29, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -29, "ce": 0.0},
-      "rapid/1600": {"human_acc": 87.71, "human_blunder": 7.08, "raw_acc": 86.85, "raw_blunder": 7.99, "raw_elo": -178, "choice": "coverage 128 b0.5", "sims": 128, "beta": 0.5, "ms": 2832, "elo": -44, "ce": -0.0017},
-      "rapid/1800": {"human_acc": 88.38, "human_blunder": 6.58, "raw_acc": 87.16, "raw_blunder": 7.41, "raw_elo": -181, "choice": "coverage 32 b1", "sims": 32, "beta": 1.0, "ms": 741, "elo": -12, "ce": -0.0034},
-      "rapid/2000": {"human_acc": 89.17, "human_blunder": 5.38, "raw_acc": 87.72, "raw_blunder": 7.0, "raw_elo": -236, "choice": "coverage 128 b1", "sims": 128, "beta": 1.0, "ms": 2832, "elo": -63, "ce": -0.0049},
-      "rapid/2200": {"human_acc": 90.21, "human_blunder": 4.48, "raw_acc": 88.3, "raw_blunder": 6.35, "raw_elo": -269, "choice": "coverage 32 b3", "sims": 32, "beta": 3.0, "ms": 741, "elo": 11, "ce": -0.0082},
-      "rapid/2400": {"human_acc": 92.04, "human_blunder": 3.0, "raw_acc": 88.66, "raw_blunder": 6.22, "raw_elo": -458, "choice": "coverage 128 b6", "sims": 128, "beta": 6.0, "ms": 2832, "elo": 39, "ce": -0.0192},
-      "rapid/2600": {"human_acc": 93.62, "human_blunder": 2.4, "raw_acc": 89.61, "raw_blunder": 6.01, "raw_elo": -507, "choice": "coverage 256 b8", "sims": 256, "beta": 8.0, "ms": 5388, "elo": -8, "ce": -0.0307},
-      "classical/800": {"human_acc": 85.29, "human_blunder": 11.42, "raw_acc": 85.52, "raw_blunder": 11.23, "raw_elo": 77, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": 77, "ce": 0.0},
-      "classical/1000": {"human_acc": 86.15, "human_blunder": 10.06, "raw_acc": 85.74, "raw_blunder": 10.39, "raw_elo": -99, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -99, "ce": 0.0},
-      "classical/1200": {"human_acc": 86.27, "human_blunder": 9.44, "raw_acc": 86.29, "raw_blunder": 9.57, "raw_elo": -7, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -7, "ce": 0.0},
-      "classical/1400": {"human_acc": 87.01, "human_blunder": 8.34, "raw_acc": 86.66, "raw_blunder": 8.72, "raw_elo": -60, "choice": "raw", "sims": 0, "beta": null, "ms": 0, "elo": -60, "ce": 0.0},
-      "classical/1600": {"human_acc": 87.75, "human_blunder": 6.6, "raw_acc": 86.86, "raw_blunder": 7.93, "raw_elo": -160, "choice": "coverage 128 b0.5", "sims": 128, "beta": 0.5, "ms": 2832, "elo": -61, "ce": -0.0026},
-      "classical/1800": {"human_acc": 88.99, "human_blunder": 5.46, "raw_acc": 87.93, "raw_blunder": 6.82, "raw_elo": -166, "choice": "coverage 32 b1", "sims": 32, "beta": 1.0, "ms": 741, "elo": -33, "ce": -0.0042},
-      "classical/2000": {"human_acc": 90.73, "human_blunder": 3.82, "raw_acc": 88.2, "raw_blunder": 6.46, "raw_elo": -348, "choice": "coverage 32 b4", "sims": 32, "beta": 4.0, "ms": 741, "elo": 7, "ce": -0.0113},
-      "classical/2200": {"human_acc": 92.9, "human_blunder": 2.48, "raw_acc": 89.1, "raw_blunder": 5.93, "raw_elo": -489, "choice": "coverage 128 b6", "sims": 128, "beta": 6.0, "ms": 2832, "elo": -24, "ce": -0.0189},
-      "classical/2400": {"human_acc": 93.99, "human_blunder": 1.78, "raw_acc": 89.41, "raw_blunder": 6.04, "raw_elo": -575, "choice": "coverage 256 b8", "sims": 256, "beta": 8.0, "ms": 5388, "elo": -137, "ce": -0.0395},
-      "classical/2600": {"human_acc": 94.91, "human_blunder": 1.34, "raw_acc": 89.84, "raw_blunder": 5.68, "raw_elo": -585, "choice": "coverage 256 b12", "sims": 256, "beta": 12.0, "ms": 5388, "elo": -260, "ce": -0.0395}
-    },
-    "raw": {"bullet": {"mean": -219, "rms": 257}, "blitz": {"mean": -226, "rms": 287}, "rapid": {"mean": -214, "rms": 278}, "classical": {"mean": -241, "rms": 333}},
-    "shipped": {"bullet": {"mean": -219, "rms": 257}, "blitz": {"mean": -60, "rms": 73}, "rapid": {"mean": -39, "rms": 110}, "classical": {"mean": -60, "rms": 106}},
     "n_cells": 40,
-    "n_search": 17,
-    "ce_range": [-0.002, -0.04],
-    "versus": {"cells": 17, "coverage_as_good": 15, "lookahead_cheaper": 7},
-    "ceiling": {
-      "cell": "classical/2400",
-      "coverage": [
-        {"budget": 8, "leaves": 8, "ce": null, "reach": -107, "ce_opt_elo": -454},
-        {"budget": 16, "leaves": 16, "ce": null, "reach": -15, "ce_opt_elo": -399},
-        {"budget": 32, "leaves": 32, "ce": null, "reach": -3, "ce_opt_elo": -343},
-        {"budget": 64, "leaves": 63, "ce": 0.391, "reach": 0, "ce_opt_elo": -304},
-        {"budget": 128, "leaves": 126, "ce": 0.396, "reach": 0, "ce_opt_elo": -313},
-        {"budget": 256, "leaves": 252, "ce": 0.287, "reach": 0, "ce_opt_elo": -334},
-        {"budget": 512, "leaves": 501, "ce": 0.159, "reach": 0, "ce_opt_elo": -288},
-        {"budget": 1024, "leaves": 996, "ce": 0.106, "reach": 0, "ce_opt_elo": -268},
-        {"budget": 2048, "leaves": 1981, "ce": 0.068, "reach": 0, "ce_opt_elo": -243},
-        {"budget": 4096, "leaves": 3937, "ce": 0.038, "reach": 0, "ce_opt_elo": -220}
-      ],
-      "two_view": [
-        {"budget": 8, "leaves": 16, "ce": null, "reach": -91, "ce_opt_elo": -425},
-        {"budget": 16, "leaves": 32, "ce": 1.038, "reach": 0, "ce_opt_elo": -370},
-        {"budget": 32, "leaves": 63, "ce": 0.214, "reach": 0, "ce_opt_elo": -304},
-        {"budget": 64, "leaves": 127, "ce": 0.13, "reach": 0, "ce_opt_elo": -275},
-        {"budget": 128, "leaves": 253, "ce": 0.089, "reach": 0, "ce_opt_elo": -265},
-        {"budget": 256, "leaves": 503, "ce": 0.061, "reach": 0, "ce_opt_elo": -265},
-        {"budget": 512, "leaves": 1001, "ce": 0.033, "reach": 0, "ce_opt_elo": -244},
-        {"budget": 1024, "leaves": 1992, "ce": 0.012, "reach": 0, "ce_opt_elo": -226}
-      ],
-      "lookahead": [
-        {"budget": 1, "leaves": 33, "ce": null, "reach": -280, "ce_opt_elo": -464},
-        {"budget": 2, "leaves": 48, "ce": null, "reach": -139, "ce_opt_elo": -412},
-        {"budget": 4, "leaves": 79, "ce": null, "reach": -58, "ce_opt_elo": -362},
-        {"budget": 8, "leaves": 140, "ce": 0.281, "reach": 0, "ce_opt_elo": -355},
-        {"budget": 16, "leaves": 258, "ce": 0.26, "reach": 0, "ce_opt_elo": -337},
-        {"budget": 32, "leaves": 477, "ce": 0.239, "reach": 0, "ce_opt_elo": -327},
-        {"budget": 64, "leaves": 847, "ce": 0.229, "reach": 0, "ce_opt_elo": -327},
-        {"budget": 128, "leaves": 1344, "ce": 0.222, "reach": 0, "ce_opt_elo": -328},
-        {"budget": 256, "leaves": 1745, "ce": 0.225, "reach": 0, "ce_opt_elo": -328},
-        {"budget": 512, "leaves": 1896, "ce": 0.233, "reach": 0, "ce_opt_elo": -329}
-      ],
-      "stockfish_ce": -0.068,
-      "stockfish_mean_elo": -17,
+    "cells": {
+      "bullet/800": {"human_acc": 84.69, "human_blunder": 10.48, "raw_acc": 83.75, "raw_blunder": 11.79, "raw_elo": -746, "elo": -565, "ce": -0.001, "miss": true, "leaves": 128},
+      "bullet/1000": {"human_acc": 84.67, "human_blunder": 10.76, "raw_acc": 84.36, "raw_blunder": 10.86, "raw_elo": -126, "elo": 27, "ce": -0.0004, "miss": false, "leaves": 128},
+      "bullet/1200": {"human_acc": 85.53, "human_blunder": 9.34, "raw_acc": 85.28, "raw_blunder": 9.83, "raw_elo": -186, "elo": -62, "ce": -0.0003, "miss": false, "leaves": 128},
+      "bullet/1400": {"human_acc": 85.29, "human_blunder": 9.4, "raw_acc": 84.99, "raw_blunder": 9.78, "raw_elo": -154, "elo": -42, "ce": -0.0004, "miss": false, "leaves": 128},
+      "bullet/1600": {"human_acc": 85.8, "human_blunder": 9.28, "raw_acc": 85.7, "raw_blunder": 9.19, "raw_elo": -4, "elo": 92, "ce": 0.0001, "miss": false, "leaves": 64},
+      "bullet/1800": {"human_acc": 86.65, "human_blunder": 8.04, "raw_acc": 86.36, "raw_blunder": 8.48, "raw_elo": -140, "elo": -57, "ce": 0.0004, "miss": false, "leaves": 64},
+      "bullet/2000": {"human_acc": 86.95, "human_blunder": 8.02, "raw_acc": 87.07, "raw_blunder": 7.56, "raw_elo": 103, "elo": 189, "ce": 0.0004, "miss": true, "leaves": 64},
+      "bullet/2200": {"human_acc": 87.53, "human_blunder": 7.26, "raw_acc": 87.41, "raw_blunder": 7.13, "raw_elo": 1, "elo": 84, "ce": -0.0002, "miss": false, "leaves": 64},
+      "bullet/2400": {"human_acc": 88.12, "human_blunder": 6.64, "raw_acc": 88.01, "raw_blunder": 6.82, "raw_elo": -49, "elo": 26, "ce": -0.0001, "miss": false, "leaves": 32},
+      "bullet/2600": {"human_acc": 88.57, "human_blunder": 6.08, "raw_acc": 88.44, "raw_blunder": 6.55, "raw_elo": -97, "elo": -24, "ce": -0.001, "miss": false, "leaves": 32},
+      "blitz/800": {"human_acc": 85.22, "human_blunder": 10.52, "raw_acc": 84.14, "raw_blunder": 11.86, "raw_elo": -669, "elo": -336, "ce": -0.0016, "miss": true, "leaves": 512},
+      "blitz/1000": {"human_acc": 84.95, "human_blunder": 10.56, "raw_acc": 84.46, "raw_blunder": 10.94, "raw_elo": -188, "elo": 80, "ce": -0.0002, "miss": false, "leaves": 256},
+      "blitz/1200": {"human_acc": 85.74, "human_blunder": 9.88, "raw_acc": 85.07, "raw_blunder": 10.22, "raw_elo": -182, "elo": 25, "ce": -0.0006, "miss": false, "leaves": 256},
+      "blitz/1400": {"human_acc": 85.57, "human_blunder": 9.42, "raw_acc": 85.33, "raw_blunder": 9.66, "raw_elo": -68, "elo": 117, "ce": 0.0, "miss": false, "leaves": 256},
+      "blitz/1600": {"human_acc": 86.82, "human_blunder": 7.94, "raw_acc": 86.26, "raw_blunder": 8.37, "raw_elo": -127, "elo": 56, "ce": 0.0005, "miss": false, "leaves": 256},
+      "blitz/1800": {"human_acc": 87.63, "human_blunder": 6.78, "raw_acc": 86.68, "raw_blunder": 7.84, "raw_elo": -232, "elo": -25, "ce": -0.0022, "miss": false, "leaves": 256},
+      "blitz/2000": {"human_acc": 89.04, "human_blunder": 5.76, "raw_acc": 87.97, "raw_blunder": 6.65, "raw_elo": -216, "elo": 10, "ce": -0.002, "miss": false, "leaves": 256},
+      "blitz/2200": {"human_acc": 89.02, "human_blunder": 5.96, "raw_acc": 88.28, "raw_blunder": 6.54, "raw_elo": -131, "elo": 129, "ce": -0.0008, "miss": true, "leaves": 256},
+      "blitz/2400": {"human_acc": 90.62, "human_blunder": 4.58, "raw_acc": 89.16, "raw_blunder": 5.86, "raw_elo": -271, "elo": 20, "ce": -0.003, "miss": false, "leaves": 128},
+      "blitz/2600": {"human_acc": 91.45, "human_blunder": 4.02, "raw_acc": 89.74, "raw_blunder": 5.52, "raw_elo": -309, "elo": 12, "ce": -0.0082, "miss": false, "leaves": 128},
+      "rapid/800": {"human_acc": 84.75, "human_blunder": 11.48, "raw_acc": 84.78, "raw_blunder": 11.56, "raw_elo": -3, "elo": 177, "ce": 0.0003, "miss": false, "leaves": 512},
+      "rapid/1000": {"human_acc": 85.51, "human_blunder": 10.32, "raw_acc": 84.73, "raw_blunder": 11.01, "raw_elo": -343, "elo": -175, "ce": -0.0002, "miss": false, "leaves": 512},
+      "rapid/1200": {"human_acc": 86.3, "human_blunder": 9.1, "raw_acc": 85.81, "raw_blunder": 9.58, "raw_elo": -148, "elo": -37, "ce": -0.0007, "miss": false, "leaves": 512},
+      "rapid/1400": {"human_acc": 86.42, "human_blunder": 8.82, "raw_acc": 85.91, "raw_blunder": 9.38, "raw_elo": -118, "elo": -18, "ce": -0.0009, "miss": false, "leaves": 512},
+      "rapid/1600": {"human_acc": 86.58, "human_blunder": 8.36, "raw_acc": 86.34, "raw_blunder": 8.44, "raw_elo": -33, "elo": 67, "ce": 0.0004, "miss": false, "leaves": 512},
+      "rapid/1800": {"human_acc": 88.34, "human_blunder": 6.02, "raw_acc": 87.3, "raw_blunder": 7.23, "raw_elo": -185, "elo": -60, "ce": -0.0033, "miss": false, "leaves": 512},
+      "rapid/2000": {"human_acc": 89.23, "human_blunder": 5.02, "raw_acc": 87.97, "raw_blunder": 6.45, "raw_elo": -203, "elo": -31, "ce": -0.0053, "miss": false, "leaves": 512},
+      "rapid/2200": {"human_acc": 90.52, "human_blunder": 4.3, "raw_acc": 88.99, "raw_blunder": 5.75, "raw_elo": -209, "elo": 42, "ce": -0.0037, "miss": false, "leaves": 512},
+      "rapid/2400": {"human_acc": 92.18, "human_blunder": 3.16, "raw_acc": 89.35, "raw_blunder": 5.98, "raw_elo": -376, "elo": -46, "ce": -0.0239, "miss": true, "leaves": 512},
+      "rapid/2600": {"human_acc": 93.74, "human_blunder": 2.08, "raw_acc": 90.15, "raw_blunder": 5.2, "raw_elo": -458, "elo": -26, "ce": -0.0368, "miss": true, "leaves": 512},
+      "classical/800": {"human_acc": 84.34, "human_blunder": 12.44, "raw_acc": 84.56, "raw_blunder": 12.05, "raw_elo": 66, "elo": 82, "ce": 0.0001, "miss": false, "leaves": 1024},
+      "classical/1000": {"human_acc": 85.04, "human_blunder": 11.16, "raw_acc": 84.61, "raw_blunder": 11.45, "raw_elo": -67, "elo": -43, "ce": -0.0002, "miss": false, "leaves": 1024},
+      "classical/1200": {"human_acc": 86.3, "human_blunder": 9.64, "raw_acc": 85.6, "raw_blunder": 10.3, "raw_elo": -107, "elo": -73, "ce": -0.0009, "miss": true, "leaves": 1024},
+      "classical/1400": {"human_acc": 87.04, "human_blunder": 7.94, "raw_acc": 86.65, "raw_blunder": 8.43, "raw_elo": -63, "elo": -10, "ce": -0.0008, "miss": false, "leaves": 1024},
+      "classical/1600": {"human_acc": 88.1, "human_blunder": 6.44, "raw_acc": 87.67, "raw_blunder": 7.13, "raw_elo": -75, "elo": 12, "ce": -0.0005, "miss": false, "leaves": 1024},
+      "classical/1800": {"human_acc": 89.14, "human_blunder": 6.08, "raw_acc": 88.24, "raw_blunder": 6.62, "raw_elo": -94, "elo": 45, "ce": -0.0028, "miss": true, "leaves": 1024},
+      "classical/2000": {"human_acc": 91.29, "human_blunder": 3.56, "raw_acc": 89.52, "raw_blunder": 5.25, "raw_elo": -236, "elo": -2, "ce": -0.0075, "miss": false, "leaves": 1024},
+      "classical/2200": {"human_acc": 92.93, "human_blunder": 2.48, "raw_acc": 90.25, "raw_blunder": 4.94, "raw_elo": -351, "elo": 10, "ce": -0.0181, "miss": false, "leaves": 1024},
+      "classical/2400": {"human_acc": 94.19, "human_blunder": 1.96, "raw_acc": 90.72, "raw_blunder": 4.83, "raw_elo": -420, "elo": 10, "ce": -0.0394, "miss": false, "leaves": 1024},
+      "classical/2600": {"human_acc": 95.76, "human_blunder": 1.14, "raw_acc": 92.67, "raw_blunder": 3.83, "raw_elo": -425, "elo": 65, "ce": -0.0099, "miss": false, "leaves": 512}
+    },
+    "raw": {
+      "bullet": {"mean": -140, "rms": 232},
+      "blitz": {"mean": -239, "rms": 285},
+      "rapid": {"mean": -208, "rms": 240},
+      "classical": {"mean": -177, "rms": 236}
+    },
+    "shipped": {
+      "bullet": {"mean": -33, "rms": 157},
+      "blitz": {"mean": 9, "rms": 95},
+      "rapid": {"mean": -11, "rms": 49},
+      "classical": {"mean": 10, "rms": 19}
+    },
+    "ce": {
+      "bullet": -0.0002,
+      "blitz": -0.0018,
+      "rapid": -0.0074,
+      "classical": -0.008
+    },
+    "rules": [[0.1, 2.0, 1.0, 0.5, 0.1], [0.196, 2.5, 1.0, 0.5, 0.2], [0.125, 3.0, 0.5, 0.25, 0.1], [0.196, 3.0, 0.5, 0.0, 0.0]],
+    "ladder": [8, 16, 32, 64, 128, 256, 512, 1024],
+    "cost": 0.006,
+    "margin": 0.3,
+    "tests": {
+      "of": 80,
+      "chance": 4,
+      "sept": 11,
+      "july": 5,
+      "params": 20,
+      "one_rule_july": [14, 16],
+      "candidates": [14, 17],
+      "v20": {"july": 2, "sept": 8, "params": 4}
+    },
+    "sweep": {
+      "coverage_elo": [-137, -260],
+      "coverage_sims": 256,
       "stockfish_cells": 12,
       "plateau_elo": [-220, -330],
-      "seconds": {"coverage 256": 5.4, "coverage 1024": 21, "two-view 1024": 43},
-      "cl2600_two_view_1024_ce": 0.087
+      "rows": [{"name": "coverage, Q tilt", "c2400": null, "c2600": null}, {"name": "coverage, log-odds tilt", "c2400": 280, "c2600": null}, {"name": "coverage, 3000-rated view", "c2400": 220, "c2600": 1100}, {"name": "coverage, 2 views", "c2400": 170, "c2600": 1400}, {"name": "KL", "c2400": 130, "c2600": 2000}, {"name": "KL, 3000-rated view", "c2400": 110, "c2600": 560}, {"name": "KL, 3000-rated classical view", "c2400": 100, "c2600": 420}],
+      "holdout": {"positions": 4000, "kl": 3000, "kl_view": 1000}
     },
-    "live": {"bot": "AllieTheChessBot", "url": "lichess.org/@/AllieTheChessBot", "cpus": 6, "games": 10, "search_clock": "1/10", "fallback_clock": "1/5", "busy_median_s": [2, 3], "busy_max_s": 6.9},
+    "live": {
+      "bot": "AllieTheChessBot",
+      "url": "lichess.org/@/AllieTheChessBot",
+      "cpus": 16,
+      "games": 10,
+      "measured_s": {"median": 1.8, "p90": 4.9}
+    },
     "schematic": {
       "_note": "illustrative numbers for the explanatory beats, not measurements",
       "moves": ["Re1", "Qe2", "h3", "Bd3", "a4", "Nxe5", "Rb1", "g4"],
@@ -1106,11 +1108,7 @@
       "beta_engine": 15,
       "t_sharp": 0.5,
       "tree_p": [0.26, 0.19, 0.14, 0.11, 0.08, 0.07, 0.05, 0.04, 0.035, 0.025],
-      "tree_q": [0.1, -0.35, 0.25, 0.05, -0.15, 0.4, -0.05, 0.15, -0.45, -0.25],
-      "noise_p": [0.3, 0.25, 0.18, 0.12, 0.09, 0.06],
-      "noise_q": [0.12, 0.22, 0.02, -0.08, -0.25, 0.3],
-      "noise_sd": 0.12,
-      "noise_beta": 10
+      "tree_q": [0.1, -0.35, 0.25, 0.05, -0.15, 0.4, -0.05, 0.15, -0.45, -0.25]
     }
   }
 }

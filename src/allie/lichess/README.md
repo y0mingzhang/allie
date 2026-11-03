@@ -64,7 +64,7 @@ trust_remote_code=True)`, see the model card).
 | `play.mode` | What it does |
 |---|---|
 | `human` (default) | Samples a move from the model's predicted distribution for a player of `play.rating`, at `play.temperature` (1 = the model's own distribution). `rating = "opponent"` mirrors the opponent's rating, as the original Allie did. |
-| `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with Allie 2.0's own output calibration and plays its most likely move. |
+| `strongest` | Plays the most likely move of a player of `play.rating` (for example 2800). With `play.search` = 5, 8, 25 or 128, it runs `allie.search`'s coverage search with the output calibration fitted on Allie 2.0 (not refit for 2.1) and plays its most likely move. |
 | `calibrated` | Plays at the strength of humans of `play.rating` at the game's time control, at temperature 1 (the policy's diversity kept), predicting human moves no worse than the policy at 95% in any time control and rating on September games (on July, bullet 2000 is worse with the game halves pooled). One rule per time control, none per rating (`calibration.py`): the move's think time is drawn first, a KL search (best-first on log-odds values, every node read as a game between two 3000-rated players) evaluates the largest of 8, 16, ..., 1024 leaves that fits it and a tenth of the clock (none if 8 do not fit), and the move is sampled from the policy tilted by the searched values, more sharply for stronger players and longer-thought positions, never less than its time control's floor. A search ends 0.3 s before the think time (or at a fifth of the clock) with the tree it has, so no search runs past the drawn think time. Searches run only on the Rust engine; a leaf is priced at `calibration.COST` (6 ms, 16 cores) or at the bot's recent searches' cost when higher (up to 24 ms), so a busy or slower machine searches less and plays weaker than fitted. With `play.think_time` off, only the clock caps the search, which plays stronger. Needs `--extra fast`. Live with Allie 2.0, against rating-matched humans (2,223 games, 2026-10-06 to 10-17), it played 53 ± 8 Elo above its rating in games decided on the board (85 counting opponents who flagged or left; blitz -11, rapid +61, classical +124), so the live bot sets `play.offset = -50`: the rating it plays as, in the header and the tilt, 50 below its opponent's (kept for Allie 2.1 until its own live games measure it). The rule and `behaviour.json` are fitted for Allie 2.1. For Allie 2.0, check out the whole of [commit cad41559](https://github.com/y0mingzhang/allie/tree/cad41559): on this version the bot warns and plays Allie 2.1's rule. |
 
 - **Think time.** The bot waits for a think time drawn from the model's think-time head: a distribution over
@@ -76,8 +76,7 @@ trust_remote_code=True)`, see the model card).
   minute, between the two up to two minutes), plus the increment, and never the clock above the reserve
   itself (the increment arrives only after the move). Live, with a 2.5 s reserve and half the clock, 5% of
   the bot's bullet games flagged: one long think late in the game, then a reserve spent by the lag of the
-  moves at it (0.2-0.3 s a move, 1 s at the 90th percentile). The guard cuts 4% of human moves' times (9%
-  in bullet, mostly by under a second with a few seconds left), against 1.4% before.
+  moves at it (0.2-0.3 s a move, 1 s at the 90th percentile). The guard cuts 4% of human moves' times.
 - **Resigning.** At each position, the bot resigns with the probability that a human of its rating resigns
   there: on its turn instead of moving, or right after its own move, when the new position shows it is
   lost. The probability is a hazard fitted on held-out human games, from the model's win / draw / loss
@@ -87,7 +86,7 @@ trust_remote_code=True)`, see the model card).
   `play.resign = false` turns it off.
 - **Draws.** It ends games by agreement about as often as humans do in the same situation, by offering a
   draw with its move (from ply 20). It accepts an offer from ply 30 (83% of human agreements come later)
-  unless it is clearly better: above an expected score of 0.62, where three quarters of human agreements
+  unless it is clearly better: above an expected score of 0.645, where three quarters of human agreements
   happen at or below. The game data show agreements, not offers, so these rules are heuristics. It answers
   an offer only on its turn, before it moves: after its move Lichess has declined the offer, and a yes
   would be an offer of its own. `play.draws = false` turns both off.
@@ -109,8 +108,8 @@ trust_remote_code=True)`, see the model card).
 
 ## Human-likeness
 
-Measured on the main evaluation's July 2026 games between two humans with every clock known, 12,159 games.
-Coefficients and thresholds come from the even-numbered half; every number below is from the odd half,
+Measured for Allie 2.1 on the main evaluation's July 2026 games between two humans with every clock known, 12,159
+games. Coefficients and thresholds come from the even-numbered half; every number below is from the odd half,
 which also guided the choice of the hazard's form, the floor and the acceptance percentile, so it is a
 validation set rather than an untouched holdout.
 
@@ -119,22 +118,22 @@ humans' own times there. The model draws as humans spend.
 
 | Positions | Human median | Bot median | Human 90th percentile | Bot 90th percentile |
 |---|---:|---:|---:|---:|
-| bullet | 1 | 1.2 | 4 | 4.0 |
-| blitz | 2 | 2.5 | 11 | 10.7 |
-| rapid | 5 | 4.8 | 23 | 22.8 |
-| classical | 9 | 8.9 | 49 | 47.0 |
-| under 10% of the clock left | 1 | 1.1 | 6 | 5.7 |
-| one legal move | 2 | 2.1 | 8 | 7.9 |
+| bullet | 1 | 1.2 | 4 | 3.8 |
+| blitz | 2 | 2.4 | 11 | 10.8 |
+| rapid | 5 | 4.6 | 23 | 23.6 |
+| classical | 9 | 8.8 | 49 | 49.6 |
+| under 10% of the clock left | 1 | 1.2 | 6 | 5.5 |
+| one legal move | 2 | 2.0 | 8 | 7.9 |
 
-The clock guard cuts 1% of these draws. The rule it replaced, which capped every wait at 10% of the clock
-left, cut 12% of them, and 55% when under 10% of the clock was left.
+The clock guard cuts 5% of these draws (11% in bullet, 43% with under 10% of the clock left). The rule it
+replaced, which capped every wait at 10% of the clock left, cut 12%, 19% and 54%.
 
 **Resigning.** On the held-out games, humans resign in 22.5% of player-games. Their P(loss) at resignation,
-by the model, is 0.56 at the 5th percentile, 0.86 at the 25th and 0.95 at the median; 87% resign on their
-own turn. The fitted hazard, sampled along the same games, resigns at P(loss) 0.66 / 0.83 / 0.94 (5th, 25th,
-median). The previous rule resigned only at P(loss) 0.97 / 0.98 / 0.98, about 15 plies later than humans.
-Like a human, the hazard sometimes resigns a game that could still have been saved: for 1.7% of
-player-games, against 0.1% for the previous rule.
+by the model, is 0.55 at the 5th percentile, 0.86 at the 25th and 0.95 at the median; 87% resign on their
+own turn. The fitted hazard, sampled along the same games, resigns at P(loss) 0.67 / 0.86 / 0.95 (5th, 25th,
+median), in 14% of player-games. The previous rule resigned
+only at P(loss) 0.97 / 0.98 / 0.99, about 16 plies later than humans. Like a human, the hazard sometimes
+resigns a game that could still have been saved: for 1.2% of player-games, against 0.1% for the previous rule.
 
 **Whole games.** 400 games of the bot against itself, 25 per format and rating band, in held-out games'
 ratings and time controls. Clocks are virtual, and each move costs its think time (at least 0.05 s of
@@ -142,18 +141,18 @@ compute) plus 0.1 s of lag. Endings, bot (human):
 
 | Format | Mate | Resignation | Flag | Draw |
 |---|---:|---:|---:|---:|
-| bullet | 40% (25%) | 35% (24%) | 19% (50%) | 6% (1%) |
-| blitz | 32% (30%) | 54% (48%) | 3% (18%) | 11% (4%) |
-| rapid | 29% (22%) | 61% (68%) | 1% (6%) | 9% (4%) |
-| classical | 29% (32%) | 64% (52%) | 0% (7%) | 7% (9%) |
+| bullet | 39% (25%) | 30% (24%) | 27% (50%) | 4% (1%) |
+| blitz | 36% (30%) | 54% (48%) | 1% (18%) | 9% (4%) |
+| rapid | 33% (22%) | 57% (68%) | 1% (6%) | 9% (4%) |
+| classical | 42% (32%) | 51% (52%) | 1% (7%) | 6% (9%) |
 
-- **Resignation** happens about as often as in human games, and 7-22% of the bot's resignations come right
-  after its own move, against 13% for humans.
+- **Resignation** happens about as often as in human games, within 11 points, and 3-15% of the bot's
+  resignations come right after its own move, against 13% for humans.
 - **Flags** are much rarer than between humans: the bot falls into time trouble less often, and the guard
-  limits how long it thinks with little time left. It still flags: in 9 of the 100 bullet games, a bot
+  limits how long it thinks with little time left. It still flags: in 12 of the 100 bullet games, a bot
   flagged while the model did not count it as losing.
-- **Draws** include repetition, stalemate and insufficient material. The bot agrees to draws in 2-3% of
-  blitz to classical games, as humans do.
+- **Draws** include repetition, stalemate and insufficient material. The bot agrees to draws in up to 1% of
+  games, against 0-4% for humans, and reaches as many or more draws by rule.
 
 ## Chat
 
@@ -284,32 +283,25 @@ alongside it on the same node).
 
 **Accuracy.** `analysis/lichess/parity.py` scores 5,000 positions of the Maia-3 blitz benchmark, 1,250 per
 rating band, against the training code's scores of the same model (the training forward on a GPU), here the
-released, annealed Allie 2.0. With `--decode`, each position is reached as live play reaches it: the game so
-far in one step, then its last move as a cached step. The port is not bitwise identical, because
-floating-point sums run in a different order, but BF16 is equal within noise. 95% intervals are bootstrapped
-over games.
+released Allie 2.1. With `--decode`, each position is reached as live play reaches it: the game so far in one
+step, then its last move as a cached step. The port is not bitwise identical, because floating-point sums run
+in a different order. Every setting scores within 0.0025 nats of the training code, slightly below it. 95%
+intervals are bootstrapped over games.
 
-| Setting | CE minus the training code's (nats) | Top-1 (training code: 59.00%) |
+| Setting | CE minus the training code's (nats) | Top-1 (training code: 59.24%) |
 |---|---:|---:|
-| CPU, int8, one game (the default) | +0.0010 [−0.0011, +0.0032] | 58.96% |
-| CPU, int8, 16 games in one step | +0.0012 [−0.0010, +0.0034] | 58.92% |
-| CPU, BF16, one game | +0.0003 [−0.0007, +0.0012] | 58.90% |
-| GPU, BF16, one game (CUDA graphs, the default) | +0.0005 [−0.0005, +0.0014] | 58.92% |
-| PyTorch reference, CPU, BF16, one game | −0.0000 [−0.0010, +0.0009] | 58.86% |
-| PyTorch reference, GPU, BF16, one game | +0.0004 [−0.0005, +0.0014] | 58.90% |
+| CPU, int8, one game (the default) | −0.0010 [−0.0021, +0.0002] | 59.50% |
+| CPU, int8, 16 games in one step | −0.0011 [−0.0022, +0.0000] | 59.52% |
+| CPU, BF16, one game | −0.0015 [−0.0023, −0.0006] | 59.56% |
+| GPU, BF16, one game (CUDA graphs, the default) | −0.0013 [−0.0022, −0.0005] | 59.56% |
+| PyTorch reference, GPU, BF16, one game | −0.0016 [−0.0025, −0.0007] | 59.52% |
 
-- **Fast against the reference**, on the same positions (CPU BF16): +0.0003 [−0.0002, +0.0008] nats. A
-  position's largest change in any move's probability is 0.004 on average and 0.06 at most, and the top move
-  agrees on 99.4% of positions. The CPU kernels round to BF16 where the reference does; the sums run in a
-  different order. 16 games in one step against one at a time: +0.0002 [−0.0001, +0.0004], the top move
-  agrees on 99.9%. On GPU, CUDA graphs against the eager reference: +0.0001 [−0.0002, +0.0003], 99.8%.
-- **int8 against BF16**, on the same positions: +0.0008 [−0.0013, +0.0030] nats on the CPU kernels; the top
-  move agrees on 97.7% of positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
-- **CPU against GPU** (BF16, CPU kernels against CUDA graphs): −0.0002 [−0.0006, +0.0002] nats; the top move
-  agrees on 99.5% of positions, and no move's probability differs by more than 0.067.
-- **Before the second anneal** (step 143051, the same positions against its own training-code scores): int8
-  +0.0017 [−0.0005, +0.0038], BF16 −0.0005 [−0.0014, +0.0004], GPU CUDA graphs −0.0003 [−0.0012, +0.0006];
-  int8 against BF16 +0.0021 [+0.0001, +0.0042].
+- **Fast against the reference** (CPU BF16 against the GPU reference): +0.0002 nats. A position's largest change
+  in any move's probability is 0.003 on average and 0.04 at most, and the top move agrees on 99.6% of positions.
+  16 games in one step against one at a time: −0.0002, the top move agrees on 99.8%. On GPU, CUDA graphs against
+  the eager reference: +0.0003, 99.6%.
+- **int8 against BF16**, on the same positions: +0.0005 nats on the CPU kernels; the top move agrees on 99.4% of
+  positions. We allowed 0.002 for the CPU default; `int8 = false` keeps BF16.
 
 ## Offline testing
 
@@ -321,5 +313,5 @@ over games.
   server. `--opponent random` plays a random mover instead. Every move goes through the full protocol, and the
   server checks it.
 - `allie-bot bench --config my-bot.toml` measures the time per move.
-- `python analysis/lichess/parity.py --model exports/allie-2.0` scores the bot's model on the Maia-3 benchmark
+- `python analysis/lichess/parity.py --model exports/allie-2.1` scores the bot's model on the Maia-3 benchmark
   positions against the training forward's scores (needs `ALLIE_DATA`).

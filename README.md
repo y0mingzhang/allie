@@ -36,9 +36,9 @@ Besides the next move, it predicts how long the player will think and how the ga
 
 Three silent, captioned animations, about five to seven minutes each. Each teaser links to its full 1080p MP4, which GitHub offers as a download.
 
-| [![How Allie Works: the router picks 16 of 256 experts for a move](docs/videos/how-allie-works.gif)](docs/videos/how-allie-works.mp4) | [![Fitting Allie's Scaling Law: the law's forecast for Allie 2.0 against the loss it reached](docs/videos/scaling-law.gif)](docs/videos/scaling-law.mp4) | [![How Allie Searches: coverage and lookahead search trees growing side by side](docs/videos/how-allie-searches.gif)](docs/videos/how-allie-searches.mp4) |
+| [![How Allie Works: the router picks 16 of 256 experts for a move](docs/videos/how-allie-works.gif)](docs/videos/how-allie-works.mp4) | [![Fitting Allie's Scaling Law: the law's forecast for Allie 2.0 against the loss it reached](docs/videos/scaling-law.gif)](docs/videos/scaling-law.mp4) | [![How Allie Searches: coverage and KL search trees growing side by side](docs/videos/how-allie-searches.gif)](docs/videos/how-allie-searches.mp4) |
 |:---:|:---:|:---:|
-| **[How Allie Works](docs/videos/how-allie-works.mp4)** (4:44): from a game's tokens to 16 of 256 experts to three predictions | **[Fitting Allie's Scaling Law](docs/videos/scaling-law.mp4)** (7:01): the sweep, three ways to fit it, why it missed Allie 2.0's big run, and where Allie 2.1 landed | **[How Allie Searches](docs/videos/how-allie-searches.mp4)** (4:32): search that adds strength and still predicts human moves |
+| **[How Allie Works](docs/videos/how-allie-works.mp4)** (4:58): from a game's tokens to 16 of 256 experts to three predictions | **[Fitting Allie's Scaling Law](docs/videos/scaling-law.mp4)** (7:06): the sweep, three ways to fit it, why it missed Allie 2.0's big run, and where Allie 2.1 landed | **[How Allie Searches](docs/videos/how-allie-searches.mp4)** (5:54): search that adds strength and still predicts human moves |
 
 ## Allie 2.1 against Allie 2.0
 
@@ -190,10 +190,10 @@ Set `ALLIE_DATA` to the folder for the game data and test sets. Runs and scores 
    python -m allie.data.fastbuild build --hf raw/2024-01 --out $ALLIE_DATA/data-v1/2024-01
    python -m allie.data.fastbuild finalize --out $ALLIE_DATA/data-v1/2024-01
    ```
-   Over-the-board and engine games go through `python -m allie.data.external`. The big run's exact data selection is in [configs/allie-2.0.json](configs/allie-2.0.json).
+   Over-the-board and engine games go through `python -m allie.data.external`. Allie 2.1's exact data selection is in [configs/allie-2.1.json](configs/allie-2.1.json).
 3. **Build the test set.** `python -m allie.eval.build`
-4. **Train.** `allie-train configs/allie-2.0.json --nproc 8` needs eight 48 GB GPUs for about a week. It stops every two days; the same command resumes it. The second anneal starts a new run from its last checkpoint with `--init-from`; [configs/allie-2.0/anneal.sbatch](configs/allie-2.0/anneal.sbatch) has its settings. This repository has Allie 2.0's training config only; what Allie 2.1 changed is in [DETAILS](docs/DETAILS.md#allie-21).
-5. **Evaluate.** `allie-eval --checkpoint results/pretrain/allie-2.0/last.pt` scores the main test set. The blitz comparison has its own scripts in `allie.eval.maia3`.
+4. **Train.** `allie-train configs/allie-2.1.json --nproc 8` needs eight 48 GB GPUs for about two weeks. It stops every two days; the same command resumes it. The released weights are half the final weights and half their tail average: `python -m allie.experiments.tail_ema blend results/pretrain/allie-2.1/last.pt results/pretrain/allie-2.1/tail-ema-0.08.pt 0.5 results/pretrain/allie-2.1-blend`. Allie 2.0's config is [configs/allie-2.0.json](configs/allie-2.0.json), and [configs/allie-2.0/anneal.sbatch](configs/allie-2.0/anneal.sbatch) has its second anneal.
+5. **Evaluate.** `allie-eval --checkpoint results/pretrain/allie-2.1-blend/last.pt` scores the main test set. The blitz comparison has its own scripts in `allie.eval.maia3`.
 6. **Figures.** `uv run --extra figures python docs/make_figures.py` redraws every figure here. `docs/anim/render.sh how_allie_works` re-renders a video with [manim](https://www.manim.community) (it needs ffmpeg and the cairo and pango libraries); each video's numbers are in [docs/anim/data.json](docs/anim/data.json).
 
 Commands run inside the environment: prefix them with `uv run`, or activate `.venv`. Search has its own [guide](src/allie/search/README.md). More on the code is in [DETAILS](docs/DETAILS.md#reproducing).
