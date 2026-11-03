@@ -36,6 +36,8 @@ V21_BENCH = DATA / "release-2.1/maia3/blitz.npz"  # its benchmark scores
 SEARCH = DATA / "maia3-bench/search"
 SWEEP = X / "sweep-readout-c8s200f0v4-w4.json"
 C_ALLIE = 3.142088554411623e20  # the big run's useful training FLOPs (bigrun-trajectory-v2)
+C_V21 = 8.27e20  # Allie 2.1's
+N_V21, D_V21 = 1.23e9, 112e9  # its active parameters and training tokens
 MAIA = {"maia3-5m": "Maia-3 5M", "maia3-23m": "Maia-3 23M", "maia3-79m": "Maia-3 79M"}
 
 INK, INK2, MUTED = "#1f2328", "#57534e", "#78716c"
@@ -375,13 +377,14 @@ def moe_vs_dense():
 
 def frontier():
     """Main-eval CE against training compute: the isoflop minima, each family's law at its compute-optimal size,
-    and the big run against the law's forecast for its own size and tokens."""
+    the big run against the law's forecast for its own size and tokens, and Allie 2.1 (a different recipe)."""
     act, _, D = allie_n()
     final = jload(R / f"lm-eval/{FINAL.name}/strat-v1.json")["macro"]
+    v21 = jload(R / f"lm-eval/{V21}/strat-v1.json")["macro"]
     forecast, E = law("s16")(act, D), math.exp(macro()["law"]["s16"]["theta"][0])
     sx, sy = (
         alt.Scale(type="log", domain=[4e17, 3e21], nice=False),
-        alt.Scale(domain=[1.24, 1.42], nice=False, zero=False),
+        alt.Scale(domain=[1.21, 1.42], nice=False, zero=False),
     )
     x = alt.X(
         "c:Q",
@@ -403,11 +406,13 @@ def frontier():
         values([{"c": C_ALLIE, "v": forecast}]).mark_point(color=ALLIE, size=150, strokeWidth=2, filled=False).encode(x=x, y=y),
         values([{"c": C_ALLIE, "v": forecast, "t": f"Forecast  {forecast:.4f}"}]).mark_text(align="left", dx=12, dy=-4).encode(x=x, y=y, text="t:N"),
         values([{"c": C_ALLIE, "v": final}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
-        values([{"c": C_ALLIE, "v": final, "t": f"Big run  {final:.4f}"}]).mark_text(align="left", dx=12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_ALLIE, "v": final, "t": f"Allie 2.0's big run  {final:.4f}"}]).mark_text(align="left", dx=12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_V21, "v": v21}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
+        values([{"c": C_V21, "v": v21, "t": f"Allie 2.1  {v21:.4f}"}]).mark_text(align="right", dx=-12, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
     ).properties(width=WIDTH, height=300, title=title(
-        "The big run landed below the scaling law's forecast",
-        "Best main-evaluation loss at each training budget. Dashed: the law's extrapolation. The big run landed",
-        "0.032 below its forecast, and below the law's floor."))  # fmt: skip
+        "Allie 2.1 and Allie 2.0's big run landed below the scaling law",
+        "Best main-evaluation loss at each training budget. Dashed: the law's extrapolation, fit before either run.",
+        "The big run landed 0.032 below its forecast. Allie 2.1 also changed the recipe, so its gap isn't the law's alone."))  # fmt: skip
     save(chart, "frontier")
     l_opt, n_opt, d_opt = optimum("s16", C_ALLIE)
     print(f"  big run {C_ALLIE:.3e} FLOPs: {final:.4f}, forecast {forecast:.4f}, law optimum {l_opt:.4f}")
@@ -416,7 +421,7 @@ def frontier():
 
 def optimal():
     """Compute-optimal active parameters against training compute: the isoflop minima, each law's optimum, and
-    the big run's size against the law's extrapolated choice at its compute."""
+    the big run's size against the law's extrapolated choice at its compute, and Allie 2.1's."""
     act, _, D = allie_n()
     _, n_opt, d_opt = optimum("s16", C_ALLIE)
     sx, sy = (
@@ -440,10 +445,13 @@ def optimal():
         *law_layers(x, y, 1, {"dense": (9e17, 1.6e8), "s16": (2.5e18, 4.5e7)}),
         values([{"c": C_ALLIE, "v": n_opt}]).mark_point(color=ALLIE, size=150, strokeWidth=2, filled=False).encode(x=x, y=y),
         values([{"c": C_ALLIE, "v": n_opt, "t": ["Extrapolated optimum", f"{n_opt / 1e9:.1f}B, {d_opt / 1e9:.0f}B tokens"]}])
-        .mark_text(align="left", dx=14, lineHeight=17).encode(x=x, y=y, text="t:N"),
+        .mark_text(align="left", dx=14, dy=-24, lineHeight=17).encode(x=x, y=y, text="t:N"),
         values([{"c": C_ALLIE, "v": act}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
-        values([{"c": C_ALLIE, "v": act, "t": ["Big run", f"{act / 1e9:.2f}B, {D / 1e9:.0f}B tokens"]}])
-        .mark_text(align="left", dx=14, lineHeight=17, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_ALLIE, "v": act, "t": ["Allie 2.0's big run", f"{act / 1e9:.2f}B, {D / 1e9:.0f}B tokens"]}])
+        .mark_text(align="right", dx=-14, dy=24, lineHeight=17, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
+        values([{"c": C_V21, "v": N_V21}]).mark_circle(color=ALLIE, size=170, opacity=1).encode(x=x, y=y),
+        values([{"c": C_V21, "v": N_V21, "t": ["Allie 2.1", f"{N_V21 / 1e9:.2f}B, {D_V21 / 1e9:.0f}B tokens"]}])
+        .mark_text(align="left", dx=-40, dy=30, lineHeight=17, color=INK, fontWeight=600).encode(x=x, y=y, text="t:N"),
     ).properties(width=WIDTH, height=300, title=title(
         "The law would have picked a larger model on fewer tokens",
         "Compute-optimal model size: the sweep's best sizes and each law's optimum, dashed beyond the sweep.",
@@ -513,7 +521,7 @@ def model():
         box(ax, 0.1, y - 0.3, 1.0, 0.6, text)
         arrow(ax, (1.1, y), (1.4, mid + (y - mid) * 0.35))
     box(ax, 1.4, 0.2, 4.0, 3.2, ec="#ddd6c8", fc="#f1ede4")
-    ax.text(3.4, 3.15, "MoE block  (23 of 24 blocks)", **small)
+    ax.text(3.4, 3.15, "MoE block  (21 of 24 blocks)", **small)
     box(ax, 1.55, mid - 0.3, 1.15, 0.6, "Attention")
     ax.plot([2.7, 2.95, 2.95, 3.75], [mid, mid, 2.6, 2.6], color=ALLIE, lw=1.3, zorder=3)  # the shared expert
     box(ax, 3.75, 2.45, 1.05, 0.3, ec=ALLIE, fc=ALLIE_WASH)
@@ -702,10 +710,10 @@ def protocol():
 
 
 def versatility():
-    """Allie 2.0's loss minus Maia-3 79M's by time control (bullet, rapid and classical from the formats sample,
+    """Allie 2.1's loss minus Maia-3 79M's by time control (bullet, rapid and classical from the formats sample,
     5,000 positions per rating band; blitz from the benchmark) and, in blitz, by time left on the mover's clock;
     paired 95% game-bootstrap intervals (allie.eval.maia3.report's aggregate-NAME.json)."""
-    sl = jload(X / f"maia3-bench/aggregate-{ANN}.json")["slices"]
+    sl = jload(X / f"maia3-bench/aggregate-{V21}.json")["slices"]
     clocks = ["Under 10 s", "10–30 s", "30–60 s", "1–2 min", "Over 2 min"]
     groups = (
         ("By time control", ["bullet", "blitz", "rapid", "classical"], [sl["format"][f] for f in ("bullet", "blitz", "rapid", "classical")]),
@@ -715,33 +723,35 @@ def versatility():
     for name, order, items in groups:
         rows = [dict(name=n, d=d["d_ce_maia3-79m"]["mean"], lo=d["d_ce_maia3-79m"]["lo"], hi=d["d_ce_maia3-79m"]["hi"],
                      label=signed(d["d_ce_maia3-79m"]["mean"], 3)) for n, d in zip(order, items)]  # fmt: skip
-        panels.append(diverging(rows, order, [-0.37, 0.06], 1, [-0.3, -0.2, -0.1, 0], name, alt.datum.d == alt.datum.d, width=248)
+        panels.append(diverging(rows, order, [-0.44, 0.06], 1, [-0.3, -0.2, -0.1, 0], name, alt.datum.d == alt.datum.d, width=248)
                       .properties(height=34 * 5))  # fmt: skip
         for r in rows:
             print(f"  {r['name']:11s} dCE {signed(r['d'], 4)} [{signed(r['lo'], 4)}, {signed(r['hi'], 4)}]")
     chart = alt.hconcat(*panels, spacing=34).properties(title=title(
-        "Allie 2.0's lead is largest in bullet and in time trouble",
-        "Allie 2.0's loss minus Maia-3 79M's; below zero, Allie 2.0 predicts better. Maia-3 never",
+        "Allie 2.1's lead is largest in bullet and in time trouble",
+        "Allie 2.1's loss minus Maia-3 79M's; below zero, Allie 2.1 predicts better. Maia-3 never",
         "trained on bullet, rapid or classical games. Whiskers: 95% intervals."))  # fmt: skip
     save(chart, "versatility")
 
 
 def rating():
     """Legal-move CE minus Maia-3 79M's per 100-point bin of game rating, on every scored blitz move."""
-    rows = [r for r in jload(X / f"bigrun-progress/acc-by-game-rating-{ANN}.json") if r["n"]]
+    rows = [r for r in jload(X / f"bigrun-progress/acc-by-game-rating-{V21}.json") if r["n"]]
+    old = {r["bin"]: r for r in jload(X / f"bigrun-progress/acc-by-game-rating-{ANN}.json")}
     x_ = [float(np.mean([float(v) for v in r["bin"].split("-")])) for r in rows]
     ref = np.array([r["models"]["maia3-79m"]["ce"][0] for r in rows])
     pts = []
     for i, r in enumerate(rows):
-        d = r["models"][ANN]["d_ce_79m"]
-        pts.append(dict(x=x_[i], s="Allie 2.0", d=d[0], lo=d[1], hi=d[2]))
+        d = r["models"][V21]["d_ce_79m"]
+        pts.append(dict(x=x_[i], s="Allie 2.1", d=d[0], lo=d[1], hi=d[2]))
+        pts.append(dict(x=x_[i], s="Allie 2.0", d=old[r["bin"]]["models"][ANN]["ce"][0] - ref[i]))
         pts += [dict(x=x_[i], s=MAIA[m], d=r["models"][m]["ce"][0] - ref[i]) for m in ("maia3-5m", "maia3-23m")]
     ce = previous("allie1-medium", "rating")
     if ce is not None:
         pts += [dict(x=x, s="Original Allie", d=float(v)) for x, v in zip(x_, binned(ce) - ref)]
     sx, sy = (
         alt.Scale(domain=[600, 2900], nice=False),
-        alt.Scale(domain=[-0.11, 0.16], nice=False),
+        alt.Scale(domain=[-0.15, 0.16], nice=False),
     )
     x = alt.X(
         "x:Q",
@@ -760,18 +770,19 @@ def rating():
         ),
     )
     b = values(pts)
-    allie = b.transform_filter(alt.datum.s == "Allie 2.0")
+    allie = b.transform_filter(alt.datum.s == "Allie 2.1")
     layers = [values([{"d": 0}]).mark_rule(color=INK, strokeWidth=1.4).encode(y=y),
               allie.mark_area(color=ALLIE, opacity=0.15).encode(x=x, y=alt.Y("lo:Q", scale=sy), y2="hi:Q")]  # fmt: skip
     ends = {p["s"]: p["d"] for p in pts}
     labels = [
         dict(x=2850, d=-0.016, t="Maia-3 79M"),
-        dict(x=1950, d=-0.04, t="Allie 2.0"),
+        dict(x=1700, d=-0.075, t="Allie 2.1"),
     ]
     for s, color, dash, dy in (
         ("Maia-3 5M", NEUTRAL, [1, 0], -0.004),
         ("Maia-3 23M", NEUTRAL_DARK, [1, 0], 0),
         ("Original Allie", INK2, [5, 3], 0.004),
+        ("Allie 2.0", ALLIE_PALE, [1, 0], 0),
     ):
         if s in ends:
             layers.append(
@@ -782,14 +793,14 @@ def rating():
             labels.append(dict(x=2850, d=ends[s] + dy, t=s))
     layers.append(allie.mark_line(color=ALLIE, strokeWidth=3).encode(x=x, y=y))
     lab = values(labels)
-    layers += [lab.transform_filter(alt.datum.t != "Allie 2.0").mark_text(align="left", dx=10).encode(x=x, y=y, text="t:N"),
-               lab.transform_filter(alt.datum.t == "Allie 2.0").mark_text(align="left", color=ALLIE, fontWeight=700).encode(x=x, y=y, text="t:N")]  # fmt: skip
+    layers += [lab.transform_filter(alt.datum.t != "Allie 2.1").mark_text(align="left", dx=10).encode(x=x, y=y, text="t:N"),
+               lab.transform_filter(alt.datum.t == "Allie 2.1").mark_text(align="left", color=ALLIE, fontWeight=700).encode(x=x, y=y, text="t:N")]  # fmt: skip
     chart = alt.layer(*layers).properties(width=546, height=300, title=title(
-        "Allie 2.0 predicts well at every rating",
+        "Allie 2.1 predicts well at every rating",
         "Loss minus Maia-3 79M's by game rating, on all blitz positions of the main evaluation. Below zero is",
-        "better. Band: Allie 2.0's 95% interval; the end bins hold few games."))  # fmt: skip
+        "better. Band: Allie 2.1's 95% interval; the end bins hold few games."))  # fmt: skip
     save(chart, "rating")
-    d = np.array([r["models"][ANN]["d_ce_79m"] for r in rows])
+    d = np.array([r["models"][V21]["d_ce_79m"] for r in rows])
     print(
         f"  {len(rows)} bins; CE above 79M in {[r['bin'] for r, v in zip(rows, d[:, 0]) if v > 0]}; interval below 0 in {(d[:, 2] < 0).sum()}"
     )
@@ -798,18 +809,18 @@ def rating():
 def calibrated():
     """Move accuracy and blunder rate (Stockfish on every legal move) against rating, per time control, on September
     2026 games (the rule is fitted on July): the humans' own moves (line, 95% band) and the expected values of the
-    move distributions played at that rating, Allie 2.0 sampled straight from the policy or calibrated as the bot
+    move distributions played at that rating, Allie 2.1 sampled straight from the policy or calibrated as the bot
     plays it (allie.lichess.calibration: per position, its search rungs mixed by the think times the bot draws;
     analysis/elo_strength/calib_unified.py --params --plot), Maia-3 79M (its most likely move, or sampled) and the
     original Allie (blitz only: its time-control token covers only blitz), with 95% intervals clustered by game."""
-    kl = jload(X / "elo-strength/calib-sept/plot-kl-sept-thinkx-m03.json")
+    kl = jload(DATA / "release-2.1/calib-fit/win21-sept.plot.json")
     base = X / "elo-strength/calib/klcal/baselines/sept"
     maia, orig = jload(base / "maia3-79m.json")["cells"], jload(base / "allie1.json")["cells"]
     formats = ("bullet", "blitz", "rapid", "classical")
     series = (  # label, cells (None: the calibration's), source, color, shape
         ("Humans", None, "human", INK2, "stroke"),
-        ("Allie 2.0 (raw policy)", None, "raw", NEUTRAL, "circle"),
-        ("Allie 2.0 (calibrated)", None, "calibrated", ALLIE, "diamond"),
+        ("Allie 2.1 (raw policy)", None, "raw", NEUTRAL, "circle"),
+        ("Allie 2.1 (calibrated)", None, "calibrated", ALLIE, "diamond"),
         ("Allie (original)", orig, "sampled", "#13906a", "cross"),
         ("Maia-3 (argmax)", maia, "argmax", "#a23b72", "triangle-up"),
         ("Maia-3 (sampled)", maia, "sampled", "#a23b72", "triangle-down"),

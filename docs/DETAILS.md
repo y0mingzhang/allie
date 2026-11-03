@@ -51,17 +51,17 @@ All 80,000 positions:
 
 ### Where the differences come from
 
-Allie 2.0 minus Maia-3 79M on slices of the benchmark. The bullet, rapid and classical rows use 5,000 positions per rating band. The other rows are blitz.
+Allie 2.1 minus Maia-3 79M on slices of the benchmark. The bullet, rapid and classical rows use 5,000 positions per rating band. The other rows are blitz.
 
 | Slice | positions | CE difference | top-1 difference (points) |
 |---|---:|---:|---:|
-| bullet | 20,000 | −0.1448 [−0.1552, −0.1343] | +3.36 [+2.84, +3.86] |
-| rapid | 20,000 | −0.0191 [−0.0252, −0.0131] | +0.74 [+0.29, +1.16] |
-| classical | 20,000 | −0.0227 [−0.0292, −0.0162] | +0.56 [+0.11, +1.01] |
-| mover has under 10 s left | 2,852 | −0.2240 [−0.2658, −0.1842] | +3.47 [+2.00, +5.10] |
-| mover has 60-120 s left | 15,719 | +0.0088 [+0.0014, +0.0160] | −0.55 [−1.04, −0.03] |
-| plies 40-59 | 15,997 | +0.0053 [−0.0017, +0.0120] | −0.17 [−0.69, +0.32] |
-| Maia-3's protocol (below) | 56,599 | −0.0132 [−0.0166, −0.0100] | +0.31 [+0.06, +0.56] |
+| bullet | 20,000 | −0.1657 [−0.1762, −0.1549] | +3.98 [+3.48, +4.47] |
+| rapid | 20,000 | −0.0503 [−0.0564, −0.0444] | +1.61 [+1.15, +2.03] |
+| classical | 20,000 | −0.0545 [−0.0610, −0.0482] | +1.29 [+0.84, +1.71] |
+| mover has under 10 s left | 2,852 | −0.2567 [−0.2976, −0.2171] | +4.63 [+3.14, +6.27] |
+| mover has 60-120 s left | 15,719 | −0.0342 [−0.0412, −0.0273] | +0.98 [+0.47, +1.48] |
+| plies 40-59 | 15,997 | −0.0337 [−0.0401, −0.0271] | +1.18 [+0.67, +1.64] |
+| Maia-3's protocol (below) | 56,599 | −0.0419 [−0.0451, −0.0388] | +1.23 [+0.97, +1.48] |
 
 ### Maia-3's protocol
 
@@ -73,15 +73,15 @@ That keeps 56,599 of the 80,000 positions, in 6,089 games. An earlier version of
 
 ### By rating
 
-![Loss relative to Maia-3 79M by game rating, for Maia-3 5M and 23M, the original Allie and Allie 2.0](figures/rating.png)
+![Loss relative to Maia-3 79M by game rating, for Maia-3 5M and 23M, the original Allie, Allie 2.0 and Allie 2.1](figures/rating.png)
 
 *Every position scored, as in the README's compute plot.*
 
 The rating plot uses every scored blitz move of the main evaluation: 402,108 positions in 6,247 games. They are reweighted to the natural mix of players and grouped by game rating in 100-point bins.
 
-Allie 2.0's whole CE interval is below Maia-3 79M's in 20 of 23 bins. The exceptions are 600-700, 700-800 and 2800-2900. Only the last, with 7 games, has a higher point estimate.
+Allie 2.1's whole CE interval is below Maia-3 79M's in all 23 bins. Allie 2.0's is in 20 of 23: the exceptions are 600-700, 700-800 and 2800-2900.
 
-Its accuracy is lower in one bin, 2800-2900, by 0.33 points, within noise. It ties in 800-900. The bins at both ends hold few games.
+Allie 2.1's top-1 accuracy is above Maia-3 79M's in every bin, with intervals that include zero in 600-700, 700-800, 800-900 and 2800-2900. The bins at both ends hold few games.
 
 ### The original Allie
 
@@ -148,6 +148,12 @@ Search helps less as models grow. 128 simulations gain 0.022, 0.019 and 0.013 na
 - **Cost.** 1.39 GFLOPs per move with the game cached. Of this, 0.74 is fixed and each routed expert adds 0.041.
 
 ## Training
+
+This section is Allie 2.0's; what Allie 2.1 changed is in [Allie 2.1](#allie-21).
+
+![The big run's loss on the main test set during training, the scaling law's forecast, and Allie 2.0 after the second anneal](figures/training.png)
+
+*Earlier checkpoints were not scored on the main test set.*
 
 Allie 2.0 trained in two runs. The big run took 75B tokens in 143,051 steps, 3.14×10²⁰ training FLOPs. The second anneal added 1B tokens in 1,907 steps, 4.2×10¹⁸ FLOPs. Data, optimization and systems below describe the big run.
 

@@ -8,25 +8,25 @@ Allie is a chess model that plays like a human. It predicts the move a person wi
 
 It follows our paper [Human-Aligned Chess With a Bit of Search](https://arxiv.org/abs/2410.03893), published at ICLR 2025. That model, the [original Allie](https://github.com/ippolito-cmu/allie), learned from blitz games only.
 
-Allie 2.0 aims to cover every time control, from bullet to classical, and every level of play, experts included. So we judge it by how well it predicts the moves people actually played.
+Allie 2.1 aims to cover every time control, from bullet to classical, and every level of play, experts included. So we judge it by how well it predicts the moves people actually played.
 
 We measure this as a loss: how surprised the model is by each real move, in nats. Lower is better. We also report how often the model's top choice is the move that was played.
 
-**Allie 2.0** is a transformer with 5.6B parameters, of which only 0.69B are used for each move. Its main training run, the big run, covered 75B tokens of online and over-the-board games. A short second anneal then trained it on 1B tokens of 2024-2026 games at a low learning rate. The released model is the annealed one.
+**Allie 2.1** is a transformer with 9.2B parameters, of which only 1.2B are used for each move. It trained on 112B tokens of online and over-the-board games and finished on October 28, 2026. The Lichess bot has played it since October 30, 2026.
 
 Our main test set covers every time control and rating level. Its games come from July 2026, a month held out from training.
 
-- Its loss on our main test set is **1.2505**, against 1.3526 for the original Allie.
-- In blitz, its top choice is the move played **59.3%** of the time. For players rated 2400 and above, it is **63.1%**.
-- It runs on an ordinary CPU: about 4-7 ms per move on a recent server ([fast inference](#fast-inference)).
+- Its loss on our main test set is **1.2240**, against 1.2505 for Allie 2.0 and 1.3526 for the original Allie.
+- In blitz, its top choice is the move played **60.1%** of the time. For players rated 2400 and above, it is **64.5%**.
+- It runs on a CPU: about 14 ms per move on 12 server cores ([fast inference](#fast-inference)).
 
-**Allie 2.1**, a larger model trained on 112B tokens, finished training on October 28, 2026. Its loss on the main test set is **1.2240**. The Lichess bot has played it since October 30, 2026, and its weights are on Hugging Face as [`yimingzhang/allie-2.1`](https://huggingface.co/yimingzhang/allie-2.1). Its results are in [Allie 2.1](#allie-21).
+**Allie 2.0**, the previous release, is smaller: 5.6B parameters, 0.69B for each move. Its main training run, the big run, covered 75B tokens, and a short second anneal then trained it on 1B tokens of 2024-2026 games. [The two compared](#allie-21-against-allie-20).
 
 You can [play Allie 2.1 on Lichess](#play-against-allie-on-lichess) or [download it](#download-and-run-the-model).
 
-![Diagram of one Allie 2.0 block: attention, then a router that sends each token to 16 of 256 experts plus a shared expert](docs/figures/model.png)
+![Diagram of one Allie 2.1 block: attention, then a router that sends each token to 16 of 256 experts plus a shared expert](docs/figures/model.png)
 
-*23 of Allie 2.0's 24 blocks route each move to 16 of 256 small "experts", plus one shared expert.*
+*21 of Allie 2.1's 24 blocks route each move to 16 of 256 small "experts", plus one shared expert. The first three are dense.*
 
 The model reads the game as a sequence of moves, with both ratings and the time control at the start. At each move it also sees the clocks and the board.
 
@@ -40,13 +40,9 @@ Three silent, captioned animations, about five to seven minutes each. Each tease
 |:---:|:---:|:---:|
 | **[How Allie Works](docs/videos/how-allie-works.mp4)** (4:44): from a game's tokens to 16 of 256 experts to three predictions | **[Fitting Allie's Scaling Law](docs/videos/scaling-law.mp4)** (7:01): the sweep, three ways to fit it, why it missed Allie 2.0's big run, and where Allie 2.1 landed | **[How Allie Searches](docs/videos/how-allie-searches.mp4)** (4:32): search that adds strength and still predicts human moves |
 
-## Allie 2.1
+## Allie 2.1 against Allie 2.0
 
-Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of which 1.2B are used for each move, trained on 112B tokens of the same data. It took 14.9 days on the same kind of 8-GPU machine and finished on October 28, 2026. The Lichess bot has played it since October 30; its weights are on [Hugging Face](https://huggingface.co/yimingzhang/allie-2.1).
-
-![Main-test loss during training for Allie 2.1 and Allie 2.0's big run, and both released models](docs/figures/training-2.1.png)
-
-*Each run's learning rate decays to its own end: Allie 2.0's at 75B tokens, Allie 2.1's at 112B.*
+Allie 2.1 is Allie 2.0's design, wider and trained longer: 9.2B parameters, of which 1.2B are used for each move, trained on 112B tokens of the same data. It took 14.9 days on the same kind of 8-GPU machine. Its weights are on [Hugging Face](https://huggingface.co/yimingzhang/allie-2.1).
 
 | | Allie 2.0 | Allie 2.1 |
 |---|---:|---:|
@@ -92,13 +88,13 @@ We then fit a scaling law in the style of [Chinchilla](https://arxiv.org/abs/220
 
 The law forecast 1.2856 for the big run. The big run scored 1.2533, below the law's limit for unlimited compute. The second anneal took the released model to 1.2505.
 
-![Loss against training compute: the sweep's best models, each law extrapolated, and the big run below its forecast](docs/figures/frontier.png)
+![Loss against training compute: the sweep's best models, each law extrapolated, and Allie 2.0's big run and Allie 2.1 below them](docs/figures/frontier.png)
 
-*The big run used about 50 times the compute of the largest sweep budget.*
+*The big run used about 50 times the compute of the largest sweep budget, and Allie 2.1 2.6 times the big run's.*
 
-The big run's recipe isn't the reason: at small scale it is slightly worse than the sweep's. More likely, the law underestimates how far loss keeps falling with compute. [Allie 2.1](#allie-21) landed below its forecast too.
+The big run's recipe isn't the reason: at small scale it is slightly worse than the sweep's. More likely, the law underestimates how far loss keeps falling with compute. Allie 2.1 landed below a law refit with its own recipe too, by less ([Allie 2.1 against Allie 2.0](#allie-21-against-allie-20)).
 
-The law would have picked a bigger model trained on fewer tokens: 1.8B active parameters on 28B tokens. Instead we trained the largest model that fit on one 8-GPU machine at the time, with 0.69B active parameters on 75B tokens.
+The law would have picked a bigger model trained on fewer tokens: 1.8B active parameters on 28B tokens. Instead the big run was the largest model that fit on one 8-GPU machine at the time, with 0.69B active parameters on 75B tokens. Allie 2.1 has 1.23B on 112B.
 
 ### What else shaped it
 
@@ -123,33 +119,33 @@ Favoring strong players lowered the loss for players rated 2400 and above by 0.0
 
 ### Training
 
-![The big run's loss on the main test set during training, the scaling law's forecast, and Allie 2.0 after the second anneal](docs/figures/training.png)
+![Main-test loss during training for Allie 2.1 and Allie 2.0's big run, and both released models](docs/figures/training-2.1.png)
 
-*Earlier checkpoints were not scored on the main test set.*
+*Each run's learning rate decays to its own end: Allie 2.0's at 75B tokens, Allie 2.1's at 112B.*
 
-- **Hardware.** One machine with 8 NVIDIA L40S GPUs, for 6.6 days, then 2 hours for the second anneal.
-- **Length.** 75B tokens in 143,051 steps, then 1B tokens in 1,907 steps.
-- **One crash.** At step 60,081, a near-zero number in the router made the update overflow. A small lower limit on that number fixed it.
-- **The second anneal.** It restarts from the big run's last checkpoint with a fresh optimizer, a low learning rate and only 2024-2026 games. It lowered the loss from 1.2533 to 1.2505, on every time control. Its result is the released Allie 2.0.
+- **Hardware.** One machine with 8 NVIDIA L40S GPUs, for 14.9 days.
+- **Length.** 112B tokens in 213,623 steps.
+- **The released weights.** Half the final weights and half a moving average of the weights over the end of training. That scores 1.2240, against 1.2248 for the final weights alone.
+- **Allie 2.0.** Its big run took 6.6 days and 143,051 steps, and its second anneal 2 hours. Allie 2.1 had none. See [DETAILS](docs/DETAILS.md#training).
 
 ## Comparison
 
-We compare Allie 2.0 and 2.1 with the original Allie and [Maia-3](https://arxiv.org/abs/2605.19091) ([weights](https://huggingface.co/collections/MaiaChess/maia3)).
+We compare Allie 2.1 and 2.0 with the original Allie and [Maia-3](https://arxiv.org/abs/2605.19091) ([weights](https://huggingface.co/collections/MaiaChess/maia3)).
 
 Maia-3 trains only on Lichess blitz, so we compare on blitz. We use 80,000 blitz positions from July 2026, 20,000 from each of four rating bands.
 
-![Loss against compute per move. Allie 2.0 (1.4 GFLOPs) and Allie 2.1 (2.5) have lower loss than all three Maia-3 sizes, including Maia-3 79M at 9.2 GFLOPs. The original Allie sits near Maia-3 5M. Search helps little: 100 simulations cost about 100 times the compute and lower the loss by 0.0052 for Allie 2.0 and 0.0028 for Allie 2.1.](docs/figures/pareto.png)
+![Loss against compute per move. Allie 2.1 (2.5 GFLOPs) and Allie 2.0 (1.4) have lower loss than all three Maia-3 sizes, including Maia-3 79M at 9.2 GFLOPs. The original Allie sits near Maia-3 5M. Search helps little: 100 simulations cost about 100 times the compute and lower the loss by 0.0028 for Allie 2.1 and 0.0052 for Allie 2.0.](docs/figures/pareto.png)
 
 *Scores are on the 20,000 positions search ran on, 5,000 per rating band, so they differ slightly from the 80,000-position numbers below. More search is in [DETAILS](docs/DETAILS.md#search).*
 
-On all 80,000 positions, Allie 2.0's loss is 1.2030 against 1.2269 for Maia-3 79M. It uses 1.39 GFLOPs per move against 9.23. Allie 2.1's loss is 1.1779, at 2.45 GFLOPs.
+On all 80,000 positions, Allie 2.1's loss is 1.1779 against 1.2269 for Maia-3 79M. It uses 2.45 GFLOPs per move against 9.23. Allie 2.0's loss is 1.2030, at 1.39 GFLOPs.
 
 **This plot is not a fair test for Maia-3.**
 
 - **It scores every position.** That includes the first 10 plies, where openings are partly memorized, and moves made with under 30 seconds left. Maia-3's own evaluation leaves both out.
 - **Allie reads the clock.** The released Maia-3 does not, which matters most in time trouble.
 - **Allie trains on more, and more recent, data.** It sees every time control from 2017 to 2026, including August 2026. Maia-3 trains on Lichess blitz from January 2023 to July 2025.
-- **Compute is counted, not timed.** Allie 2.0 also needs about 11 GB for its weights, and Allie 2.1 about 18 GB, against about 0.3 GB for Maia-3 79M.
+- **Compute is counted, not timed.** Allie 2.1 also needs about 18 GB for its weights, and Allie 2.0 about 11 GB, against about 0.3 GB for Maia-3 79M.
 
 ### On Maia's own protocol
 
@@ -157,17 +153,17 @@ On all 80,000 positions, Allie 2.0's loss is 1.2030 against 1.2269 for Maia-3 79
 
 *Each bar compares a model with Maia-3 79M on the same positions.*
 
-Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.0 is slightly ahead of Maia-3 79M.
+Maia-3's paper skips each game's first 10 plies and every position from the moment a player first has under 30 seconds. On that protocol, Allie 2.1 is still ahead of Maia-3 79M.
 
-Its loss is 1.2048 against 1.2180, a gap of 0.0132 [0.0100, 0.0166]. Its top choice is right 59.37% of the time against 59.06%, a gap of 0.31 points [0.06, 0.56]. The original Allie scores 1.2883 and 57.09%.
+Its loss is 1.1762 against 1.2180, a gap of 0.0419 [0.0388, 0.0451]. Its top choice is right 60.29% of the time against 59.06%, a gap of 1.23 points [0.97, 1.48].
 
-Allie 2.1 is further ahead: its loss is 1.1762, a gap of 0.0419 [0.0388, 0.0451], and its top choice is right 60.29% of the time, a gap of 1.23 points [0.97, 1.48].
+Allie 2.0 is closer: its loss is 1.2048, a gap of 0.0132 [0.0100, 0.0166], and its top choice is right 59.37% of the time, a gap of 0.31 points [0.06, 0.56]. The original Allie scores 1.2883 and 57.09%.
 
 ### Beyond blitz
 
 Allie plays beyond blitz: it supports every time control (bullet, blitz, rapid, classical)\*. It also reads the clock, which helps most when time runs short.
 
-![Allie 2.0's loss minus Maia-3 79M's by time control and, in blitz, by time left on the clock](docs/figures/versatility.png)
+![Allie 2.1's loss minus Maia-3 79M's by time control and, in blitz, by time left on the clock](docs/figures/versatility.png)
 
 *Bullet, rapid and classical use a separate sample of 20,000 positions each.*
 
@@ -196,7 +192,7 @@ Set `ALLIE_DATA` to the folder for the game data and test sets. Runs and scores 
    ```
    Over-the-board and engine games go through `python -m allie.data.external`. The big run's exact data selection is in [configs/allie-2.0.json](configs/allie-2.0.json).
 3. **Build the test set.** `python -m allie.eval.build`
-4. **Train.** `allie-train configs/allie-2.0.json --nproc 8` needs eight 48 GB GPUs for about a week. It stops every two days; the same command resumes it. The second anneal starts a new run from its last checkpoint with `--init-from`; [configs/allie-2.0/anneal.sbatch](configs/allie-2.0/anneal.sbatch) has its settings.
+4. **Train.** `allie-train configs/allie-2.0.json --nproc 8` needs eight 48 GB GPUs for about a week. It stops every two days; the same command resumes it. The second anneal starts a new run from its last checkpoint with `--init-from`; [configs/allie-2.0/anneal.sbatch](configs/allie-2.0/anneal.sbatch) has its settings. This repository has Allie 2.0's training config only; what Allie 2.1 changed is in [DETAILS](docs/DETAILS.md#allie-21).
 5. **Evaluate.** `allie-eval --checkpoint results/pretrain/allie-2.0/last.pt` scores the main test set. The blitz comparison has its own scripts in `allie.eval.maia3`.
 6. **Figures.** `uv run --extra figures python docs/make_figures.py` redraws every figure here. `docs/anim/render.sh how_allie_works` re-renders a video with [manim](https://www.manim.community) (it needs ffmpeg and the cairo and pango libraries); each video's numbers are in [docs/anim/data.json](docs/anim/data.json).
 
@@ -229,7 +225,7 @@ In its `calibrated` mode the bot plays close to the strength of humans of its ra
 
 ![Move accuracy and blunder rate against rating, by time control: humans' own moves, the bot sampling straight from the model, calibrated play, Maia-3 and the original Allie](docs/figures/calibrated.png)
 
-*Move accuracy and blunder rate (log scale), scored by Stockfish on every legal move, against rating, on 197,191 positions from September 2026 games (the rule is fitted on July games). The line is the humans' own moves; the points are the expected values of each model's move distribution at that rating: Allie 2.0 sampled straight from the model or calibrated with its own rule (the bot's until October 30, 2026), Maia-3 (79M) playing its most likely move or sampled, and the original Allie (blitz only). Maia-3 is trained on blitz only and isn't meant for other time controls; neither Maia-3 nor the original Allie sees the clock. Bands and whiskers: 95% intervals.*
+*Move accuracy and blunder rate (log scale), scored by Stockfish on every legal move, against rating, on 197,191 positions from September 2026 games (the rule is fitted on July games). The line is the humans' own moves; the points are the expected values of each model's move distribution at that rating: Allie 2.1 sampled straight from the model or calibrated with the bot's rule, Maia-3 (79M) playing its most likely move or sampled, and the original Allie (blitz only). 11 of the 80 tests on these games fall outside the noise, against about 4 by chance; bullet and blitz at 800 miss most ([Allie 2.1 against Allie 2.0](#allie-21-against-allie-20)). Maia-3 is trained on blitz only and isn't meant for other time controls; neither Maia-3 nor the original Allie sees the clock. Bands and whiskers: 95% intervals.*
 
 ## Download and run the model
 
@@ -251,11 +247,11 @@ model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player woul
 
 ### Fast inference
 
-Allie 2.0 has 5.6B parameters, yet it plays a move in about 4-7 ms on a recent server CPU with 8 to 32 threads, in 6.4 GB of memory. Batching 64 games, it plays about 1,500 moves a second. Allie 2.1 takes 1.4 times as long, in 9.8 GB ([Allie 2.1](#allie-21)).
+Allie 2.1 has 9.2B parameters, yet it plays a move in about 14 ms on a server CPU (AMD EPYC 7763, 12 threads), in 9.8 GB of memory. Playing 16 games at once, a step takes 80 ms: about 200 moves a second. Allie 2.0 takes 10.4 ms on the same CPU, in 6.4 GB.
 
-- **It reads little.** Each move reads only the 0.7B parameters it routes through.
-- **It reads fast.** Rust kernels (Linux on x86-64; elsewhere the PyTorch reference, about three times slower) stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach.
-- **Elsewhere.** On a GPU a move takes about 7 ms (CUDA graphs). A laptop has less memory bandwidth: we estimate 10-20 ms a move, untested.
+- **It reads little.** Each move reads only the 1.2B parameters it routes through.
+- **It reads fast.** Rust kernels (Linux on x86-64; elsewhere the PyTorch reference, about three times slower) stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach, measured on Allie 2.0.
+- **Elsewhere, for Allie 2.0.** On a GPU a move takes about 7 ms (CUDA graphs). A laptop has less memory bandwidth: we estimate 10-20 ms a move, untested. Allie 2.1 reads 1.7 times the bytes per move.
 
 Every measurement is in [DETAILS](docs/DETAILS.md#fast-inference).
 
