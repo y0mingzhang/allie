@@ -413,23 +413,24 @@ The final run uses all three changes. It also drops multi-token prediction, whos
 
 ## Fast inference
 
-One cached step: the time a move takes once the opponent's move arrives, median of 35 steps of a game (`analysis/lichess/speed.py`). A step of 16 or 64 games reads one new token for each. CPU: int8 weights and the C++ kernels the Rust engine replaced (bit for bit the same logits, the same speed or faster) unless noted. Memory: the process's resident size. Share of bandwidth: the weights one game reads per move (0.74 GB in int8) per second, against the best streaming read the same threads reached on that machine (measured with the C++ kernels' bandwidth probe).
+One cached step: the time a move takes once the opponent's move arrives, median of 35 steps of a game (`analysis/lichess/speed.py`), for Allie 2.1. A step of 16 or 64 games reads one new token for each. CPU: int8 weights and the Rust engine unless noted. Memory: the process's resident size, 11.8 GB with 64 games in int8; on a GPU, the weights. GB/s: what one game reads per second (1.29 GB a move in int8), as the script reports it. The nodes were shared with other users' jobs. Allie 2.0's table is in [commit cad41559](https://github.com/y0mingzhang/allie/blob/cad41559/docs/DETAILS.md#fast-inference).
 
-| Device | Threads | 1 game: ms per move | Share of bandwidth | 16 games: ms per step | 64 games: ms per step | Memory |
+| Device | Threads | 1 game: ms per move | GB/s | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|---:|
-| AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 6.3 | 55% | 32 (500 moves/s) | 101 | 6.4 GB |
-| AMD EPYC 9755 | 32 | 4.6 | 75% | 17 (960 moves/s) | 41 (1,570 moves/s) | 6.4 GB |
-| AMD EPYC 9755, PyTorch reference | 8 | 19.5 | | 185 | | 6.4 GB |
-| AMD EPYC 9755, AVX2 only | 4 / 8 | 11.7 / 6.7 | | 93 / 48 | | 6.4 GB |
-| AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 7.6 / 5.0 / 4.4 | 50% / 73% / 82% | 51 / 30 / 20 | 165 / 93 / 56 | 6.4 GB |
-| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 12.7 / 8.0 | 66% / 74% | 76 / 42 | 246 / 136 | 6.4 GB |
-| AMD EPYC 9755, BF16 weights | 16 | 7.8 | | 30 | | 11 GB |
-| NVIDIA RTX A6000, BF16, CUDA graphs | | 7.3 | | 25 | | 11 GB |
-| NVIDIA RTX A6000, PyTorch reference | | 46.5 | | 186 | | 11 GB |
+| AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 10.1 | 128 | 54 (300 moves/s) | 161 | 9.8 GB |
+| AMD EPYC 9755 | 32 | 10.0 | 128 | 41 (390 moves/s) | 111 (580 moves/s) | 9.8 GB |
+| AMD EPYC 9755, PyTorch reference | 8 | 25.3 | 51 | 231 | | 9.8 GB |
+| AMD EPYC 9755, AVX2 only | 4 / 8 | 17.1 / 10.8 | 75 / 119 | 147 / 80 | | 9.8 GB |
+| AMD EPYC 9354 (Zen 4, AVX-512) | 8 / 16 / 32 | 12.2 / 9.9 / 9.3 | 106 / 130 / 139 | 86 / 63 / 51 | 275 / 204 / 155 | 9.8 GB |
+| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 18.7 / 11.9 | 69 / 108 | 152 / 82 | 537 / 272 | 9.8 GB |
+| AMD EPYC 7763, PyTorch reference | 16 | 76.8 | 17 | 776 | | 9.8 GB |
+| AMD EPYC 9755, BF16 weights | 16 | 17.2 | 145 | 71 | | 18 GB |
+| NVIDIA RTX A6000, BF16, CUDA graphs | | 10.2 | 245 | 36 | | 18 GB |
+| NVIDIA RTX A6000, PyTorch reference | | 24.6 | 101 | 95 | | 18 GB |
 
-- **Bandwidth bound.** One game is limited by memory bandwidth: speed rises with threads until the kernels read about 150-165 GB/s. A laptop or desktop streams 50-100 GB/s, so we expect about 10-20 ms a move with 6-8 cores. We have not measured one.
-- **Batching.** Games in one step share each expert's weights: 16 games cost 3.6 to 5 times one game on CPU, and 64 games 9 to 16 times.
-- **Accuracy.** On 5,000 benchmark positions, against the training forward, BF16 weights on CPU change the loss by +0.0003 [−0.0007, +0.0012] nats, the int8 default by +0.0010 [−0.0011, +0.0032], and CUDA graphs on GPU by +0.0005 [−0.0005, +0.0014]. int8 minus BF16 is +0.0008 [−0.0013, +0.0030], and the two pick the same top move 97.7% of the time. The [bot's guide](../src/allie/lichess/README.md#cost-and-accuracy) has the full comparison.
+- **Bandwidth bound.** One game is limited by memory bandwidth: speed rises with threads until the kernels read about 130-140 GB/s. A laptop or desktop streams 50-100 GB/s, so we estimate 20-35 ms a move with 6-8 cores. We have not measured one.
+- **Batching.** Games in one step share each expert's weights: 16 games cost 4 to 8 times one game on CPU, and 64 games 11 to 29 times.
+- **Accuracy.** On 5,000 benchmark positions, against the training forward, the int8 default changes the loss by −0.0010 [−0.0021, +0.0002] nats, BF16 on CPU by −0.0015 [−0.0023, −0.0006], and CUDA graphs on GPU by −0.0013 [−0.0022, −0.0005]. int8 minus BF16 is +0.0005, and the two pick the same top move 99.4% of the time. The [bot's guide](../src/allie/lichess/README.md#cost-and-accuracy) has the full comparison.
 
 ## Reproducing
 

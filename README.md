@@ -250,8 +250,8 @@ model.play("1. e4 e5 2. Nf3", elo=1200)  # a move, sampled as a 1200 player woul
 Allie 2.1 has 9.2B parameters, yet it plays a move in about 14 ms on a server CPU (AMD EPYC 7763, 12 threads), in 9.8 GB of memory. Playing 16 games at once, a step takes 80 ms: about 200 moves a second. Allie 2.0 takes 10.4 ms on the same CPU, in 6.4 GB.
 
 - **It reads little.** Each move reads only the 1.2B parameters it routes through.
-- **It reads fast.** Rust kernels (Linux on x86-64; elsewhere the PyTorch reference, about three times slower) stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach, measured on Allie 2.0.
-- **Elsewhere, for Allie 2.0.** On a GPU a move takes about 7 ms (CUDA graphs). A laptop has less memory bandwidth: we estimate 10-20 ms a move, untested. Allie 2.1 reads 1.7 times the bytes per move.
+- **It reads fast.** Rust kernels (Linux on x86-64; elsewhere the PyTorch reference, 2.5 to 6.5 times slower) stream the int8 weights at up to 75-82% of the memory bandwidth the machine can reach, measured on Allie 2.0.
+- **Elsewhere.** On a GPU a move takes about 10 ms (CUDA graphs). A laptop has less memory bandwidth: we estimate 20-35 ms a move, untested.
 
 Every measurement is in [DETAILS](docs/DETAILS.md#fast-inference).
 

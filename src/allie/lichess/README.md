@@ -239,32 +239,31 @@ involved.
 **Speed and memory.** One cached step, the time a move takes once the opponent's move arrives (median of 35
 steps of a game, `analysis/lichess/speed.py`). The bot appends its own move while the opponent thinks, so
 each decision reads one new token; a step of 16 games reads one token for each. CPU: int8 weights, the
-Rust engine (the default) unless noted. The EPYC 7763 row is the Rust engine's; the others were measured on
-the C++ kernels it replaced, whose logits it reproduces bit for bit; on the 7763 it was as fast within run-to-run
-noise, or faster (C++: 12.7 / 8.0, 76 / 42, 246 / 136). Memory: the process's resident size. The table is Allie
-2.0's; Allie 2.1 takes 14.3 ms per move on the EPYC 7763 with 12 threads, in 9.8 GB (Allie 2.0: 10.4 ms, measured
-alongside it on the same node).
+Rust engine (the default) unless noted. Memory: the process's resident size, 11.8 GB with 64 games in int8. On a
+GPU, the weights. Allie 2.0 takes 10.4 ms per move on the EPYC 7763 with 12 threads, in 6.4 GB, against Allie 2.1's
+14.3 ms in 9.8 GB, measured alongside each other on the same node.
 
 | Device | Threads | 1 game: ms per move | 16 games: ms per step | 64 games: ms per step | Memory |
 |---|---:|---:|---:|---:|---:|
-| AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 6.3 | 32 (500 moves/s) | 101 | 6.4 GB |
-| AMD EPYC 9755 | 32 | 4.6 | 17 (960 moves/s) | 41 (1,570 moves/s) | 6.4 GB |
-| AMD EPYC 9755, PyTorch reference (`backend = "torch"`) | 8 | 19.5 | 185 | | 6.4 GB |
-| AMD EPYC 9755, AVX2 only (`ALLIE_RUST_ISA=avx2`) | 4 / 8 | 11.7 / 6.7 | 93 / 48 | | 6.4 GB |
-| AMD EPYC 9554 (Zen 4, AVX-512) | 8 / 16 / 32 | 7.6 / 5.0 / 4.4 | 51 / 30 / 20 | 165 / 93 / 56 | 6.4 GB |
-| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 9.5 / 8.0 | 64 / 41 | 222 / 132 | 6.4 GB |
-| AMD EPYC 9755, BF16 weights | 16 | 7.8 | 30 | | 11 GB |
-| GPU (NVIDIA RTX A6000), CUDA graphs, BF16 | | 7.3 | 25 | | 11 GB |
-| GPU (RTX A6000), PyTorch reference | | 46.5 | 186 | | 11 GB |
+| AMD EPYC 9755 (Zen 5, AVX-512) | 8 | 10.1 | 54 (300 moves/s) | 161 | 9.8 GB |
+| AMD EPYC 9755 | 32 | 10.0 | 41 (390 moves/s) | 111 (580 moves/s) | 9.8 GB |
+| AMD EPYC 9755, PyTorch reference (`backend = "torch"`) | 8 | 25.3 | 231 | | 9.8 GB |
+| AMD EPYC 9755, AVX2 only (`ALLIE_RUST_ISA=avx2`) | 4 / 8 | 17.1 / 10.8 | 147 / 80 | | 9.8 GB |
+| AMD EPYC 9354 (Zen 4, AVX-512) | 8 / 16 / 32 | 12.2 / 9.9 / 9.3 | 86 / 63 / 51 | 275 / 204 / 155 | 9.8 GB |
+| AMD EPYC 7763 (Zen 3, AVX2) | 8 / 16 | 18.7 / 11.9 | 152 / 82 | 537 / 272 | 9.8 GB |
+| AMD EPYC 7763, PyTorch reference | 16 | 76.8 | 776 | | 9.8 GB |
+| AMD EPYC 9755, BF16 weights | 16 | 17.2 | 71 | | 18 GB |
+| GPU (NVIDIA RTX A6000), CUDA graphs, BF16 | | 10.2 | 36 | | 18 GB |
+| GPU (RTX A6000), PyTorch reference | | 24.6 | 95 | | 18 GB |
 
 - **Threads.** The default is PyTorch's thread count within one NUMA node (socket), pinned one per core and
-  spread over the node's caches, with the weights moved to that node. One game reads 0.74 GB of weights a
-  move, so it is bound by memory bandwidth: speed rises with threads until about 150-160 GB/s, three
-  quarters of what these servers stream (`analysis/lichess/speed.py` prints the GB/s it reaches). A laptop
-  or desktop streams 50-100 GB/s: about 10-20 ms a move with 6-8 cores. Threads on two sockets are slower
+  spread over the node's caches, with the weights moved to that node. One game reads 1.29 GB of weights a
+  move, so it is bound by memory bandwidth: speed rises with threads until about 130-140 GB/s
+  (`analysis/lichess/speed.py` prints the GB/s it reaches). A laptop or desktop streams 50-100 GB/s: we
+  estimate 20-35 ms a move with 6-8 cores, untested. Threads on two sockets are slower
   than on one.
-- **Batching.** Games in one step share each expert's weights: on CPU, 16 games cost 3.6 to 5 times one
-  game and 64 games 9 to 16 times (fewer threads: more), so a bot with many games should batch them, as
+- **Batching.** Games in one step share each expert's weights: on CPU, 16 games cost 4 to 8 times one
+  game and 64 games 11 to 29 times (fewer threads: more), so a bot with many games should batch them, as
   `allie-bot` does.
 - **Kernels.** The engine picks AVX-512, AVX2 or scalar kernels at run time (`ALLIE_RUST_ISA` forces one);
   without the engine installed the model runs the PyTorch reference, with a warning. `ALLIE_NUMA=0` leaves
