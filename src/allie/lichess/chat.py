@@ -693,18 +693,12 @@ class Chatter:
                  r.first, r.seconds, "-" if posted is None else f"{posted:.2f} s", total,
                  r.usd)  # fmt: skip
 
-    def post(self, text, room, unprompted, then=None, asked=None):
-        """Send a line (an unprompted one after the gap) unless, by then, !quiet, the end
-        of the bot, a game that moved on from an unprompted line's moves (then), a reply
-        STALE seconds after its message (asked), in a rated game a move it names not yet
-        played, or during the game a claim about a piece; the seconds it took, or None.
-        One try: a failed post is dropped."""
-        if unprompted:
-            time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
-        elif asked is not None and self.cfg.typing:  # a reply at a person's pace, well within STALE
-            time.sleep(max(asked + min(1.5 + len(text) / self.cfg.typing, 6.0) - time.monotonic(), 0))
+    def blocked(self, text, unprompted, then, asked):
+        """Why a line may not go out now, or None: !quiet, the end of the bot, a game that moved on from an unprompted
+        line's moves (then), a reply STALE seconds after its message (asked), in a rated game a move it names not yet
+        played, or during the game a claim about a piece."""
         now, stopped = list(self.latest), getattr(self.match.bot, "stopped", None)
-        why = (
+        return (
             "quiet" if self.muted() and text != QUIET
             else "cancelled" if self.cancelled or stopped and stopped.is_set()
             else "late" if unprompted and then is not None
@@ -717,7 +711,15 @@ class Chatter:
             else "board talk" if not self.status and BOARD_TALK.search(text)
             else None
         )  # fmt: skip
-        if why:
+
+    def post(self, text, room, unprompted, then=None, asked=None):
+        """Send a line (an unprompted one after the gap) unless blocked; the seconds it took, or None. One try: a failed
+        post is dropped."""
+        if unprompted:
+            time.sleep(max(self.posted + self.cfg.gap - time.monotonic(), 0))
+        elif asked is not None and self.cfg.typing:  # a reply at a person's pace, well within STALE
+            time.sleep(max(asked + min(1.5 + len(text) / self.cfg.typing, 6.0) - time.monotonic(), 0))
+        if why := self.blocked(text, unprompted, then, asked):
             log.info("game %s chat: not posted (%s): %s", self.gid, why, text)
             return None
         start = time.monotonic()
