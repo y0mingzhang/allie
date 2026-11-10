@@ -1,4 +1,5 @@
-"""The variants chat_elo.py compares: prompts and harness as edits on the live bot's chat. No player text here."""
+"""The variants chat_elo.py compared, as edits on the bot's chat at 38ead16d (the baseline). C2Q has since landed in chat.py,
+so these edits apply only at the eval's own commit, cfdbe69b: check that out to reproduce the study. No player text here."""
 
 from dataclasses import replace
 

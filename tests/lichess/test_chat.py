@@ -261,28 +261,17 @@ def test_reciprocity(engine, caplog):
     g = Game(engine, opp="shy", hello="", quiet_p_moment=1, every=0, p_end=1, linger=5,
              min_plies=4)  # fmt: skip
     c = g.chatter(m)
-    c.allowed = (["opening", "compliment"], ["opening", "compliment", "mistake"])
-    script(c, lambda n: 0.5 if n < 9 else 0.3)  # their 5th move (ply 9) is strong
-    moves = [
-        "e2e4",
-        "e7e5",
-        "g1f3",
-        "b8c6",
-        "f1c4",
-        "g8f6",
-        "d2d3",
-        "f8c5",
-        "c2c3",
-        "d7d6",
-    ]
+    c.allowed = (["mistake"], ["mistake", "scramble"])
+    script(c, lambda n: 0.5 if n < 2 else 0.3)  # our 1... d5 is punished by exd5
+    moves = ["e2e4", "d7d5", "e4d5", "g8f6", "g1f3", "f6d5"]
     g.feed(g.full())
     for k in range(1, len(moves) + 1):
         g.feed(state(" ".join(moves[:k])))
-    assert c.kinds == ["opening", "compliment"]
+    assert c.kinds == ["mistake"]
     g.feed(state(" ".join(moves), status="resign", winner="black"))
-    assert c.kinds == ["opening", "compliment"] and len(m.calls) == 2  # no finish: they never wrote
+    assert c.kinds == ["mistake"] and len(m.calls) == 1  # no finish: they never wrote
     g.feed(g.say("gg wp"))
-    assert g.posts[-1] == ("player", chat.GG) and len(g.posts) == 3
+    assert g.posts[-1] == ("player", chat.GG) and len(g.posts) == 2
     assert "game g1 chat (player) Shy: gg wp" in caplog.text
     q = Game(engine, opp="shy2", hello="", quiet_p_moment=0, p_end=0, min_plies=0)
     q.chatter(Model("x"))
@@ -290,10 +279,10 @@ def test_reciprocity(engine, caplog):
     assert q.posts == [("player", chat.GG)]  # nothing said after the game: the fixed reply
     d = Game(engine, opp="fader", hello="", p_moment=1, quiet_p_moment=1, every=0)
     c = d.chatter(Model("hey"))
-    c.allowed = ([], ["opening"])
+    c.allowed = ([], ["mistake"])
     d.feed(d.full(), d.say("hi"))
     assert c.engaged()
-    c.moment(time.monotonic(), "opening")  # the kind they get once they chat
+    c.moment(time.monotonic(), "mistake")  # the kind they get once they chat
     c.respond()
     assert c.unreplied == 2 and not c.engaged()  # two lines unanswered: quiet again
     c.moment(time.monotonic(), "scramble")
@@ -351,8 +340,8 @@ def test_unprompted_lines_vary_and_name_played_moves(engine, tmp_path):
 
 
 def test_pick():
-    """Each game draws 1-3 kinds by `mix` (one more once they chat), by weight, and a
-    finish line with chance p_end."""
+    """Each game draws 1-2 kinds by `mix` (one more once they chat, while there are more), by weight,
+    and a finish line with chance p_end."""
     import random
 
     cfg = Chat()
@@ -361,10 +350,10 @@ def test_pick():
     sizes = Counter(len(q) for (q, _), _ in picks)
     for k, p in enumerate(cfg.mix, 1):
         assert abs(sizes[k] / 4000 - p) < 0.03
-    assert all(e[: len(q)] == q and len(e) == len(q) + 1 for (q, e), _ in picks)
+    assert all(e[: len(q)] == q and len(e) == min(len(q) + 1, len(chat.WEIGHTS)) for (q, e), _ in picks)
     first = Counter(q[0] for (q, _), _ in picks)
-    share = chat.WEIGHTS["opening"] / sum(chat.WEIGHTS.values())
-    assert abs(first["opening"] / 4000 - share) < 0.03
+    share = chat.WEIGHTS["mistake"] / sum(chat.WEIGHTS.values())
+    assert abs(first["mistake"] / 4000 - share) < 0.03
     assert abs(sum(f for _, f in picks) / 4000 - cfg.p_end) < 0.03
 
 
@@ -389,7 +378,7 @@ def test_facts_and_kinds(engine):
     assert c.kinds == ["mistake"]  # the clock remark waits: one call at a time
     g.feed(state(" ".join(moves + ["b1c3"]), wtime=130000))
     g.feed(state(" ".join(moves + ["b1c3", "h5e5"]), wtime=130000))
-    assert c.kinds[0] == "mistake" and c.kinds[-1] == "scramble"  # the opening between
+    assert c.kinds == ["mistake", "scramble"]
 
 
 def test_recent_survives_an_outage(engine, tmp_path, caplog, monkeypatch):
@@ -424,8 +413,7 @@ def test_recent_survives_an_outage(engine, tmp_path, caplog, monkeypatch):
     c = g.chatter(Model("Still talking."))
     c.allowed = (list(chat.WEIGHTS), list(chat.WEIGHTS))
     g.feed(g.full())
-    for k in range(1, 7):
-        g.feed(state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"][:k])))
+    g.feed(state("e2e4 e7e5", btime=15000))  # our clock runs low: a remark
     assert g.posts and g.posts[-1] == ("player", "Still talking.")
     monkeypatch.setattr("builtins.open", real)
     assert r.writer.flush(5)  # the game's own line may be there too, from its writer
@@ -557,8 +545,7 @@ def test_recent_lines(engine, tmp_path):
         list(chat.WEIGHTS),
     )
     g.feed(g.full())
-    for k, _ in enumerate(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"]):
-        g.feed(state(" ".join(["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"][: k + 1])))
+    g.feed(state("e2e4 e7e5", btime=15000))  # our clock runs low: a remark
     read = lambda: json.loads(pathlib.Path(path).read_text())
     wait(lambda: os.path.exists(path) and read() == ["A line to remember."])
     chat.RECENTS.clear()  # a new process: seeded from the file
@@ -579,7 +566,7 @@ def test_short_game_ends_quietly(engine):
     c = g.chatter(m)
     g.feed(g.full())
     c.allowed = (list(chat.WEIGHTS), list(chat.WEIGHTS))
-    c.ply = lambda t, j, *a: c.moment(t, "compliment")  # every move a moment
+    c.ply = lambda t, j, *a: c.moment(t, "mistake")  # every move a moment
     g.feed(state("e2e4 e7e5", status="resign", winner="black"))
     assert m.calls == [] and g.posts == []
 
@@ -596,7 +583,7 @@ def test_header_and_stale(engine, monkeypatch):
     full["white"]["rating"] = 759
     g.feed(full)
     header = c.system[1]["text"]
-    assert "You play as a 759-rated human" in header and "1335" not in header
+    assert "You play at about 759 this game" in header and "you match each opponent" in header and "1335" not in header
     monkeypatch.setattr(chat, "STALE", 0.1)
     c.put(g.say("hi"))
     wait(lambda: m.calls)
@@ -655,7 +642,7 @@ def test_clocks_takeback_and_late(engine):
     assert c.game.clocks == ref.clocks == [170, 171]
     g.feed(state("e2e4 e7e5 g1f3"), state("e2e4"))  # a takeback of two plies
     assert c.game.moves == ["e2e4"] and c.sans == ["e4"] and max(c.views) == 1
-    c.want = ("opening", "player", True, time.monotonic())
+    c.want = ("mistake", "player", True, time.monotonic())
     c.put({"type": "opponentGone", "gone": False})
     wait(lambda: m.calls)
     for k in range(2, 6):

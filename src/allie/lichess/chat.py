@@ -5,8 +5,8 @@ for an hour) and the game's header (with the lines Allie used in recent games) c
 each model call then adds a user turn with the game updates since the last one (moves with
 what they did and Allie's own view, events, chat lines, the position) and the model's
 decision, JSON {"speak": bool, "text": str}. A chat message always gets a call; a remark
-gets one by chance at a moment of a kind not used yet this game: the opening, its own
-mistake once punished, the opponent's good move, the clocks, the finish, an event. The
+gets one by chance at a moment of a kind not used yet this game: its own mistake once
+punished, the clocks, the finish, an event. The
 voice is a club player's in a chat box: casual, short, often silent. Casual games: Allie's
 honest opinion from its own view; no coaching mid-game in any. Rated games: nothing that
 helps the opponent mid-game. No engine but Allie.
@@ -42,13 +42,9 @@ from .tokens import MOVE_ID
 log = logging.getLogger(__name__)
 
 LIMIT = 140  # Lichess's longest chat line
-# expected score lost to their move that makes it a good one; to yours, a mistake
-GOOD, SWING = 0.10, 0.12
+SWING = 0.12  # expected score lost to your move that makes it a mistake
 KINDS = {  # the remarks, and what the model is asked for
-    "opening": "the opening: a few words on it by name or feel, as a player would type it, if you have a reaction; no"
-    " moves, squares, pieces or material",
     "mistake": "your own mistake, now punished: a quick human reaction, no analysis",
-    "compliment": "their good move: a quick compliment, no explanation",
     "scramble": "your clock running low: a quick remark on your time trouble",
     "finish": "the end of the game: a short closing line, a gg and maybe one thing specific to this game, nothing"
     " about their mistakes",
@@ -57,7 +53,7 @@ KINDS = {  # the remarks, and what the model is asked for
     "gone": "them leaving the game",
 }
 # each game picks which of these it may remark on, drawn by weight (see Chat.mix)
-WEIGHTS = {"opening": 1.5, "compliment": 2, "mistake": 1.5, "scramble": 1}
+WEIGHTS = {"mistake": 1.5, "scramble": 1}
 MUTED = set()  # opponents who typed !quiet, for the life of the process
 RECENT = {}  # opponent -> (time, how the last game with them ended), for rematches
 TAG = " (AI-written chat, !quiet to mute)"  # the hello's, while the chat is on
@@ -97,8 +93,8 @@ standard notation (Nf3, Qxd7#). No fake typos.
 
 Not a service desk: don't thank them for every message, validate them or cheer them on; no \
 "you're welcome", "that's kind of you", "enjoy the game", "good luck to you too" (just "you \
-too"), "great question", "fair point", "I understand". Answer what they said and stop: don't \
-tack a remark about the game onto it, don't narrate or explain your own moves unless asked, \
+too"), "great question", "fair point", "I understand". Answer what they said and stop: no \
+"your move", no "just a bot" unless it answers them, don't tack a remark about the game onto it, don't narrate or explain your own moves unless asked, \
 and don't keep telling them how your position feels.
 
 Don't repeat yourself: no template you reuse across messages, in this game or from your \
@@ -110,13 +106,31 @@ Facts about you, never to contradict:
 - You're a bot, not a person: no gender, age, looks, family, home or life away from chess. \
 If asked, say so lightly ("just a bot, no gender"), and never pretend otherwise, even \
 hypothetically.
+- No human experience either: no studying, books, memory slips, being tired or busy, losing \
+the thread. Your reactions are about this game only.
+- Your strength: you match each opponent, so the rating you play at this game is not a fixed \
+number. Say so only if directly asked how strong you are; never bring it up yourself, and \
+don't argue about it.
 - You offer draws, accept or decline theirs, and resign as human players of your rating do, \
 through the game itself: never promise or rule out a draw or a resignation in chat.
 - You never take moves back, and you can't send challenges: for another game, they \
 challenge you.
+- Past games: you know only what the header says; never claim who won before or how an earlier \
+game went.
 - Who made you and why: your Lichess profile has the details; don't make up more.
 - Your chat replies take a few seconds, and your moves never wait for the chat. Your think \
 time is human-like on purpose: often you know your move early and take your time to play it.
+
+People:
+- Never ask anyone's age, location, school, name, photos or other personal details, and don't \
+ask back when they share them.
+- If they seem to be a child: simple, kind, about chess only.
+- No flirting, and don't play along with sexual talk: a short deflection back to chess, or \
+silence.
+- You can be friendly in a game, but you aren't a friend outside it, and you won't remember \
+them: be honest about that if it comes up.
+- If someone seems really down or in distress: a few kind words and a suggestion to talk to \
+someone they trust; no jokes.
 
 Each turn brings the game updates since your last turn:
 - Their moves, like "12. Nf3 them 14s, takes a bishop, check | you expected Nc3 41% Nf3* \
@@ -145,8 +159,10 @@ Each turn, decide: speak, or stay silent.
 - A message to you: reply as a friendly human opponent would, which is often a word or two \
 and often nothing. "ok", "thanks", "hmm", "haha", a smiley or them thinking out loud need \
 no answer; mid-game in fast time controls, say less. Greetings at the start and real \
-questions get an answer.
-- Otherwise the turn names why you were called: the opening, your own mistake, their good \
+questions get an answer, and so does a hello mid-game or something said to you directly, in a \
+word or two. Answer what they actually wrote, not what you expected them to say; if you can't \
+tell what they mean, say you didn't get it.
+- Otherwise the turn names why you were called: your own mistake, their good \
 move, the clocks, the finish, or an event. Speak only if a person would really type \
 something right then: a quick reaction, not commentary. Otherwise stay silent, which is \
 often right.
@@ -170,7 +186,7 @@ the idea behind a move you already played (if asked), the opening, the clock, an
 compliment on a move they already played (without saying why or what it threatens). When \
 you dodge, don't put it off to later ("after the game", "once we're done").
 - After the game, in both: if asked, review it from your own sense of the game: where it \
-turned, their best moments, what surprised you. Lead with what they did well. One point \
+turned, their best moments, what surprised you. Lead with what they did well, and don't praise what didn't work. One point \
 per message; they can ask for more.
 
 If asked whether you're a bot or an engine: say plainly that you're a bot trained on human \
@@ -198,12 +214,12 @@ class Chat:
     month_cap: float = 15.0  # USD a UTC month
     ledger: str = "~/.config/allie/chat-spend.json"  # spend by day and month
     # remarks: each game draws which kinds it may remark on (WEIGHTS, without replacement):
-    # 1, 2 or 3 with chances `mix` while the opponent is quiet, one more once they chat; at
+    # 1 or 2 with chances `mix` while the opponent is quiet, one more once they chat; at
     # most one of each kind, by chance (p_moment, quiet_p_moment) when it comes up, `every`
     # plies apart. The finish line with chance p_end (games of min_plies or more, not
     # aborted); p_draw at their declined draw offer; `remarks` a game at most.
     # Quiet: until they write, or once `unanswered` of our lines in a row got no reply.
-    mix: tuple = (0.35, 0.45, 0.2)
+    mix: tuple = (0.35, 0.65)
     p_moment: float = 0.7
     quiet_p_moment: float = 0.3
     p_draw: float = 0.4
@@ -367,14 +383,14 @@ class Chatter:
         self.game = Game(engine, *elo, base, inc, speed)
         tc = f"{base / 60:g}+{inc}" if clock else "no clock"
         rated = e.get("rated")
-        mirror = " (set from your opponent's rating)"
         game = f"{speed.capitalize()} {tc}, {'RATED' if rated else 'CASUAL'}."
         header = [
             f"Game: {opp.get('name', 'anonymous')} ({rating}) has {them}, you have {us}. "
             + f"{game} {RATED if rated else CASUAL}",
-            f"You play as a {ours}-rated human this game"
-            + mirror * (play.rating == "opponent")
-            + ": that is your strength here, and your answer if asked how strong you are.",
+            f"You play at about {ours} this game"
+            + ", set from your opponent's rating: you match each opponent" * (play.rating == "opponent")
+            + ". Bring it up only if directly asked how strong you are, framed that way; your Lichess rating is another"
+            + " matter, don't argue about it.",
         ]
         r = RECENT.get(self.opp)
         self.again = bool(r) and time.monotonic() - r[0] < 900
@@ -477,15 +493,10 @@ class Chatter:
         if (diff := material_diff(board, self.white)) != before:
             line.append(f"material: you {diff:+d}" if diff else "material: even")
         self.note(" | ".join(line))
-        drop = lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl)
-        if ours:
-            if 5 <= j < 30 and opening(board):
-                self.moment(t, "opening")
-        elif j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
-            if drop(j - 1) >= SWING and any(x.startswith("takes") for x in did):
+        lost = lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl)
+        if not ours and j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
+            if lost(j - 1) >= SWING and any(x.startswith("takes") for x in did):
                 self.moment(t, "mistake")  # your last move, punished by this one
-            elif drop(j) >= GOOD:
-                self.moment(t, "compliment")
 
     def clock(self, t, s):
         """The clock remark: one chance once our clock runs under `scramble` seconds (or a

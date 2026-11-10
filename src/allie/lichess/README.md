@@ -177,16 +177,13 @@ involved.
   human opponent often would), during the game and for `linger` seconds after it. Otherwise it remarks
   on a moment, at most one remark of each kind a game, by chance, decided in code before any call,
   at least `every` plies after the last call. The kinds:
-  - the opening (once a name is known);
   - its own mistake, once the opponent has punished it;
-  - the opponent's good move;
   - its own clock under `scramble` seconds;
   - the finish (in games of `min_plies` or more, not aborted);
   - a declined draw offer, a takeback request, the opponent leaving.
 
-  Variety: each game draws which of the first four kinds it may use, by weight (a compliment most
-  often): 1, 2 or 3 of them with chances `mix` while the opponent is quiet,
-  one more once they chat (`p_moment` per chance then, `quiet_p_moment` before). A finish line comes
+  Variety: each game draws which of the first two kinds it may use, by weight: 1 or 2 of them with chances
+  `mix` while the opponent is quiet, one more once they chat (`p_moment` per chance then, `quiet_p_moment` before). A finish line comes
   with chance `p_end`; `p_draw` at a declined draw offer; at most `remarks` remarks a game. Quiet means
   until they write, or once `unanswered` of the bot's lines in a row get no reply. The finish line is only
   for an opponent who wrote during the game. A "gg" after the game gets a fixed reply (no call) if the bot
@@ -196,10 +193,14 @@ involved.
   template), nor one naming a move not played.
 - **Voice.** A friendly club player typing in a chat box: short, casual (lowercase, chat shorthand,
   light humor, a joke when asked), mirroring the opponent's language and register, often silent; no
-  service-desk politeness and no narration of its own moves. A bot with no gender or age when asked.
+  service-desk politeness and no narration of its own moves. A bot with no gender, age or human experience,
+  and no memory of past games beyond the header. It asks no one for personal details; simple and kind with
+  an apparent child; no flirting; not a friend outside the game; a pointer to someone they trust if they
+  seem in distress. Its rating comes up only if directly asked, as matching each opponent.
   Never a dig at the opponent's mistakes, and no coaching mid-game in any game. The last of the
   `replies` a game signs off, and no remarks follow it. lol and haha come at most once a game, in a reply
-  (code strips the rest; live, 96% of opening remarks ended in lol). During the game a line calling a piece
+  (code strips the rest). No remark on the opening or on their good moves: judged blind on real games those
+  lost to silence (`analysis/lichess/chat_elo.py`), and most opening remarks claimed a human's study. During the game a line calling a piece
   hanging, loose or free is not posted (live, of 25 such lines, 9 were false and 13 gave one away or dug at
   the opponent's).
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
@@ -230,6 +231,8 @@ involved.
 - **Setup.** `uv sync --extra chat`, then put an Anthropic API key in `~/.config/allie/anthropic_key`
   (`chmod 600`) or `ANTHROPIC_API_KEY`. Each call is logged with its tokens (new, cached, written,
   output), cost, time to the first token and latency; the key is never logged.
+- **Eval.** `analysis/lichess/chat_elo.py` compares prompts, harness settings and models: real decisions from a
+  bot log, a blind pairwise judge, Bradley-Terry Elo with a bootstrap by game, hard checks kept apart.
 - **Dry run.** `analysis/lichess/chat_dryrun.py` replays recorded games through a real chat, with scripted
   messages, a draw offer and a resignation, or (`--log`) live games with their opponents' real lines from
   the bot's log (`--llm mock` needs no key).
