@@ -63,7 +63,7 @@ class Game:
             chat=lambda gid, text, room, **kw: self.posts.append((room, text)),
             chat_lines=lambda gid, **kw: self.lines,
         )
-        cfg = Chat(enabled=True, gap=0, poll=0.05, **{"recent": 0, "typing": 0} | cfg)
+        cfg = Chat(enabled=True, gap=0, poll=0.05, **{"recent": 0, "typing": 0, "p_opening": 0} | cfg)
         config = SimpleNamespace(chat=cfg, play=Play())
         bot = SimpleNamespace(me="allie", config=config, client=client, engine=engine)
         self.match = SimpleNamespace(bot=bot, gid="g1", over=False)
@@ -337,6 +337,22 @@ def test_unprompted_lines_vary_and_name_played_moves(engine, tmp_path):
     start = time.monotonic()
     h.feed(h.say("what should I have played?"))
     assert h.posts == [("player", "Maybe Nf3 was better.")] and time.monotonic() - start >= 1.5
+
+
+def test_opening_arm(engine, caplog):
+    """A game draws whether it may remark on the opening (logged); only then, once named, on our move."""
+    caplog.set_level("INFO", logger="allie.lichess.chat")
+    moves = ["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "d2d3", "f8c5"]
+    for p, want in ((1, ["opening"]), (0, [])):
+        g = Game(engine, opp=f"o{p}", hello="", quiet_p_moment=1, every=0, p_opening=p)
+        c = g.chatter(Model("ah, the italian"))
+        c.allowed = ([], [])
+        script(c, lambda n: 0.5)
+        g.feed(g.full())
+        for k in range(1, len(moves) + 1):
+            g.feed(state(" ".join(moves[:k])))
+        assert c.kinds == want
+        assert f"game g1 chat: opening remark {'on' if p else 'off'}" in caplog.text
 
 
 def test_pick():

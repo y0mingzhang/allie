@@ -5,8 +5,8 @@ for an hour) and the game's header (with the lines Allie used in recent games) c
 each model call then adds a user turn with the game updates since the last one (moves with
 what they did and Allie's own view, events, chat lines, the position) and the model's
 decision, JSON {"speak": bool, "text": str}. A chat message always gets a call; a remark
-gets one by chance at a moment of a kind not used yet this game: its own mistake once
-punished, the clocks, the finish, an event. The
+gets one by chance at a moment of a kind not used yet this game: the opening (in a game
+that drew it), its own mistake once punished, the clocks, the finish, an event. The
 voice is a club player's in a chat box: casual, short, often silent. Casual games: Allie's
 honest opinion from its own view; no coaching mid-game in any. Rated games: nothing that
 helps the opponent mid-game. No engine but Allie.
@@ -44,6 +44,8 @@ log = logging.getLogger(__name__)
 LIMIT = 140  # Lichess's longest chat line
 SWING = 0.12  # expected score lost to your move that makes it a mistake
 KINDS = {  # the remarks, and what the model is asked for
+    "opening": 'the opening: just its name and at most a few plain words, as a player would type it ("ah, the french");'
+    " nothing about how well you know it, studying or theory; no moves, squares, pieces or material",
     "mistake": "your own mistake, now punished: a quick human reaction, no analysis",
     "scramble": "your clock running low: a quick remark on your time trouble",
     "finish": "the end of the game: a short closing line, a gg and maybe one thing specific to this game, nothing"
@@ -162,7 +164,7 @@ no answer; mid-game in fast time controls, say less. Greetings at the start and 
 questions get an answer, and so does a hello mid-game or something said to you directly, in a \
 word or two. Answer what they actually wrote, not what you expected them to say; if you can't \
 tell what they mean, say you didn't get it.
-- Otherwise the turn names why you were called: your own mistake, their good \
+- Otherwise the turn names why you were called: the opening, your own mistake, their good \
 move, the clocks, the finish, or an event. Speak only if a person would really type \
 something right then: a quick reaction, not commentary. Otherwise stay silent, which is \
 often right.
@@ -220,6 +222,7 @@ class Chat:
     # aborted); p_draw at their declined draw offer; `remarks` a game at most.
     # Quiet: until they write, or once `unanswered` of our lines in a row got no reply.
     mix: tuple = (0.35, 0.65)
+    p_opening: float = 0.5  # chance a game may remark on the opening (logged: does it start chats?)
     p_moment: float = 0.7
     quiet_p_moment: float = 0.3
     p_draw: float = 0.4
@@ -269,6 +272,8 @@ class Chatter:
         self.said = self.answered = 0
         self.kinds = []  # remark kinds used this game
         self.allowed, self.finishing = self.pick()  # the ones it may use
+        self.opening = self.rng.random() < self.cfg.p_opening
+        log.info("game %s chat: opening remark %s", self.gid, "on" if self.opening else "off")
         self.scrambled = self.closed = self.again = False  # seen; said after the end; played them lately
         self.talked, self.unreplied = False, 0  # they wrote; our lines since their last
         self.laughed = False
@@ -494,7 +499,9 @@ class Chatter:
             line.append(f"material: you {diff:+d}" if diff else "material: even")
         self.note(" | ".join(line))
         lost = lambda k: score(self.views[k].wdl) - score(self.views[k + 1].wdl)
-        if not ours and j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
+        if ours and self.opening and 5 <= j < 30 and opening(board):
+            self.moment(t, "opening")
+        elif not ours and j >= 1 and all(k in self.views for k in (j - 1, j, j + 1)):
             if lost(j - 1) >= SWING and any(x.startswith("takes") for x in did):
                 self.moment(t, "mistake")  # your last move, punished by this one
 
@@ -627,7 +634,7 @@ class Chatter:
         c, engaged = self.cfg, self.engaged()
         if self.want or self.muted() or kind in self.kinds or self.answered >= c.replies:  # signed off
             return False
-        if kind in WEIGHTS and kind not in self.allowed[engaged]:
+        if kind in WEIGHTS and kind not in self.allowed[engaged] or kind == "opening" and not self.opening:
             return False
         if kind == "finish" and not (self.finishing and self.talked) or kind in ("takeback", "gone") and not engaged:
             return False

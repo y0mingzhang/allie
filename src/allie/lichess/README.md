@@ -177,6 +177,8 @@ involved.
   human opponent often would), during the game and for `linger` seconds after it. Otherwise it remarks
   on a moment, at most one remark of each kind a game, by chance, decided in code before any call,
   at least `every` plies after the last call. The kinds:
+  - the opening, once named, in a game that drew it (`p_opening`, logged per game: a live test of whether
+    a plain opening remark starts conversations);
   - its own mistake, once the opponent has punished it;
   - its own clock under `scramble` seconds;
   - the finish (in games of `min_plies` or more, not aborted);
@@ -199,8 +201,8 @@ involved.
   seem in distress. Its rating comes up only if directly asked, as matching each opponent.
   Never a dig at the opponent's mistakes, and no coaching mid-game in any game. The last of the
   `replies` a game signs off, and no remarks follow it. lol and haha come at most once a game, in a reply
-  (code strips the rest). No remark on the opening or on their good moves: judged blind on real games those
-  lost to silence (`analysis/lichess/chat_elo.py`), and most opening remarks claimed a human's study. During the game a line calling a piece
+  (code strips the rest). No remark on their good moves, and the opening remark is plain, its name and a few words: judged blind on real
+  games the old ones lost to silence (`analysis/lichess/chat_elo.py`), and most opening remarks claimed a human's study. During the game a line calling a piece
   hanging, loose or free is not posted (live, of 25 such lines, 9 were false and 13 gave one away or dug at
   the opponent's).
 - **Casual or rated.** In casual games the bot gives its honest opinion from Allie's view when asked.
